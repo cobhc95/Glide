@@ -1,0 +1,14 @@
+{
+  "name": "glide-codec-bridge",
+  "version-string": "1.0.0",
+  "dependencies": [
+    "libwebp",
+    {
+      "name": "libheif",
+      "features": ["aom", "jpeg", "openjpeg", "iso23001-17"]
+    },
+    "libjxl",
+    "openjpeg",
+    "tinyexr"
+  ]
+}

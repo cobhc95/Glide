@@ -1,0 +1,8 @@
+#include <windows.h>
+#include "resource.h"
+
+// Deliberately minimal shell-facing resources.
+// Keep the primary application icon as the first/lowest group icon ordinal.
+IDI_GLIDE ICON "Glide.ico"
+
+1 24 "Glide.manifest"
