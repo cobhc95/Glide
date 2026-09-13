@@ -1,200 +1,305 @@
 @echo off
-setlocal EnableExtensions
-set "NO_PAUSE="
-if /I "%~1"=="--no-pause" set "NO_PAUSE=1"
+
+rem Outer wrapper: stream the inner build live while mirroring the transcript to build-output.txt.
+rem PowerShell Tee-Object preserves live progress and a complete failure transcript at the same time.
+rem On failure the transcript is copied to the Windows clipboard for one-paste diagnostics.
+if /I "%~1"=="--glide-captured" (
+  shift
+  goto :captured_entry
+)
+
+setlocal EnableExtensions EnableDelayedExpansion
+set "GLIDE_WRAPPER_NO_PAUSE=0"
+for %%A in (%*) do if /I "%%~A"=="--no-pause" set "GLIDE_WRAPPER_NO_PAUSE=1"
+set "GLIDE_BUILD_LOG=%~dp0build-output.txt"
+if exist "%GLIDE_BUILD_LOG%" del /q "%GLIDE_BUILD_LOG%" >nul 2>nul
+
+echo Glide build running. Output is live and mirrored to build-output.txt...
+powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\build-live.ps1" -BuildScript "%~f0" -LogPath "%GLIDE_BUILD_LOG%" -ForwardArgsLine "%*"
+set "GLIDE_WRAPPER_RC=%errorlevel%"
+
+if not "%GLIDE_WRAPPER_RC%"=="0" (
+  if not exist "%GLIDE_BUILD_LOG%" (
+    >"%GLIDE_BUILD_LOG%" echo Glide build wrapper failed before the normal transcript could be created.
+    >>"%GLIDE_BUILD_LOG%" echo Exit code: %GLIDE_WRAPPER_RC%
+    >>"%GLIDE_BUILD_LOG%" echo Command: powershell build-live.ps1
+  )
+  where clip >nul 2>nul
+  if not errorlevel 1 (
+    type "%GLIDE_BUILD_LOG%" | clip
+    set "GLIDE_CLIPBOARD_STATUS=copied to clipboard"
+  ) else (
+    set "GLIDE_CLIPBOARD_STATUS=NOT copied - clip.exe was not found"
+  )
+  echo.
+  echo ============================================================
+  echo   FULL FAILURE TRANSCRIPT: build-output.txt
+  echo   Transcript: !GLIDE_CLIPBOARD_STATUS!
+  echo   Paste build-output.txt directly back into ChatGPT for diagnostics.
+  echo ============================================================
+  if not "%GLIDE_WRAPPER_NO_PAUSE%"=="1" pause
+)
+exit /b %GLIDE_WRAPPER_RC%
+
+:captured_entry
+setlocal EnableExtensions EnableDelayedExpansion
 cd /d "%~dp0"
+title Glide 3.0
 
-echo ==============================================
-echo   Glide Alpha 0.12107 - Glide - Automated Diagnostics
-echo ==============================================
+set "GLIDE_AOT=0"
+set "GLIDE_FAST=0"
+set "GLIDE_NO_PAUSE=0"
+set "DOTNET_CLI_TELEMETRY_OPTOUT=1"
+set "DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1"
+set "NUGET_XMLDOC_MODE=skip"
+set "GLIDE_BUILD_RC="
+
+:parse_args
+if "%~1"=="" goto :args_done
+if /I "%~1"=="aot" set "GLIDE_AOT=1"
+if /I "%~1"=="fast" set "GLIDE_FAST=1"
+if /I "%~1"=="--no-pause" set "GLIDE_NO_PAUSE=1"
+shift
+goto :parse_args
+
+:args_done
+echo ============================================================
+echo   Glide 3.0
+echo ============================================================
 echo.
-
-where cl.exe >nul 2>nul
-if errorlevel 1 goto :findvs
-goto :build
-
-:findvs
-set "VSWHERE=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
-if not exist "%VSWHERE%" (
-    echo ERROR: MSVC compiler was not found.
-    echo Install Visual Studio 2022/2026 with "Desktop development with C++".
-    echo Or run this script from a Visual Studio Developer Command Prompt.
-    if not defined NO_PAUSE pause
-    exit /b 1
+if "%GLIDE_AOT%"=="1" (
+  echo ERROR: The optional AOT build is currently disabled.
+  echo Reason: the embedded Windows Explorer host uses built-in COM interop ^(ComImport/Activator/Marshal^) which Windows NativeAOT does not support.
+  echo Use the ordinary non-AOT build while Explorer COM is migrated to an AOT-compatible ComWrappers path.
+  set "GLIDE_BUILD_RC=2"
+  goto :fail
 )
-for /f "usebackq tokens=*" %%i in (`"%VSWHERE%" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VSROOT=%%i"
-if not defined VSROOT (
-    echo ERROR: Visual C++ build tools were not found.
-    if not defined NO_PAUSE pause
-    exit /b 1
-)
-call "%VSROOT%\VC\Auxiliary\Build\vcvars64.bat"
+if "%GLIDE_FAST%"=="1" echo   FAST DEV MODE: compile + publish; tests/fixture regeneration skipped when safe.
+echo   Incremental caches: native\Glide.Native\build + managed bin/obj + NuGet global cache
+echo.
+call :progress 2 "Preflight"
+
+where dotnet >nul 2>nul
 if errorlevel 1 (
-    echo ERROR: Failed to initialize the MSVC x64 environment.
-    if not defined NO_PAUSE pause
-    exit /b 1
+  echo ERROR: .NET SDK not found. Install .NET 8 SDK x64, then rerun.
+  set "GLIDE_BUILD_RC=1"
+  goto :fail
 )
 
-:build
-where rc.exe >nul 2>nul
-if errorlevel 1 (
-    echo ERROR: Windows Resource Compiler rc.exe was not found.
-    echo Ensure the Windows SDK is installed with Visual Studio.
-    if not defined NO_PAUSE pause
-    exit /b 1
+if exist codecs (
+  echo Generating lazy codec routing index...
+  powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File "tools\generate-codec-index.ps1" -CodecDirectory "codecs"
+  if errorlevel 1 (
+    set "GLIDE_BUILD_RC=!errorlevel!"
+    goto :fail
+  )
 )
 
-if not exist build mkdir build
-if not exist dist mkdir dist
+if exist native\Glide.Native\CMakeLists.txt (
+  where cmake >nul 2>nul
+  if errorlevel 1 (
+    echo ERROR: CMake is required for the TIFF decoder bridge. The declared TIFF support cannot ship without Glide.Native.dll.
+    set "GLIDE_BUILD_RC=1"
+    goto :fail
+  ) else (
+    call :progress 8 "Native configure/toolchain validation"
 
-echo [1/6] Preparing minimal offline codec runtime...
-call "%~dp0build_codecs.cmd"
-if errorlevel 1 goto :fail
-
-echo [2/6] Preparing clean build directory...
-if exist "build" rmdir /s /q "build"
-mkdir "build"
-
-rc /nologo /fo "build\resources.res" "resources.rc"
-if errorlevel 1 goto :fail
-
-echo [3/6] Compiling Glide Glide modules in parallel...
-rem Fast builder: compile the full translation-unit set in one CL invocation.
-rem /MP lets MSVC schedule independent source files across available CPU cores.
-rem image_decode_wic_base.cpp is a tiny build-only wrapper that applies the
-rem DecodeFile=DecodeFileWicBase rename without changing image_decode.cpp.
-cl /nologo /c /MP /std:c++17 /O2 /GL /EHsc /permissive- /W4 /DUNICODE /D_UNICODE /utf-8 /Fo"build\\" ^
-    "main.cpp" ^
-    "input_hotkeys.cpp" ^
-    "ui_settings_layout.cpp" ^
-    "ui_settings_shell.cpp" ^
-    "crash_report.cpp" ^
-    "image_decode_wic_base.cpp" ^
-    "image_decode_extended.cpp" ^
-    "image_decode_extended_simple.cpp" ^
-    "image_decode_extended_misc.cpp" ^
-    "image_decode_extended_dds.cpp" ^
-    "image_cache.cpp" ^
-    "image_prefetch.cpp" ^
-    "overlay_state.cpp" ^
-    "platform_shell.cpp" ^
-    "viewer_view_state.cpp" ^
-    "diagnostic_harness.cpp" ^
-    "window_restore_guard.cpp"
-if errorlevel 1 goto :fail
-
-echo Verifying required object files before link...
-for %%O in (
-    main.obj input_hotkeys.obj ui_settings_layout.obj ui_settings_shell.obj crash_report.obj
-    image_decode_wic_base.obj image_decode_extended.obj image_decode_extended_simple.obj image_decode_extended_misc.obj image_decode_extended_dds.obj
-    image_cache.obj image_prefetch.obj overlay_state.obj platform_shell.obj viewer_view_state.obj diagnostic_harness.obj window_restore_guard.obj
-) do (
-    if not exist "build\%%O" (
-        echo ERROR: Required object file was not produced: build\%%O
-        goto :fail
+    rem Validate the reusable native cache by generator/platform, not by looking for
+    rem CMAKE_CXX_COMPILER in CMakeCache.txt. Visual Studio generators do not reliably
+    rem expose that variable there; compiler metadata is normally stored under CMakeFiles.
+    rem A mismatched copied cache is reset, while a valid VS x64 cache stays incremental.
+    set "GLIDE_NATIVE_CACHE=native\Glide.Native\build\CMakeCache.txt"
+    if exist "!GLIDE_NATIVE_CACHE!" (
+      set "GLIDE_CACHED_GENERATOR="
+      set "GLIDE_CACHED_PLATFORM="
+      for /f "tokens=1,* delims==" %%A in ('findstr /b /c:"CMAKE_GENERATOR:INTERNAL=" "!GLIDE_NATIVE_CACHE!" 2^>nul') do set "GLIDE_CACHED_GENERATOR=%%B"
+      for /f "tokens=1,* delims==" %%A in ('findstr /b /c:"CMAKE_GENERATOR_PLATFORM:INTERNAL=" "!GLIDE_NATIVE_CACHE!" 2^>nul') do set "GLIDE_CACHED_PLATFORM=%%B"
+      set "GLIDE_RESET_NATIVE_CACHE=0"
+      if defined GLIDE_CACHED_GENERATOR (
+        echo !GLIDE_CACHED_GENERATOR! | findstr /i /c:"Visual Studio" >nul
+        if errorlevel 1 set "GLIDE_RESET_NATIVE_CACHE=1"
+      )
+      if defined GLIDE_CACHED_PLATFORM if /I not "!GLIDE_CACHED_PLATFORM!"=="x64" set "GLIDE_RESET_NATIVE_CACHE=1"
+      if "!GLIDE_RESET_NATIVE_CACHE!"=="1" (
+        echo [1/8] Native CMake cache targets a different generator/platform; resetting it...
+        rmdir /s /q "native\Glide.Native\build"
+      )
     )
-)
-if not exist "build\resources.res" (
-    echo ERROR: Required resource file was not produced: build\resources.res
-    goto :fail
-)
 
-echo [4/6] Linking...
-link /nologo /SUBSYSTEM:WINDOWS /LTCG /OUT:"build\Glide.exe" ^
-   "build\main.obj" "build\input_hotkeys.obj" "build\ui_settings_layout.obj" "build\ui_settings_shell.obj" "build\crash_report.obj" ^
-   "build\image_decode_wic_base.obj" "build\image_decode_extended.obj" "build\image_decode_extended_simple.obj" "build\image_decode_extended_misc.obj" "build\image_decode_extended_dds.obj" ^
-   "build\image_cache.obj" "build\image_prefetch.obj" "build\overlay_state.obj" "build\platform_shell.obj" "build\viewer_view_state.obj" "build\diagnostic_harness.obj" "build\window_restore_guard.obj" "build\resources.res" ^
-   user32.lib gdi32.lib advapi32.lib d2d1.lib dwrite.lib propsys.lib windowscodecs.lib ole32.lib oleaut32.lib shell32.lib comdlg32.lib shlwapi.lib dwmapi.lib uxtheme.lib dbghelp.lib
-if errorlevel 1 goto :fail
-
-echo Verifying embedded application icon in final EXE...
-cl /nologo /std:c++17 /O2 /EHsc /DUNICODE /D_UNICODE /Fe"build\resource_probe.exe" "resource_probe.cpp" user32.lib shell32.lib
-if errorlevel 1 goto :fail
-"build\resource_probe.exe" "build\Glide.exe"
-if errorlevel 1 goto :fail
-del /q "build\resource_probe.exe" "build\resource_probe.obj" >nul 2>nul
-
-echo [5/6] Packaging stable portable output...
-copy /y "build\Glide.exe" "dist\Glide.exe" >nul
-
-rem Ask Explorer to refresh the stable Glide.exe path without deleting its icon cache.
-cl /nologo /std:c++17 /O2 /EHsc /DUNICODE /D_UNICODE /Fe"build\shell_icon_refresh.exe" "shell_icon_refresh.cpp" shell32.lib >nul 2>nul
-if exist "build\shell_icon_refresh.exe" (
-    "build\shell_icon_refresh.exe" "%~dp0dist\Glide.exe"
-    del /q "build\shell_icon_refresh.exe" "build\shell_icon_refresh.obj" >nul 2>nul
-) else (
-    echo WARNING: Shell refresh helper could not be built; Glide itself was built successfully.
-)
-if exist "prebuilt_codecs" (
-    if exist "dist\codecs" rmdir /s /q "dist\codecs"
-    mkdir "dist\codecs"
-    robocopy "prebuilt_codecs" "dist\codecs" /E /NFL /NDL /NJH /NJS /NP >nul
-    if errorlevel 8 goto :fail
-)
-if not exist "diagnostic_fixtures\fixture_manifest.csv" (
-    if exist "diagnostic_fixtures.zip" (
-        echo Extracting bundled diagnostic fixtures...
-        tar -xf "diagnostic_fixtures.zip"
-        if errorlevel 1 goto :fail
+    echo [1/8] Configuring/refreshing native bridge for x64...
+    cmake -S native\Glide.Native -B native\Glide.Native\build -A x64
+    if errorlevel 1 (
+      echo ERROR: Native configure failed. If Visual Studio Build Tools was recently upgraded, delete native\Glide.Native\build and rerun.
+      set "GLIDE_BUILD_RC=!errorlevel!"
+      goto :fail
     )
+
+    rem A successful Visual Studio configure already proves that CMake resolved the
+    rem requested x64 toolchain. The following build is the authoritative compiler/linker
+    rem validation and gives the real MSVC diagnostic if that toolchain is incomplete.
+    echo       CMake accepted the Visual Studio x64 native toolchain.
+
+    call :progress 18 "Native incremental build"
+    echo [2/8] Building native bridge ^(parallel, incremental^)...
+    cmake --build native\Glide.Native\build --config Release --parallel %NUMBER_OF_PROCESSORS%
+    if errorlevel 1 (
+      set "GLIDE_BUILD_RC=!errorlevel!"
+      goto :fail
+    )
+    if not exist "native\Glide.Native\build\Release\Glide.Native.dll" (
+      echo ERROR: Native Release build completed without native\Glide.Native\build\Release\Glide.Native.dll.
+      set "GLIDE_BUILD_RC=1"
+      goto :fail
+    )
+  )
 )
-if not exist "diagnostic_fixtures\fixture_manifest.csv" (
-    echo WARNING: Diagnostic fixtures are unavailable; Glide will build, but the bundled regression suite will be incomplete.
+
+call :progress 32 "Managed restore/build"
+echo [3/8] Restoring and building managed solution ^(incremental / multiprocess^)...
+dotnet restore Glide.sln
+if errorlevel 1 (
+  set "GLIDE_BUILD_RC=!errorlevel!"
+  goto :fail
+)
+dotnet build Glide.sln -c Release --no-restore -m -p:BuildInParallel=true
+if errorlevel 1 (
+  set "GLIDE_BUILD_RC=!errorlevel!"
+  goto :fail
+)
+
+if "%GLIDE_FAST%"=="1" (
+  call :progress 52 "Fast mode: validation skipped"
+  echo [4/8] Core tests skipped in fast mode.
+  echo [5/8] Input tests skipped in fast mode.
+  echo [6/8] Headless diagnostics skipped in fast mode.
 ) else (
-    rem Fast repeat packaging: Robocopy only changed/new fixture files instead of
-    rem deleting and copying the complete diagnostic library every build.
-    robocopy "diagnostic_fixtures" "dist\diagnostic_fixtures" /E /NFL /NDL /NJH /NJS /NP >nul
-    if errorlevel 8 goto :fail
-)
-
-if not exist "dist\Glide.exe" goto :fail
-for %%F in ("dist\Glide.exe") do if %%~zF LSS 10000 (
-    echo ERROR: Output executable looks unexpectedly small.
+  call :progress 48 "Core + Input tests (parallel)"
+  echo [4-5/8] Running Core and Input test projects in parallel...
+  dotnet test Glide.sln -c Release --no-build -m -p:BuildInParallel=true
+  if errorlevel 1 (
+    set "GLIDE_BUILD_RC=!errorlevel!"
     goto :fail
+  )
+
+  call :progress 66 "Headless diagnostics"
+  echo [6/8] Running headless diagnostics self-test...
+  dotnet run --project src\Glide.App\Glide.App.csproj -c Release --no-build -- --diagnostics self-test
+  if errorlevel 1 (
+    set "GLIDE_BUILD_RC=!errorlevel!"
+    goto :fail
+  )
 )
 
-echo [6/6] Checking Glide source identity...
-findstr /c:"Glide Alpha 0.12107" "main.cpp" >nul
+call :progress 78 "Publishing"
+echo [7/8] Publishing...
+if not "%GLIDE_FAST%"=="1" if exist dist rmdir /s /q dist
+if "%GLIDE_FAST%"=="1" if not exist dist mkdir dist
+dotnet publish src\Glide.App\Glide.App.csproj -c Release -r win-x64 --self-contained false -o dist
 if errorlevel 1 (
-    echo ERROR: Alpha 0.12107 source identity check failed.
-    goto :fail
-)
-findstr /c:"Comprehensive Glide image-format registry" "image_formats.h" >nul
-if errorlevel 1 (
-    echo ERROR: Glide image_formats.h was not found.
-    goto :fail
+  set "GLIDE_BUILD_RC=!errorlevel!"
+  goto :fail
 )
 
+if not exist "native\Glide.Native\build\Release\Glide.Native.dll" (
+  echo ERROR: Required native bridge missing; refusing to produce a TIFF-capable Glide release.
+  set "GLIDE_BUILD_RC=1"
+  goto :fail
+)
+copy /y "native\Glide.Native\build\Release\Glide.Native.dll" "dist\Glide.Native.dll" >nul
+if not exist "dist\Glide.Native.dll" (
+  echo ERROR: Native bridge copy to dist failed.
+  set "GLIDE_BUILD_RC=1"
+  goto :fail
+)
+call :progress 90 "Diagnostic fixtures"
+if "%GLIDE_FAST%"=="1" (
+  powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File "tools\fixture-manifest.ps1" -Mode Validate -Directory "artifacts\diagnostic-fixtures" -Generator "dist\Glide.exe" -SourceIdentity "Glide-3.5" >nul 2>&1
+  if errorlevel 1 (
+    echo [8/8] Fast fixture cache is absent/stale/partial; regenerating...
+    call :generate_diagnostic_fixtures
+    if errorlevel 1 goto :fail
+  ) else (
+    echo [8/8] Reusing manifest-validated diagnostic fixtures in fast mode...
+  )
+) else (
+  echo [8/8] Normal build: regenerating diagnostic fixtures from this exact candidate...
+  call :generate_diagnostic_fixtures
+  if errorlevel 1 goto :fail
+)
+
+rem Optional decoder-provider payloads are copied when present; no runtime download.
+if exist codecs xcopy /e /i /y /q codecs dist\codecs >nul
+
+if /I "%GLIDE_SKIP_INSTALLER%"=="1" (
+  call :progress 94 "Installer package skipped"
+  echo [9/9] Installer build skipped for nested/portable build.
+) else (
+  call :progress 94 "Installer package"
+  echo [9/9] Building Inno Setup installer...
+  set "GLIDE_INSTALLER_PARENT=1"
+  call build-installer.cmd --from-build
+  set "GLIDE_INSTALLER_PARENT="
+  if errorlevel 1 (
+    set "GLIDE_BUILD_RC=!errorlevel!"
+    goto :fail
+  )
+)
+
+call :progress 100 "Complete"
 echo.
-echo SUCCESS - Glide Alpha 0.12107 - automated diagnostics build
-echo Stable EXE path: "%~dp0dist\Glide.exe"
-for %%F in ("dist\Glide.exe") do echo Size: %%~zF bytes
-echo.
-echo Build acceleration:
-echo   - MSVC /MP parallel compilation uses all available CPU cores
-echo   - Diagnostic fixtures use incremental copy on repeat builds
-echo.
-echo Built-in diagnostics:
-echo   - Fast master progress window with Pause/Resume and Cancel
-echo   - Isolated workers for formats, performance, viewer/window checks and GUI visuals
-echo   - 100+ bundled image/configuration fixtures with real viewer opens and timing
-echo   - Quality/rapid-preview/refinement plus cold/warm/cache/prefetch performance
-echo   - Window restore/transparency/off-screen recovery and resize screenshots
-echo   - Complete Settings-page visual sweep for overlap/clipping/stale paint
-echo   - Legacy exhaustive per-setting behavior sweep retired after validation
-echo   - New or modified features should add targeted diagnostics when developed
-echo   - Codec-aware HRESULT evidence plus one combined report ZIP
-echo.
-echo NOTE: MSVC/runtime output remains authoritative; the diagnostic runner is designed to remove manual acceptance testing.
-echo.
-if not defined NO_PAUSE pause
+echo ============================================================
+echo   BUILD COMPLETE - portable: dist\
+if /I "%GLIDE_SKIP_INSTALLER%"=="1" (
+  echo   INSTALLER: skipped by caller
+) else (
+  echo   INSTALLER: dist-installer\Glide Setup.exe
+)
+echo ============================================================
+echo Run: dist\Glide.exe
 exit /b 0
 
+:generate_diagnostic_fixtures
+if not exist artifacts mkdir artifacts
+if exist "artifacts\diagnostic-fixtures" rmdir /s /q "artifacts\diagnostic-fixtures"
+dist\Glide.exe --write-diagnostic-fixtures "artifacts\diagnostic-fixtures"
+if errorlevel 1 (
+  set "GLIDE_BUILD_RC=!errorlevel!"
+  exit /b !GLIDE_BUILD_RC!
+)
+if not exist "artifacts\diagnostic-fixtures" (
+  echo ERROR: Diagnostic fixture generation returned success but produced no output directory.
+  set "GLIDE_BUILD_RC=1"
+  exit /b 1
+)
+powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File "tools\fixture-manifest.ps1" -Mode Write -Directory "artifacts\diagnostic-fixtures" -Generator "dist\Glide.exe" -SourceIdentity "Glide-3.5"
+if errorlevel 1 (
+  echo ERROR: Diagnostic fixture identity manifest creation/validation failed.
+  set "GLIDE_BUILD_RC=!errorlevel!"
+  exit /b !GLIDE_BUILD_RC!
+)
+powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File "tools\fixture-manifest.ps1" -Mode Validate -Directory "artifacts\diagnostic-fixtures" -Generator "dist\Glide.exe" -SourceIdentity "Glide-3.5"
+if errorlevel 1 (
+  echo ERROR: Generated diagnostic fixtures did not pass identity validation.
+  set "GLIDE_BUILD_RC=!errorlevel!"
+  exit /b !GLIDE_BUILD_RC!
+)
+exit /b 0
+
+:progress
+set "GLIDE_PROGRESS=%~1"
+set "GLIDE_PROGRESS_LABEL=%~2"
+title Glide 3.5 Build - %GLIDE_PROGRESS%%% - %GLIDE_PROGRESS_LABEL%
+echo [ %GLIDE_PROGRESS%%% ] %GLIDE_PROGRESS_LABEL%
+exit /b 0
 
 :fail
+if not defined GLIDE_BUILD_RC set "GLIDE_BUILD_RC=1"
 echo.
-echo BUILD FAILED - see compiler/linker output above.
-echo Existing dist\Glide.exe was not deliberately deleted.
+echo ============================================================
+echo   BUILD FAILED - error code %GLIDE_BUILD_RC%
+echo ============================================================
 echo.
-if not defined NO_PAUSE pause
-exit /b 1
+echo The window will stay open so the error output can be copied.
+echo Run build.cmd --no-pause from an existing terminal/CI to disable this pause.
+if not "%GLIDE_NO_PAUSE%"=="1" pause
+exit /b %GLIDE_BUILD_RC%

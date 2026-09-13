@@ -1,0 +1,7 @@
+cmake_minimum_required(VERSION 3.20)
+project(GlideNative LANGUAGES CXX)
+add_library(Glide.Native SHARED GlideNative.cpp)
+target_compile_features(Glide.Native PRIVATE cxx_std_20)
+target_compile_definitions(Glide.Native PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+target_link_libraries(Glide.Native PRIVATE windowscodecs ole32 oleaut32 propsys shell32)
+set_target_properties(Glide.Native PROPERTIES OUTPUT_NAME "Glide.Native")

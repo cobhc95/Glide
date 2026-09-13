@@ -1,0 +1,38 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="using:Glide.App.Controls"
+             x:Class="Glide.App.Controls.BrowserSurface">
+  <Grid RowDefinitions="44,*" Background="{DynamicResource BrushViewport}">
+        <Border x:Name="BrowserToolbarBorder" Grid.Row="0" Background="{DynamicResource BrushSurface}" BorderBrush="{DynamicResource BrushBorderSoft}" BorderThickness="0,0,0,1">
+          <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,*,Auto,Auto" ColumnSpacing="5" Margin="9,6">
+            <Button x:Name="BrowserBackButton" Classes="browserTool" Click="BrowserBackClicked" ToolTip.Tip="Up / return to containing folder"><controls:GlideIconView Kind="Previous" Classes="toolbarGlyph"/></Button>
+            <Button x:Name="BrowserForwardButton" Grid.Column="1" Classes="browserTool" Click="BrowserForwardClicked" ToolTip.Tip="Forward"><controls:GlideIconView Kind="Next" Classes="toolbarGlyph"/></Button>
+            <Button x:Name="BrowserUpButton" Grid.Column="2" Classes="browserTool" Click="BrowserUpClicked" ToolTip.Tip="Up one folder"><controls:GlideIconView Kind="Up" Classes="toolbarGlyph"/></Button>
+            <Button x:Name="BrowserRefreshButton" Grid.Column="3" Classes="browserTool" Click="BrowserRefreshClicked" ToolTip.Tip="Refresh"><controls:GlideIconView Kind="Refresh" Classes="toolbarGlyph"/></Button>
+            <TextBox x:Name="BrowserAddressBox" Grid.Column="4" Classes="browserAddress" KeyDown="BrowserAddressKeyDown" ToolTip.Tip="Folder path — press Enter to navigate"/>
+            <ComboBox x:Name="BrowserViewModeCombo" Grid.Column="5" Width="132" Height="31" SelectedIndex="0" SelectionChanged="BrowserViewModeChanged" ToolTip.Tip="Thumbnail size">
+              <ComboBoxItem Content="Large icons"/>
+              <ComboBoxItem Content="Medium icons"/>
+              <ComboBoxItem Content="Compact"/>
+            </ComboBox>
+            <Button x:Name="BrowserWindowsExplorerButton" Grid.Column="6" Classes="browserTool" Click="BrowserWindowsExplorerClicked" ToolTip.Tip="Open this folder in Windows Explorer"><controls:GlideIconView Kind="Browser" Classes="toolbarGlyph"/></Button>
+          </Grid>
+        </Border>
+        <Grid Grid.Row="1" x:Name="BrowserContentSurface">
+          <!-- Retained only so the isolated legacy COM-host code remains buildable for diagnostics/future fallback. -->
+          <Grid x:Name="NativeExplorerHostSurface" IsVisible="False" Width="1" Height="1"/>
+          <ScrollViewer x:Name="BrowserScrollViewer" Margin="0" Padding="10"
+                        HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto"
+                        Background="{DynamicResource BrushViewport}" KeyDown="BrowserListKeyDown">
+            <ItemsRepeater x:Name="BrowserRepeater" HorizontalCacheLength="1" VerticalCacheLength="1">
+              <ItemsRepeater.Layout>
+                <UniformGridLayout Orientation="Horizontal"
+                                   MinItemWidth="176" MinItemHeight="188"
+                                   MinColumnSpacing="6" MinRowSpacing="6"/>
+              </ItemsRepeater.Layout>
+            </ItemsRepeater>
+          </ScrollViewer>
+        </Grid>
+      
+  </Grid>
+</UserControl>

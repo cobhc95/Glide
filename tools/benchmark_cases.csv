@@ -1,0 +1,11 @@
+name,category,target,reference
+baseline-jpeg,baseline_jpeg,diagnostic_corpus/90_settings_large.jpg,diagnostic_corpus/90_settings_large.jpg
+progressive-jpeg,progressive_jpeg,diagnostic_corpus/91_settings_progressive.jpg,diagnostic_corpus/91_settings_progressive.jpg
+large-landscape,large_landscape,diagnostic_corpus/90_settings_large.jpg,diagnostic_corpus/90_settings_large.jpg
+large-portrait,large_portrait,diagnostic_corpus/93_large_progressive_portrait_21mp.jpg,diagnostic_corpus/93_large_progressive_portrait_21mp.jpg
+orientation-6,orientation,tools/benchmark_corpus/orientation-6.jpg,tools/benchmark_references/orientation-6-expected.png
+transparent-png,transparent_png,tools/benchmark_corpus/transparent-large.png,tools/benchmark_corpus/transparent-large.png
+tiff-lzw,tiff,tools/benchmark_corpus/large-lzw.tif,tools/benchmark_corpus/large-lzw.tif
+specialist-webp,specialist,diagnostic_corpus/21_webp.webp,tools/benchmark_references/21_webp-expected.png
+specialist-avif,specialist,diagnostic_corpus/23_avif.avif,tools/benchmark_references/23_avif-expected.png
+specialist-qoi,specialist,diagnostic_corpus/43_qoi.qoi,tools/benchmark_references/43_qoi-expected.png

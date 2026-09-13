@@ -1,0 +1,82 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="using:Glide.App.Controls"
+             x:Class="Glide.App.Controls.HomeSurface"
+             x:Name="Root">
+  <Grid>
+        <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" Padding="0,0,0,70">
+          <Grid Margin="31,24,18,18" RowDefinitions="Auto,Auto,Auto">
+            <Grid ColumnDefinitions="*,Auto">
+              <StackPanel>
+                <TextBlock x:Name="HomeHeadingText" Text="Welcome to Glide" FontSize="24" FontWeight="SemiBold"/>
+                <TextBlock x:Name="HomeSubtitleText" Text="Fast browsing, precise zooming, and familiar Windows controls."
+                           Foreground="{DynamicResource BrushMuted}" FontSize="12" Margin="0,5,0,0"/>
+              </StackPanel>
+              <Button Grid.Column="1" Classes="recentClear" Click="ResetWelcomeLayoutClicked" ToolTip.Tip="Reset Welcome page layout, Recent position/size and visibility to defaults" VerticalAlignment="Top">
+                <StackPanel Orientation="Horizontal" Spacing="6"><controls:GlideIconView Kind="Refresh" Width="14" Height="14"/><TextBlock Text="Reset layout" VerticalAlignment="Center"/></StackPanel>
+              </Button>
+            </Grid>
+
+            <Grid x:Name="HomeTipsGrid" Grid.Row="1" ColumnDefinitions="*,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto"
+                  ColumnSpacing="12" RowSpacing="8" Margin="0,20,0,0">
+              <Border Classes="homeCard homeCardAccent" Grid.Row="0" Grid.Column="0"><Grid ColumnDefinitions="34,*"><controls:GlideIconView Kind="Mouse" Classes="homeGlyph"/><StackPanel Grid.Column="1"><TextBlock Text="Wheel through pictures" Classes="homeTitle"/><TextBlock Text="Scroll the mouse wheel to move to the previous or next image — Glide uses the wheel for browsing, not canvas scrolling." Classes="homeDescription"/></StackPanel></Grid></Border>
+              <Border Classes="homeCard homeCardAccent" Grid.Row="0" Grid.Column="1"><Grid ColumnDefinitions="34,*"><controls:GlideIconView Kind="Performance" Classes="homeGlyph"/><StackPanel Grid.Column="1"><TextBlock Text="Drag around a zoomed image" Classes="homeTitle"/><TextBlock Text="Hold the right mouse button and drag to move around inside the current picture. It replaces ordinary canvas scrolling." Classes="homeDescription"/></StackPanel></Grid></Border>
+              <Border Classes="homeCard" Grid.Row="1" Grid.Column="0"><Grid ColumnDefinitions="34,*"><controls:GlideIconView Kind="Tabs" Classes="homeGlyph"/><StackPanel Grid.Column="1"><TextBlock Text="Select exactly what you want" Classes="homeTitle"/><TextBlock Text="Left-drag across the image to draw a precise zoom selection. The selection stays until you use it or cancel it." Classes="homeDescription"/></StackPanel></Grid></Border>
+              <Border Classes="homeCard" Grid.Row="1" Grid.Column="1"><Grid ColumnDefinitions="34,*"><controls:GlideIconView Kind="ZoomIn" Classes="homeGlyph"/><StackPanel Grid.Column="1"><TextBlock Text="Zoom directly into a selection" Classes="homeTitle"/><TextBlock Text="Left-click inside a selection to zoom in, or right-click inside a newly drawn selection to zoom out. The selection then disappears." Classes="homeDescription"/></StackPanel></Grid></Border>
+              <Border Classes="homeCard" Grid.Row="2" Grid.Column="0"><Grid ColumnDefinitions="34,*"><controls:GlideIconView Kind="Browser" Classes="homeGlyph"/><StackPanel Grid.Column="1"><TextBlock Text="Keep browsing across folders" Classes="homeTitle"/><TextBlock Text="At a folder boundary Glide can continue into sibling folders and skip folders with no supported images." Classes="homeDescription"/></StackPanel></Grid></Border>
+              <Border Classes="homeCard" Grid.Row="2" Grid.Column="1"><Grid ColumnDefinitions="34,*"><controls:GlideIconView Kind="Tabs" Classes="homeGlyph"/><StackPanel Grid.Column="1"><TextBlock Text="Use tabs like a browser" Classes="homeTitle"/><TextBlock Text="Reorder, detach, rejoin, duplicate, close and restore Home, image and Explorer tabs." Classes="homeDescription"/></StackPanel></Grid></Border>
+              <Border Classes="homeCard" Grid.Row="3" Grid.Column="0"><Grid ColumnDefinitions="34,*"><controls:GlideIconView Kind="Overlays" Classes="homeGlyph"/><StackPanel Grid.Column="1"><TextBlock Text="Duplicate the current tab" Classes="homeTitle"/><TextBlock Text="Use Duplicate Tab to keep your current location while exploring another view." Classes="homeDescription"/></StackPanel></Grid></Border>
+              <Border Classes="homeCard" Grid.Row="3" Grid.Column="1"><Grid ColumnDefinitions="34,*"><controls:GlideIconView Kind="FitWidth" Classes="homeGlyph"/><StackPanel Grid.Column="1"><TextBlock Text="Fit an image instantly" Classes="homeTitle"/><TextBlock Text="Use Fit, Fit Width, Fit Height or exact 100% viewing from the status surface." Classes="homeDescription"/></StackPanel></Grid></Border>
+              <Border Classes="homeCard" Grid.Row="4" Grid.Column="0"><Grid ColumnDefinitions="34,*"><controls:GlideIconView Kind="Fullscreen" Classes="homeGlyph"/><StackPanel Grid.Column="1"><TextBlock Text="Go fullscreen instantly" Classes="homeTitle"/><TextBlock Text="Double-click an image or press F. Escape restores the exact previous window placement." Classes="homeDescription"/></StackPanel></Grid></Border>
+              <Border Classes="homeCard" Grid.Row="4" Grid.Column="1"><Grid ColumnDefinitions="34,*"><controls:GlideIconView Kind="Last" Classes="homeGlyph"/><StackPanel Grid.Column="1"><TextBlock Text="Jump through the current folder" Classes="homeTitle"/><TextBlock Text="Home/End and the navigation cluster keep first, previous, next and last close at hand." Classes="homeDescription"/></StackPanel></Grid></Border>
+            </Grid>
+
+            <Border x:Name="RecentHistoryPanel" Grid.Row="2" IsVisible="False" Classes="recentPanel" Margin="0,16,0,0">
+              <Grid RowDefinitions="Auto,Auto" Margin="14,11">
+                <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto" ColumnSpacing="4">
+                  <StackPanel Orientation="Horizontal" Spacing="8">
+                    <controls:GlideIconView Kind="History" Width="16" Height="16" IconBrush="{DynamicResource BrushAccent}" StrokeWidth="1.5" VerticalAlignment="Center"/>
+                    <TextBlock Text="Recent" FontSize="13.5" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                  </StackPanel>
+                  <Button Grid.Column="1" Classes="recentClear" Click="MoveRecentHistoryClicked" ToolTip.Tip="Move Recent above/below the Welcome instructions">
+                    <controls:GlideIconView x:Name="RecentMoveIcon" Kind="Up" Width="14" Height="14"/>
+                  </Button>
+                  <Button x:Name="RecentResizeButton" Grid.Column="2" Classes="recentClear" Click="ResizeRecentHistoryClicked" ToolTip.Tip="Resize Recent: Normal → Compact → Large">
+                    <controls:GlideIconView x:Name="RecentResizeIcon" Kind="Expand" Width="14" Height="14"/>
+                  </Button>
+                  <Button Grid.Column="3" Classes="recentClear" Content="Clear" Click="ClearRecentHistoryClicked" ToolTip.Tip="Clear recent file and folder history"/>
+                  <Button Grid.Column="4" Classes="recentClear" Click="CloseRecentHistoryClicked" ToolTip.Tip="Hide Recent from the Welcome page. Restore it in Settings → General.">
+                    <controls:GlideIconView Kind="Close" Width="12" Height="12"/>
+                  </Button>
+                </Grid>
+                <ScrollViewer x:Name="RecentHistoryScroll" Grid.Row="1" Margin="0,7,0,0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                  <StackPanel x:Name="RecentHistoryHost" Spacing="3"/>
+                </ScrollViewer>
+              </Grid>
+            </Border>
+          </Grid>
+        </ScrollViewer>
+
+        <Border x:Name="HomeStatusSurface" Classes="statusSurface legacyViewerStatus" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="14,0,14,14" Height="58">
+          <Grid ColumnDefinitions="*,Auto" Margin="16,8,8,8">
+            <TextBlock Text="Glide  •  Drop an image here or Ctrl+O" FontSize="12.5" Foreground="{DynamicResource BrushMuted}" VerticalAlignment="Center"/>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4">
+              <Button Classes="statusIcon legacyStatusIcon" IsEnabled="False" ToolTip.Tip="Zoom out"><controls:GlideIconView Kind="ZoomOut" Classes="statusGlyph"/></Button>
+              <Button Classes="statusIcon legacyStatusIcon" IsEnabled="False" ToolTip.Tip="Zoom in"><controls:GlideIconView Kind="ZoomIn" Classes="statusGlyph"/></Button>
+              <Button Classes="statusIcon legacyStatusIcon" IsEnabled="False" ToolTip.Tip="Fit width"><controls:GlideIconView Kind="FitWidth" Classes="statusGlyph"/></Button>
+              <Button Classes="statusIcon legacyStatusIcon" IsEnabled="False" ToolTip.Tip="Fit height"><controls:GlideIconView Kind="FitHeight" Classes="statusGlyph"/></Button>
+              <Button Classes="statusIcon legacyStatusIcon" IsEnabled="False" ToolTip.Tip="Slideshow"><controls:GlideIconView Kind="Play" Classes="statusGlyph"/></Button>
+              <Button x:Name="HomeOptionsButton" Classes="statusIcon legacyStatusIcon" Click="SettingsClicked" ToolTip.Tip="Settings"><TextBlock Text="&#xE713;" FontFamily="Segoe Fluent Icons" FontSize="18" Classes="modernSettingsGlyph"/></Button>
+              <Border Width="6"/>
+              <Button Classes="statusIcon legacyStatusIcon nav" IsEnabled="False" ToolTip.Tip="First image"><controls:GlideIconView Kind="First" Classes="statusGlyph"/></Button>
+              <Button Classes="statusIcon legacyStatusIcon nav" IsEnabled="False" ToolTip.Tip="Previous image"><controls:GlideIconView Kind="Previous" Classes="statusGlyph"/></Button>
+              <Button Classes="statusIcon legacyStatusIcon nav" IsEnabled="False" ToolTip.Tip="Next image"><controls:GlideIconView Kind="Next" Classes="statusGlyph"/></Button>
+              <Button Classes="statusIcon legacyStatusIcon nav" IsEnabled="False" ToolTip.Tip="Last image"><controls:GlideIconView Kind="Last" Classes="statusGlyph"/></Button>
+              <Button x:Name="HomeStatusCollapseButton" Classes="statusIcon legacyStatusIcon" Click="CollapseStatusClicked" ToolTip.Tip="Collapse status surface"><controls:GlideIconView Kind="Collapse" Classes="statusGlyph"/></Button>
+              <Button Classes="statusIcon legacyStatusIcon" Click="CloseStatusClicked" ToolTip.Tip="Hide status surface"><controls:GlideIconView Kind="Close" Classes="statusGlyph"/></Button>
+            </StackPanel>
+          </Grid>
+        </Border>
+      
+  </Grid>
+</UserControl>

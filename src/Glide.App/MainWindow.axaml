@@ -1,0 +1,179 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="using:Glide.App.Controls"
+        xmlns:platform="using:Glide.App.Platform"
+        x:Class="Glide.App.MainWindow"
+        Width="1064" Height="687" MinWidth="180" MinHeight="360"
+        Title="Glide 3.5 — Home"
+        Icon="/Assets/Glide.ico"
+        SystemDecorations="None"
+        ExtendClientAreaToDecorationsHint="False"
+        Background="{DynamicResource BrushWindow}">
+  <Grid x:Name="MainRoot" RowDefinitions="44,*">
+    <!-- Browser-style integrated title/tab bar. On Windows the visual row is client-drawn, while a
+         Win32 frame controller returns native non-client hit-test codes for caption buttons and the
+         resize edge. This mirrors the Chromium/Firefox architecture rather than Avalonia system chrome. -->
+    <Border x:Name="ChromeBorder" Grid.Row="0" Classes="chromeBorder" Height="44" VerticalAlignment="Top">
+      <Grid x:Name="ChromeLayout" ColumnDefinitions="*,Auto,Auto" Margin="8,0,0,0">
+        <Grid x:Name="TabOverflowHost" ColumnDefinitions="Auto,*,Auto">
+          <Button x:Name="TabOverflowLeftButton" Grid.Column="0" Classes="tabOverflowArrow" Width="28" Height="36" IsVisible="False" Click="TabOverflowLeftClicked" ToolTip.Tip="Show tabs to the left">
+            <controls:GlideIconView Kind="Previous" Width="13" Height="13" IconBrush="#FFFFFFFF" StrokeWidth="2.0"/>
+          </Button>
+          <ScrollViewer x:Name="TabStripScroll" Grid.Column="1" HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Disabled">
+            <StackPanel x:Name="TabStripHost" Orientation="Horizontal" Spacing="3" VerticalAlignment="Stretch">
+              <StackPanel x:Name="TabStripPanel" Orientation="Horizontal" Spacing="3"/>
+              <Button x:Name="NewTabButton" Classes="tabPlus" Width="36" Height="36" Click="NewTabClicked" ToolTip.Tip="[New tab (Ctrl+T)]">
+                <controls:GlideIconView Kind="Plus" Width="14" Height="14" IconBrush="{DynamicResource BrushText}" StrokeWidth="1.8"/>
+              </Button>
+            </StackPanel>
+          </ScrollViewer>
+          <Button x:Name="TabOverflowRightButton" Grid.Column="2" Classes="tabOverflowArrow" Width="28" Height="36" IsVisible="False" Click="TabOverflowRightClicked" ToolTip.Tip="Show tabs to the right">
+            <controls:GlideIconView Kind="Next" Width="13" Height="13" IconBrush="#FFFFFFFF" StrokeWidth="2.0"/>
+          </Button>
+        </Grid>
+
+        <!-- Browser-like Back/Forward live on the right-side chrome, visually separated from
+             user-configurable utility actions. Their history is per tab. -->
+        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center" Margin="0,4,6,4">
+          <StackPanel x:Name="TabNavigationHost" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
+            <Button x:Name="TabNavBackButton" Classes="tabNavUtility back" Width="34" Height="34" Click="TabNavBackClicked" ToolTip.Tip="Up / return to containing folder">
+              <controls:GlideIconView Kind="Previous" Width="14" Height="14" IconBrush="{DynamicResource BrushAccent}" StrokeWidth="2"/>
+            </Button>
+            <Button x:Name="TabNavForwardButton" Classes="tabNavUtility forward" Width="34" Height="34" Click="TabNavForwardClicked" ToolTip.Tip="Forward">
+              <controls:GlideIconView Kind="Next" Width="14" Height="14" IconBrush="{DynamicResource BrushText}" StrokeWidth="2"/>
+            </Button>
+          </StackPanel>
+          <Border Width="1" Height="22" Background="{DynamicResource BrushBorder}" Margin="3,0,3,0"/>
+          <!-- User-configurable utility strip. Buttons are rebuilt from stable settings IDs at runtime. -->
+          <StackPanel x:Name="TitleActionHost" Orientation="Horizontal" Spacing="1" VerticalAlignment="Center"/>
+        </StackPanel>
+
+        <StackPanel x:Name="CaptionButtonHost" Grid.Column="2" Orientation="Horizontal" Spacing="0" Height="44" VerticalAlignment="Top">
+          <!-- Browser-style Windows controls: like Firefox/Chromium, Glide owns the visual buttons
+               but exposes their rectangles to Win32 as HTMINBUTTON/HTMAXBUTTON/HTCLOSE.
+               Segoe Fluent Icons is the Windows 11 system icon font, avoiding hand-drawn glyphs. -->
+          <Button x:Name="CaptionMinimizeButton" Classes="captionButton" Width="46" Height="44" Click="CaptionMinimizeClicked" ToolTip.Tip="Minimize">
+            <TextBlock Text="&#xE921;" FontFamily="Segoe Fluent Icons" FontSize="10" Classes="captionGlyph"/>
+          </Button>
+          <Button x:Name="CaptionMaximizeButton" Classes="captionButton" Width="46" Height="44" Click="CaptionMaximizeClicked" ToolTip.Tip="Maximize">
+            <TextBlock x:Name="CaptionMaximizeIcon" Text="&#xE922;" FontFamily="Segoe Fluent Icons" FontSize="10" Classes="captionGlyph"/>
+          </Button>
+          <Button x:Name="CaptionCloseButton" Classes="captionButton close" Width="46" Height="44" Click="CaptionCloseClicked" ToolTip.Tip="Close">
+            <TextBlock Text="&#xE8BB;" FontFamily="Segoe Fluent Icons" FontSize="10" Classes="captionGlyph"/>
+          </Button>
+        </StackPanel>
+      </Grid>
+    </Border>
+
+    <!-- A tiny always-hit-testable fullscreen corner target closes the last DPI/auto-hide race:
+         moving the pointer to the absolute top-right pixel still executes the configured X action. -->
+    <Button x:Name="FullscreenCornerCloseHit" Classes="fullscreenCornerHit" Grid.Row="1" Width="12" Height="12" HorizontalAlignment="Right" VerticalAlignment="Top"
+            Background="Transparent" BorderThickness="0" Padding="0" Focusable="False" IsVisible="False" ZIndex="2000" Click="CaptionCloseClicked"/>
+
+    <Grid x:Name="WorkspaceLayer" Grid.Row="1">
+      <!-- HOME: the heavy welcome/history/status tree is constructed only if a Home tab is shown. -->
+      <ContentControl x:Name="HomeHost" IsVisible="False"/>
+
+      <!-- VIEWER -->
+      <Grid x:Name="ImageView" IsVisible="False">
+        <controls:ImageViewport x:Name="Viewport" Background="{DynamicResource BrushViewport}" Focusable="False"/>
+        <controls:ImageSelectionOverlay x:Name="SelectionOverlay" IsHitTestVisible="False" ZIndex="200"/>
+        <controls:LegacyOverlaySurface x:Name="OverlayCanvas" IsHitTestVisible="False" ZIndex="250"/>
+        <ScrollBar x:Name="ViewportHScroll" Classes="viewportScroll" Orientation="Horizontal"
+                   HorizontalAlignment="Stretch" VerticalAlignment="Bottom" Margin="8,0,18,5" Height="9" IsVisible="False"/>
+        <ScrollBar x:Name="ViewportVScroll" Classes="viewportScroll" Orientation="Vertical"
+                   HorizontalAlignment="Right" VerticalAlignment="Stretch" Margin="0,8,5,18" Width="9" IsVisible="False"/>
+        <Border x:Name="CornerCounterHost" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,28,15,0" IsHitTestVisible="False">
+          <Grid>
+            <TextBlock x:Name="CornerCounterShadowText" Text="[0/0]" Margin="1,1,0,0" Foreground="#CC000000" FontSize="13" FontWeight="SemiBold"/>
+            <TextBlock x:Name="CornerCounterText" Text="[0/0]" Foreground="#D9FFFFFF" FontSize="13" FontWeight="SemiBold"/>
+          </Grid>
+        </Border>
+
+
+        <Border x:Name="ImageInfoOverlay" IsVisible="False" IsHitTestVisible="False"
+                HorizontalAlignment="Left" VerticalAlignment="Top" Margin="18,18,0,0"
+                Background="#D91B1E23" BorderBrush="{DynamicResource BrushAccent}" BorderThickness="1"
+                CornerRadius="8" Padding="13,10" MaxWidth="520" ZIndex="320">
+          <StackPanel Spacing="3">
+            <TextBlock Text="Image information" FontWeight="SemiBold" FontSize="13.5" Foreground="{DynamicResource BrushText}"/>
+            <TextBlock x:Name="ImageInfoText" Text="" FontSize="12.5" Foreground="{DynamicResource BrushMuted}" TextWrapping="Wrap"/>
+          </StackPanel>
+        </Border>
+
+        <Border x:Name="NavigationBoundaryNotice" IsVisible="False" IsHitTestVisible="False"
+                HorizontalAlignment="Center" VerticalAlignment="Center" ZIndex="1450"
+                Background="#EB15191E" BorderBrush="{DynamicResource BrushAccent}" BorderThickness="2"
+                CornerRadius="10" Padding="22,14">
+          <TextBlock x:Name="NavigationBoundaryNoticeText" Text="End of folder" FontSize="18" FontWeight="SemiBold" Foreground="White"/>
+        </Border>
+
+        <Border x:Name="ViewerStatusSurface" Classes="statusSurface legacyViewerStatus" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="14,0,14,14">
+          <Grid ColumnDefinitions="Auto,*" Margin="10,3,4,3" ColumnSpacing="8">
+            <TextBlock x:Name="StatusStatsText" Classes="statusStats" Text="Ready" FontWeight="SemiBold" Foreground="{DynamicResource BrushMuted}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+            <!-- Narrow-window contract: controls always flow left-to-right, then wrap onto a second/third
+                 horizontal row. Never rotate the controls into one vertical tower. Small independent
+                 groups keep any one group from establishing a large minimum width. -->
+            <WrapPanel x:Name="StatusControlsPanel" Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Left" VerticalAlignment="Center">
+              <Border Classes="statusGroup viewGroup"><StackPanel x:Name="ZoomGroup" Orientation="Horizontal" Spacing="2">
+                <Button x:Name="StatusZoomOutButton" Classes="statusIcon legacyStatusIcon" Click="ZoomOutClicked" ToolTip.Tip="Zoom out"><controls:GlideIconView Kind="ZoomOut" Classes="statusGlyph"/></Button>
+                <Button x:Name="StatusZoomInButton" Classes="statusIcon legacyStatusIcon" Click="ZoomInClicked" ToolTip.Tip="Zoom in"><controls:GlideIconView Kind="ZoomIn" Classes="statusGlyph"/></Button>
+              </StackPanel></Border>
+              <Border Classes="statusGroup viewGroup"><StackPanel x:Name="FitGroup" Orientation="Horizontal" Spacing="2">
+                <Button x:Name="StatusFitWidthButton" Classes="statusIcon legacyStatusIcon" Click="FitWidthClicked" ToolTip.Tip="Fit width"><controls:GlideIconView Kind="FitWidth" Classes="statusGlyph"/></Button>
+                <Button x:Name="StatusFitHeightButton" Classes="statusIcon legacyStatusIcon" Click="FitHeightClicked" ToolTip.Tip="Fit height"><controls:GlideIconView Kind="FitHeight" Classes="statusGlyph"/></Button>
+              </StackPanel></Border>
+              <Border Classes="statusGroup viewGroup"><StackPanel x:Name="InfoGroup" Orientation="Horizontal"><Button x:Name="StatusInfoButton" Classes="statusIcon legacyStatusIcon" Click="InfoClicked" ToolTip.Tip="Image information"><controls:GlideIconView Kind="Info" Classes="statusGlyph"/></Button></StackPanel></Border>
+              <Border Classes="statusGroup viewGroup"><StackPanel x:Name="OptionsGroup" Orientation="Horizontal"><Button x:Name="StatusOptionsButton" Classes="statusIcon legacyStatusIcon" Click="SettingsClicked" ToolTip.Tip="Settings"><TextBlock Text="&#xE713;" FontFamily="Segoe Fluent Icons" FontSize="18" Classes="modernSettingsGlyph"/></Button></StackPanel></Border>
+              <Border Classes="statusGroup overlayGroup"><WrapPanel x:Name="OverlayGroup" Orientation="Horizontal">
+                <Button x:Name="OverlaySaveButton" Classes="statusIcon legacyStatusIcon" Click="OverlaySaveClicked" ToolTip.Tip="Save overlay layout"><controls:GlideIconView Kind="OverlaySave" Classes="statusGlyph"/></Button>
+                <Button x:Name="OverlayClearButton" Classes="statusIcon legacyStatusIcon" Click="OverlayClearClicked" ToolTip.Tip="Clear all overlays"><controls:GlideIconView Kind="Close" Classes="statusGlyph"/></Button>
+                <Button x:Name="OverlayAddButton" Classes="statusIcon legacyStatusIcon" Click="OverlayAddClicked" ToolTip.Tip="Add Window-in-Window overlay"><controls:GlideIconView Kind="OverlayAdd" Classes="statusGlyph"/></Button>
+                <Button x:Name="OverlayLoadButton" Classes="statusIcon legacyStatusIcon" Click="OverlayLoadClicked" ToolTip.Tip="Load overlay layout"><controls:GlideIconView Kind="OverlayLoad" Classes="statusGlyph"/></Button>
+                <Slider x:Name="OverlayOpacitySlider" IsVisible="False" Minimum="10" Maximum="100" Value="100" Width="1"/>
+              </WrapPanel></Border>
+              <Border Classes="statusGroup slideshowGroup"><StackPanel x:Name="SlideshowGroup" Orientation="Horizontal" Spacing="2">
+                <Button x:Name="SlideshowButton" Classes="statusIcon legacyStatusIcon" ToolTip.Tip="Start slideshow"><controls:GlideIconView x:Name="SlideshowIcon" Kind="Play" Classes="statusGlyph"/></Button>
+                <Button x:Name="SlideshowStopButton" Classes="statusIcon legacyStatusIcon" Click="SlideshowStopClicked" ToolTip.Tip="Stop slideshow session" IsVisible="False"><controls:GlideIconView Kind="Stop" Classes="statusGlyph"/></Button>
+              </StackPanel></Border>
+              <Border Classes="statusGroup navGroup"><WrapPanel x:Name="NavigationGroup" Orientation="Horizontal">
+                <Button x:Name="StatusFirstButton" Classes="statusIcon legacyStatusIcon nav" Click="FirstClicked" ToolTip.Tip="First image"><controls:GlideIconView Kind="First" Classes="statusGlyph"/></Button>
+                <Button x:Name="StatusPreviousButton" Classes="statusIcon legacyStatusIcon nav" Click="PreviousClicked" ToolTip.Tip="Previous image"><controls:GlideIconView Kind="Previous" Classes="statusGlyph"/></Button>
+                <Button x:Name="StatusNextButton" Classes="statusIcon legacyStatusIcon nav" Click="NextClicked" ToolTip.Tip="Next image"><controls:GlideIconView Kind="Next" Classes="statusGlyph"/></Button>
+                <Button x:Name="StatusLastButton" Classes="statusIcon legacyStatusIcon nav" Click="LastClicked" ToolTip.Tip="Last image"><controls:GlideIconView Kind="Last" Classes="statusGlyph"/></Button>
+              </WrapPanel></Border>
+              <Button x:Name="StatusCollapseButton" Classes="statusIcon legacyStatusIcon" Click="CollapseStatusClicked" ToolTip.Tip="Collapse status bar"><controls:GlideIconView Kind="Collapse" Classes="statusGlyph"/></Button>
+              <Button x:Name="StatusCloseButton" Classes="statusIcon legacyStatusIcon" Click="CloseStatusClicked" ToolTip.Tip="Close status bar"><controls:GlideIconView Kind="Close" Classes="statusGlyph"/></Button>
+              <Button x:Name="StatusActualButton" IsVisible="False" Click="ActualSizeClicked"/>
+            </WrapPanel>
+          </Grid>
+        </Border>
+      </Grid>
+
+      <!-- EXPLORER: toolbar/grid/virtualizer are instantiated only when a Browser tab is activated. -->
+      <ContentControl x:Name="BrowserView" IsVisible="False" Background="{DynamicResource BrushViewport}"/>
+
+      <!-- Session-only collapsed status affordance. Close persists hidden; collapse does not. -->
+      <Button x:Name="StatusRestoreButton" Classes="statusRestore" IsVisible="False"
+              HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,16,14"
+              Click="RestoreStatusClicked" ToolTip.Tip="Expand status surface" ZIndex="450">
+        <controls:GlideIconView Kind="Expand" Width="19" Height="19" IconBrush="{DynamicResource BrushAccent}" StrokeWidth="1.7"/>
+      </Button>
+
+      <!-- Session-only whole-window transparency control. It is intentionally not persisted. -->
+      <Border x:Name="TransparencyPanel" IsVisible="False" Classes="transparencyPanel"
+              HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,12,12,0"
+              ZIndex="500">
+        <Grid ColumnDefinitions="Auto,190,52,Auto" ColumnSpacing="10" Margin="14,10">
+          <TextBlock Text="Transparency" VerticalAlignment="Center" FontSize="12.5"/>
+          <Slider x:Name="TransparencySlider" Grid.Column="1" Minimum="35" Maximum="100" Value="100"
+                  VerticalAlignment="Center" ToolTip.Tip="Whole Glide window opacity for this run only"/>
+          <TextBlock x:Name="TransparencyValueText" Grid.Column="2" Text="100%" VerticalAlignment="Center"
+                     HorizontalAlignment="Center" Foreground="{DynamicResource BrushMuted}"/>
+          <Button Grid.Column="3" Classes="miniAction" Content="Reset" Click="TransparencyResetClicked"
+                  ToolTip.Tip="Reset to 100% and hide this control"/>
+        </Grid>
+      </Border>
+    </Grid>
+  </Grid>
+</Window>

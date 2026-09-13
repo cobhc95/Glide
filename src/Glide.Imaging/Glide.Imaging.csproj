@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><AllowUnsafeBlocks>true</AllowUnsafeBlocks></PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="11.3.20" />
+    <ProjectReference Include="..\Glide.Core\Glide.Core.csproj" />
+  </ItemGroup>
+</Project>

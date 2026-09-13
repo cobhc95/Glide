@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <AssemblyName>Glide</AssemblyName>
+    <RootNamespace>Glide.App</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>$(MSBuildProjectDirectory)\Assets\Glide.ico</ApplicationIcon>
+    <PublishAot Condition="'$(PublishAot)' == ''">false</PublishAot>
+    <InvariantGlobalization>false</InvariantGlobalization>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="11.3.20" />
+    <PackageReference Include="Avalonia.Desktop" Version="11.3.20" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.20" />
+    <PackageReference Include="Avalonia.Diagnostics" Version="11.3.20" Condition="'$(Configuration)' == 'Debug'" />
+    <PackageReference Include="Avalonia.Controls.ItemsRepeater" Version="11.1.5" />
+    <ProjectReference Include="..\Glide.Core\Glide.Core.csproj" />
+    <ProjectReference Include="..\Glide.Input\Glide.Input.csproj" />
+    <ProjectReference Include="..\Glide.Imaging\Glide.Imaging.csproj" />
+    <ProjectReference Include="..\Glide.Diagnostics\Glide.Diagnostics.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <AvaloniaResource Include="Assets\**" />
+    <Content Include="Assets\Glide.ico" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+  <Target Name="ValidateGlideApplicationIcon" BeforeTargets="CoreCompile">
+    <Error Condition="!Exists('$(MSBuildProjectDirectory)\Assets\Glide.ico')" Text="Glide application icon is missing: Assets\Glide.ico" />
+  </Target>
+</Project>
