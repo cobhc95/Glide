@@ -2,6 +2,8 @@
 
 ## Fast. Lightweight. Multi-tabbed. Multi-window. Highly customizable.
 
+![Glide 3.5 Main User Interface](docs/screenshots/ui_interface.jpg)
+
 **Glide is a high-performance Windows image viewer built around instant-feeling image opening, a compact ~14 MB installer, multi-tab and multi-window workflows, transparent overlays, deep mouse/keyboard customization, and recognition/routing for 196 image and document filename extensions.**
 
 Glide is designed for users who desire the instantaneous startup and minimal resource footprint of classic lightweight viewers without sacrificing modern multi-tabbed navigation, configurable fullscreen behaviour, non-destructive overlays, extensive hotkey mapping, viewer emulation profiles, prefetch controls, and an exhaustively configurable settings engine.
