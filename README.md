@@ -1,438 +1,265 @@
-# Glide 3.5
+﻿# Glide 3.5
 
 ## Fast. Lightweight. Multi-tabbed. Multi-window. Highly customizable.
 
-**Glide is a Windows image viewer built around instant-feeling image opening, a compact ~14 MB installer, multi-tab and multi-window workflows, overlays, deep mouse/keyboard customization, and recognition/routing for 196 image/document filename extensions.**
+**Glide is a high-performance Windows image viewer built around instant-feeling image opening, a compact ~14 MB installer, multi-tab and multi-window workflows, transparent overlays, deep mouse/keyboard customization, and recognition/routing for 196 image and document filename extensions.**
 
-Glide is designed for people who want the speed and simplicity of a classic lightweight viewer without giving up modern tabbed workflows, configurable fullscreen behaviour, image overlays, extensive hotkeys, profiles, prefetch controls, and a settings system that exposes the viewer's behaviour instead of hard-coding it.
+Glide is designed for users who desire the instantaneous startup and minimal resource footprint of classic lightweight viewers without sacrificing modern multi-tabbed navigation, configurable fullscreen behaviour, non-destructive overlays, extensive hotkey mapping, viewer emulation profiles, prefetch controls, and an exhaustively configurable settings engine.
 
-> **Format breadth:** Glide recognizes and routes **196 suffixes**. The protected built-in fast path covers JPEG/JPG, PNG, BMP, GIF, TIFF, WebP and ICO-family essentials; additional formats may be satisfied by Windows WIC, verified optional codec providers, or Windows Shell preview/rasterization depending on the format and installed platform capabilities.
+> **Format Breadth:** Glide recognizes and routes **196 suffixes**. The protected built-in fast path covers JPEG/JPG, PNG, BMP, GIF, TIFF, WebP, and ICO essentials. Additional formats are handled seamlessly via Windows WIC, verified optional codec providers, or Windows Shell preview/rasterization pipelines depending on installed platform capabilities.
 
-## Highlights
+---
 
-- **Speed-first startup and navigation** — single real-window startup, staged first-frame → full-resolution refinement, decoder-scaled previews, neighbour prefetching, cache controls and rapid-navigation previews.
-- **Lightweight distribution** — approximately **14 MB installer** while retaining a broad feature set.
-- **Tabbed image workspace** — multiple images in one window, detachable tabs, tab transfer between Glide windows, recently closed tabs and configurable tab behaviour.
-- **Multiple independent windows** — open new windows or duplicate sessions, with window size/placement-aware behaviour.
-- **196 recognized/routed extensions** — broad raster, RAW, HDR, medical/scientific, vector/document and texture/container suffix coverage.
-- **Fullscreen built for viewing** — configurable caption-button actions, mouse navigation, cursor hiding, title/tab auto-hide and exact pre-fullscreen placement restoration.
-- **Overlay / Window-in-Window mode** — transparent image overlays, opacity controls, zoom/pan, edge chrome, always-on-top and optional windowed-style interactions.
-- **Deep input customization** — configurable left/right drag policies, gesture matrix, mouse-wheel behaviour and rebindable hotkeys.
-- **Viewer profiles and presets** — Glide, Windows Photos, IrfanView, nomacs, FastStone and XnView MP interaction/hotkey presets.
-- **Built-in diagnostics** — permanent diagnostics and exportable diagnostic ZIPs for performance, UI and behaviour troubleshooting.
+## Visual Overview & Adaptive Layout
 
-## Settings & customization
+Glide's interface is engineered with a responsive design system that reflows seamlessly across any window size, aspect ratio, or DPI scale.
 
-Glide's Settings window is intentionally extensive. The controls shown in the screenshots are described below so the repository doubles as a reference for what can be customized.
+| Standard View | Wide Layout | Tall Layout | Compact Mode |
+| :---: | :---: | :---: | :---: |
+| ![Standard](docs/screenshots/settings/settings_resize_standard.png) | ![Wide](docs/screenshots/settings/settings_resize_wide.png) | ![Tall](docs/screenshots/settings/settings_resize_tall.png) | ![Compact](docs/screenshots/settings/settings_resize_compact.png) |
 
-### General
+---
 
-Application, history, folder traversal and startup behaviour:
+## Core Feature Reference & Settings Gallery
 
-- Keep recent file/folder history and choose the history size.
-- Remember window position, size and maximized state.
-- Reuse one Glide instance for Explorer image launches.
-- Automatically continue into sibling folders.
-- Continue into nearby parent/grandparent folder branches.
-- Confirm before leaving the current folder branch.
-- Set a default **Open File** directory, or remember the last Open/Open Folder location.
-- Show Quick Tips cards on Home.
-- Show or hide recently opened files/folders on Home.
-- Warn before discarding unapplied Settings changes.
-- Choose what Glide opens to: **Welcome tab, last session, Explorer tab or custom path**.
-- Configure a custom startup file/folder.
-- Choose what a **new tab** opens to: Explorer, Welcome or custom content.
-- Make new Explorer tabs reuse their last navigated directory.
-- Set default Explorer-tab and custom new-tab paths.
+The Glide Settings engine exposes nearly every aspect of the viewer's execution, rendering, input handling, and presentation. The complete feature set is detailed below alongside screenshots captured directly from Glide 3.5.
 
-### Themes & Colours
+---
 
-Visual appearance and sizing:
+### 1. General & Startup Navigation
 
-- Theme: **Dark, Neutral or Light**.
-- Explorer theme can follow Glide or use its own Dark/Neutral/Light theme.
-- Accent colour presets plus a custom colour picker.
-- Glow colour can follow the accent or use its own preset/custom colour.
-- Main image background can follow the theme or use black, gray, white or a custom colour.
-- Adjustable glow intensity.
-- Status bar size from very small through extra large.
-- Global status-bar scale.
-- Additional maximized/fullscreen size boost.
-- Minimum and maximum tab widths.
-- Text-overlay font size, bold state, opacity, position, colour and shadow.
-- Default Window-in-Window overlay opacity.
-- Optional accent-colour highlight for the selected overlay.
+![General Settings](docs/screenshots/settings/settings_general_settled.png)
+![General Settings Scrolled](docs/screenshots/settings/settings_general_scroll2_settled.png)
 
-### Viewing & Interface
+Glide provides flexible session management, folder traversal policies, and startup behaviors:
 
-Core viewer presentation and navigation:
+* **History & Session Retention:** Maintain recent file and folder history with a configurable capacity (e.g., 50 items). Option to display recent files/folders directly on the Home dashboard.
+* **Window State Memory:** Automatically remembers window size, position, and maximized state across sessions.
+* **Instance Reuse:** Single-instance mode ensures file launches from Windows Explorer open into the active Glide instance instead of spawning unnecessary background processes.
+* **Hierarchical Folder Traversal:**
+  * Automatically advance into adjacent sibling folders when reaching the end of the current directory.
+  * Extend continuous navigation into parent/grandparent directory branches.
+  * Configurable confirmation prompts before crossing directory boundaries.
+* **Startup & Landing Modes:** Choose what Glide opens on startup:
+  * *Welcome tab*
+  * *Resume last session*
+  * *Built-in Explorer tab*
+  * *Custom file or directory path*
+* **New Tab Landing Target:** Independently configure whether new tabs open the Explorer, Welcome page, or a custom target folder.
+* **Quick Tips & Safety Guards:** Optional Quick Tips on Home and alert prompts before discarding uncommitted settings changes.
 
-- Show/hide the translucent status overlay.
-- Optional bottom-edge reveal for a collapsed status bar.
-- Slim scrollbars only when needed.
-- Show full file path in the title.
-- Hide the cursor when idle in fullscreen.
-- Auto-hide the fullscreen title/tab bar.
-- Optionally keep the title/tab bar open in fullscreen and resize the image below it.
-- Enable/disable tabs and the Explorer tab bar.
-- Choose the folder-navigation action: **internal browser** or **Windows Explorer**.
-- Show/hide Up/return-to-folder and Forward buttons in title navigation.
-- Choose what opening an image from Explorer does: **new tab, new window or overwrite existing tab**.
-- Choose what happens when Explorer opens an image that is already open: **new instance (default), refresh existing image or open new tab**.
-- Customize title-bar buttons.
-- Independently assign windowed and fullscreen **Minimize, Maximize/Restore and Close** button actions.
-- Keep the status bar visible in fullscreen.
-- Always keep Glide on top.
-- Choose fullscreen exit behaviour: **restore exact size/location, maximize or minimize**.
-- Default view for new images: **Fit image, Fit width, Fit height or 100%**.
-- Zoom around the mouse pointer.
-- Preserve manual zoom while navigating.
-- Configure Escape behaviour for slideshow, fullscreen and windowed close.
-- Clear the remembered Escape-close choice.
+---
 
-### Mouse & Fullscreen
+### 2. Tabs & Multi-Window Workspace
 
-Pointer, drag and fullscreen interaction:
+![Tabs Settings](docs/screenshots/settings/settings_tabs_settled.png)
+![Tabs Settings Scrolled](docs/screenshots/settings/settings_tabs_scroll2_settled.png)
 
-- Double-click to enter fullscreen.
-- Double-click to exit fullscreen.
-- Fullscreen left/right click for next/previous image.
-- Windowed mouse wheel can zoom or navigate.
-- Invert previous/next wheel direction.
-- **Left-drag on image:** create selection, pan image or move window.
-- **Left-drag window behaviour:** Smart (normal window only), never move window, or allow move when maximized.
-- **Right-drag behaviour:** Smart (pan image / move window), pan image only, move window, or do nothing.
-- Click inside a selection to zoom into it.
-- Right-click inside a selection to zoom out.
-- Optionally let left-drag on empty background move the native window.
-- Ctrl + wheel zoom.
-- Middle-drag pans a zoomed image.
-- Advanced gesture matrix for assigning semantic Glide actions to physical pointer contexts.
-- Reset the gesture matrix independently.
+Glide brings modern browser-grade tab management to image viewing:
 
-### Performance & Startup
+* **Detachable & Re-attachable Tabs:** Tear off any image tab into its own independent Glide window, or drag tabs between existing Glide windows seamlessly.
+* **Closed Tab History Stack:** Retains a buffer of recently closed tabs (e.g., 10 tabs) for instant reopening.
+* **Window Teardown Behavior:** Option to automatically close a source window when its final remaining tab is detached into another window.
+* **Last-Tab Closing Policy:** Choose whether closing the last tab maintains an empty workspace/Home tab or terminates the application.
+* **Close Protection:** Option to display a confirmation guard before closing a window containing multiple open image tabs.
+* **Tab Strip Ergonomics:** Double-click any tab header to close it; visual scroll overflow arrows appear automatically when many tabs are open.
+* **Sibling Folder Integration:**
+  * Dedicated Previous Folder, Next Folder, and Explore Parent Folder commands.
+  * Automatically skip sibling folders that contain no supported image formats.
+  * Option to include or ignore hidden directories.
+  * Directional preference: choose whether entering a new sibling folder opens the first or the last image.
 
-Image quality, startup and navigation tuning:
+---
 
-- Browsing/image quality profiles: **Maximum speed, Balanced, Maximum quality or User custom**.
-- Save a custom profile.
-- Quality while dragging/panning: Fast, Balanced or Full quality.
-- Decoder-scaled first useful frame for large images.
-- Adjustable full-resolution refinement delay.
-- Sequential read hints for foreground streams.
-- Predictive neighbour preparation.
-- Idle full-resolution refinement.
-- Optional cache purge when Glide is minimized.
-- Lightweight startup timing JSONL.
-- Neighbour prefetch depth per direction.
-- Prefetch surrounding sibling folders.
-- Number of pictures to prefetch per surrounding folder.
-- Compressed-cache item limit and MB budget.
-- Decoded-frame memory budget.
-- Preview longest-side size.
-- Rapid-navigation preview size.
-- Reduced-frame rapid navigation activates only during sustained keyboard/wheel bursts; isolated navigation remains normal quality.
-- Keep the first progressive-JPEG frame in colour, with final refinement restoring full fidelity.
+### 3. Viewing & Interface Presentation
 
-### Status Bar
+![Viewing Settings](docs/screenshots/settings/settings_viewing_settled.png)
+![Viewing Settings Scrolled 1](docs/screenshots/settings/settings_viewing_scroll2_settled.png)
+![Viewing Settings Scrolled 2](docs/screenshots/settings/settings_viewing_scroll3_settled.png)
 
-Choose exactly what appears in the status bar:
+Fine-tune every visual component of the viewing canvas and window chrome:
 
-- Show/hide the entire status bar.
-- Navigation controls.
-- Zoom controls.
-- Slideshow control.
-- Fit Width / Fit Height controls.
-- Image information control.
-- Options menu.
-- Close control.
-- Optional bottom-edge reveal while collapsed.
-- Select status statistics individually: **index, resolution, zoom, file size and format**.
-- At narrow widths Glide can reflow the controls into multiple horizontal rows rather than forcing one long row.
+* **Translucent Status Overlay:** Overlay floating image metadata and controls with automatic bottom-edge hover reveal when collapsed.
+* **Dynamic Title Bar:** Display full image paths in the window title bar alongside customizable navigation buttons (Back, Up-to-Folder, Forward).
+* **Explorer Open Actions:** Configure whether double-clicking an image in Windows Explorer creates a new tab, opens a new window, or overwrites the current tab.
+* **Duplicate File Handling:** Choose behavior when launching an already-opened file (spawn new instance, refresh existing view, or switch to tab).
+* **Fullscreen Experience:**
+  * Auto-hide title bar and tab strip in fullscreen with smooth mouse reveal.
+  * Option to pin title/tab bars in fullscreen with automatic image letterboxing.
+  * Auto-hide the mouse cursor during fullscreen inactivity.
+  * Exact restoration of pre-fullscreen window geometry upon exit.
+* **Initial Zoom Framing:** Default view for newly opened images: *Fit to Window*, *Fit Width*, *Fit Height*, or *1:1 (100% Native Resolution)*.
+* **Navigation Zoom Lock:** Option to lock and preserve manual zoom/pan levels when flipping through consecutive images in a directory.
+* **Escape Key Behavior:** Map Escape independently to exit slideshow, exit fullscreen, close the current tab, or minimize the window.
 
-### Slideshow
+---
 
-- Slideshow interval in milliseconds.
-- Loop slideshow.
-- Continue across picture folders.
-- Shuffle images.
-- Forward/backward direction when not shuffled.
-- Enter fullscreen when slideshow starts.
-- Pause slideshow while Glide is not the active window.
+### 4. Mouse Interactions & Gesture Matrix
 
-### Hotkeys
+![Mouse Settings](docs/screenshots/settings/settings_mouse_settled.png)
+![Mouse Settings Scrolled 1](docs/screenshots/settings/settings_mouse_scroll2_settled.png)
+![Mouse Settings Scrolled 2](docs/screenshots/settings/settings_mouse_scroll3_settled.png)
+![Mouse Settings Scrolled 3](docs/screenshots/settings/settings_mouse_scroll4_settled.png)
 
-- Full keyboard-shortcut editor with action and category views.
-- Multiple shortcuts may intentionally map to the same action.
-- Presets for **Glide default, Windows Photos, IrfanView, nomacs, FastStone and XnView MP**.
-- Change, add or remove shortcuts.
-- Reset hotkeys.
+Glide features one of the most comprehensive input-binding engines available:
 
-### Tabs & Workspace
+* **Left-Drag Drag Policy:** Configure left-click-and-drag to *Create Selection Box*, *Pan Image Canvas*, or *Move Window*.
+* **Right-Drag Policy:** Choose between *Smart Mode* (pan if zoomed, move window if fit-to-screen), *Pan Only*, *Move Window*, or *Disabled*.
+* **Selection Box Actions:** Click inside a selection box to instantly crop-zoom into that exact region; right-click inside to zoom back out.
+* **Wheel Navigation & Zoom:** Configure the mouse wheel for smooth zooming (centered at the mouse cursor) or previous/next file navigation, with direction inversion options.
+* **Window Drag on Canvas:** Option to drag the native application window by grabbing empty canvas background space.
+* **Physical Gesture Matrix:** Map combinations of Left, Middle, Right, Wheel, and Modifier keys (Ctrl, Shift, Alt) directly to semantic actions.
 
-- Show left/right arrows when tabs overflow.
-- Drag tabs out into new Glide windows.
-- Drag tabs between Glide windows.
-- Choose how many recently closed tabs to retain.
-- Close the source window if its final tab is detached.
-- Include a Home tab in newly detached windows.
-- Double-click a tab to close it.
-- Last-tab behaviour: **keep last tab open or close the program**.
-- Ask before closing a window containing multiple image tabs.
-- Choose the Home page: **Welcome, Browser or Recent pictures**.
-- Optional sibling-folder navigation group.
-- Individual Previous Folder, Next Folder and Explore Parent Folders controls.
-- Skip sibling folders containing no supported images.
-- Include hidden sibling folders.
-- Wrap sibling-folder navigation at directory ends.
-- Choose whether a sibling folder opens its first or last image.
+---
 
-### Window in Window / Overlay
+### 5. Performance, Memory & Staged Decoding
 
-Text overlays and whole-app/image overlays:
+![Performance Settings](docs/screenshots/settings/settings_performance_settled.png)
+![Performance Settings Scrolled](docs/screenshots/settings/settings_performance_scroll2_settled.png)
 
-- Show/hide the text overlay template.
-- Fully configurable text-overlay template.
-- Template tokens include index/total, file name, stem, extension/format, folder/path, dimensions, megapixels, file size and zoom.
-- Start Glide directly in whole-application **Overlay / Window-in-Window mode**.
-- Use normal windowed image interactions while in Overlay mode when preferred.
-- Show Window-in-Window controls in the status bar.
-- Remember the last overlay-image folder.
-- Restore overlays automatically on the next launch, including position, size, zoom, pan and opacity.
-- Selected overlay receives keyboard +/- zoom.
-- Mouse wheel zooms the hovered or selected overlay.
-- Adjustable overlay zoom step.
-- Remember overlay zoom in saved layouts.
-- Right-click-and-hold pans cropped/zoomed overlay content.
-- Scale overlay size proportionally when the main Glide window resizes.
-- Set a default overlay directory.
-- Whole-app Overlay mode supports transparent composition so transparent PNG regions and unused transparent areas can reveal the desktop where the Windows compositor supports it.
+Engineered for blazing speed even when browsing folders containing thousands of large RAW or high-megapixel images:
 
-### Profiles & Presets
+* **Performance Tuning Profiles:** Instant presets for *Maximum Speed*, *Balanced*, *Maximum Quality*, or *User Custom*.
+* **Staged First-Frame Display:** Renders a decoder-scaled low-latency first frame immediately, followed by sub-millisecond background refinement to full resolution.
+* **Prefetch Engine:**
+  * Configurable prefetch depth (e.g., 2 images ahead and behind).
+  * Surrounding sibling-folder preloading for instant folder transitions.
+  * Dedicated decoded-frame cache and compressed-image memory budgets (MB limit and item count).
+* **Rapid Navigation Burst Mode:** Detects rapid wheel or arrow key scrolling and renders lightweight preview frames during bursts, restoring full quality the instant scrolling settles.
+* **Resource Optimization:** Automatic cache purging when Glide is minimized to release system memory.
 
-- Interaction presets for **Glide, Windows Photos, IrfanView, nomacs, FastStone and XnView MP**.
-- Apply presets as staged Settings changes.
-- Add named user profiles.
-- Choose a default profile directory.
-- Import/export portable settings.
+---
 
-### Windows Integration
+### 6. Status Bar Customization
 
-- Add Glide to **Windows Open With** without changing the system default application.
-- Remove Glide's Open With entries.
-- Per-user registration; administrator privileges are not required.
-- Configure up to three external programs, available through Shift+1 / Shift+2 / Shift+3.
+![Status Bar Settings](docs/screenshots/settings/settings_status_settled.png)
 
-### Developer Options
+Completely customize the information and action buttons visible in the status bar:
 
-Advanced and diagnostic controls:
+* **Modular Element Toggles:** Individually show or hide Navigation Arrows, Zoom Controls, Slideshow Button, Fit-Width / Fit-Height toggles, Metadata Info popover, Context Menu button, and Window Close icon.
+* **Metadata Statistics Selector:** Select which details appear in real time:
+  * *Image index in folder (e.g., 14 / 320)*
+  * *Dimensions & Megapixels (e.g., 3840 × 2160 • 8.3 MP)*
+  * *Current Zoom Percentage (e.g., 100%)*
+  * *File Size (e.g., 2.4 MB)*
+  * *Image Codec / Format (e.g., PNG, AVIF)*
+* **Adaptive Multi-Row Reflow:** When resizing to narrow windows, controls gracefully wrap into multi-line layouts without clipping.
 
-- Reverse selection-to-zoom-out scaling so a smaller selection produces a larger zoom-out.
-- Automatically shrink/reflow the status bar for narrow windows.
-- Optionally keep Window-in-Window overlay coordinates absolute while the main window is resized, maximized or fullscreen.
-- Run built-in diagnostics.
-- Export a Diagnostic ZIP containing UI screenshots, geometry, settings state/effect coverage and structural tests.
+---
 
-## Settings screenshots
+### 7. Automated Slideshow
 
-The screenshots below are the current Glide 3.5 Settings UI. They are kept in the repository so behaviour and options can be reviewed without installing the application.
+![Slideshow Settings](docs/screenshots/settings/settings_slideshow_settled.png)
+
+High-performance presentation mode for image portfolios and galleries:
+
+* **Interval Timing:** Millisecond-level duration control (e.g., 5000 ms).
+* **Sequence Control:** Choose between linear loop, bidirectional playback, or randomized shuffle.
+* **Continuous Folder Playback:** Seamlessly advance across adjacent folders during slideshow playback.
+* **Fullscreen & Focus Integration:** Automatically trigger fullscreen mode upon slideshow start, and pause the timer when Glide loses window focus.
+
+---
+
+### 8. Keyboard Shortcuts & Emulation Presets
+
+![Hotkeys Settings](docs/screenshots/settings/settings_hotkeys_settled.png)
+![Hotkeys Settings Scrolled](docs/screenshots/settings/settings_hotkeys_scroll2_settled.png)
+![Hotkeys Search](docs/screenshots/settings/settings_search_hotkey_settled.png)
+
+Glide provides a complete keyboard shortcut manager with 1-click emulation presets:
+
+* **Viewer Compatibility Presets:** Instantly switch keybindings to match familiar workflows:
+  * **Glide Default**
+  * **Windows Photos**
+  * **IrfanView**
+  * **nomacs**
+  * **FastStone Image Viewer**
+  * **XnView MP**
+* **Instant Shortcut Search:** Real-time search filter across all command names, categories, and assigned keys.
+* **Custom Rebinding:** Add multiple hotkeys per command, modify key combinations, or restore defaults on a per-action basis.
+
+---
+
+### 9. Window-in-Window / Transparent Overlays
+
+![Overlays Settings](docs/screenshots/settings/settings_overlays_settled.png)
+![Overlays Settings Scrolled](docs/screenshots/settings/settings_overlays_scroll2_settled.png)
+
+Glide includes a dedicated non-destructive overlay system for image comparison, reference art, and HUD data:
+
+* **Custom HUD Text Overlay:** Fully customizable metadata HUD using tokens:
+  * Format: [%INDEX%/%TOTAL%] %FILENAME%  %DIMS% (%MEGAPIXELS% MP)  %FILESIZE%  %ZOOM%
+* **Whole-App Overlay Mode:** Run Glide as a borderless, transparent floating overlay over reference applications with alpha-channel passthrough.
+* **Independent Overlay Controls:**
+  * Multi-image pinboard with independent zoom, pan, opacity, and rotation.
+  * Keyboard + / - and mouse wheel direct zoom on hovered or selected overlays.
+  * Automatic state restoration on next launch (retaining coordinates, scale, and opacity).
+  * Proportional scaling when the parent window resizes.
+
+---
+
+### 10. Profiles & Settings Portability
+
+![Profiles Settings](docs/screenshots/settings/settings_profiles_settled.png)
+
+* **Named User Profiles:** Save distinct configurations for different workflows (e.g., Photography Review, Pixel Art Inspection, Reference Overlay).
+* **Portability:** Export and import settings as clean, human-readable JSON files.
+* **Staged Configuration:** Preview and test configuration changes before applying them permanently.
+
+---
+
+### 11. Windows Integration & External Tools
+
+![Windows Integration Settings](docs/screenshots/settings/settings_windows_settled.png)
+
+* **Open With Integration:** Register Glide with the Windows Open With context menu without overriding your default OS application associations.
+* **Per-User Registration:** Does not require administrator privileges or UAC elevation.
+* **External Tool Quick-Launch:** Assign up to three external graphics editors (e.g., Photoshop, GIMP, Paint.NET) accessible instantly via Shift + 1, Shift + 2, and Shift + 3.
+
+---
+
+### 12. Developer Tools & Built-In Diagnostics
+
+![Developer Settings](docs/screenshots/settings/settings_developer_settled.png)
+![Developer Export](docs/screenshots/settings/settings_export_time.png)
+
+* **Diagnostic ZIP Exporter:** Generates a full diagnostic archive with UI geometry, state coverage, active settings diffs, and benchmark logs for easy issue reporting.
+* **Mathematical Tweaks:** Options for inverse zoom-out scaling and absolute coordinate locks across multi-monitor setups.
+
+---
+
+## Recognized & Routed Formats
+
+Glide recognizes and routes **196 filename extensions**:
 
 <details>
-<summary><strong>Open complete settings screenshot gallery (40 screenshots)</strong></summary>
+<summary><strong>Expand full list of 196 recognized/routed extensions</strong></summary>
 
-
-#### Settings Developer Immediate
-
-![Settings Developer Immediate](docs/screenshots/settings/settings_developer_immediate.png)
-
-#### Settings Developer Settled
-
-![Settings Developer Settled](docs/screenshots/settings/settings_developer_settled.png)
-
-#### Settings Export Time
-
-![Settings Export Time](docs/screenshots/settings/settings_export_time.png)
-
-#### Settings General Immediate
-
-![Settings General Immediate](docs/screenshots/settings/settings_general_immediate.png)
-
-#### Settings General Scroll2 Settled
-
-![Settings General Scroll2 Settled](docs/screenshots/settings/settings_general_scroll2_settled.png)
-
-#### Settings General Settled
-
-![Settings General Settled](docs/screenshots/settings/settings_general_settled.png)
-
-#### Settings Hotkeys Immediate
-
-![Settings Hotkeys Immediate](docs/screenshots/settings/settings_hotkeys_immediate.png)
-
-#### Settings Hotkeys Scroll2 Settled
-
-![Settings Hotkeys Scroll2 Settled](docs/screenshots/settings/settings_hotkeys_scroll2_settled.png)
-
-#### Settings Hotkeys Settled
-
-![Settings Hotkeys Settled](docs/screenshots/settings/settings_hotkeys_settled.png)
-
-#### Settings Mouse Immediate
-
-![Settings Mouse Immediate](docs/screenshots/settings/settings_mouse_immediate.png)
-
-#### Settings Mouse Scroll2 Settled
-
-![Settings Mouse Scroll2 Settled](docs/screenshots/settings/settings_mouse_scroll2_settled.png)
-
-#### Settings Mouse Scroll3 Settled
-
-![Settings Mouse Scroll3 Settled](docs/screenshots/settings/settings_mouse_scroll3_settled.png)
-
-#### Settings Mouse Scroll4 Settled
-
-![Settings Mouse Scroll4 Settled](docs/screenshots/settings/settings_mouse_scroll4_settled.png)
-
-#### Settings Mouse Settled
-
-![Settings Mouse Settled](docs/screenshots/settings/settings_mouse_settled.png)
-
-#### Settings Overlays Immediate
-
-![Settings Overlays Immediate](docs/screenshots/settings/settings_overlays_immediate.png)
-
-#### Settings Overlays Scroll2 Settled
-
-![Settings Overlays Scroll2 Settled](docs/screenshots/settings/settings_overlays_scroll2_settled.png)
-
-#### Settings Overlays Settled
-
-![Settings Overlays Settled](docs/screenshots/settings/settings_overlays_settled.png)
-
-#### Settings Performance Immediate
-
-![Settings Performance Immediate](docs/screenshots/settings/settings_performance_immediate.png)
-
-#### Settings Performance Scroll2 Settled
-
-![Settings Performance Scroll2 Settled](docs/screenshots/settings/settings_performance_scroll2_settled.png)
-
-#### Settings Performance Settled
-
-![Settings Performance Settled](docs/screenshots/settings/settings_performance_settled.png)
-
-#### Settings Profiles Immediate
-
-![Settings Profiles Immediate](docs/screenshots/settings/settings_profiles_immediate.png)
-
-#### Settings Profiles Settled
-
-![Settings Profiles Settled](docs/screenshots/settings/settings_profiles_settled.png)
-
-#### Settings Resize Compact
-
-![Settings Resize Compact](docs/screenshots/settings/settings_resize_compact.png)
-
-#### Settings Resize Standard
-
-![Settings Resize Standard](docs/screenshots/settings/settings_resize_standard.png)
-
-#### Settings Resize Tall
-
-![Settings Resize Tall](docs/screenshots/settings/settings_resize_tall.png)
-
-#### Settings Resize Wide
-
-![Settings Resize Wide](docs/screenshots/settings/settings_resize_wide.png)
-
-#### Settings Search Hotkey Settled
-
-![Settings Search Hotkey Settled](docs/screenshots/settings/settings_search_hotkey_settled.png)
-
-#### Settings Slideshow Immediate
-
-![Settings Slideshow Immediate](docs/screenshots/settings/settings_slideshow_immediate.png)
-
-#### Settings Slideshow Settled
-
-![Settings Slideshow Settled](docs/screenshots/settings/settings_slideshow_settled.png)
-
-#### Settings Status Immediate
-
-![Settings Status Immediate](docs/screenshots/settings/settings_status_immediate.png)
-
-#### Settings Status Settled
-
-![Settings Status Settled](docs/screenshots/settings/settings_status_settled.png)
-
-#### Settings Tabs Immediate
-
-![Settings Tabs Immediate](docs/screenshots/settings/settings_tabs_immediate.png)
-
-#### Settings Tabs Scroll2 Settled
-
-![Settings Tabs Scroll2 Settled](docs/screenshots/settings/settings_tabs_scroll2_settled.png)
-
-#### Settings Tabs Settled
-
-![Settings Tabs Settled](docs/screenshots/settings/settings_tabs_settled.png)
-
-#### Settings Viewing Immediate
-
-![Settings Viewing Immediate](docs/screenshots/settings/settings_viewing_immediate.png)
-
-#### Settings Viewing Scroll2 Settled
-
-![Settings Viewing Scroll2 Settled](docs/screenshots/settings/settings_viewing_scroll2_settled.png)
-
-#### Settings Viewing Scroll3 Settled
-
-![Settings Viewing Scroll3 Settled](docs/screenshots/settings/settings_viewing_scroll3_settled.png)
-
-#### Settings Viewing Settled
-
-![Settings Viewing Settled](docs/screenshots/settings/settings_viewing_settled.png)
-
-#### Settings Windows Immediate
-
-![Settings Windows Immediate](docs/screenshots/settings/settings_windows_immediate.png)
-
-#### Settings Windows Settled
-
-![Settings Windows Settled](docs/screenshots/settings/settings_windows_settled.png)
+.jpg, .jpeg, .jpe, .jfif, .jif, .jfi, .pjpeg, .pjpg, .png, .apng, .mng, .jng, .bmp, .dib, .rle, .wbmp, .tif, .tiff, .btf, .gif, .ico, .cur, .ani, .icns, .webp, .heic, .heif, .heics, .heifs, .hif, .avif, .avifs, .svg, .svgz, .jxr, .wdp, .hdp, .jp2, .j2k, .j2c, .jpc, .jpx, .jpf, .jpm, .mj2, .jxl, .psd, .psb, .pdd, .xcf, .ora, .kra, .afphoto, .afdesign, .afpub, .clip, .csp, .pdn, .psp, .pspimage, .pxr, .tga, .targa, .icb, .vda, .vst, .dpx, .cin, .sgi, .rgb, .rgba, .bw, .ras, .sun, .iff, .lbm, .ilbm, .img, .pic, .pict, .pct, .pict2, .eps, .epsf, .ai, .pdf, .pnm, .ppm, .pgm, .pbm, .pam, .pfm, .pcx, .qoi, .hdr, .rgbe, .xyze, .exr, .dds, .ff, .fits, .fit, .fts, .fts.gz, .hdr.gz, .xbm, .xpm, .xwd, .cut, .mac, .mpo, .jps, .pns, .dng, .cr2, .cr3, .crw, .nef, .nrw, .arw, .srf, .sr2, .raf, .orf, .ori, .rw2, .rwl, .pef, .ptx, .3fr, .fff, .iiq, .cap, .eip, .mef, .mos, .mrw, .x3f, .erf, .kdc, .dcr, .k25, .bay, .srw, .rwz, .gpr, .mdc, .raw, .r3d, .ari, .cinema, .dcs, .drf, .dsc, .r2d, .rw1, .dcm, .dicom, .ima, .nii, .nii.gz, .mha, .mhd, .nrrd, .ndpi, .svs, .vms, .vmu, .scn, .mrxs, .bif, .czi, .lif, .lsm, .ome.tif, .ome.tiff, .vsi, .ktx, .ktx2, .pvr, .astc, .basis, .tex, .vtf, .wal, .spr, .cdr, .cmx, .cpt, .emf, .wmf, .emz, .wmz, .dwg, .dxf, .skp
 
 </details>
 
-## Recognized / routed formats
+### Protected Core Fast-Path Suffixes
+.jpg, .jpeg, .jpe, .png, .bmp, .gif, .tif, .tiff, .webp, .ico
 
-Glide's current routing registry contains **196 filename suffixes**:
+---
 
-<details>
-<summary><strong>Show all 196 recognized/routed suffixes</strong></summary>
+## Building from Source
 
-`.jpg`, `.jpeg`, `.jpe`, `.jfif`, `.jif`, `.jfi`, `.pjpeg`, `.pjpg`, `.png`, `.apng`, `.mng`, `.jng`, `.bmp`, `.dib`, `.rle`, `.wbmp`, `.tif`, `.tiff`, `.btf`, `.gif`, `.ico`, `.cur`, `.ani`, `.icns`, `.webp`, `.heic`, `.heif`, `.heics`, `.heifs`, `.hif`, `.avif`, `.avifs`, `.svg`, `.svgz`, `.jxr`, `.wdp`, `.hdp`, `.jp2`, `.j2k`, `.j2c`, `.jpc`, `.jpx`, `.jpf`, `.jpm`, `.mj2`, `.jxl`, `.psd`, `.psb`, `.pdd`, `.xcf`, `.ora`, `.kra`, `.afphoto`, `.afdesign`, `.afpub`, `.clip`, `.csp`, `.pdn`, `.psp`, `.pspimage`, `.pxr`, `.tga`, `.targa`, `.icb`, `.vda`, `.vst`, `.dpx`, `.cin`, `.sgi`, `.rgb`, `.rgba`, `.bw`, `.ras`, `.sun`, `.iff`, `.lbm`, `.ilbm`, `.img`, `.pic`, `.pict`, `.pct`, `.pict2`, `.eps`, `.epsf`, `.ai`, `.pdf`, `.pnm`, `.ppm`, `.pgm`, `.pbm`, `.pam`, `.pfm`, `.pcx`, `.qoi`, `.hdr`, `.rgbe`, `.xyze`, `.exr`, `.dds`, `.ff`, `.fits`, `.fit`, `.fts`, `.fts.gz`, `.hdr.gz`, `.xbm`, `.xpm`, `.xwd`, `.cut`, `.mac`, `.mpo`, `.jps`, `.pns`, `.dng`, `.cr2`, `.cr3`, `.crw`, `.nef`, `.nrw`, `.arw`, `.srf`, `.sr2`, `.raf`, `.orf`, `.ori`, `.rw2`, `.rwl`, `.pef`, `.ptx`, `.3fr`, `.fff`, `.iiq`, `.cap`, `.eip`, `.mef`, `.mos`, `.mrw`, `.x3f`, `.erf`, `.kdc`, `.dcr`, `.k25`, `.bay`, `.srw`, `.rwz`, `.gpr`, `.mdc`, `.raw`, `.r3d`, `.ari`, `.cinema`, `.dcs`, `.drf`, `.dsc`, `.r2d`, `.rw1`, `.dcm`, `.dicom`, `.ima`, `.nii`, `.nii.gz`, `.mha`, `.mhd`, `.nrrd`, `.ndpi`, `.svs`, `.vms`, `.vmu`, `.scn`, `.mrxs`, `.bif`, `.czi`, `.lif`, `.lsm`, `.ome.tif`, `.ome.tiff`, `.vsi`, `.ktx`, `.ktx2`, `.pvr`, `.astc`, `.basis`, `.tex`, `.vtf`, `.wal`, `.spr`, `.cdr`, `.cmx`, `.cpt`, `.emf`, `.wmf`, `.emz`, `.wmz`, `.dwg`, `.dxf`, `.skp`
+On Windows:
+* Build the application: run uild.cmd
+* Build the complete standalone installer: run uild-installer.cmd
 
-</details>
+---
 
-Recognition/routing is intentionally broader than the dependency-free built-in decoder. A routed file may be decoded through Glide's core fast path, Windows WIC, a verified optional provider, or a Windows Shell preview/rasterization path depending on format and system capabilities.
+## Architectural Philosophy & Manifesto
 
-### Protected core fast-path suffixes
+Glide follows six core design principles:
+1. **Measured Image-Open Speed:** Zero splash screens; direct, single real-window launch.
+2. **Smooth High-Volume Navigation:** Instant folder traversal and predictive caching.
+3. **Broad Format Breadth:** 196 extensions recognized without loading heavy optional codecs during cold startup.
+4. **Deep Customizability:** Total control over keyboard, mouse, gestures, UI layout, and performance policies.
+5. **Modern Tabbed Multitasking:** Drag-and-drop tab detachable workflows across independent windows.
+6. **Self-Documenting Architecture:** Thoroughly documented codebase with diagnostic instrumentation for easy maintenance.
 
-`.jpg`, `.jpeg`, `.jpe`, `.png`, `.bmp`, `.gif`, `.tif`, `.tiff`, `.webp`, `.ico`
-
-## Build
-
-On Windows, the project includes the build and installer tooling in the repository root. `build-installer.cmd` is the intended one-click installer build path.
-
-## Project philosophy
-
-Glide prioritizes:
-
-1. **Perceived and measured image-open speed.**
-2. **A stable single real window** with no splash-to-main-window visual handoff.
-3. **Fast navigation** through large folders.
-4. **Broad format routing without making optional codecs part of cold startup.**
-5. **Deep customizability without forcing complexity on the default experience.**
-6. **AI-friendly source structure, diagnostics and handoff documentation** so the project can be maintained efficiently.
-
-For architecture, build internals, implementation history and agent handoff guidance, see `GLIDE_MANIFESTO_AND_HANDOFF.md`.
+For comprehensive technical specifications, refer to [GLIDE_MANIFESTO_AND_HANDOFF.md](GLIDE_MANIFESTO_AND_HANDOFF.md).
