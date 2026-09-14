@@ -1,6 +1,6 @@
 #define MyAppName "Glide Image Viewer"
 #define MyAppShortName "Glide"
-#define MyAppVersion "3.5.7"
+#define MyAppVersion "3.5.8"
 #define MyAppExeName "Glide.exe"
 
 [Setup]
@@ -23,7 +23,7 @@ UsePreviousAppDir=yes
 CloseApplications=yes
 RestartApplications=no
 UninstallDisplayIcon={app}\{#MyAppExeName}
-VersionInfoVersion=3.5.7.0
+VersionInfoVersion=3.5.8.0
 VersionInfoProductName={#MyAppName}
 VersionInfoDescription=Glide Image Viewer Setup
 

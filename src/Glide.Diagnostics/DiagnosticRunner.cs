@@ -1,6 +1,8 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
 using System.Text.Json;
 using Glide.Core;
 using Glide.Core.Settings;
@@ -293,162 +295,505 @@ public static class DiagnosticRunner
     }
 
 
+    public static int MeasureLaunch(IEnumerable<string> targetImages, int iterations, TextWriter output)
+        => MeasureLaunch(string.Join(";", targetImages), iterations, output);
+
     public static int MeasureLaunch(string? targetImagePath, int iterations, TextWriter output)
     {
-        output.WriteLine("============================================================");
-        output.WriteLine("  Glide Real-World Cold Launch Diagnostic Harness");
-        output.WriteLine("============================================================");
+        output.WriteLine("=========================================================================================================");
+        output.WriteLine("  Glide Real-World Multi-Format Cold Launch Diagnostic Benchmark");
+        output.WriteLine("=========================================================================================================");
 
-        var exePath = Environment.ProcessPath;
-        if (string.IsNullOrEmpty(exePath) || !File.Exists(exePath))
-            exePath = Path.Combine(AppContext.BaseDirectory, "Glide.exe");
-
-        if (!File.Exists(exePath))
+        var exePath = LocateExecutable();
+        if (exePath is null)
         {
-            var fallback = Path.Combine(Directory.GetCurrentDirectory(), "dist", "Glide.exe");
-            if (File.Exists(fallback)) exePath = fallback;
-        }
-
-        if (!File.Exists(exePath))
-        {
-            output.WriteLine($"ERROR: Glide executable not found at: {exePath}");
+            output.WriteLine("ERROR: Glide executable not found. Build the project first (e.g. dotnet build).");
             return 1;
         }
 
-        var image = targetImagePath;
-        if (string.IsNullOrWhiteSpace(image) || !File.Exists(image))
+        var targets = ResolveBenchmarkImages(targetImagePath);
+        if (targets.Count == 0)
         {
-            var candidates = new[]
-            {
-                Path.Combine(AppContext.BaseDirectory, "artifacts", "diagnostic-fixtures", "fixture.jpg"),
-                Path.Combine(Directory.GetCurrentDirectory(), "artifacts", "diagnostic-fixtures", "fixture.jpg"),
-                Path.Combine(AppContext.BaseDirectory, "artifacts", "diagnostic-fixtures", "navigation-stress-240", "browse_0003_large.jpg"),
-                Path.Combine(Directory.GetCurrentDirectory(), "artifacts", "diagnostic-fixtures", "navigation-stress-240", "browse_0003_large.jpg")
-            };
-            image = candidates.FirstOrDefault(File.Exists);
-        }
-
-        if (string.IsNullOrWhiteSpace(image) || !File.Exists(image))
-        {
-            output.WriteLine("ERROR: Target image file not specified or not found.");
+            output.WriteLine("ERROR: No benchmark images found or resolved for common formats.");
             return 1;
         }
 
-        image = Path.GetFullPath(image);
         iterations = Math.Clamp(iterations, 1, 30);
 
         output.WriteLine($"Executable:   {exePath}");
-        output.WriteLine($"Target Image: {image} ({new FileInfo(image).Length / 1024} KB)");
-        output.WriteLine($"Iterations:   {iterations}");
-        output.WriteLine("Launching isolated OS processes to measure cold start to first on-screen paint...");
-        output.WriteLine("------------------------------------------------------------");
+        output.WriteLine($"Iterations:   {iterations} run(s) per format");
+        output.WriteLine($"Formats:      {string.Join(", ", targets.Select(t => t.Format))}");
+        output.WriteLine("Mode:         Real visible GUI process (CreateNoWindow = false, UseShellExecute = false)");
+        output.WriteLine("Verification: Win32 HWND visible & on-screen placement + DWM readyEvent + --perf-trace breakdown");
+        output.WriteLine("---------------------------------------------------------------------------------------------------------");
 
-        var firstFrameTimes = new List<double>();
-        var fullExitTimes = new List<double>();
-        var bitmapAssignedTimes = new List<double>();
+        var results = new List<FormatBenchmarkResult>();
 
-        for (var i = 1; i <= iterations; i++)
+        foreach (var target in targets)
         {
-            var eventName = $"Glide_ColdLaunch_Ready_{Guid.NewGuid():N}";
-            using var readyEvent = new EventWaitHandle(false, EventResetMode.ManualReset, eventName);
-            var tempTrace = Path.Combine(Path.GetTempPath(), $"glide_bench_{Guid.NewGuid():N}.tsv");
-
-            var psi = new ProcessStartInfo
+            var formatResult = new FormatBenchmarkResult
             {
-                FileName = exePath,
-                UseShellExecute = false,
-                CreateNoWindow = false
+                Format = target.Format,
+                ImagePath = target.FilePath
             };
-            psi.ArgumentList.Add("--perf-trace");
-            psi.ArgumentList.Add(tempTrace);
-            psi.ArgumentList.Add("--benchmark-exit-after-first-frame");
-            psi.ArgumentList.Add("--force-new-instance");
-            psi.ArgumentList.Add("--notify-first-frame");
-            psi.ArgumentList.Add(eventName);
-            psi.ArgumentList.Add(image);
 
-            var sw = Stopwatch.StartNew();
-            using var proc = Process.Start(psi);
-            if (proc is null)
+            var fileInfo = new FileInfo(target.FilePath);
+            var sizeKb = fileInfo.Exists ? fileInfo.Length / 1024 : 0;
+            output.WriteLine($"\n>>> Benchmarking Format [{target.Format}] -> {Path.GetFileName(target.FilePath)} ({sizeKb} KB)");
+
+            for (var i = 1; i <= iterations; i++)
             {
-                output.WriteLine($"Iteration {i}: Failed to spawn process.");
-                continue;
-            }
+                var eventName = $"Glide_ColdLaunch_Ready_{Guid.NewGuid():N}";
+                using var readyEvent = new EventWaitHandle(false, EventResetMode.ManualReset, eventName);
+                var tempTrace = Path.Combine(Path.GetTempPath(), $"glide_bench_{Guid.NewGuid():N}.tsv");
 
-            var signaled = readyEvent.WaitOne(TimeSpan.FromSeconds(10));
-            var firstFrameMs = sw.Elapsed.TotalMilliseconds;
-
-            var exited = proc.WaitForExit(6000);
-            var totalExitMs = sw.Elapsed.TotalMilliseconds;
-            sw.Stop();
-
-            double bitmapMs = 0;
-            string decodeRoute = "unknown";
-            if (File.Exists(tempTrace))
-            {
-                try
+                var psi = new ProcessStartInfo
                 {
-                    var lines = File.ReadAllLines(tempTrace);
-                    foreach (var line in lines)
-                    {
-                        var parts = line.Split('\t');
-                        if (parts.Length >= 4 && parts[3] == "bitmap_assigned")
-                        {
-                            if (double.TryParse(parts[0], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var bMs))
-                                bitmapMs = bMs;
-                            if (parts.Length >= 5) decodeRoute = parts[4];
-                        }
-                    }
-                    File.Delete(tempTrace);
+                    FileName = exePath,
+                    UseShellExecute = false,
+                    CreateNoWindow = false
+                };
+                psi.ArgumentList.Add("--perf-trace");
+                psi.ArgumentList.Add(tempTrace);
+                psi.ArgumentList.Add("--benchmark-exit-after-first-frame");
+                psi.ArgumentList.Add("--force-new-instance");
+                psi.ArgumentList.Add("--notify-first-frame");
+                psi.ArgumentList.Add(eventName);
+                psi.ArgumentList.Add(target.FilePath);
+
+                var sw = Stopwatch.StartNew();
+                using var proc = Process.Start(psi);
+                if (proc is null)
+                {
+                    output.WriteLine($"  Run #{i}: Failed to spawn process.");
+                    continue;
                 }
-                catch { }
+
+                bool hwndVerified = false;
+                IntPtr verifiedHwnd = IntPtr.Zero;
+                RECT verifiedRect = default;
+
+                var timeout = TimeSpan.FromSeconds(10);
+                bool signaled = false;
+                while (sw.Elapsed < timeout)
+                {
+                    if (!hwndVerified)
+                    {
+                        if (TryVerifyWindowOnScreen(proc.Id, out verifiedHwnd, out verifiedRect))
+                            hwndVerified = true;
+                    }
+
+                    if (readyEvent.WaitOne(10))
+                    {
+                        signaled = true;
+                        break;
+                    }
+                }
+                var firstFrameMs = sw.Elapsed.TotalMilliseconds;
+
+                if (signaled && !hwndVerified)
+                {
+                    if (TryVerifyWindowOnScreen(proc.Id, out verifiedHwnd, out verifiedRect))
+                        hwndVerified = true;
+                }
+
+                proc.WaitForExit(6000);
+                var totalExitMs = sw.Elapsed.TotalMilliseconds;
+                sw.Stop();
+
+                var trace = ParsePerfTrace(tempTrace);
+                try { if (File.Exists(tempTrace)) File.Delete(tempTrace); } catch { }
+
+                if (!signaled)
+                {
+                    output.WriteLine($"  Run #{i}: TIMEOUT waiting for first frame signal.");
+                }
+                else
+                {
+                    formatResult.FirstFrameTimes.Add(firstFrameMs);
+                    formatResult.FullExitTimes.Add(totalExitMs);
+                    if (trace.BitmapAssignedMs > 0)
+                        formatResult.BitmapAssignedTimes.Add(trace.BitmapAssignedMs);
+                    formatResult.Traces.Add(trace);
+
+                    if (hwndVerified)
+                    {
+                        formatResult.HwndVerified = true;
+                        formatResult.LastHwnd = verifiedHwnd;
+                        formatResult.LastRect = verifiedRect;
+                    }
+
+                    var runType = i == 1 ? " [COLD]" : " [WARM]";
+                    var hwndInfo = hwndVerified
+                        ? $"HWND 0x{verifiedHwnd.ToInt64():X} ({verifiedRect.Right - verifiedRect.Left}x{verifiedRect.Bottom - verifiedRect.Top} visible)"
+                        : "HWND unverified";
+
+                    output.WriteLine($"  Run #{i}{runType,-7}: First frame: {firstFrameMs,6:F1} ms | Bitmap: {trace.BitmapAssignedMs,6:F1} ms | Exit: {totalExitMs,6:F1} ms | {hwndInfo}");
+                    output.WriteLine($"    Trace breakdown: entry={trace.ProcessEntryMs:F1}ms -> avalonia={trace.AvaloniaStartMs:F1}ms -> ctor={trace.MainWindowCtorMs:F1}ms -> bitmap={trace.BitmapAssignedMs:F1}ms -> painted={trace.FirstFramePaintedMs:F1}ms (route: {trace.DecodeRoute})");
+                }
+
+                if (i < iterations) Thread.Sleep(150);
             }
 
-            if (!signaled)
-            {
-                output.WriteLine($"Iteration {i}: TIMEOUT waiting for first frame signal.");
-            }
-            else
-            {
-                firstFrameTimes.Add(firstFrameMs);
-                fullExitTimes.Add(totalExitMs);
-                if (bitmapMs > 0) bitmapAssignedTimes.Add(bitmapMs);
-
-                var runType = i == 1 ? " [COLD]" : "";
-                output.WriteLine($"Run #{i}{runType}: First frame on screen: {firstFrameMs:F1} ms | Bitmap assigned: {bitmapMs:F1} ms | Process exit: {totalExitMs:F1} ms");
-            }
-
-            if (i < iterations)
-                Thread.Sleep(150);
+            results.Add(formatResult);
         }
 
-        output.WriteLine("============================================================");
-        output.WriteLine("  SUMMARY RESULTS");
-        output.WriteLine("============================================================");
-        if (firstFrameTimes.Count > 0)
+        // Formatted Summary Table (Requirement 4)
+        output.WriteLine();
+        output.WriteLine("=========================================================================================================");
+        output.WriteLine("  MULTI-FORMAT BENCHMARK SUMMARY TABLE");
+        output.WriteLine("=========================================================================================================");
+        output.WriteLine($"| {"Format",-8} | {"Cold First Run (ms)",20} | {"Warm Runs (ms)",16} | {"Bitmap Assigned (ms)",20} | {"Overall Average (ms)",20} |");
+        output.WriteLine($"|{new string('-', 10)}|{new string('-', 22)}|{new string('-', 18)}|{new string('-', 22)}|{new string('-', 22)}|");
+
+        foreach (var r in results)
         {
-            var cold = firstFrameTimes[0];
-            var min = firstFrameTimes.Min();
-            var avg = firstFrameTimes.Average();
-            var max = firstFrameTimes.Max();
-            output.WriteLine($"First Frame Painted to User (Screen Visible):");
-            output.WriteLine($"  Cold First Run:          {cold:F1} ms");
-            output.WriteLine($"  Min (Fastest):           {min:F1} ms");
-            output.WriteLine($"  Average:                 {avg:F1} ms");
-            output.WriteLine($"  Max:                     {max:F1} ms");
-            if (bitmapAssignedTimes.Count > 0)
-                output.WriteLine($"  Bitmap Assigned Average: {bitmapAssignedTimes.Average():F1} ms");
-            output.WriteLine($"  Process Lifecycle Avg:   {fullExitTimes.Average():F1} ms");
-        }
-        else
-        {
-            output.WriteLine("No successful runs recorded.");
-            return 1;
-        }
+            var coldStr = r.FirstFrameTimes.Count > 0 ? $"{r.ColdFirstRunMs:F1}" : "N/A";
+            var warmStr = r.FirstFrameTimes.Count > 1 ? $"{r.WarmRunsAvgMs:F1}" : (r.FirstFrameTimes.Count == 1 ? $"{r.ColdFirstRunMs:F1} (1 run)" : "N/A");
+            var bitmapStr = r.BitmapAssignedTimes.Count > 0 ? $"{r.BitmapAssignedAvgMs:F1}" : "N/A";
+            var avgStr = r.FirstFrameTimes.Count > 0 ? $"{r.OverallAverageMs:F1}" : "N/A";
 
-        output.WriteLine("============================================================");
-        return 0;
+            output.WriteLine($"| {r.Format,-8} | {coldStr,20} | {warmStr,16} | {bitmapStr,20} | {avgStr,20} |");
+        }
+        output.WriteLine("=========================================================================================================");
+
+        // Trace breakdown phase averages table
+        output.WriteLine();
+        output.WriteLine("Phase Breakdown Averages (from --perf-trace):");
+        output.WriteLine($"| {"Format",-8} | {"Process Entry",14} | {"Avalonia Start",15} | {"MainWindow Ctor",17} | {"Bitmap Assigned",16} | {"First Frame Painted",20} | {"Decode Route",-24} |");
+        output.WriteLine($"|{new string('-', 10)}|{new string('-', 16)}|{new string('-', 17)}|{new string('-', 19)}|{new string('-', 18)}|{new string('-', 22)}|{new string('-', 26)}|");
+
+        foreach (var r in results)
+        {
+            var traces = r.Traces.Where(t => t.FirstFramePaintedMs > 0 || t.BitmapAssignedMs > 0).ToList();
+            if (traces.Count == 0) continue;
+
+            var entryAvg = traces.Average(t => t.ProcessEntryMs);
+            var avaAvg = traces.Average(t => t.AvaloniaStartMs);
+            var ctorAvg = traces.Average(t => t.MainWindowCtorMs);
+            var bmpAvg = traces.Average(t => t.BitmapAssignedMs);
+            var paintAvg = traces.Average(t => t.FirstFramePaintedMs);
+            var route = traces.LastOrDefault()?.DecodeRoute ?? "unknown";
+
+            output.WriteLine($"| {r.Format,-8} | {entryAvg,11:F1} ms | {avaAvg,12:F1} ms | {ctorAvg,14:F1} ms | {bmpAvg,13:F1} ms | {paintAvg,17:F1} ms | {route,-24} |");
+        }
+        output.WriteLine("=========================================================================================================");
+
+        return results.Any(r => r.FirstFrameTimes.Count > 0) ? 0 : 1;
     }
+
+    private static readonly string[] CommonFormats = [".jpg", ".png", ".webp", ".bmp", ".gif", ".tif"];
+
+    private static string NormalizeFormat(string extension)
+    {
+        var ext = extension.ToLowerInvariant();
+        return ext switch
+        {
+            ".jpeg" or ".jpe" => ".jpg",
+            ".tiff" => ".tif",
+            ".dib" => ".bmp",
+            _ => ext
+        };
+    }
+
+    private static List<(string Format, string FilePath)> ResolveBenchmarkImages(string? targetImagePath)
+    {
+        var resolved = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        // Case 1: Delimited list of paths
+        if (!string.IsNullOrWhiteSpace(targetImagePath) && (targetImagePath.Contains(',') || targetImagePath.Contains(';')))
+        {
+            var parts = targetImagePath.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            foreach (var part in parts)
+            {
+                if (File.Exists(part))
+                {
+                    var ext = NormalizeFormat(Path.GetExtension(part));
+                    resolved.TryAdd(ext, Path.GetFullPath(part));
+                }
+            }
+            if (resolved.Count > 0)
+                return SortByCommonFormats(resolved);
+        }
+
+        // Case 2: Target is a directory
+        if (!string.IsNullOrWhiteSpace(targetImagePath) && Directory.Exists(targetImagePath))
+        {
+            ScanDirectoryForFormats(targetImagePath, resolved);
+            if (resolved.Count > 0)
+                return SortByCommonFormats(resolved);
+        }
+
+        // Case 3: Target is a single file
+        if (!string.IsNullOrWhiteSpace(targetImagePath) && File.Exists(targetImagePath))
+        {
+            var fullPath = Path.GetFullPath(targetImagePath);
+            var ext = NormalizeFormat(Path.GetExtension(fullPath));
+            resolved[ext] = fullPath;
+
+            var dir = Path.GetDirectoryName(fullPath);
+            if (!string.IsNullOrEmpty(dir) && Directory.Exists(dir))
+            {
+                ScanDirectoryForFormats(dir, resolved);
+            }
+            return SortByCommonFormats(resolved);
+        }
+
+        // Case 4: Target is null/empty -> check standard fixture locations
+        var fixtureDirectories = new[]
+        {
+            Path.Combine(Directory.GetCurrentDirectory(), "artifacts", "diagnostic-fixtures"),
+            Path.Combine(AppContext.BaseDirectory, "artifacts", "diagnostic-fixtures"),
+            Path.Combine(Directory.GetCurrentDirectory(), "artifacts", "diagnostic-fixtures", "legacy-real-format-corpus"),
+            Path.Combine(AppContext.BaseDirectory, "artifacts", "diagnostic-fixtures", "legacy-real-format-corpus"),
+        };
+
+        foreach (var dir in fixtureDirectories)
+        {
+            if (Directory.Exists(dir))
+                ScanDirectoryForFormats(dir, resolved);
+        }
+
+        // If any common formats are missing, generate them on the fly from ImageDiagnosticFixtures
+        var missing = CommonFormats.Where(fmt => !resolved.ContainsKey(fmt)).ToList();
+        if (missing.Count > 0)
+        {
+            try
+            {
+                var tempFixturesDir = Path.Combine(Path.GetTempPath(), "glide_diagnostic_fixtures");
+                ImageDiagnosticFixtures.WriteTo(tempFixturesDir);
+                ScanDirectoryForFormats(tempFixturesDir, resolved);
+            }
+            catch { }
+        }
+
+        return SortByCommonFormats(resolved);
+    }
+
+    private static void ScanDirectoryForFormats(string dir, Dictionary<string, string> resolved)
+    {
+        try
+        {
+            foreach (var file in Directory.EnumerateFiles(dir))
+            {
+                var ext = NormalizeFormat(Path.GetExtension(file));
+                if (CommonFormats.Contains(ext, StringComparer.OrdinalIgnoreCase))
+                {
+                    resolved.TryAdd(ext, Path.GetFullPath(file));
+                }
+            }
+        }
+        catch { }
+    }
+
+    private static List<(string Format, string FilePath)> SortByCommonFormats(Dictionary<string, string> dict)
+    {
+        var result = new List<(string Format, string FilePath)>();
+        foreach (var fmt in CommonFormats)
+        {
+            if (dict.TryGetValue(fmt, out var path))
+                result.Add((fmt, path));
+        }
+        foreach (var pair in dict)
+        {
+            if (!CommonFormats.Contains(pair.Key, StringComparer.OrdinalIgnoreCase))
+                result.Add((pair.Key, pair.Value));
+        }
+        return result;
+    }
+
+    private static string? LocateExecutable()
+    {
+        var exePath = Environment.ProcessPath;
+        if (!string.IsNullOrEmpty(exePath) && File.Exists(exePath) &&
+            string.Equals(Path.GetFileName(exePath), "Glide.exe", StringComparison.OrdinalIgnoreCase))
+            return exePath;
+
+        var candidates = new[]
+        {
+            Path.Combine(AppContext.BaseDirectory, "Glide.exe"),
+            Path.Combine(Directory.GetCurrentDirectory(), "dist", "Glide.exe"),
+            Path.Combine(Directory.GetCurrentDirectory(), ".artifacts", "bin", "Glide.App", "debug", "Glide.exe"),
+            Path.Combine(Directory.GetCurrentDirectory(), ".artifacts", "bin", "Glide.App", "release", "Glide.exe"),
+            Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".artifacts", "bin", "Glide.App", "debug", "Glide.exe")
+        };
+        return candidates.FirstOrDefault(File.Exists);
+    }
+
+    private static PerfTraceBreakdown ParsePerfTrace(string traceFile)
+    {
+        var trace = new PerfTraceBreakdown();
+        if (!File.Exists(traceFile)) return trace;
+
+        try
+        {
+            var lines = File.ReadAllLines(traceFile);
+            foreach (var line in lines)
+            {
+                var parts = line.Split('\t');
+                if (parts.Length < 4) continue;
+                if (!double.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var elapsedMs))
+                    continue;
+
+                var eventName = parts[3];
+                switch (eventName)
+                {
+                    case "process_entry" when trace.ProcessEntryMs == 0:
+                        trace.ProcessEntryMs = elapsedMs;
+                        break;
+                    case "avalonia_build_start" when trace.AvaloniaStartMs == 0:
+                    case "avalonia_xaml_start" when trace.AvaloniaStartMs == 0:
+                        trace.AvaloniaStartMs = elapsedMs;
+                        break;
+                    case "main_window_ctor_start" when trace.MainWindowCtorMs == 0:
+                    case "ctor_init_component_start" when trace.MainWindowCtorMs == 0:
+                        trace.MainWindowCtorMs = elapsedMs;
+                        break;
+                    case "bitmap_assigned" when trace.BitmapAssignedMs == 0:
+                        trace.BitmapAssignedMs = elapsedMs;
+                        if (parts.Length >= 5)
+                        {
+                            var routeSegment = parts[4].Split(';').FirstOrDefault(s => s.StartsWith("route=", StringComparison.OrdinalIgnoreCase));
+                            if (routeSegment is not null)
+                                trace.DecodeRoute = routeSegment["route=".Length..];
+                        }
+                        break;
+                    case "composition_batch_rendered" when trace.FirstFramePaintedMs == 0:
+                        trace.FirstFramePaintedMs = elapsedMs;
+                        break;
+                }
+            }
+        }
+        catch { }
+
+        return trace;
+    }
+
+    private sealed class FormatBenchmarkResult
+    {
+        public string Format { get; set; } = "";
+        public string ImagePath { get; set; } = "";
+        public List<double> FirstFrameTimes { get; } = new();
+        public List<double> BitmapAssignedTimes { get; } = new();
+        public List<double> FullExitTimes { get; } = new();
+        public List<PerfTraceBreakdown> Traces { get; } = new();
+        public bool HwndVerified { get; set; }
+        public IntPtr LastHwnd { get; set; }
+        public RECT LastRect { get; set; }
+
+        public double ColdFirstRunMs => FirstFrameTimes.Count > 0 ? FirstFrameTimes[0] : 0.0;
+        public double WarmRunsAvgMs => FirstFrameTimes.Count > 1 ? FirstFrameTimes.Skip(1).Average() : (FirstFrameTimes.Count == 1 ? FirstFrameTimes[0] : 0.0);
+        public double BitmapAssignedAvgMs => BitmapAssignedTimes.Count > 0 ? BitmapAssignedTimes.Average() : 0.0;
+        public double OverallAverageMs => FirstFrameTimes.Count > 0 ? FirstFrameTimes.Average() : 0.0;
+    }
+
+    private sealed class PerfTraceBreakdown
+    {
+        public double ProcessEntryMs { get; set; }
+        public double AvaloniaStartMs { get; set; }
+        public double MainWindowCtorMs { get; set; }
+        public double BitmapAssignedMs { get; set; }
+        public double FirstFramePaintedMs { get; set; }
+        public string DecodeRoute { get; set; } = "unknown";
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct RECT { public int Left, Top, Right, Bottom; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct POINT { public int X, Y; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct WINDOWPLACEMENT
+    {
+        public int length;
+        public int flags;
+        public int showCmd;
+        public POINT ptMinPosition;
+        public POINT ptMaxPosition;
+        public RECT rcNormalPosition;
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetWindowPlacement(IntPtr hWnd, ref WINDOWPLACEMENT lpwndpl);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsWindowVisible(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+
+    private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+    private static bool TryVerifyWindowOnScreen(int processId, out IntPtr windowHandle, out RECT windowRect)
+    {
+        windowHandle = IntPtr.Zero;
+        windowRect = default;
+        if (!OperatingSystem.IsWindows()) return true;
+
+        IntPtr foundHwnd = IntPtr.Zero;
+        RECT foundRect = default;
+
+        try
+        {
+            EnumWindows((hWnd, _) =>
+            {
+                if (!IsWindow(hWnd) || !IsWindowVisible(hWnd))
+                    return true;
+
+                GetWindowThreadProcessId(hWnd, out var pid);
+                if (pid != processId)
+                    return true;
+
+                var wp = new WINDOWPLACEMENT { length = Marshal.SizeOf<WINDOWPLACEMENT>() };
+                if (GetWindowPlacement(hWnd, ref wp))
+                {
+                    if (wp.showCmd is 0 or 2 or 6)
+                        return true;
+                }
+
+                if (GetWindowRect(hWnd, out var rect))
+                {
+                    var w = rect.Right - rect.Left;
+                    var h = rect.Bottom - rect.Top;
+                    if (w > 100 && h > 100)
+                    {
+                        foundHwnd = hWnd;
+                        foundRect = rect;
+                        return false;
+                    }
+                }
+                return true;
+            }, IntPtr.Zero);
+        }
+        catch
+        {
+            return false;
+        }
+
+        if (foundHwnd != IntPtr.Zero)
+        {
+            windowHandle = foundHwnd;
+            windowRect = foundRect;
+            return true;
+        }
+        return false;
+    }
+
 
     private static ImageTabState AssertImage(TabState tab) => tab as ImageTabState ?? throw new InvalidOperationException("Expected image tab.");
 

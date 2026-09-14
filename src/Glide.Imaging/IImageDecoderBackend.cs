@@ -116,10 +116,10 @@ public sealed class AvaloniaImageDecoderBackend : IImageDecoderBackend, IPathOpt
 
     public Bitmap DecodePreview(Stream stream, ImageDimensions source, int longestSide, BitmapInterpolationMode interpolationMode, string? sourcePath)
     {
-        // Large JPEG/TIFF previews use the native WIC bridge first. This avoids a full-size Skia
+        // Native previews use the native WIC bridge first. This avoids a full-size Skia
         // decode followed by managed downscaling on the critical browse path and lets WIC request
         // a decoder-scaled first frame where the installed codec supports it.
-        if ((NativeImageDecoder.IsTiffPath(sourcePath) || NativeImageDecoder.IsJpegPath(sourcePath)) &&
+        if (NativeImageDecoder.SupportsDirectNativeDecode(sourcePath) &&
             NativeImageDecoder.TryDecode(sourcePath!, longestSide, out var nativePreview))
             return nativePreview;
 
@@ -283,8 +283,31 @@ public static partial class NativeImageDecoder
                extension.Equals(".dib", StringComparison.OrdinalIgnoreCase);
     }
 
+    public static bool IsWebpPath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return false;
+        var extension = ImageFormatRegistry.GetLongestExtension(path);
+        return extension.Equals(".webp", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public static bool IsGifPath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return false;
+        var extension = ImageFormatRegistry.GetLongestExtension(path);
+        return extension.Equals(".gif", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public static bool IsIcoPath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return false;
+        var extension = ImageFormatRegistry.GetLongestExtension(path);
+        return extension.Equals(".ico", StringComparison.OrdinalIgnoreCase) ||
+               extension.Equals(".cur", StringComparison.OrdinalIgnoreCase);
+    }
+
     public static bool SupportsDirectNativeDecode(string? path)
-        => IsJpegPath(path) || IsTiffPath(path) || IsJpegXrPath(path) || IsPngPath(path) || IsBmpPath(path);
+        => IsJpegPath(path) || IsTiffPath(path) || IsJpegXrPath(path) || IsPngPath(path) || IsBmpPath(path) ||
+           IsWebpPath(path) || IsGifPath(path) || IsIcoPath(path);
 
     public static bool SupportsNativeScaledPreview(string? path) => IsJpegPath(path) || IsJpegXrPath(path);
 

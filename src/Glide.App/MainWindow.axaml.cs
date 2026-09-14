@@ -304,15 +304,10 @@ public partial class MainWindow : Window
         // surface has already marked the routed event handled. This is deliberately uniform: the
         // slideshow button previously had this protection alone, which is why it was the only
         // reliable status control in the field.
-        foreach (var button in new Button[]
-        {
-            StatusZoomOutButton, StatusZoomInButton, StatusFitWidthButton, StatusFitHeightButton,
-            StatusInfoButton, StatusOptionsButton, SlideshowButton, SlideshowStopButton,
-            StatusFirstButton, StatusPreviousButton, StatusNextButton, StatusLastButton,
-            StatusCollapseButton, StatusCloseButton, OverlayAddButton, OverlayLoadButton, OverlaySaveButton, OverlayClearButton,
-            CaptionMinimizeButton, CaptionMaximizeButton, CaptionCloseButton
-        })
-            button.AddHandler(InputElement.PointerPressedEvent, ReliableCommandButtonPressed, RoutingStrategies.Tunnel, true);
+        ViewerStatusSurface.AddHandler(InputElement.PointerPressedEvent, ReliableStatusSurfaceButtonPressed, RoutingStrategies.Tunnel, true);
+        CaptionMinimizeButton.AddHandler(InputElement.PointerPressedEvent, ReliableCommandButtonPressed, RoutingStrategies.Tunnel, true);
+        CaptionMaximizeButton.AddHandler(InputElement.PointerPressedEvent, ReliableCommandButtonPressed, RoutingStrategies.Tunnel, true);
+        CaptionCloseButton.AddHandler(InputElement.PointerPressedEvent, ReliableCommandButtonPressed, RoutingStrategies.Tunnel, true);
         TabNavigationHost.AddHandler(InputElement.PointerReleasedEvent, (s, e) =>
         {
             if (e.InitialPressMouseButton == MouseButton.Right)
@@ -609,7 +604,7 @@ public partial class MainWindow : Window
             var explicitStartupPaths = _earlyStartupPaths ?? (!_deferWorkspaceActivation ? ApplyQueuedStartupDestinations() : Array.Empty<string>());
             var isColdImageOpen = (!_deferWorkspaceActivation && explicitStartupPaths.Length > 0 && _workspace.Active is ImageTabState) || _earlyStartupTask is not null;
 
-            ApplySettingsVisuals();
+            ApplySettingsVisuals(deferSecondaryChrome: isColdImageOpen);
             ApplyStartupWholeAppOverlayPreference();
 
             if (!isColdImageOpen)
@@ -1100,7 +1095,7 @@ public partial class MainWindow : Window
     {
         if (!File.Exists(path) || !ImageNavigator.IsSupported(path))
         {
-            Title = "Glide 3.5-7 — Unsupported or missing image";
+            Title = "Glide 3.5-8 — Unsupported or missing image";
             return;
         }
         if (!_workspace.ReplaceActiveWithImage(path)) _workspace.AddImage(path);
@@ -3952,6 +3947,12 @@ public partial class MainWindow : Window
     private void ZoomInClicked(object? sender, RoutedEventArgs e) => Viewport.ZoomBy(1.15);
     private void ZoomOutClicked(object? sender, RoutedEventArgs e) => Viewport.ZoomBy(1 / 1.15);
     private async void SlideshowClicked(object? sender, RoutedEventArgs e) => await ToggleSlideshowAsync();
+    private void ReliableStatusSurfaceButtonPressed(object? sender, PointerPressedEventArgs e)
+    {
+        var button = (e.Source as Visual)?.FindAncestorOfType<Button>() ?? (e.Source as Button);
+        if (button is not null)
+            ReliableCommandButtonPressed(button, e);
+    }
 
     private async void ReliableCommandButtonPressed(object? sender, PointerPressedEventArgs e)
     {
@@ -4826,7 +4827,7 @@ public partial class MainWindow : Window
         BrowserView.Resources["BrushSearch"] = new SolidColorBrush(Color.Parse(search));
     }
 
-    private void ApplySettingsVisuals()
+    private void ApplySettingsVisuals(bool deferSecondaryChrome = false)
     {
         ApplyPalette(_settings.ThemeChoice, _settings.AccentChoice, _settings.GlowChoice, _settings.GlowIntensityPercent, _settings.CustomAccentHex, _settings.CustomGlowHex, _settings.MainBackgroundChoice, _settings.CustomMainBackgroundHex);
         Topmost = _settings.AlwaysOnTop;
@@ -4904,6 +4905,28 @@ public partial class MainWindow : Window
 
         // Keep fullscreen overlay chrome in sync when its auto-hide setting changes live.
         ApplyChromeLayoutForWindowState();
+
+        if (deferSecondaryChrome)
+        {
+            ApplyStatusVisibility();
+            UpdateStatusStats();
+            UpdateWindowTitle();
+            Dispatcher.UIThread.Post(() =>
+            {
+                if (_windowLifetimeCts.IsCancellationRequested) return;
+                RebuildTitleActionStrip();
+                ApplyTabUtilityButtonVisibility();
+                if (_titleBarButtons.TryGetValue("window.alwaysOnTop", out var topmostButton)) SetActiveClass(topmostButton, _settings.AlwaysOnTop);
+                ApplyStatusVisibility();
+                UpdateViewportScrollbars();
+                RebuildTabStrip();
+                RefreshDynamicTooltips();
+                UpdateStatusStats();
+                UpdateWindowTitle();
+            }, DispatcherPriority.Background);
+            return;
+        }
+
         RebuildTitleActionStrip();
         ApplyTabUtilityButtonVisibility();
         if (_titleBarButtons.TryGetValue("window.alwaysOnTop", out var topmostButton)) SetActiveClass(topmostButton, _settings.AlwaysOnTop);
@@ -5984,7 +6007,7 @@ public partial class MainWindow : Window
     {
         if (string.IsNullOrWhiteSpace(_currentPath) || !ImageView.IsVisible)
         {
-            if (HomeHost.IsVisible) Title = "Glide 3.5-7 — Home";
+            if (HomeHost.IsVisible) Title = "Glide 3.5-8 — Home";
             return;
         }
         var display = _settings.FullPathInTitle ? _currentPath : Path.GetFileName(_currentPath);

@@ -4,7 +4,7 @@
         xmlns:platform="using:Glide.App.Platform"
         x:Class="Glide.App.MainWindow"
         Width="1064" Height="687" MinWidth="180" MinHeight="360"
-        Title="Glide 3.5-6 — Home"
+        Title="Glide 3.5-8 — Home"
         Icon="/Assets/Glide.ico"
         SystemDecorations="None"
         ExtendClientAreaToDecorationsHint="False"
