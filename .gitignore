@@ -12,3 +12,8 @@ diagnostics-out/
 *.zip
 *.log
 *-output.txt
+*MANIFESTO*
+*HANDOFF*
+*handover*
+*Handover*
+diagnostic_corpus/
