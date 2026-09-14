@@ -30,9 +30,24 @@ public interface IImageDecoderBackend
         => DecodePreview(stream, source, longestSide, interpolationMode);
 
     Task<Bitmap> DecodeFullAsync(Stream stream, string? sourcePath, CancellationToken cancellationToken = default)
-        => Task.Run(() => DecodeFull(stream, sourcePath), cancellationToken);
+    {
+        if (Thread.CurrentThread.IsThreadPoolThread)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(DecodeFull(stream, sourcePath));
+        }
+        return Task.Run(() => DecodeFull(stream, sourcePath), cancellationToken);
+    }
+
     Task<Bitmap> DecodePreviewAsync(Stream stream, ImageDimensions source, int longestSide, BitmapInterpolationMode interpolationMode, string? sourcePath, CancellationToken cancellationToken = default)
-        => Task.Run(() => DecodePreview(stream, source, longestSide, interpolationMode, sourcePath), cancellationToken);
+    {
+        if (Thread.CurrentThread.IsThreadPoolThread)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(DecodePreview(stream, source, longestSide, interpolationMode, sourcePath));
+        }
+        return Task.Run(() => DecodePreview(stream, source, longestSide, interpolationMode, sourcePath), cancellationToken);
+    }
 }
 
 
@@ -56,6 +71,19 @@ public sealed class AvaloniaImageDecoderBackend : IImageDecoderBackend, IPathOpt
 
     public Bitmap DecodeFull(Stream stream, string? sourcePath)
     {
+        if (OperatingSystem.IsWindows() && !string.IsNullOrWhiteSpace(sourcePath))
+        {
+            if (NativeImageDecoder.SupportsDirectNativeDecode(sourcePath))
+            {
+                if (NativeImageDecoder.TryDecode(sourcePath, 0, out var native))
+                {
+                    if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("native_full_decode_hit", sourcePath);
+                    return native;
+                }
+                if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("native_full_decode_miss", sourcePath);
+            }
+        }
+
         try
         {
             return new Bitmap(stream);
@@ -117,63 +145,74 @@ public sealed class AvaloniaImageDecoderBackend : IImageDecoderBackend, IPathOpt
         if (!SupportsPathPreview(path))
             return Task.FromResult<PathPreviewDecodeResult?>(null);
 
+        if (Thread.CurrentThread.IsThreadPoolThread)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(TryDecodePreviewFromPathCore(path, source, maxWidth, maxHeight, progressiveColorFirstPreview));
+        }
+
         return Task.Run<PathPreviewDecodeResult?>(() =>
         {
             cancellationToken.ThrowIfCancellationRequested();
-
-            // JPEG/JPEG-XR have a deterministic decoder-native reduced-resolution route. Put it
-            // ahead of Shell-cache probing so a cold cache miss cannot add COM/Shell latency to the
-            // exact class that exposed the regression. This mirrors legacy's fastest JPEG path while
-            // keeping Shell cache as a fallback if the native transform is unavailable on that PC.
-            if (NativeImageDecoder.SupportsNativeScaledPreview(path))
-            {
-                var nativeStarted = System.Diagnostics.Stopwatch.GetTimestamp();
-                if (NativeImageDecoder.TryDecodeBounded(path, maxWidth, maxHeight, progressiveColorFirstPreview, out var nativeBitmap))
-                {
-                    if (GlidePerformanceTrace.Enabled)
-                        GlidePerformanceTrace.Mark("wic_native_preview_ready",
-                            $"output={nativeBitmap.PixelSize.Width}x{nativeBitmap.PixelSize.Height};progressive={(progressiveColorFirstPreview ? "colour-first" : "level0-fast")};elapsed={System.Diagnostics.Stopwatch.GetElapsedTime(nativeStarted).TotalMilliseconds:F3}ms");
-                    var sourcePixels = (long)Math.Max(1, source.Width) * Math.Max(1, source.Height);
-                    var outputPixels = (long)nativeBitmap.PixelSize.Width * nativeBitmap.PixelSize.Height;
-                    return new PathPreviewDecodeResult(nativeBitmap, outputPixels < sourcePixels, "wic-native-scale");
-                }
-                if (GlidePerformanceTrace.Enabled)
-                    GlidePerformanceTrace.Mark("wic_native_preview_miss",
-                        $"elapsed={System.Diagnostics.Stopwatch.GetElapsedTime(nativeStarted).TotalMilliseconds:F3}ms");
-            }
-
-            // Never use Explorer/Shell cached thumbnails for formats that may contain alpha. Windows
-            // is allowed to pre-composite those thumbnail pixels against an opaque background; using
-            // that cache would make a genuinely transparent PNG/WebP/etc appear grey in Overlay mode.
-            // Return to the normal codec path instead, which preserves source alpha end-to-end.
-            if (ImageFormatRegistry.MayContainTransparency(path))
-            {
-                if (GlidePerformanceTrace.Enabled)
-                    GlidePerformanceTrace.Mark("shell_cached_preview_skipped_alpha",
-                        $"extension={ImageFormatRegistry.GetLongestExtension(path)}");
-                return null;
-            }
-
-            // Opaque-only formats may opportunistically consume an already-existing Windows Shell
-            // thumbnail. INCACHEONLY forbids extraction, so this never turns into hidden foreground
-            // decode work. Tiny/icon-like cache entries are rejected and the normal codec path wins.
-            var shellStarted = System.Diagnostics.Stopwatch.GetTimestamp();
-            if (NativeImageDecoder.TryDecodeShellCachedBounded(path, maxWidth, maxHeight, out var cached) &&
-                IsUsefulCachedPreview(cached, source, maxWidth, maxHeight))
-            {
-                var cachedPixels = (long)cached.PixelSize.Width * cached.PixelSize.Height;
-                var sourcePixels = (long)Math.Max(1, source.Width) * Math.Max(1, source.Height);
-                if (GlidePerformanceTrace.Enabled)
-                    GlidePerformanceTrace.Mark("shell_cached_preview_hit",
-                        $"output={cached.PixelSize.Width}x{cached.PixelSize.Height};elapsed={System.Diagnostics.Stopwatch.GetElapsedTime(shellStarted).TotalMilliseconds:F3}ms");
-                return new PathPreviewDecodeResult(cached, cachedPixels < sourcePixels, "shell-cache");
-            }
-            cached?.Dispose();
-            if (GlidePerformanceTrace.Enabled)
-                GlidePerformanceTrace.Mark("shell_cached_preview_miss",
-                    $"elapsed={System.Diagnostics.Stopwatch.GetElapsedTime(shellStarted).TotalMilliseconds:F3}ms");
-            return null;
+            return TryDecodePreviewFromPathCore(path, source, maxWidth, maxHeight, progressiveColorFirstPreview);
         }, cancellationToken);
+    }
+
+    private static PathPreviewDecodeResult? TryDecodePreviewFromPathCore(
+        string path, ImageDimensions source, int maxWidth, int maxHeight, bool progressiveColorFirstPreview)
+    {
+        // JPEG/JPEG-XR have a deterministic decoder-native reduced-resolution route. Put it
+        // ahead of Shell-cache probing so a cold cache miss cannot add COM/Shell latency to the
+        // exact class that exposed the regression. This mirrors legacy's fastest JPEG path while
+        // keeping Shell cache as a fallback if the native transform is unavailable on that PC.
+        if (NativeImageDecoder.SupportsNativeScaledPreview(path))
+        {
+            var nativeStarted = System.Diagnostics.Stopwatch.GetTimestamp();
+            if (NativeImageDecoder.TryDecodeBounded(path, maxWidth, maxHeight, progressiveColorFirstPreview, out var nativeBitmap))
+            {
+                if (GlidePerformanceTrace.Enabled)
+                    GlidePerformanceTrace.Mark("wic_native_preview_ready",
+                        $"output={nativeBitmap.PixelSize.Width}x{nativeBitmap.PixelSize.Height};progressive={(progressiveColorFirstPreview ? "colour-first" : "level0-fast")};elapsed={System.Diagnostics.Stopwatch.GetElapsedTime(nativeStarted).TotalMilliseconds:F3}ms");
+                var sourcePixels = (long)Math.Max(1, source.Width) * Math.Max(1, source.Height);
+                var outputPixels = (long)nativeBitmap.PixelSize.Width * nativeBitmap.PixelSize.Height;
+                return new PathPreviewDecodeResult(nativeBitmap, outputPixels < sourcePixels, "wic-native-scale");
+            }
+            if (GlidePerformanceTrace.Enabled)
+                GlidePerformanceTrace.Mark("wic_native_preview_miss",
+                    $"elapsed={System.Diagnostics.Stopwatch.GetElapsedTime(nativeStarted).TotalMilliseconds:F3}ms");
+        }
+
+        // Never use Explorer/Shell cached thumbnails for formats that may contain alpha. Windows
+        // is allowed to pre-composite those thumbnail pixels against an opaque background; using
+        // that cache would make a genuinely transparent PNG/WebP/etc appear grey in Overlay mode.
+        // Return to the normal codec path instead, which preserves source alpha end-to-end.
+        if (ImageFormatRegistry.MayContainTransparency(path))
+        {
+            if (GlidePerformanceTrace.Enabled)
+                GlidePerformanceTrace.Mark("shell_cached_preview_skipped_alpha",
+                    $"extension={ImageFormatRegistry.GetLongestExtension(path)}");
+            return null;
+        }
+
+        // Opaque-only formats may opportunistically consume an already-existing Windows Shell
+        // thumbnail. INCACHEONLY forbids extraction, so this never turns into hidden foreground
+        // decode work. Tiny/icon-like cache entries are rejected and the normal codec path wins.
+        var shellStarted = System.Diagnostics.Stopwatch.GetTimestamp();
+        if (NativeImageDecoder.TryDecodeShellCachedBounded(path, maxWidth, maxHeight, out var cached) &&
+            IsUsefulCachedPreview(cached, source, maxWidth, maxHeight))
+        {
+            var cachedPixels = (long)cached.PixelSize.Width * cached.PixelSize.Height;
+            var sourcePixels = (long)Math.Max(1, source.Width) * Math.Max(1, source.Height);
+            if (GlidePerformanceTrace.Enabled)
+                GlidePerformanceTrace.Mark("shell_cached_preview_hit",
+                    $"output={cached.PixelSize.Width}x{cached.PixelSize.Height};elapsed={System.Diagnostics.Stopwatch.GetElapsedTime(shellStarted).TotalMilliseconds:F3}ms");
+            return new PathPreviewDecodeResult(cached, cachedPixels < sourcePixels, "shell-cache");
+        }
+        cached?.Dispose();
+        if (GlidePerformanceTrace.Enabled)
+            GlidePerformanceTrace.Mark("shell_cached_preview_miss",
+                $"elapsed={System.Diagnostics.Stopwatch.GetElapsedTime(shellStarted).TotalMilliseconds:F3}ms");
+        return null;
     }
 
     private static bool IsUsefulCachedPreview(Bitmap bitmap, ImageDimensions source, int maxWidth, int maxHeight)
@@ -227,6 +266,25 @@ public static partial class NativeImageDecoder
                extension.Equals(".wdp", StringComparison.OrdinalIgnoreCase) ||
                extension.Equals(".hdp", StringComparison.OrdinalIgnoreCase);
     }
+
+    public static bool IsPngPath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return false;
+        var extension = ImageFormatRegistry.GetLongestExtension(path);
+        return extension.Equals(".png", StringComparison.OrdinalIgnoreCase) ||
+               extension.Equals(".apng", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public static bool IsBmpPath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return false;
+        var extension = ImageFormatRegistry.GetLongestExtension(path);
+        return extension.Equals(".bmp", StringComparison.OrdinalIgnoreCase) ||
+               extension.Equals(".dib", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public static bool SupportsDirectNativeDecode(string? path)
+        => IsJpegPath(path) || IsTiffPath(path) || IsJpegXrPath(path) || IsPngPath(path) || IsBmpPath(path);
 
     public static bool SupportsNativeScaledPreview(string? path) => IsJpegPath(path) || IsJpegXrPath(path);
 
@@ -341,8 +399,17 @@ public static partial class NativeImageDecoder
         finally { GlideFreeImageBuffer(decoded.Data); }
     }
 
+    internal static unsafe bool TryCreateBitmapFromNative(NativeDecodedImage decoded, int status, out Bitmap bitmap)
+        => TryCreateBitmap(decoded, status, out bitmap);
+
+    internal static int RawGlideDecodeImage(string path, uint maxLongestSide, out NativeDecodedImage image)
+        => GlideDecodeImageW(path, maxLongestSide, out image);
+
+    internal static void RawGlideFreeBuffer(IntPtr data)
+        => GlideFreeImageBuffer(data);
+
     [StructLayout(LayoutKind.Sequential)]
-    private struct NativeDecodedImage
+    internal struct NativeDecodedImage
     {
         public uint Width;
         public uint Height;

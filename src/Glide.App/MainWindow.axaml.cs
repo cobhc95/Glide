@@ -190,9 +190,46 @@ public partial class MainWindow : Window
         WindowState RestoreState, PixelPoint Position, double Width, double Height,
         bool RestoreFullscreen, double SessionOpacity);
 
+    private Task? _earlyStartupTask;
+    private string[]? _earlyStartupPaths;
+
+    [DllImport("dwmapi.dll", PreserveSig = true)]
+    private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
+    private const int DwmwaTransitionsForcedisabled = 3;
+
+    private void DisableDwmTransitions(string source)
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        try
+        {
+            var platform = TryGetPlatformHandle();
+            if (platform is not null && platform.Handle != IntPtr.Zero)
+            {
+                int disable = 1;
+                var hr = DwmSetWindowAttribute(platform.Handle, DwmwaTransitionsForcedisabled, ref disable, sizeof(int));
+                if (GlidePerformanceTrace.Enabled)
+                    GlidePerformanceTrace.Mark("disable_dwm_transitions", $"src={source};hr={hr};hwnd={platform.Handle}");
+            }
+            else
+            {
+                if (GlidePerformanceTrace.Enabled)
+                    GlidePerformanceTrace.Mark("disable_dwm_transitions_no_handle", $"src={source}");
+            }
+        }
+        catch { }
+    }
+
     public MainWindow()
     {
+        GlidePerformanceTrace.Mark("ctor_init_component_start");
         InitializeComponent();
+        GlidePerformanceTrace.Mark("ctor_init_component_end");
+        DisableDwmTransitions("ctor");
+        PropertyChanged += (_, e) =>
+        {
+            if (e.Property == IsVisibleProperty && e.NewValue is true)
+                DisableDwmTransitions("visible");
+        };
         // The HWND must be created transparency-capable from its very first show. Switching
         // TransparencyLevelHint only after entering Overlay mode is too late on some Windows/Avalonia
         // compositor paths and causes transparent PNG pixels to be flattened against an opaque surface.
@@ -249,7 +286,9 @@ public partial class MainWindow : Window
         Viewport.SelectionOverlayTarget = SelectionOverlay;
         // Window-in-window overlay decoding and slideshow infrastructure are intentionally lazy.
         // A plain cold file-open should construct only the primary image path before first pixels.
+        GlidePerformanceTrace.Mark("ctor_create_commands_start");
         _commands = CreateCommandDispatcher();
+        GlidePerformanceTrace.Mark("ctor_create_commands_end");
         // Tunnel handlers preserve legacy drag-anywhere behavior even when a TextBlock/ScrollViewer
         // sits under the pointer. Interactive controls are explicitly excluded by the handlers.
         MainRoot.AddHandler(InputElement.PointerPressedEvent, AutoDismissTransientPanels, RoutingStrategies.Tunnel, true);
@@ -555,6 +594,8 @@ public partial class MainWindow : Window
 
         Opened += async (_, _) =>
         {
+            DisableDwmTransitions("opened");
+            GlidePerformanceTrace.Mark("window_opened_start");
             GlideWindowRegistry.Register(this);
             ExternalLaunchBroker.Start(this);
             // Never wait for settings I/O/deserialization on first presentation. On a normal cold
@@ -564,44 +605,47 @@ public partial class MainWindow : Window
             ContinueDeferredStartupSettingsAdoption();
             if (_settings.StartupDiagnostics) _diagnostics.Enable();
             _diagnostics.Write("app", "opened", new { renderScaling = TopLevel.GetTopLevel(this)?.RenderScaling ?? 1.0, settingsPath = SettingsStore.GetSettingsPath() });
+
+            var explicitStartupPaths = _earlyStartupPaths ?? (!_deferWorkspaceActivation ? ApplyQueuedStartupDestinations() : Array.Empty<string>());
+            var isColdImageOpen = (!_deferWorkspaceActivation && explicitStartupPaths.Length > 0 && _workspace.Active is ImageTabState) || _earlyStartupTask is not null;
+
             ApplySettingsVisuals();
             ApplyStartupWholeAppOverlayPreference();
-            var explicitStartupPaths = !_deferWorkspaceActivation ? ApplyQueuedStartupDestinations() : Array.Empty<string>();
-            if (!_deferWorkspaceActivation && explicitStartupPaths.Length == 0 && !_hasExplicitStartupOpen)
+
+            if (!isColdImageOpen)
             {
-                // No-file startup actions depend on the full graph. Await hydration only on this
-                // non-image path so the decision is deterministic without taxing explicit cold opens.
-                if (!_deferredStartupSettingsAdopted && App.StartupSettingsTask is { } startupSettingsTask)
+                if (!_deferWorkspaceActivation && explicitStartupPaths.Length == 0 && !_hasExplicitStartupOpen)
                 {
-                    try { await startupSettingsTask; } catch { }
-                    if (!_windowLifetimeCts.IsCancellationRequested) AdoptStartupSettingsIfReady(applyVisuals: true);
+                    // No-file startup actions depend on the full graph. Await hydration only on this
+                    // non-image path so the decision is deterministic without taxing explicit cold opens.
+                    if (!_deferredStartupSettingsAdopted && App.StartupSettingsTask is { } startupSettingsTask)
+                    {
+                        try { await startupSettingsTask; } catch { }
+                        if (!_windowLifetimeCts.IsCancellationRequested) AdoptStartupSettingsIfReady(applyVisuals: true);
+                    }
+                    if (!_windowLifetimeCts.IsCancellationRequested) ApplyConfiguredStartupWorkspace();
                 }
-                if (!_windowLifetimeCts.IsCancellationRequested) ApplyConfiguredStartupWorkspace();
+                TryScheduleAutomaticOverlayLayoutRestore();
+                RebuildTabStrip();
             }
-            TryScheduleAutomaticOverlayLayoutRestore();
-            RebuildTabStrip();
-
-            // Explicit image launches use one real Glide window from the first visible frame. Paint
-            // the already-functional shell first, then begin decode/activation on a lower-priority UI
-            // turn. This deliberately trades an invisible amount of scheduling latency for removal of
-            // the perceptually expensive "window appeared, then appeared again" startup transition.
-            // The shell is not a splash or surrogate: caption controls, tabs, canvas input and window
-            // movement already belong to the final MainWindow instance the user will keep using.
-            if (!_deferWorkspaceActivation && explicitStartupPaths.Length > 0 && _workspace.Active is ImageTabState)
+            else
             {
+                // Paint the functional shell and present the startup image immediately on the first frame.
+                // Pipelined background pre-decoding ensures the bitmap is already waiting in memory.
                 ShowImageSurface();
-                UpdateWindowTitle("Loading");
-                Dispatcher.UIThread.Post(async () => await CompleteOpenedStartupAsync(explicitStartupPaths), DispatcherPriority.Loaded);
-                return;
             }
 
+            GlidePerformanceTrace.Mark("opened_call_complete_startup_start");
             await CompleteOpenedStartupAsync(explicitStartupPaths);
+            GlidePerformanceTrace.Mark("opened_call_complete_startup_end");
         };
 
         // Resolve the final startup geometry before Windows ever shows the HWND. Applying reference
         // size/remembered placement from Opened made the real window visibly resize/reposition after
-        // its first composition, which reads as a second load even with no external launcher.
+        // its first composition, reads as a second load even with no external launcher.
+        GlidePerformanceTrace.Mark("ctor_placement_start");
         ApplyInitialReferenceSizeAndPlacement();
+        GlidePerformanceTrace.Mark("ctor_placement_end");
     }
 
     private async Task CompleteOpenedStartupAsync(IReadOnlyList<string> explicitStartupPaths)
@@ -609,10 +653,21 @@ public partial class MainWindow : Window
         if (_windowLifetimeCts.IsCancellationRequested) return;
         if (!_deferWorkspaceActivation)
         {
-            // Do not warm/read the startup file in parallel with the authoritative decoder. On a true
-            // cold open that duplicated I/O can contend with WIC/Skia and pollute the file cache. The
-            // foreground decoder is now the single owner of startup image reads.
-            await ActivateWorkspaceAsync();
+            if (_earlyStartupTask is not null)
+            {
+                GlidePerformanceTrace.Mark("opened_early_startup_await_start");
+                await _earlyStartupTask;
+                GlidePerformanceTrace.Mark("opened_early_startup_await_end");
+            }
+            else
+            {
+                // Do not warm/read the startup file in parallel with the authoritative decoder. On a true
+                // cold open that duplicated I/O can contend with WIC/Skia and pollute the file cache. The
+                // foreground decoder is now the single owner of startup image reads.
+                GlidePerformanceTrace.Mark("activate_workspace_start");
+                await ActivateWorkspaceAsync();
+                GlidePerformanceTrace.Mark("activate_workspace_end");
+            }
         }
         if (_windowLifetimeCts.IsCancellationRequested) return;
 
@@ -728,6 +783,20 @@ public partial class MainWindow : Window
         _startupPaths.Add(materialized,
             path => Directory.Exists(path) || (File.Exists(path) && ImageNavigator.IsSupported(path)),
             (path, reason) => _diagnostics.Write("launch", reason.StartsWith("invalid", StringComparison.OrdinalIgnoreCase) ? "invalid_path_skipped" : "unsupported_path_skipped", new { path, reason }));
+    }
+
+    public void TryPrepareEarlyStartupPresentation()
+    {
+        if (_deferWorkspaceActivation) return;
+        var explicitStartupPaths = ApplyQueuedStartupDestinations();
+        if (explicitStartupPaths.Length == 0 || _workspace.Active is not ImageTabState imageTab) return;
+
+        GlidePerformanceTrace.Mark("early_startup_prep_start", Path.GetFileName(imageTab.Path));
+        _hasExplicitStartupOpen = true;
+        _earlyStartupPaths = explicitStartupPaths;
+        AdvanceWorkspaceEpoch();
+        _earlyStartupTask = LoadPathAsync(imageTab.Path, updateActiveTab: false);
+        GlidePerformanceTrace.Mark("early_startup_prep_end");
     }
 
     private string[] ApplyQueuedStartupDestinations()
@@ -1031,7 +1100,7 @@ public partial class MainWindow : Window
     {
         if (!File.Exists(path) || !ImageNavigator.IsSupported(path))
         {
-            Title = "Glide 3.5-6 — Unsupported or missing image";
+            Title = "Glide 3.5-7 — Unsupported or missing image";
             return;
         }
         if (!_workspace.ReplaceActiveWithImage(path)) _workspace.AddImage(path);
@@ -1202,7 +1271,6 @@ public partial class MainWindow : Window
         _metadataCts = CancellationTokenSource.CreateLinkedTokenSource(request.Token);
         _currentMetadata = new();
         if (ImageInfoOverlay.IsVisible) UpdateImageInfoOverlayText();
-        UpdateWindowTitle("Loading");
 
         try
         {
@@ -1219,16 +1287,19 @@ public partial class MainWindow : Window
             var hadBitmap = Viewport.Bitmap is not null;
             var old = Viewport.Bitmap;
             Viewport.SetInteractionBitmap(null);
-            _interactionPreviewBitmap?.Dispose();
+            if (_interactionPreviewBitmap is not null && !_loader.IsBitmapCached(_interactionPreviewBitmap))
+                _interactionPreviewBitmap.Dispose();
             _interactionPreviewBitmap = null;
             Viewport.PreserveManualZoomOnBitmapChange = _settings.PreserveManualZoomOnNavigate;
             Viewport.PresentationRequestId = request.ImageRequestId;
             Viewport.Bitmap = result.Bitmap;
             _presentedPath = path;
+            _loader.SetActivePath(path);
             Viewport.SetPresentationSourceSize(
                 result.SourceWidth > 0 ? result.SourceWidth : result.Bitmap.PixelSize.Width,
                 result.SourceHeight > 0 ? result.SourceHeight : result.Bitmap.PixelSize.Height);
-            old?.Dispose();
+            if (old is not null && !_loader.IsBitmapCached(old))
+                old.Dispose();
             if (!hadBitmap || !_settings.PreserveManualZoomOnNavigate)
                 Viewport.ApplyViewMode(_settings.DefaultViewMode);
             ShowImageSurface();
@@ -1243,18 +1314,32 @@ public partial class MainWindow : Window
                     GlidePerformanceTrace.Mark("folder_index_start", $"synthetic=true;request={request.ImageRequestId}");
             }
 
-            var rendered = await renderedTask;
-            if (!rendered || !IsRequestCurrent(request, requirePresented: true))
+            if (!_startupFirstImageTimingWritten || GlidePerformanceTrace.Enabled || App.BenchmarkExitAfterFirstFrame || App.NotifyFirstFrameEventName is not null)
             {
-                if (GlidePerformanceTrace.Enabled)
-                    GlidePerformanceTrace.Mark("frame_render_fence_rejected", $"request={request.ImageRequestId}");
-                return new PresentationOutcome(PresentationStatus.Cancelled, request);
-            }
+                var rendered = await renderedTask;
+                if (!rendered || !IsRequestCurrent(request, requirePresented: true))
+                {
+                    if (GlidePerformanceTrace.Enabled)
+                        GlidePerformanceTrace.Mark("frame_render_fence_rejected", $"request={request.ImageRequestId}");
+                    return new PresentationOutcome(PresentationStatus.Cancelled, request);
+                }
 
-            if (GlidePerformanceTrace.Enabled)
-                GlidePerformanceTrace.Mark("composition_batch_rendered", $"request={request.ImageRequestId};path={Path.GetFileName(path)}");
-            if (App.BenchmarkExitAfterFirstFrame)
-                Dispatcher.UIThread.Post(Close, DispatcherPriority.Background);
+                if (GlidePerformanceTrace.Enabled)
+                    GlidePerformanceTrace.Mark("composition_batch_rendered", $"request={request.ImageRequestId};path={Path.GetFileName(path)}");
+
+                if (App.NotifyFirstFrameEventName is { } notifyName)
+                {
+                    try
+                    {
+                        using var readyEvent = EventWaitHandle.OpenExisting(notifyName);
+                        readyEvent.Set();
+                    }
+                    catch { }
+                }
+
+                if (App.BenchmarkExitAfterFirstFrame)
+                    Dispatcher.UIThread.Post(Close, DispatcherPriority.Background);
+            }
 
             // Everything below is nonessential for the first correct frame and is intentionally gated
             // behind the render fence for this exact request.
@@ -1279,9 +1364,8 @@ public partial class MainWindow : Window
             UpdateStatusStats();
             UpdateWindowTitle();
             if (ImageInfoOverlay.IsVisible) UpdateImageInfoOverlayText();
-            if (!rapidPreviewOnly) RebuildTabStrip();
-            _diagnostics.Write("decode", "foreground_presented",
-                new { path, request = request.ImageRequestId, width = _currentPixelWidth, height = _currentPixelHeight,
+            if (!rapidPreviewOnly && _settings.TabsEnabled && _workspace.Tabs.Count > 1) RebuildTabStrip();
+            _diagnostics.Write("decode", "foreground_presented",    new { path, request = request.ImageRequestId, width = _currentPixelWidth, height = _currentPixelHeight,
                     decodeMs = _currentDecodeMs, cacheHit = result.CacheHit, preparedHit = result.PreparedFrameHit,
                     preview = result.IsPreview, route = result.DecodeRoute, index = _navigator.Index, count = _navigator.Count });
             if (_settings.StartupDiagnostics && !_startupFirstImageTimingWritten)
@@ -1306,7 +1390,7 @@ public partial class MainWindow : Window
             if (IsRequestCurrent(request))
             {
                 _diagnostics.Write("decode", "foreground_failed", new { path, request = request.ImageRequestId, error = ex.GetType().Name, ex.Message });
-                Title = $"Glide 3.5-6 — Open failed: {ex.GetType().Name}";
+                Title = $"Glide 3.5-7 — Open failed: {ex.GetType().Name}";
             }
             return new PresentationOutcome(PresentationStatus.Failed, request);
         }
@@ -1379,12 +1463,14 @@ public partial class MainWindow : Window
             if (!IsRequestCurrent(request, requirePresented: true))
             {
                 var rejected = Viewport.ReplaceBitmapPreservingView(old!);
-                rejected?.Dispose();
+                if (rejected is not null && !_loader.IsBitmapCached(rejected))
+                    rejected.Dispose();
                 return;
             }
 
             Viewport.SetInteractionBitmap(null);
-            _interactionPreviewBitmap?.Dispose();
+            if (_interactionPreviewBitmap is not null && !_loader.IsBitmapCached(_interactionPreviewBitmap))
+                _interactionPreviewBitmap.Dispose();
             _interactionPreviewBitmap = old;
             Viewport.SetInteractionBitmap(_interactionPreviewBitmap);
             _currentDecodeMs += refined.DecodeTime.TotalMilliseconds;
@@ -1684,7 +1770,7 @@ public partial class MainWindow : Window
             : "Fast browsing, precise zooming, and familiar Windows controls.";
         home.TipsGrid.IsVisible = !recentLanding && _settings.ShowHomeTips;
         ApplyWelcomeLayout();
-        Title = recentLanding ? "Glide 3.5-6 — Recent pictures" : "Glide 3.5-6 — Home";
+        Title = recentLanding ? "Glide 3.5-7 — Recent pictures" : "Glide 3.5-7 — Home";
         RefreshRecentHistoryHome();
         ApplyStatusVisibility();
     }
@@ -1843,7 +1929,7 @@ public partial class MainWindow : Window
                 ShowBrowserSurface();
                 RestoreBrowserNavigationState(browser);
                 NavigateBrowserTo(browser.Folder, addHistory: false);
-                Title = $"Glide 3.5-6 — Explorer — {browser.Folder}";
+                Title = $"Glide 3.5-7 — Explorer — {browser.Folder}";
                 break;
         }
         RebuildTabStrip();
@@ -3292,7 +3378,7 @@ public partial class MainWindow : Window
         BrowserBackButton.IsEnabled = session.Index > 0 || (_tabForwardImageTargets.TryGetValue(id, out var backTarget) && File.Exists(backTarget));
         BrowserForwardButton.IsEnabled = session.Index >= 0 && session.Index < session.History.Count - 1;
         BrowserUpButton.IsEnabled = Directory.GetParent(folder) is not null;
-        Title = $"Glide 3.5-6 — Explorer — {folder}";
+        Title = $"Glide 3.5-7 — Explorer — {folder}";
         RebuildTabStrip();
         SelectBrowserHighlight(id);
         UpdateTabNavigationButtons();
@@ -3330,7 +3416,7 @@ public partial class MainWindow : Window
         BrowserBackButton.IsEnabled = session.Index > 0 || (_tabForwardImageTargets.TryGetValue(browser.Id, out var nativeBackTarget) && File.Exists(nativeBackTarget));
         BrowserForwardButton.IsEnabled = session.Index >= 0 && session.Index < session.History.Count - 1;
         BrowserUpButton.IsEnabled = Directory.GetParent(folder) is not null;
-        Title = $"Glide 3.5-6 — Explorer — {folder}";
+        Title = $"Glide 3.5-7 — Explorer — {folder}";
         RebuildTabStrip();
         SelectBrowserHighlight(browser.Id);
         UpdateTabNavigationButtons();
@@ -4641,6 +4727,7 @@ public partial class MainWindow : Window
             SequentialForegroundReads = _settings.SequentialForegroundReads,
             PredictivePrefetch = _settings.PredictivePrefetch,
             PrefetchDepth = _settings.PrefetchDepth,
+            FullNeighbourPredecodeCount = 1,
             CompressedCacheItems = _settings.CacheItems,
             CompressedCacheMegabytes = _settings.CompressedCacheMegabytes,
             DecodedCacheMegabytes = _settings.DecodedCacheMegabytes
@@ -4753,10 +4840,12 @@ public partial class MainWindow : Window
             MainRoot.Background = Brushes.Transparent;
         else if (Application.Current?.Resources["BrushWindow"] is IBrush normalWindowBrush)
             MainRoot.Background = normalWindowBrush;
-        if (_homeSurface is not null) _homeSurface.TipsGrid.IsVisible = _settings.ShowHomeTips && !string.Equals(_settings.HomePageMode, "Recent pictures page", StringComparison.OrdinalIgnoreCase);
-        ApplyWelcomeLayout();
-        if (_settings.RecentHistoryEnabled) RecentHistoryStore.Trim(_settings.HistorySize);
-        RefreshRecentHistoryHome();
+        if (_homeSurface is not null)
+        {
+            _homeSurface.TipsGrid.IsVisible = _settings.ShowHomeTips && !string.Equals(_settings.HomePageMode, "Recent pictures page", StringComparison.OrdinalIgnoreCase);
+            ApplyWelcomeLayout();
+            RefreshRecentHistoryHome();
+        }
         TabStripHost.IsVisible = _settings.TabsEnabled;
         _workspace.ClosedHistoryLimit = Math.Clamp(_settings.ClosedTabHistoryLimit, 1, 100);
 
@@ -5895,14 +5984,14 @@ public partial class MainWindow : Window
     {
         if (string.IsNullOrWhiteSpace(_currentPath) || !ImageView.IsVisible)
         {
-            if (HomeHost.IsVisible) Title = "Glide 3.5-6 — Home";
+            if (HomeHost.IsVisible) Title = "Glide 3.5-7 — Home";
             return;
         }
         var display = _settings.FullPathInTitle ? _currentPath : Path.GetFileName(_currentPath);
         var index = _navigator.Count > 0 ? $"[{_navigator.Index + 1}/{_navigator.Count}]" : string.Empty;
         Title = prefix is null
-            ? $"Glide 3.5-6 — {display}  {index}  {Viewport.ZoomPercent}%"
-            : $"Glide 3.5-6 — {prefix} — {display}";
+            ? $"Glide 3.5-7 — {display}  {index}  {Viewport.ZoomPercent}%"
+            : $"Glide 3.5-7 — {prefix} — {display}";
     }
 
     private static string FormatFileSize(long bytes)
@@ -6312,7 +6401,7 @@ public partial class MainWindow : Window
         // folder-boundary policy used by status-bar/title-bar mouse buttons. Only if the key is STILL down
         // after the hold threshold do we enter the reduced-resolution playback path. This makes a tap
         // deterministic regardless of whether it lasts 30 ms or a few render frames.
-        const int holdActivationMs = 360;
+        const int holdActivationMs = 180;
         var minimumFrameTime = TimeSpan.FromSeconds(1.0 / 120.0);
         try
         {
@@ -6372,19 +6461,16 @@ public partial class MainWindow : Window
         {
             delta, index = _navigator.Index, count = _navigator.Count
         });
+
+        // Schedule prefetching of the next frames immediately so background decoding
+        // runs concurrently while presenting and rendering the current frame.
+        if (_navigator.Count > 1)
+            _loader.SchedulePrefetch(_navigator.Paths, _navigator.Index, _lastNavigationDirection);
+
         await PresentCurrentAsync(rapidPreviewOnly: true);
         if (token.IsCancellationRequested) return false;
 
-        // A decode completing is not the same thing as the user having seen the frame. Explicitly
-        // yield through the render queue before advancing the logical index. This prevents the UI
-        // compositor from coalescing dozens of rapid bitmap assignments into one visible update.
-        await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Render);
-        if (token.IsCancellationRequested) return false;
-
-        // Prepare the next few reduced frames while this one is on screen. Prepared-cache hits turn
-        // sustained key holds into a small playback pipeline rather than serial decode -> wait -> decode.
-        if (_navigator.Count > 1)
-            _loader.SchedulePrefetch(_navigator.Paths, _navigator.Index, _lastNavigationDirection);
+        await Task.Yield();
         return true;
     }
 

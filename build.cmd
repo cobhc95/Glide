@@ -44,7 +44,7 @@ exit /b %GLIDE_WRAPPER_RC%
 :captured_entry
 setlocal EnableExtensions EnableDelayedExpansion
 cd /d "%~dp0"
-title Glide 3.0
+title Glide 3.5-7
 
 set "GLIDE_AOT=0"
 set "GLIDE_FAST=0"
@@ -64,7 +64,7 @@ goto :parse_args
 
 :args_done
 echo ============================================================
-echo   Glide 3.0
+echo   Glide 3.5-7
 echo ============================================================
 echo.
 if "%GLIDE_AOT%"=="1" (
@@ -295,7 +295,7 @@ exit /b 0
 :progress
 set "GLIDE_PROGRESS=%~1"
 set "GLIDE_PROGRESS_LABEL=%~2"
-title Glide 3.5-6 Build - %GLIDE_PROGRESS%%% - %GLIDE_PROGRESS_LABEL%
+title Glide 3.5-7 Build - %GLIDE_PROGRESS%%% - %GLIDE_PROGRESS_LABEL%
 echo [ %GLIDE_PROGRESS%%% ] %GLIDE_PROGRESS_LABEL%
 exit /b 0
 

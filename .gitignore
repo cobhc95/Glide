@@ -3,6 +3,7 @@
 **/build/
 dist/
 dist-installer/
+dist-portable/
 .artifacts/
 artifacts/
 diagnostics-out/

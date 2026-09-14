@@ -4,4 +4,12 @@
     <PackageReference Include="Avalonia" Version="11.3.20" />
     <ProjectReference Include="..\Glide.Core\Glide.Core.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
+      <_Parameter1>Glide</_Parameter1>
+    </AssemblyAttribute>
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
+      <_Parameter1>Glide.Core.Tests</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
 </Project>

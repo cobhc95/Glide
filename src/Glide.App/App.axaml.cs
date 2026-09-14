@@ -10,6 +10,7 @@ public partial class App : Application
     public static string? StartupPath { get; set; }
     public static IReadOnlyList<string> StartupPaths { get; set; } = Array.Empty<string>();
     public static bool BenchmarkExitAfterFirstFrame { get; set; }
+    public static string? NotifyFirstFrameEventName { get; set; }
     public static bool AutoExportDiagnostics { get; set; }
     public static string? AutoExportDiagnosticsFolder { get; set; }
     public static Task<Glide.App.Settings.GlideSettingsState>? StartupSettingsTask { get; set; }
@@ -48,6 +49,7 @@ public partial class App : Application
             desktop.MainWindow = window;
             var paths = StartupPaths.Count > 0 ? StartupPaths : (!string.IsNullOrWhiteSpace(StartupPath) ? new[] { StartupPath! } : Array.Empty<string>());
             window.QueueOpenPaths(paths);
+            window.TryPrepareEarlyStartupPresentation();
         }
         base.OnFrameworkInitializationCompleted();
         GlidePerformanceTrace.Mark("framework_init_end");

@@ -1,7 +1,64 @@
+using System.Buffers;
+using System.IO.MemoryMappedFiles;
+using System.Runtime.InteropServices;
 using Avalonia.Media.Imaging;
 using Glide.Core;
 
 namespace Glide.Imaging;
+
+/// <summary>
+/// Unmanaged memory buffer allocated via NativeMemory or pooled memory owner.
+/// Bypasses the Large Object Heap (LOH) entirely and avoids GC pauses during heavy image browsing.
+/// </summary>
+public sealed class NativeCompressedBuffer : IDisposable
+{
+    private IntPtr _pointer;
+    private readonly long _length;
+    private int _disposed;
+
+    public const long MaxAllowedBufferBytes = 1024L * 1024L * 1024L; // 1 GB max compressed stream buffer
+
+    public unsafe NativeCompressedBuffer(long length)
+    {
+        if (length <= 0 || length > MaxAllowedBufferBytes)
+            throw new ArgumentOutOfRangeException(nameof(length), "Native compressed buffer length must be between 1 and 1GB.");
+        _length = length;
+        _pointer = (IntPtr)NativeMemory.Alloc((nuint)length);
+    }
+
+    public IntPtr Pointer => _pointer;
+    public long Length => _length;
+
+    public unsafe Span<byte> AsSpan()
+    {
+        ObjectDisposedException.ThrowIf(_disposed != 0, this);
+        return new Span<byte>((void*)_pointer, checked((int)_length));
+    }
+
+    public unsafe UnmanagedMemoryStream CreateReadStream()
+    {
+        ObjectDisposedException.ThrowIf(_disposed != 0, this);
+        return new UnmanagedMemoryStream((byte*)_pointer, _length, _length, FileAccess.Read);
+    }
+
+    public unsafe UnmanagedMemoryStream CreateWriteStream()
+    {
+        ObjectDisposedException.ThrowIf(_disposed != 0, this);
+        return new UnmanagedMemoryStream((byte*)_pointer, _length, _length, FileAccess.Write);
+    }
+
+    public void Dispose()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) == 0)
+        {
+            var ptr = Interlocked.Exchange(ref _pointer, IntPtr.Zero);
+            if (ptr != IntPtr.Zero)
+            {
+                unsafe { NativeMemory.Free((void*)ptr); }
+            }
+        }
+    }
+}
 
 /// <summary>
 /// Pass-3 staged image pipeline. Foreground first-paint, visible-image refinement and speculative
@@ -33,7 +90,7 @@ public sealed class ImageLoadCoordinator : IDisposable
     private string? _lastDemandPath;
     private CancellationTokenSource _activitySettleCts = new();
 
-    private sealed record CompressedEntry(byte[] Bytes, FileIdentity Identity, LinkedListNode<string> Node);
+    private sealed record CompressedEntry(NativeCompressedBuffer Buffer, FileIdentity Identity, LinkedListNode<string> Node);
     private sealed record PreparedEntry(Bitmap Bitmap, bool IsFull, ImageDimensions Source, FileIdentity Identity, long EstimatedBytes, LinkedListNode<string> Node);
     private readonly record struct FileIdentity(long Length, long LastWriteTicksUtc);
 
@@ -107,7 +164,7 @@ public sealed class ImageLoadCoordinator : IDisposable
         var started = System.Diagnostics.Stopwatch.GetTimestamp();
         if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("foreground_load_start", ImageFormatRegistry.GetLongestExtension(path));
 
-        if (TryTakePrepared(path, out var prepared))
+        if (TryGetPrepared(path, out var prepared))
         {
             if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("foreground_prepared_cache_hit", path);
             return new ImageLoadResult(path, prepared.Bitmap, System.Diagnostics.Stopwatch.GetElapsedTime(started),
@@ -116,83 +173,136 @@ public sealed class ImageLoadCoordinator : IDisposable
                 DecodeRoute: "prepared-cache");
         }
 
-        await _foregroundGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
+        if (StartupImagePreloader.TryConsume(path, out var preloadedResult) && preloadedResult is not null)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            // Windows first-paint fast path. Probe only the compact image header off-thread, then let
-            // a path-aware backend consume either an already-cached Shell thumbnail or a codec-native
-            // reduced frame. On a hit this avoids opening a second managed FileStream, avoids reading
-            // the compressed file into managed memory, and (for large JPEG/JPEG-XR) avoids materialising
-            // the full source raster before the user sees anything.
-            ImageDimensions source = default;
-            if (policy.DecoderScaledFirstFrame && _backend is IPathOptimizedImageDecoderBackend pathBackend &&
-                pathBackend.SupportsPathPreview(path))
+            using (preloadedResult)
             {
-                source = await Task.Run(() => ProbeDimensions(path), cancellationToken).ConfigureAwait(false);
-                if (source.IsValid && RequiresPreview(source, policy))
+                if (preloadedResult.Bitmap is not null)
                 {
-                    if (GlidePerformanceTrace.Enabled)
-                        GlidePerformanceTrace.Mark("foreground_path_preview_start", $"source={source.Width}x{source.Height};box={policy.PreviewMaxWidth}x{policy.PreviewMaxHeight}");
-                    var direct = await pathBackend.TryDecodePreviewFromPathAsync(path, source,
-                        policy.PreviewMaxWidth, policy.PreviewMaxHeight, policy.ProgressiveColorFirstPreview,
-                        cancellationToken).ConfigureAwait(false);
-                    if (direct is { } pathPreview)
+                    AddPrepared(path, preloadedResult.Bitmap, isFull: true, preloadedResult.Dimensions, epoch: -1);
+                    preloadedResult.IsConsumed = true;
+                    if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("foreground_startup_preload_hit", path);
+                    return new ImageLoadResult(path, preloadedResult.Bitmap, System.Diagnostics.Stopwatch.GetElapsedTime(started),
+                        CacheHit: true, IsPreview: false, SourceWidth: preloadedResult.Dimensions.Width,
+                        SourceHeight: preloadedResult.Dimensions.Height, Generation: generation, PreparedFrameHit: true,
+                        DecodeRoute: "startup-preloaded");
+                }
+                if (preloadedResult.NativeImage.Data != IntPtr.Zero && preloadedResult.NativeStatus == 1)
+                {
+                    if (NativeImageDecoder.TryCreateBitmapFromNative(preloadedResult.NativeImage, preloadedResult.NativeStatus, out var bitmap))
                     {
-                        if (generation != Volatile.Read(ref _generation))
-                        {
-                            pathPreview.Bitmap.Dispose();
-                            return null;
-                        }
-                        if (GlidePerformanceTrace.Enabled)
-                            GlidePerformanceTrace.Mark("foreground_path_preview_ready",
-                                $"route={pathPreview.Route};output={pathPreview.Bitmap.PixelSize.Width}x{pathPreview.Bitmap.PixelSize.Height};elapsed={System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds:F3}ms");
-                        return new ImageLoadResult(path, pathPreview.Bitmap, System.Diagnostics.Stopwatch.GetElapsedTime(started),
-                            CacheHit: pathPreview.Route == "shell-cache", IsPreview: pathPreview.IsPreview,
-                            SourceWidth: source.Width, SourceHeight: source.Height, Generation: generation, PreparedFrameHit: false,
-                            DecodeRoute: pathPreview.Route);
+                        preloadedResult.IsConsumed = true;
+                        AddPrepared(path, bitmap, isFull: true, preloadedResult.Dimensions, epoch: -1);
+                        if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("foreground_startup_preload_hit", path);
+                        return new ImageLoadResult(path, bitmap, System.Diagnostics.Stopwatch.GetElapsedTime(started),
+                            CacheHit: true, IsPreview: false, SourceWidth: preloadedResult.Dimensions.Width,
+                            SourceHeight: preloadedResult.Dimensions.Height, Generation: generation, PreparedFrameHit: true,
+                            DecodeRoute: "startup-native-preloaded");
                     }
-                    if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("foreground_path_preview_miss", path);
                 }
-            }
-
-            var (stream, compressedHit) = await OpenDecodeStreamAsync(path, policy.SequentialForegroundReads, cancellationToken).ConfigureAwait(false);
-            if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("foreground_stream_ready", compressedHit ? "compressed_cache" : "file");
-            using (stream)
-            {
-                if (!source.IsValid)
-                    source = await ProbeDimensionsAsync(path, stream, cancellationToken).ConfigureAwait(false);
-                if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("foreground_probe_ready", source.IsValid ? $"{source.Width}x{source.Height}" : "unknown");
-                Bitmap bitmap;
-                var isPreview = false;
-                if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("foreground_decode_start", source.IsValid ? $"{source.Width}x{source.Height}" : "unknown");
-                if (policy.DecoderScaledFirstFrame && source.IsValid && RequiresPreview(source, policy))
+                if (preloadedResult.PreloadedBytes is not null && preloadedResult.PreloadedBytes.Length > 0)
                 {
-                    var targetLongest = RequiredPreviewLongestSide(source, policy);
-                    bitmap = await _backend.DecodePreviewAsync(stream, source, targetLongest, policy.PreviewInterpolation, path, cancellationToken).ConfigureAwait(false);
-                    isPreview = bitmap.PixelSize.Width < source.Width || bitmap.PixelSize.Height < source.Height;
+                    using var ms = new MemoryStream(preloadedResult.PreloadedBytes, writable: false);
+                    var bitmap = _backend.DecodeFull(ms, path);
+                    preloadedResult.IsConsumed = true;
+                    AddPrepared(path, bitmap, isFull: true, preloadedResult.Dimensions, epoch: -1);
+                    if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("foreground_startup_preload_hit", path);
+                    return new ImageLoadResult(path, bitmap, System.Diagnostics.Stopwatch.GetElapsedTime(started),
+                        CacheHit: false, IsPreview: false, SourceWidth: preloadedResult.Dimensions.Width,
+                        SourceHeight: preloadedResult.Dimensions.Height, Generation: generation, PreparedFrameHit: true,
+                        DecodeRoute: "startup-memory-preloaded");
                 }
-                else
-                {
-                    bitmap = await _backend.DecodeFullAsync(stream, path, cancellationToken).ConfigureAwait(false);
-                    if (!source.IsValid) source = new ImageDimensions(bitmap.PixelSize.Width, bitmap.PixelSize.Height);
-                }
-
-                if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("foreground_decode_ready", $"{bitmap.PixelSize.Width}x{bitmap.PixelSize.Height};preview={isPreview}");
-                if (generation != Volatile.Read(ref _generation))
-                {
-                    bitmap.Dispose();
-                    return null;
-                }
-                if (!source.IsValid) source = new ImageDimensions(bitmap.PixelSize.Width, bitmap.PixelSize.Height);
-                if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("foreground_load_end", $"elapsed={System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds:F3}ms");
-                return new ImageLoadResult(path, bitmap, System.Diagnostics.Stopwatch.GetElapsedTime(started),
-                    compressedHit, isPreview, source.Width, source.Height, generation, false,
-                    compressedHit ? "compressed-stream" : "stream");
             }
         }
-        finally { _foregroundGate.Release(); }
+
+        return await Task.Run(async () =>
+        {
+            await _foregroundGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (generation != Volatile.Read(ref _generation)) return null;
+
+                if (TryGetPrepared(path, out var preparedWhileWaiting))
+                {
+                    if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("foreground_prepared_cache_hit", path);
+                    return new ImageLoadResult(path, preparedWhileWaiting.Bitmap, System.Diagnostics.Stopwatch.GetElapsedTime(started),
+                        CacheHit: true, IsPreview: !preparedWhileWaiting.IsFull, SourceWidth: preparedWhileWaiting.Source.Width,
+                        SourceHeight: preparedWhileWaiting.Source.Height, Generation: generation, PreparedFrameHit: true,
+                        DecodeRoute: "prepared-cache");
+                }
+
+                var (stream, compressedHit) = OpenDecodeStream(path, policy.SequentialForegroundReads);
+                if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("foreground_stream_ready", compressedHit ? "compressed_cache" : "file");
+                using (stream)
+                {
+                    var source = await ProbeDimensionsAsync(path, stream, cancellationToken).ConfigureAwait(false);
+                    if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("foreground_probe_ready", source.IsValid ? $"{source.Width}x{source.Height}" : "unknown");
+
+                    if (policy.DecoderScaledFirstFrame && _backend is IPathOptimizedImageDecoderBackend pathBackend &&
+                        pathBackend.SupportsPathPreview(path) && source.IsValid && RequiresPreview(source, policy))
+                    {
+                        if (GlidePerformanceTrace.Enabled)
+                            GlidePerformanceTrace.Mark("foreground_path_preview_start", $"source={source.Width}x{source.Height};box={policy.PreviewMaxWidth}x{policy.PreviewMaxHeight}");
+                        var direct = await pathBackend.TryDecodePreviewFromPathAsync(path, source,
+                            policy.PreviewMaxWidth, policy.PreviewMaxHeight, policy.ProgressiveColorFirstPreview,
+                            cancellationToken).ConfigureAwait(false);
+                        if (direct is { } pathPreview)
+                        {
+                            if (generation != Volatile.Read(ref _generation))
+                            {
+                                pathPreview.Bitmap.Dispose();
+                                return null;
+                            }
+                            if (GlidePerformanceTrace.Enabled)
+                                GlidePerformanceTrace.Mark("foreground_path_preview_ready",
+                                    $"route={pathPreview.Route};output={pathPreview.Bitmap.PixelSize.Width}x{pathPreview.Bitmap.PixelSize.Height};elapsed={System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds:F3}ms");
+                            AddPrepared(path, pathPreview.Bitmap, isFull: !pathPreview.IsPreview, source, epoch: -1);
+                            return new ImageLoadResult(path, pathPreview.Bitmap, System.Diagnostics.Stopwatch.GetElapsedTime(started),
+                                CacheHit: pathPreview.Route == "shell-cache", IsPreview: pathPreview.IsPreview,
+                                SourceWidth: source.Width, SourceHeight: source.Height, Generation: generation, PreparedFrameHit: false,
+                                DecodeRoute: pathPreview.Route);
+                        }
+                        if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("foreground_path_preview_miss", path);
+                    }
+
+                    Bitmap bitmap;
+                    var isPreview = false;
+                    if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("foreground_decode_start", source.IsValid ? $"{source.Width}x{source.Height}" : "unknown");
+                    if (source.IsValid && IsDecompressionBomb(source))
+                    {
+                        throw new InvalidDataException(
+                            $"Image dimensions ({source.Width}x{source.Height}) exceed the safe decompression bomb limit of {ImageHeaderProbe.MaxTotalPixels:N0} pixels.");
+                    }
+
+                    if (policy.DecoderScaledFirstFrame && source.IsValid && RequiresPreview(source, policy))
+                    {
+                        var targetLongest = RequiredPreviewLongestSide(source, policy);
+                        bitmap = await _backend.DecodePreviewAsync(stream, source, targetLongest, policy.PreviewInterpolation, path, cancellationToken).ConfigureAwait(false);
+                        isPreview = bitmap.PixelSize.Width < source.Width || bitmap.PixelSize.Height < source.Height;
+                    }
+                    else
+                    {
+                        bitmap = await _backend.DecodeFullAsync(stream, path, cancellationToken).ConfigureAwait(false);
+                        if (!source.IsValid) source = new ImageDimensions(bitmap.PixelSize.Width, bitmap.PixelSize.Height);
+                    }
+
+                    if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("foreground_decode_ready", $"{bitmap.PixelSize.Width}x{bitmap.PixelSize.Height};preview={isPreview}");
+                    if (generation != Volatile.Read(ref _generation))
+                    {
+                        bitmap.Dispose();
+                        return null;
+                    }
+                    if (!source.IsValid) source = new ImageDimensions(bitmap.PixelSize.Width, bitmap.PixelSize.Height);
+                    AddPrepared(path, bitmap, isFull: !isPreview, source, epoch: -1);
+                    if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("foreground_load_end", $"elapsed={System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds:F3}ms");
+                    return new ImageLoadResult(path, bitmap, System.Diagnostics.Stopwatch.GetElapsedTime(started),
+                        compressedHit, isPreview, source.Width, source.Height, generation, false,
+                        compressedHit ? "compressed-stream" : "stream");
+                }
+            }
+            finally { _foregroundGate.Release(); }
+        }, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<ImageLoadResult?> RefineForegroundAsync(ImageLoadResult firstFrame, CancellationToken cancellationToken = default)
@@ -213,21 +323,20 @@ public sealed class ImageLoadCoordinator : IDisposable
         var plan = _refinementScheduler.Plan(source, demand, _navigationActivity, policy);
         if (!plan.Allowed) return null;
 
-        if (TryTakePrepared(firstFrame.Path, out var prepared) && prepared.IsFull)
+        if (TryGetPrepared(firstFrame.Path, out var prepared) && prepared.IsFull)
         {
-            if (firstFrame.Generation != Volatile.Read(ref _generation)) { prepared.Bitmap.Dispose(); return null; }
+            if (firstFrame.Generation != Volatile.Read(ref _generation)) return null;
             if ((long)prepared.Bitmap.PixelSize.Width * prepared.Bitmap.PixelSize.Height <=
                 (long)firstFrame.Bitmap.PixelSize.Width * firstFrame.Bitmap.PixelSize.Height)
-            { prepared.Bitmap.Dispose(); return null; }
+            { return null; }
             var preparedBudget = Policy.DecodedCacheMegabytes * 1024L * 1024L;
             var preparedBytes = EstimatedDecodedBytes(prepared.Bitmap.PixelSize.Width, prepared.Bitmap.PixelSize.Height);
             var firstBytes = EstimatedDecodedBytes(firstFrame.Bitmap.PixelSize.Width, firstFrame.Bitmap.PixelSize.Height);
             if (preparedBytes > Math.Max(0, preparedBudget - firstBytes))
-            { prepared.Bitmap.Dispose(); return null; }
+            { return null; }
             return new ImageLoadResult(firstFrame.Path, prepared.Bitmap, TimeSpan.Zero, true, false,
                 prepared.Source.Width, prepared.Source.Height, firstFrame.Generation, true);
         }
-        if (prepared.Bitmap is not null) prepared.Bitmap.Dispose();
 
         await _refinementGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         var started = System.Diagnostics.Stopwatch.GetTimestamp();
@@ -352,7 +461,7 @@ public sealed class ImageLoadCoordinator : IDisposable
             using (stream)
             {
                 var source = await ProbeDimensionsAsync(path, stream, token).ConfigureAwait(false);
-                if (!source.IsValid) return false;
+                if (!source.IsValid || IsDecompressionBomb(source)) return false;
                 var wantFull = allowFull && EstimatedDecodedBytes(source.Width, source.Height) <= policy.DecodedCacheMegabytes * 1024L * 1024L / 2;
                 Bitmap bitmap;
                 var isFull = false;
@@ -398,32 +507,67 @@ public sealed class ImageLoadCoordinator : IDisposable
                 return;
             }
             if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("compressed_cache_read_start", $"bytes={before.Length};limit={readLimit}");
-            var bytes = await File.ReadAllBytesAsync(path, token).ConfigureAwait(false);
-            if (!TryIdentity(path, out var after) || after != before || bytes.LongLength != before.Length) return;
-            if (epoch != Volatile.Read(ref _cacheEpoch)) return;
-            if (AddCompressed(path, bytes, before, epoch) && GlidePerformanceTrace.Enabled)
-                GlidePerformanceTrace.Mark("compressed_cache_admitted", $"bytes={bytes.LongLength}");
+            
+            // Allocate native unmanaged buffer to completely avoid LOH GC pressure
+            var buffer = new NativeCompressedBuffer(before.Length);
+            try
+            {
+                await using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 64 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan))
+                using (var unmanagedStream = buffer.CreateWriteStream())
+                {
+                    await fs.CopyToAsync(unmanagedStream, token).ConfigureAwait(false);
+                }
+
+                if (!TryIdentity(path, out var after) || after != before || buffer.Length != before.Length)
+                {
+                    buffer.Dispose();
+                    return;
+                }
+                if (epoch != Volatile.Read(ref _cacheEpoch))
+                {
+                    buffer.Dispose();
+                    return;
+                }
+                if (AddCompressed(path, buffer, before, epoch))
+                {
+                    if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("compressed_cache_admitted", $"bytes={buffer.Length}");
+                }
+                else
+                {
+                    buffer.Dispose();
+                }
+            }
+            catch
+            {
+                buffer.Dispose();
+                throw;
+            }
         }
         catch (OperationCanceledException) { throw; }
         catch { }
         finally { _compressedWarmGate.Release(); }
     }
 
-    private async Task<(Stream Stream, bool CacheHit)> OpenDecodeStreamAsync(string path, bool sequential, CancellationToken token)
+    private (Stream Stream, bool CacheHit) OpenDecodeStream(string path, bool sequential)
+    {
+        if (TryGetCompressed(path, out var buffer) && buffer is not null)
+            return (buffer.CreateReadStream(), true);
+
+        var options = FileOptions.Asynchronous | (sequential ? FileOptions.SequentialScan : FileOptions.None);
+        return (new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 128 * 1024, options), false);
+    }
+
+    private Task<(Stream Stream, bool CacheHit)> OpenDecodeStreamAsync(string path, bool sequential, CancellationToken token)
     {
         token.ThrowIfCancellationRequested();
-        if (TryGetCompressed(path, out var bytes) && bytes is not null)
-            return (new MemoryStream(bytes, writable: false), true);
+        if (Thread.CurrentThread.IsThreadPoolThread)
+            return Task.FromResult(OpenDecodeStream(path, sequential));
 
-        // Opening a cold/network/slow-storage file can itself stall. Keep even handle acquisition off
-        // the UI continuation; foreground decode retains priority but never owns the UI thread.
-        var stream = await Task.Run<Stream>(() =>
+        return Task.Run(() =>
         {
             token.ThrowIfCancellationRequested();
-            var options = FileOptions.Asynchronous | (sequential ? FileOptions.SequentialScan : FileOptions.None);
-            return new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 128 * 1024, options);
-        }, token).ConfigureAwait(false);
-        return (stream, false);
+            return OpenDecodeStream(path, sequential);
+        }, token);
     }
 
     private ImageDimensions ProbeDimensions(string path)
@@ -461,14 +605,8 @@ public sealed class ImageLoadCoordinator : IDisposable
         var header = await ImageHeaderProbe.TryProbeAsync(alreadyOpenStream, cancellationToken).ConfigureAwait(false);
         if (header is { IsValid: true }) return header.Value;
 
-        var nativeDimensions = await Task.Run(() =>
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (NativeImageProbe.TryProbe(path, out var native) && native.Width > 0 && native.Height > 0)
-                return new ImageDimensions((int)Math.Min(native.Width, (uint)int.MaxValue), (int)Math.Min(native.Height, (uint)int.MaxValue));
-            return default;
-        }, cancellationToken).ConfigureAwait(false);
-        if (nativeDimensions.IsValid) return nativeDimensions;
+        if (NativeImageProbe.TryProbe(path, out var native) && native.Width > 0 && native.Height > 0)
+            return new ImageDimensions((int)Math.Min(native.Width, (uint)int.MaxValue), (int)Math.Min(native.Height, (uint)int.MaxValue));
 
         var provider = await _backend.ProbeAsync(path, cancellationToken).ConfigureAwait(false);
         return provider is { Supported: true, Dimensions.IsValid: true } ? provider.Value.Dimensions : default;
@@ -481,10 +619,15 @@ public sealed class ImageLoadCoordinator : IDisposable
         {
             _cacheEpoch++;
             _prefetchCts.Cancel();
+            foreach (var entry in _compressed.Values) entry.Buffer.Dispose();
             _compressed.Clear();
             _compressedLru.Clear();
             _compressedBytes = 0;
-            foreach (var entry in _prepared.Values) entry.Bitmap.Dispose();
+            foreach (var entry in _prepared.Values)
+            {
+                if (!string.Equals(entry.Node.Value, _currentActivePath, StringComparison.OrdinalIgnoreCase))
+                    entry.Bitmap.Dispose();
+            }
             _prepared.Clear();
             _preparedLru.Clear();
             _preparedBytes = 0;
@@ -506,37 +649,37 @@ public sealed class ImageLoadCoordinator : IDisposable
         lock (_cacheGate) return new(_compressed.Count, _compressedBytes, _prepared.Count, _preparedBytes, Volatile.Read(ref _cacheEpoch));
     }
 
-    private bool TryGetCompressed(string path, out byte[]? bytes)
+    private bool TryGetCompressed(string path, out NativeCompressedBuffer? buffer)
     {
-        bytes = null;
+        buffer = null;
         if (!TryIdentity(path, out var identity)) { InvalidateCachedPath(path); return false; }
         lock (_cacheGate)
         {
             if (!_compressed.TryGetValue(path, out var entry)) return false;
             if (entry.Identity != identity) { RemoveCompressedLocked(path, entry); return false; }
             _compressedLru.Remove(entry.Node); _compressedLru.AddFirst(entry.Node);
-            bytes = entry.Bytes;
+            buffer = entry.Buffer;
             return true;
         }
     }
 
-    private bool AddCompressed(string path, byte[] bytes, FileIdentity identity, long epoch)
+    private bool AddCompressed(string path, NativeCompressedBuffer buffer, FileIdentity identity, long epoch)
     {
         var budget = Policy.CompressedCacheMegabytes * 1024L * 1024L;
-        if (bytes.LongLength > ImagePerformanceGovernor.GetMaxSpeculativeCompressedFileBytes(Policy) || bytes.LongLength > budget || bytes.LongLength != identity.Length) return false;
+        if (buffer.Length > ImagePerformanceGovernor.GetMaxSpeculativeCompressedFileBytes(Policy) || buffer.Length > budget || buffer.Length != identity.Length) return false;
         lock (_cacheGate)
         {
             if (epoch != _cacheEpoch) return false;
             if (_compressed.TryGetValue(path, out var old)) RemoveCompressedLocked(path, old);
             var node = _compressedLru.AddFirst(path);
-            _compressed[path] = new CompressedEntry(bytes, identity, node);
-            _compressedBytes += bytes.LongLength;
+            _compressed[path] = new CompressedEntry(buffer, identity, node);
+            _compressedBytes += buffer.Length;
             TrimCompressedLocked();
             return true;
         }
     }
 
-    private bool TryTakePrepared(string path, out PreparedFrame frame)
+    private bool TryGetPrepared(string path, out PreparedFrame frame)
     {
         frame = default;
         if (!TryIdentity(path, out var identity)) { InvalidateCachedPath(path); return false; }
@@ -544,13 +687,14 @@ public sealed class ImageLoadCoordinator : IDisposable
         {
             if (!_prepared.TryGetValue(path, out var entry)) return false;
             if (entry.Identity != identity) { RemovePreparedLocked(path, entry, dispose: true); return false; }
-            RemovePreparedLocked(path, entry, dispose: false);
+            _preparedLru.Remove(entry.Node);
+            _preparedLru.AddFirst(entry.Node);
             frame = new PreparedFrame(entry.Bitmap, entry.IsFull, entry.Source);
             return true;
         }
     }
 
-    private void AddPrepared(string path, Bitmap bitmap, bool isFull, ImageDimensions source, long epoch)
+    internal void AddPrepared(string path, Bitmap bitmap, bool isFull, ImageDimensions source, long epoch = -1)
     {
         var estimate = EstimatedDecodedBytes(bitmap.PixelSize.Width, bitmap.PixelSize.Height);
         var budget = Policy.DecodedCacheMegabytes * 1024L * 1024L;
@@ -558,12 +702,35 @@ public sealed class ImageLoadCoordinator : IDisposable
         if (!TryIdentity(path, out var identity)) { bitmap.Dispose(); return; }
         lock (_cacheGate)
         {
-            if (epoch != _cacheEpoch) { bitmap.Dispose(); return; }
-            if (_prepared.TryGetValue(path, out var old)) RemovePreparedLocked(path, old, dispose: true);
+            if (epoch >= 0 && epoch != _cacheEpoch) { bitmap.Dispose(); return; }
+            if (_prepared.TryGetValue(path, out var old))
+            {
+                if (old.IsFull && !isFull) { bitmap.Dispose(); return; }
+                RemovePreparedLocked(path, old, dispose: true);
+            }
             var node = _preparedLru.AddFirst(path);
             _prepared[path] = new PreparedEntry(bitmap, isFull, source, identity, estimate, node);
             _preparedBytes += estimate;
             TrimPreparedLocked();
+        }
+    }
+
+    private string? _currentActivePath;
+    public void SetActivePath(string? path)
+    {
+        lock (_cacheGate) _currentActivePath = path;
+    }
+
+    public bool IsBitmapCached(Bitmap? bitmap)
+    {
+        if (bitmap is null) return false;
+        lock (_cacheGate)
+        {
+            foreach (var entry in _prepared.Values)
+            {
+                if (ReferenceEquals(entry.Bitmap, bitmap)) return true;
+            }
+            return false;
         }
     }
 
@@ -578,9 +745,10 @@ public sealed class ImageLoadCoordinator : IDisposable
 
     private void RemoveCompressedLocked(string path, CompressedEntry entry)
     {
-        _compressedBytes -= entry.Bytes.LongLength;
+        _compressedBytes -= entry.Buffer.Length;
         _compressedLru.Remove(entry.Node);
         _compressed.Remove(path);
+        entry.Buffer.Dispose();
     }
 
     private void RemovePreparedLocked(string path, PreparedEntry entry, bool dispose)
@@ -608,10 +776,21 @@ public sealed class ImageLoadCoordinator : IDisposable
     private void TrimPreparedLocked()
     {
         var byteLimit = Policy.DecodedCacheMegabytes * 1024L * 1024L;
-        while (_preparedBytes > byteLimit && _preparedLru.Last is { } last)
+        var node = _preparedLru.Last;
+        while (_preparedBytes > byteLimit && node is not null)
         {
-            if (_prepared.TryGetValue(last.Value, out var entry)) RemovePreparedLocked(last.Value, entry, dispose: true);
-            else _preparedLru.RemoveLast();
+            var prev = node.Previous;
+            var path = node.Value;
+            if (string.Equals(path, _currentActivePath, StringComparison.OrdinalIgnoreCase))
+            {
+                node = prev;
+                continue;
+            }
+            if (_prepared.TryGetValue(path, out var entry))
+                RemovePreparedLocked(path, entry, dispose: true);
+            else
+                _preparedLru.Remove(node);
+            node = prev;
         }
     }
 
@@ -627,6 +806,15 @@ public sealed class ImageLoadCoordinator : IDisposable
         }
         catch { return false; }
     }
+    public static bool IsDecompressionBomb(ImageDimensions dimensions)
+    {
+        if (!dimensions.IsValid) return false;
+        if (dimensions.Width > ImageHeaderProbe.MaxDimension || dimensions.Height > ImageHeaderProbe.MaxDimension)
+            return true;
+        var pixels = (long)dimensions.Width * dimensions.Height;
+        return pixels > ImageHeaderProbe.MaxTotalPixels;
+    }
+
     private static long EstimatedDecodedBytes(int width, int height)
     {
         if (width <= 0 || height <= 0) return 0;

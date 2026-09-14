@@ -1,9 +1,11 @@
 using Xunit;
 using Glide.Core;
 using Glide.Imaging;
+using Glide.Diagnostics;
 
 namespace Glide.Core.Tests;
 
+[Collection(AvaloniaHeadlessCollection.Name)]
 public sealed class ImageLoadCoordinatorCachePolicyTests
 {
     [Fact]
@@ -32,6 +34,40 @@ public sealed class ImageLoadCoordinatorCachePolicyTests
             Assert.Equal(0, snapshot.CompressedBytes);
         }
         finally { try { File.Delete(path); } catch { } }
+    }
+
+    [Fact]
+    public async Task RecentlyViewedImagesHitDecodedCacheOnBackNavigation()
+    {
+        var payload = ImageDiagnosticFixtures.CreatePayloads()[".png"];
+        var path1 = Path.Combine(Path.GetTempPath(), "glide-mru-1-" + Guid.NewGuid() + ".png");
+        var path2 = Path.Combine(Path.GetTempPath(), "glide-mru-2-" + Guid.NewGuid() + ".png");
+        try
+        {
+            File.WriteAllBytes(path1, payload);
+            File.WriteAllBytes(path2, payload);
+
+            using var loader = new ImageLoadCoordinator();
+            var res1 = await loader.LoadForegroundAsync(path1);
+            Assert.NotNull(res1);
+            Assert.False(res1!.PreparedFrameHit);
+
+            var res2 = await loader.LoadForegroundAsync(path2);
+            Assert.NotNull(res2);
+            Assert.False(res2!.PreparedFrameHit);
+
+            // Navigate back to path1: must be an instant 0ms decoded cache hit!
+            var res1Back = await loader.LoadForegroundAsync(path1);
+            Assert.NotNull(res1Back);
+            Assert.True(res1Back!.PreparedFrameHit);
+            Assert.True(res1Back.CacheHit);
+            Assert.Equal("prepared-cache", res1Back.DecodeRoute);
+        }
+        finally
+        {
+            try { File.Delete(path1); } catch { }
+            try { File.Delete(path2); } catch { }
+        }
     }
 
 

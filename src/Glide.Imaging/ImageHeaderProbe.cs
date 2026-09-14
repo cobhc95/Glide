@@ -12,27 +12,41 @@ public static class ImageHeaderProbe
     public static bool TryProbe(string path, out ImageDimensions dimensions)
     {
         dimensions = default;
-        byte[]? rented = null;
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return false;
+
+        // Zero-allocation stackalloc probe for common image formats (JPEG, PNG, GIF, BMP, WebP)
+        Span<byte> header = stackalloc byte[4096];
         try
         {
-            rented = ArrayPool<byte>.Shared.Rent(MaxHeaderBytes);
             using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete,
-                32 * 1024, FileOptions.SequentialScan);
-            var total = 0;
-            while (total < MaxHeaderBytes)
+                4096, FileOptions.SequentialScan);
+            var read = stream.Read(header);
+            if (read >= 10 && TryProbe(header[..read], out dimensions)) return true;
+
+            if (read == 4096)
             {
-                var read = stream.Read(rented, total, Math.Min(ProbeChunkBytes, MaxHeaderBytes - total));
-                if (read <= 0) break;
-                total += read;
-                if (total >= 64 && TryProbe(rented.AsSpan(0, total), out dimensions)) return true;
+                byte[]? rented = ArrayPool<byte>.Shared.Rent(MaxHeaderBytes);
+                try
+                {
+                    header.CopyTo(rented);
+                    var total = read;
+                    while (total < MaxHeaderBytes)
+                    {
+                        var chunk = stream.Read(rented, total, Math.Min(ProbeChunkBytes, MaxHeaderBytes - total));
+                        if (chunk <= 0) break;
+                        total += chunk;
+                        if (TryProbe(rented.AsSpan(0, total), out dimensions)) return true;
+                    }
+                    return TryProbe(rented.AsSpan(0, total), out dimensions);
+                }
+                finally
+                {
+                    ArrayPool<byte>.Shared.Return(rented);
+                }
             }
-            return TryProbe(rented.AsSpan(0, total), out dimensions);
+            return false;
         }
         catch { return false; }
-        finally
-        {
-            if (rented is not null) ArrayPool<byte>.Shared.Return(rented);
-        }
     }
 
     /// <summary>
@@ -42,20 +56,37 @@ public static class ImageHeaderProbe
     public static async ValueTask<ImageDimensions?> TryProbeAsync(Stream stream, CancellationToken cancellationToken = default)
     {
         if (!stream.CanRead || !stream.CanSeek) return null;
-        byte[]? rented = null;
         var origin = stream.Position;
+        byte[]? rented = null;
         try
         {
-            rented = ArrayPool<byte>.Shared.Rent(MaxHeaderBytes);
-            var total = 0;
-            while (total < MaxHeaderBytes)
+            rented = ArrayPool<byte>.Shared.Rent(ProbeChunkBytes);
+            var read = await stream.ReadAsync(rented.AsMemory(0, ProbeChunkBytes), cancellationToken).ConfigureAwait(false);
+            if (read >= 10 && TryProbe(rented.AsSpan(0, read), out var quick))
+                return quick;
+
+            if (read == ProbeChunkBytes)
             {
-                var read = await stream.ReadAsync(rented.AsMemory(total, Math.Min(ProbeChunkBytes, MaxHeaderBytes - total)), cancellationToken).ConfigureAwait(false);
-                if (read <= 0) break;
-                total += read;
-                if (total >= 64 && TryProbe(rented.AsSpan(0, total), out var dimensions)) return dimensions;
+                var larger = ArrayPool<byte>.Shared.Rent(MaxHeaderBytes);
+                try
+                {
+                    Array.Copy(rented, 0, larger, 0, read);
+                    var total = read;
+                    while (total < MaxHeaderBytes)
+                    {
+                        var chunk = await stream.ReadAsync(larger.AsMemory(total, Math.Min(ProbeChunkBytes, MaxHeaderBytes - total)), cancellationToken).ConfigureAwait(false);
+                        if (chunk <= 0) break;
+                        total += chunk;
+                        if (TryProbe(larger.AsSpan(0, total), out var dimensions)) return dimensions;
+                    }
+                    return TryProbe(larger.AsSpan(0, total), out var final) ? final : null;
+                }
+                finally
+                {
+                    ArrayPool<byte>.Shared.Return(larger);
+                }
             }
-            return TryProbe(rented.AsSpan(0, total), out var final) ? final : null;
+            return null;
         }
         catch (OperationCanceledException) { throw; }
         catch { return null; }
@@ -158,9 +189,15 @@ public static class ImageHeaderProbe
     private static uint ReadU32(ReadOnlySpan<byte> data, int offset, bool littleEndian) =>
         littleEndian ? BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(offset, 4)) : BinaryPrimitives.ReadUInt32BigEndian(data.Slice(offset, 4));
 
+    public const int MaxDimension = 65_535;
+    public const long MaxTotalPixels = 256_000_000L; // 256 Megapixels (~1.0 GB uncompressed in 32bpp)
+
     private static bool Set(int width, int height, out ImageDimensions d)
     {
         d = new(width, height);
-        return width > 0 && height > 0 && width <= 1_000_000 && height <= 1_000_000;
+        if (width <= 0 || height <= 0 || width > MaxDimension || height > MaxDimension)
+            return false;
+        var pixels = (long)width * height;
+        return pixels <= MaxTotalPixels;
     }
 }

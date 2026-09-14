@@ -12,6 +12,9 @@ internal static class Program
     [STAThread]
     public static int Main(string[] args)
     {
+        // Pre-warm thread pool to eliminate cold-launch worker thread dispatch delays
+        ThreadPool.SetMinThreads(Math.Max(8, Environment.ProcessorCount), 8);
+
         // Build-time fixture generation also runs before Avalonia initialization.
         if (args.Length >= 2 && args[0].Equals("--write-diagnostic-fixtures", StringComparison.OrdinalIgnoreCase))
         {
@@ -61,6 +64,23 @@ internal static class Program
                 var folder = args.Length >= 3 ? args[2] : "Glide Diagnostics";
                 return DiagnosticRunner.Export(folder, Console.Out);
             }
+
+            if (args[1].Equals("measure-launch", StringComparison.OrdinalIgnoreCase) ||
+                args[1].Equals("cold-launch", StringComparison.OrdinalIgnoreCase))
+            {
+                var target = args.Length >= 3 && !args[2].StartsWith("--") ? args[2] : null;
+                var runs = args.Length >= 4 && int.TryParse(args[3], out var parsedRuns) ? parsedRuns :
+                           (args.Length >= 3 && int.TryParse(args[2], out var r2) ? r2 : 3);
+                return DiagnosticRunner.MeasureLaunch(target, runs, Console.Out);
+            }
+        }
+        if (args.Length >= 1 && (args[0].Equals("--measure-launch", StringComparison.OrdinalIgnoreCase) ||
+                                args[0].Equals("--measure-cold-launch", StringComparison.OrdinalIgnoreCase)))
+        {
+            var target = args.Length >= 2 && !args[1].StartsWith("--") ? args[1] : null;
+            var runs = args.Length >= 3 && int.TryParse(args[2], out var parsedRuns) ? parsedRuns :
+                       (args.Length >= 2 && int.TryParse(args[1], out var r2) ? r2 : 3);
+            return DiagnosticRunner.MeasureLaunch(target, runs, Console.Out);
         }
 
         // Optional benchmark trace. Strip our private switch before passing arguments to Avalonia.
@@ -77,6 +97,11 @@ internal static class Program
             if (args[i].Equals("--benchmark-exit-after-first-frame", StringComparison.OrdinalIgnoreCase))
             {
                 App.BenchmarkExitAfterFirstFrame = true;
+                continue;
+            }
+            if (args[i].Equals("--notify-first-frame", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+            {
+                App.NotifyFirstFrameEventName = args[++i];
                 continue;
             }
             if (args[i].Equals("--force-new-instance", StringComparison.OrdinalIgnoreCase))
@@ -97,6 +122,10 @@ internal static class Program
         try
         {
             App.StartupPaths = appArgs.Where(a => File.Exists(a) || Directory.Exists(a)).ToArray();
+            if (App.StartupPaths.Count > 0 && File.Exists(App.StartupPaths[0]) && ImageNavigator.IsSupported(App.StartupPaths[0]))
+            {
+                Glide.Imaging.StartupImagePreloader.Start(App.StartupPaths[0]);
+            }
 
             var firstFramePolicy = SettingsStore.LoadFirstFramePolicy();
             App.StartupFirstFramePolicy = firstFramePolicy;
@@ -106,7 +135,7 @@ internal static class Program
             // reads only the compact scalar first-frame policy, avoiding hotkey/gesture/profile migration on a forwarding
             // process that is about to exit anyway.
             var benchmarkForcesColdProcess = string.Equals(Environment.GetEnvironmentVariable("GLIDE_BENCHMARK_DISABLE_REUSE"), "1", StringComparison.Ordinal);
-            var shouldReuse = !forceNewInstance && !benchmarkForcesColdProcess && launchPolicy.ReuseSingleInstance &&
+            var shouldReuse = !forceNewInstance && !benchmarkForcesColdProcess && !App.BenchmarkExitAfterFirstFrame && launchPolicy.ReuseSingleInstance &&
                 !string.Equals(launchPolicy.ExternalOpenBehavior, "Open new window", StringComparison.OrdinalIgnoreCase);
             // Prepare one immutable request batch for the entire launch attempt. The same request IDs
             // are reused by both forwarding attempts so a lost acknowledgement cannot turn the second
@@ -179,6 +208,15 @@ internal static class Program
             .With(new SkiaOptions
             {
                 MaxGpuResourceSizeBytes = GlideGpuResourceCacheBytes
+            })
+            .With(new Win32PlatformOptions
+            {
+                CompositionMode = new[]
+                {
+                    Win32CompositionMode.DirectComposition,
+                    Win32CompositionMode.WinUIComposition,
+                    Win32CompositionMode.RedirectionSurface
+                }
             });
 #if DEBUG
         // Release cold launch must not pay trace-listener/log plumbing costs.

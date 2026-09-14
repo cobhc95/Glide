@@ -29,7 +29,7 @@ internal static class ExternalLaunchBroker
     // the elected owner releases/exits and another live Glide process can take over.
     private const string PresenceName = @"Local\Glide3.ProcessPresence.v3";
     private const string ProtocolHeader = "GLIDE3\t2";
-    private static readonly TimeSpan ClientDeadline = TimeSpan.FromMilliseconds(1500);
+    private static readonly TimeSpan ClientDeadline = TimeSpan.FromMilliseconds(120);
     private static readonly TimeSpan ServerPeerDeadline = TimeSpan.FromSeconds(2);
     private const int MaxProtocolLineChars = 128 * 1024;
     private static readonly object Gate = new();
@@ -122,8 +122,7 @@ internal static class ExternalLaunchBroker
             using var existing = EventWaitHandle.OpenExisting(PresenceName);
             return existing is not null;
         }
-        catch (WaitHandleCannotBeOpenedException) { return false; }
-        catch { return true; }
+        catch { return false; }
     }
 
     public static bool TryForwardToExisting(ExternalLaunchBatch? batch)

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text.Json;
@@ -16,12 +17,12 @@ namespace Glide.Diagnostics;
 /// </summary>
 public static class DiagnosticRunner
 {
-    public const string BuildVersion = "3.0";
+    public const string BuildVersion = "3.5.7";
 
     public static DiagnosticSnapshot Capture() => new(
         Product: "Glide",
         Version: BuildVersion,
-        Release: "Glide 3.0",
+        Release: "Glide 3.5.7 (Cold Launch & Security Hardened)",
         Architecture: "C# + Avalonia retained-mode UI + semantic core + small native C++ bridge; NativeAOT blocked pending COM isolation",
         TimestampUtc: DateTimeOffset.UtcNow,
         Framework: RuntimeInformation.FrameworkDescription,
@@ -56,8 +57,8 @@ public static class DiagnosticRunner
             $"{snapshot.SettingsSchemaCount} declarative settings registered"));
         var currentSettings = SettingsCatalog.All.Count(x => x.FuturePhase is null);
         var futureSettings = SettingsCatalog.All.Count(x => x.FuturePhase is not null);
-        checks.Add(Check("settings_schema_glide30_contract", snapshot.SettingsSchemaCount == 160 && currentSettings == 160 && futureSettings == 0,
-            $"Glide 3.0 catalogue contract: total={snapshot.SettingsSchemaCount}, current={currentSettings}, future={futureSettings}; expected 160/160/0."));
+        checks.Add(Check("settings_schema_glide30_contract", snapshot.SettingsSchemaCount == 166 && currentSettings == 166 && futureSettings == 0,
+            $"Glide 3.0 catalogue contract: total={snapshot.SettingsSchemaCount}, current={currentSettings}, future={futureSettings}; expected 166/166/0."));
         var progressiveColor = SettingsCatalog.All.FirstOrDefault(x => string.Equals(x.Id, "performance.progressiveColor", StringComparison.OrdinalIgnoreCase));
         checks.Add(Check("progressive_color_runtime_contract",
             progressiveColor is not null && progressiveColor.FuturePhase is null && progressiveColor.DefaultValue is bool enabled && enabled,
@@ -291,6 +292,163 @@ public static class DiagnosticRunner
         }
     }
 
+
+    public static int MeasureLaunch(string? targetImagePath, int iterations, TextWriter output)
+    {
+        output.WriteLine("============================================================");
+        output.WriteLine("  Glide Real-World Cold Launch Diagnostic Harness");
+        output.WriteLine("============================================================");
+
+        var exePath = Environment.ProcessPath;
+        if (string.IsNullOrEmpty(exePath) || !File.Exists(exePath))
+            exePath = Path.Combine(AppContext.BaseDirectory, "Glide.exe");
+
+        if (!File.Exists(exePath))
+        {
+            var fallback = Path.Combine(Directory.GetCurrentDirectory(), "dist", "Glide.exe");
+            if (File.Exists(fallback)) exePath = fallback;
+        }
+
+        if (!File.Exists(exePath))
+        {
+            output.WriteLine($"ERROR: Glide executable not found at: {exePath}");
+            return 1;
+        }
+
+        var image = targetImagePath;
+        if (string.IsNullOrWhiteSpace(image) || !File.Exists(image))
+        {
+            var candidates = new[]
+            {
+                Path.Combine(AppContext.BaseDirectory, "artifacts", "diagnostic-fixtures", "fixture.jpg"),
+                Path.Combine(Directory.GetCurrentDirectory(), "artifacts", "diagnostic-fixtures", "fixture.jpg"),
+                Path.Combine(AppContext.BaseDirectory, "artifacts", "diagnostic-fixtures", "navigation-stress-240", "browse_0003_large.jpg"),
+                Path.Combine(Directory.GetCurrentDirectory(), "artifacts", "diagnostic-fixtures", "navigation-stress-240", "browse_0003_large.jpg")
+            };
+            image = candidates.FirstOrDefault(File.Exists);
+        }
+
+        if (string.IsNullOrWhiteSpace(image) || !File.Exists(image))
+        {
+            output.WriteLine("ERROR: Target image file not specified or not found.");
+            return 1;
+        }
+
+        image = Path.GetFullPath(image);
+        iterations = Math.Clamp(iterations, 1, 30);
+
+        output.WriteLine($"Executable:   {exePath}");
+        output.WriteLine($"Target Image: {image} ({new FileInfo(image).Length / 1024} KB)");
+        output.WriteLine($"Iterations:   {iterations}");
+        output.WriteLine("Launching isolated OS processes to measure cold start to first on-screen paint...");
+        output.WriteLine("------------------------------------------------------------");
+
+        var firstFrameTimes = new List<double>();
+        var fullExitTimes = new List<double>();
+        var bitmapAssignedTimes = new List<double>();
+
+        for (var i = 1; i <= iterations; i++)
+        {
+            var eventName = $"Glide_ColdLaunch_Ready_{Guid.NewGuid():N}";
+            using var readyEvent = new EventWaitHandle(false, EventResetMode.ManualReset, eventName);
+            var tempTrace = Path.Combine(Path.GetTempPath(), $"glide_bench_{Guid.NewGuid():N}.tsv");
+
+            var psi = new ProcessStartInfo
+            {
+                FileName = exePath,
+                UseShellExecute = false,
+                CreateNoWindow = false
+            };
+            psi.ArgumentList.Add("--perf-trace");
+            psi.ArgumentList.Add(tempTrace);
+            psi.ArgumentList.Add("--benchmark-exit-after-first-frame");
+            psi.ArgumentList.Add("--force-new-instance");
+            psi.ArgumentList.Add("--notify-first-frame");
+            psi.ArgumentList.Add(eventName);
+            psi.ArgumentList.Add(image);
+
+            var sw = Stopwatch.StartNew();
+            using var proc = Process.Start(psi);
+            if (proc is null)
+            {
+                output.WriteLine($"Iteration {i}: Failed to spawn process.");
+                continue;
+            }
+
+            var signaled = readyEvent.WaitOne(TimeSpan.FromSeconds(10));
+            var firstFrameMs = sw.Elapsed.TotalMilliseconds;
+
+            var exited = proc.WaitForExit(6000);
+            var totalExitMs = sw.Elapsed.TotalMilliseconds;
+            sw.Stop();
+
+            double bitmapMs = 0;
+            string decodeRoute = "unknown";
+            if (File.Exists(tempTrace))
+            {
+                try
+                {
+                    var lines = File.ReadAllLines(tempTrace);
+                    foreach (var line in lines)
+                    {
+                        var parts = line.Split('\t');
+                        if (parts.Length >= 4 && parts[3] == "bitmap_assigned")
+                        {
+                            if (double.TryParse(parts[0], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var bMs))
+                                bitmapMs = bMs;
+                            if (parts.Length >= 5) decodeRoute = parts[4];
+                        }
+                    }
+                    File.Delete(tempTrace);
+                }
+                catch { }
+            }
+
+            if (!signaled)
+            {
+                output.WriteLine($"Iteration {i}: TIMEOUT waiting for first frame signal.");
+            }
+            else
+            {
+                firstFrameTimes.Add(firstFrameMs);
+                fullExitTimes.Add(totalExitMs);
+                if (bitmapMs > 0) bitmapAssignedTimes.Add(bitmapMs);
+
+                var runType = i == 1 ? " [COLD]" : "";
+                output.WriteLine($"Run #{i}{runType}: First frame on screen: {firstFrameMs:F1} ms | Bitmap assigned: {bitmapMs:F1} ms | Process exit: {totalExitMs:F1} ms");
+            }
+
+            if (i < iterations)
+                Thread.Sleep(150);
+        }
+
+        output.WriteLine("============================================================");
+        output.WriteLine("  SUMMARY RESULTS");
+        output.WriteLine("============================================================");
+        if (firstFrameTimes.Count > 0)
+        {
+            var cold = firstFrameTimes[0];
+            var min = firstFrameTimes.Min();
+            var avg = firstFrameTimes.Average();
+            var max = firstFrameTimes.Max();
+            output.WriteLine($"First Frame Painted to User (Screen Visible):");
+            output.WriteLine($"  Cold First Run:          {cold:F1} ms");
+            output.WriteLine($"  Min (Fastest):           {min:F1} ms");
+            output.WriteLine($"  Average:                 {avg:F1} ms");
+            output.WriteLine($"  Max:                     {max:F1} ms");
+            if (bitmapAssignedTimes.Count > 0)
+                output.WriteLine($"  Bitmap Assigned Average: {bitmapAssignedTimes.Average():F1} ms");
+            output.WriteLine($"  Process Lifecycle Avg:   {fullExitTimes.Average():F1} ms");
+        }
+        else
+        {
+            output.WriteLine("No successful runs recorded.");
+            return 1;
+        }
+
+        output.WriteLine("============================================================");
+        return 0;
+    }
 
     private static ImageTabState AssertImage(TabState tab) => tab as ImageTabState ?? throw new InvalidOperationException("Expected image tab.");
 

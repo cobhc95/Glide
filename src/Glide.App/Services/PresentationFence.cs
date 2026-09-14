@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Avalonia.Rendering.Composition;
 using Avalonia.Threading;
 using Glide.App.Controls;
@@ -13,6 +14,9 @@ namespace Glide.App.Services;
 /// </summary>
 internal sealed class PresentationFence
 {
+    [DllImport("dwmapi.dll", PreserveSig = true)]
+    private static extern int DwmFlush();
+
     private readonly Func<ImageViewport, CancellationToken, Task<bool>>? _postDrawAwaiterForTests;
     private readonly TimeSpan _timeout;
 
@@ -31,21 +35,23 @@ internal sealed class PresentationFence
         Action<long>? handler = null;
         var finished = 0;
 
-        void FinishOnUi(bool rendered)
+        void Finish(bool rendered)
         {
             if (Interlocked.Exchange(ref finished, 1) != 0) return;
-            viewport.PresentationDrawRecorded -= handler;
+            if (Dispatcher.UIThread.CheckAccess())
+            {
+                viewport.PresentationDrawRecorded -= handler;
+            }
+            else
+            {
+                Dispatcher.UIThread.Post(() =>
+                {
+                    try { viewport.PresentationDrawRecorded -= handler; } catch { }
+                }, DispatcherPriority.Send);
+            }
             registration.Dispose();
             fenceCts.Dispose();
             completion.TrySetResult(rendered);
-        }
-
-        async Task FinishOnUiAsync(bool rendered)
-        {
-            if (Dispatcher.UIThread.CheckAccess())
-                FinishOnUi(rendered);
-            else
-                await Dispatcher.UIThread.InvokeAsync(() => FinishOnUi(rendered), DispatcherPriority.Render);
         }
 
         handler = drawnRequestId =>
@@ -69,25 +75,40 @@ internal sealed class PresentationFence
                 {
                     rendered = await _postDrawAwaiterForTests(viewport, fenceCts.Token).ConfigureAwait(false);
                 }
+                else if (OperatingSystem.IsWindows())
+                {
+                    if (GlidePerformanceTrace.Enabled)
+                        GlidePerformanceTrace.Mark("dwm_flush_waiting");
+                    await Task.Run(() => DwmFlush(), fenceCts.Token).ConfigureAwait(false);
+                    if (GlidePerformanceTrace.Enabled)
+                        GlidePerformanceTrace.Mark("dwm_flush_done");
+                    rendered = true;
+                }
                 else
                 {
                     var visual = ElementComposition.GetElementVisual(viewport);
-                    if (visual is null) { await FinishOnUiAsync(false); return; }
+                    if (visual is null) { Finish(false); return; }
+                    if (GlidePerformanceTrace.Enabled)
+                        GlidePerformanceTrace.Mark("compositor_batch_request_start");
                     var batch = visual.Compositor.RequestCompositionBatchCommitAsync();
+                    if (GlidePerformanceTrace.Enabled)
+                        GlidePerformanceTrace.Mark("compositor_batch_waiting");
                     await batch.Rendered.WaitAsync(_timeout, fenceCts.Token).ConfigureAwait(false);
+                    if (GlidePerformanceTrace.Enabled)
+                        GlidePerformanceTrace.Mark("compositor_batch_rendered_done");
                     rendered = true;
                 }
-                await FinishOnUiAsync(rendered).ConfigureAwait(false);
+                Finish(rendered);
             }
-            catch (OperationCanceledException) { await FinishOnUiAsync(false).ConfigureAwait(false); }
-            catch (TimeoutException) { await FinishOnUiAsync(false).ConfigureAwait(false); }
-            catch { await FinishOnUiAsync(false).ConfigureAwait(false); }
+            catch (OperationCanceledException) { Finish(false); }
+            catch (TimeoutException) { Finish(false); }
+            catch { Finish(false); }
         }
 
         viewport.PresentationDrawRecorded += handler;
         registration = fenceCts.Token.Register(() =>
         {
-            Dispatcher.UIThread.Post(() => FinishOnUi(false), DispatcherPriority.Background);
+            Dispatcher.UIThread.Post(() => Finish(false), DispatcherPriority.Background);
         });
         return completion.Task;
     }
