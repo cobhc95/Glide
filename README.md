@@ -1,4 +1,4 @@
-# Glide 3.56
+# Glide 3.58
 
 ## Fast. Lightweight. Multi-tabbed. Multi-window. Highly customizable.
 
