@@ -1,6 +1,12 @@
-# ACTIVE IMPLEMENTATION CHECKPOINT — GLIDE 3.5
+# ACTIVE IMPLEMENTATION CHECKPOINT — GLIDE 3.5-2
 
-> **ZERO-CONTEXT TAKEOVER — READ THIS FIRST.** Glide 3.5 preserves all 3.4 right-drag and 3.3-2 overlay/resize work, adds configurable left-drag window-move policy, and fixes false Settings dirty/restart prompts caused by load-time normalization.
+> **3.5-2 transparency compositor fix (2026-09-13):** The 3.5-1 decoder guard was necessary but insufficient. The actual remaining defect was that `MainWindow` was initially created with an opaque `BrushWindow` top-level background and only changed to transparent after entering Whole-App Overlay. The permanent invariant is now: **the Avalonia `Window.Background`, `TransparencyLevelHint`, and transparency fallback remain transparent from initial window creation for the entire HWND lifetime.** Normal-mode opacity is painted on `MainRoot` instead. Entering Overlay sets `MainRoot` transparent; exiting/restyling restores `BrushWindow` only on `MainRoot`. Never restore an opaque brush to the top-level Window. This preserves desktop-visible per-pixel alpha for PNG/WebP/etc while keeping normal Glide visually opaque. The 3.5-1 rule that alpha-capable formats must never use potentially flattened Shell thumbnails also remains mandatory.
+
+> **3.5-1 transparency bug-fix checkpoint (2026-09-13):** Whole-app Overlay already requests a transparent HWND and suppresses the viewport fill, but the fast image pipeline could still source Windows Shell/Explorer cached thumbnails for alpha-capable formats. Windows may flatten those thumbnails onto an opaque grey background before Glide receives them, permanently destroying source alpha. 3.5-1 adds `ImageFormatRegistry.MayContainTransparency`, refuses Shell cached previews for transparency-capable formats, and refuses Shell full-image fallback for those formats. PNG/WebP/AVIF/GIF/ICO/TGA/EXR and other listed alpha-capable formats therefore remain on alpha-preserving Avalonia/WIC/provider routes. Regression tests cover alpha-capable versus opaque format classification. **Do not remove this guard for speed; transparency correctness outranks Shell-thumbnail latency on alpha-capable formats.**
+>
+> **Validation status:** source patched and statically inspected in the handoff environment. The environment does not provide the Windows/.NET toolchain (`dotnet` unavailable), so compile/runtime validation remains mandatory on Windows. Verify with a PNG containing fully transparent and semi-transparent pixels over a visibly patterned desktop: Overlay must reveal the desktop exactly through alpha=0 regions and blend alpha 1–254 correctly, with no grey matte at first frame or after refinement.
+
+> **ZERO-CONTEXT TAKEOVER — READ THIS FIRST.** Glide 3.5-2 preserves all 3.4 right-drag and 3.3-2 overlay/resize work, adds configurable left-drag window-move policy, and fixes false Settings dirty/restart prompts caused by load-time normalization.
 >
 > **New 3.5 left-drag contract (do not regress):**
 > - Settings > Mouse now exposes **Left-drag window behavior** independently from **Left-drag on image**.
@@ -11,7 +17,7 @@
 >
 > **Settings clean-baseline fix:** after controls finish loading, the round-tripped/canonicalized state becomes the clean baseline. Legacy compatibility fields, derived booleans, ComboBox fallback normalization, or collection cloning must NOT make Settings claim the user changed something merely by opening it. A true user edit after opening must still enable Apply/show dirty state.
 >
-> **Versioning:** 3.5 is a dotted feature release because it adds a persistent user-configurable interaction policy. Bug-only corrections after this baseline use 3.5-1, 3.5-2, etc.
+> **Versioning:** 3.5 is a dotted feature release because it adds a persistent user-configurable interaction policy. Bug-only corrections after this baseline use 3.5-2, 3.5-2, etc.
 
 ## 1. What the reviewer actually verified
 
@@ -658,7 +664,7 @@ Checks performed:
 
 - Input archive SHA-256 recorded above; 291 files, 21 changed/added against prior reviewed source.
 - Four AXAML files, seven project XML files and `app.manifest` parse as XML.
-- SettingsCatalog and SettingEffectRegistry retain 159 unique IDs each with equal sets.
+- SettingsCatalog and SettingEffectRegistry retain 160 unique IDs each with equal sets.
 - Native forbidden cleanup-jump pattern is removed by inspection; no Windows compile was possible here.
 - Source-level contradiction verified: directories admitted by the broker are rejected by the receiver.
 - Source-level regression verified: valid first-frame cache still constructs full default settings before probing it.
@@ -888,8 +894,8 @@ This is a targeted, cross-cutting source review with repository-wide searches. I
 |---|---|---|
 | Parse all source `.axaml` | 4 files parsed successfully | XML well-formedness only |
 | Parse all `.csproj` | 7 files parsed successfully | XML well-formedness only |
-| SettingsCatalog literal IDs | 159, all unique | Structural catalogue count |
-| SettingEffectRegistry literal IDs | 159, all unique | Structural registry count; sets checked against catalogue |
+| SettingsCatalog literal IDs | 160, all unique | Structural catalogue count |
+| SettingEffectRegistry literal IDs | 160, all unique | Structural registry count; sets checked against catalogue |
 | HotkeyCatalog literal IDs | 68, all unique | Action-ID uniqueness, not shortcut behavior |
 | Transfer handoff count | Exactly one | Packaging contract |
 | Native `goto` language-rule reproduction | `g++ -std=c++20 -fsyntax-only` rejects a reduced reproduction | Jump across initialized declarations is invalid C++ |
@@ -1559,8 +1565,8 @@ The agent runtime used for this checkpoint has **no .NET SDK, MSVC, PowerShell o
 
 Static checks completed/reconfirmed in the agent runtime on the re-audited Part 3 release-candidate source:
 - all `.axaml` files under `src/` parse as XML;
-- `SettingsCatalog` literal rows = **159**, all unique;
-- `SettingEffectRegistry` literal rows = **159**, all unique, with an exact ID set match to the settings catalogue;
+- `SettingsCatalog` literal rows = **160**, all unique;
+- `SettingEffectRegistry` literal rows = **160**, all unique, with an exact ID set match to the settings catalogue;
 - `HotkeyCatalog` literal rows = **68**, all unique;
 - `overlay.wholeAppAlwaysStart` exists exactly once and defaults false;
 - normal-mode Overlay context menu contains one Enter action (a duplicate found during audit was removed);
@@ -1712,7 +1718,7 @@ Implemented contract:
 
 Static audit performed before this checkpoint:
 - duplicate normal-mode `Enter Overlay` context-menu item found and removed;
-- setting/effect catalogue contract remains 159 active settings with `overlay.wholeAppAlwaysStart` default false;
+- setting/effect catalogue contract remains 160 active settings with `overlay.wholeAppAlwaysStart` default false;
 - hotkey catalogue remains 68 unique rows; no Overlay-mode hotkey was silently added;
 - XAML remains well-formed;
 - source package still obeys exactly-one-handoff rule.

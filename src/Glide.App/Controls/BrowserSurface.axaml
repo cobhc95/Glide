@@ -5,7 +5,7 @@
   <Grid RowDefinitions="44,*" Background="{DynamicResource BrushViewport}">
         <Border x:Name="BrowserToolbarBorder" Grid.Row="0" Background="{DynamicResource BrushSurface}" BorderBrush="{DynamicResource BrushBorderSoft}" BorderThickness="0,0,0,1">
           <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,*,Auto,Auto" ColumnSpacing="5" Margin="9,6">
-            <Button x:Name="BrowserBackButton" Classes="browserTool" Click="BrowserBackClicked" ToolTip.Tip="Up / return to containing folder"><controls:GlideIconView Kind="Previous" Classes="toolbarGlyph"/></Button>
+            <Button x:Name="BrowserBackButton" Classes="browserTool" Click="BrowserBackClicked" ToolTip.Tip="Back"><controls:GlideIconView Kind="Previous" Classes="toolbarGlyph"/></Button>
             <Button x:Name="BrowserForwardButton" Grid.Column="1" Classes="browserTool" Click="BrowserForwardClicked" ToolTip.Tip="Forward"><controls:GlideIconView Kind="Next" Classes="toolbarGlyph"/></Button>
             <Button x:Name="BrowserUpButton" Grid.Column="2" Classes="browserTool" Click="BrowserUpClicked" ToolTip.Tip="Up one folder"><controls:GlideIconView Kind="Up" Classes="toolbarGlyph"/></Button>
             <Button x:Name="BrowserRefreshButton" Grid.Column="3" Classes="browserTool" Click="BrowserRefreshClicked" ToolTip.Tip="Refresh"><controls:GlideIconView Kind="Refresh" Classes="toolbarGlyph"/></Button>

@@ -67,7 +67,7 @@ public sealed class SettingsStoreRoundTripTests
 
             var loaded = SettingsStore.Load();
             Assert.Equal(new[] { "Ctrl+H", "1" }, loaded.Hotkeys["view.actual"]);
-            Assert.Equal(2, loaded.SettingsSchemaVersion);
+            Assert.Equal(3, loaded.SettingsSchemaVersion);
         });
     }
 
@@ -309,7 +309,7 @@ public sealed class SettingsStoreRoundTripTests
             Assert.Equal(new[] { "F11", "Enter" }, loaded.Hotkeys["view.fullscreen"]);
             Assert.Equal(new[] { "F", "Shift+W" }, loaded.Hotkeys["view.fit"]);
             Assert.Equal(new[] { "Ctrl+H", "1" }, loaded.Hotkeys["view.actual"]);
-            Assert.Equal(2, loaded.SettingsSchemaVersion);
+            Assert.Equal(3, loaded.SettingsSchemaVersion);
         });
     }
 
@@ -328,6 +328,40 @@ public sealed class SettingsStoreRoundTripTests
         Assert.Equal(new[] { "Z" }, merged.Hotkeys["view.fit"]);
         Assert.Equal(31, merged.CacheItems);
         Assert.Equal("Large", merged.StatusBarSize);
+    }
+
+    [Fact]
+    public void Window_placement_settings_roundtrip_preserves_position_size_and_maximized_state()
+    {
+        WithIsolatedStore(() =>
+        {
+            var state = new GlideSettingsState
+            {
+                RememberWindowPlacement = true,
+                WindowX = 250,
+                WindowY = 180,
+                WindowWidth = 1400,
+                WindowHeight = 900,
+                WindowWasMaximized = true
+            };
+            SettingsStore.Save(state);
+
+            var firstFramePolicy = SettingsStore.LoadFirstFramePolicy();
+            Assert.True(firstFramePolicy.RememberWindowPlacement);
+            Assert.Equal(250, firstFramePolicy.WindowX);
+            Assert.Equal(180, firstFramePolicy.WindowY);
+            Assert.Equal(1400, firstFramePolicy.WindowWidth);
+            Assert.Equal(900, firstFramePolicy.WindowHeight);
+            Assert.True(firstFramePolicy.WindowWasMaximized);
+
+            var loaded = SettingsStore.Load();
+            Assert.True(loaded.RememberWindowPlacement);
+            Assert.Equal(250, loaded.WindowX);
+            Assert.Equal(180, loaded.WindowY);
+            Assert.Equal(1400, loaded.WindowWidth);
+            Assert.Equal(900, loaded.WindowHeight);
+            Assert.True(loaded.WindowWasMaximized);
+        });
     }
 
     private static void WithIsolatedStore(Action action)

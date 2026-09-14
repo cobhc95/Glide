@@ -1,4 +1,4 @@
-param([string]$Output = "Glide_3.3-1_ZeroContext_Source.zip")
+param([string]$Output = "Glide-Zero-Context-Handover.zip")
 $ErrorActionPreference = 'Stop'
 $project = Split-Path -Parent $MyInvocation.MyCommand.Path
 $bundleRoot = Split-Path -Parent $project
@@ -22,23 +22,30 @@ if ((Test-Path $codecDir) -and (Test-Path $indexTool)) {
     & $indexTool -CodecDirectory $codecDir
 }
 
-Get-ChildItem $stagedProject -Directory -Recurse | Where-Object { $_.Name -in @('bin','obj','build','dist','artifacts','dist-installer') } | Remove-Item -Recurse -Force
+Get-ChildItem $stagedProject -Directory -Recurse | Where-Object { $_.Name -in @('bin','obj','build','dist','artifacts','.artifacts','dist-installer','.git') } | Remove-Item -Recurse -Force
 Get-ChildItem $stagedProject -File -Recurse | Where-Object {
-    $_.Name -match '\.(bak|tmp|orig|prehelddrag)$' -or $_.Name -like 'Glide_*_Source.zip' -or $_.Name -like 'Glide_*_CompileFix*.zip'
+    $_.Name -match '\.(bak|tmp|orig|prehelddrag|log)$' -or $_.Name -like '*.zip' -or $_.Name -like 'build-output.txt' -or $_.Name -like 'installer-output.txt'
 } | Remove-Item -Force
 
 # Permanent transfer contract: exactly one handoff document, inside Glide Image Viewer.
 $handoffs = @(Get-ChildItem $stagedProject -File -Recurse | Where-Object {
-    $_.Name -match '(?i)handoff|hand-over|handover' -or $_.Name -eq 'GLIDE_LEGACY_COMPLETE_ZERO_CONTEXT_HANDOFF.txt'
+    ($_.Name -match '(?i)handoff|hand-over|handover' -and $_.Extension -in @('.md','.txt')) -or $_.Name -eq 'GLIDE_LEGACY_COMPLETE_ZERO_CONTEXT_HANDOFF.txt'
 })
 if ($handoffs.Count -ne 1 -or $handoffs[0].Name -ne 'GLIDE_MANIFESTO_AND_HANDOFF.md') {
     $found = ($handoffs | ForEach-Object { $_.FullName }) -join "`n"
     throw "Packaging contract requires exactly one handoff file named GLIDE_MANIFESTO_AND_HANDOFF.md inside Glide Image Viewer. Found:`n$found"
 }
 
-$destination = Join-Path $bundleRoot $Output
-if (Test-Path $destination) { Remove-Item $destination -Force }
-Compress-Archive -Path $stagedProject -DestinationPath $destination -CompressionLevel Optimal
+$destinationProject = Join-Path $project $Output
+$destinationBundle = Join-Path $bundleRoot $Output
+
+if (Test-Path $destinationProject) { Remove-Item $destinationProject -Force }
+Compress-Archive -Path $stagedProject -DestinationPath $destinationProject -CompressionLevel Optimal
+
+if (Test-Path $destinationBundle) { Remove-Item $destinationBundle -Force }
+Copy-Item $destinationProject $destinationBundle -Force
+
 Remove-Item $temp -Recurse -Force
-Write-Host "Created $destination"
+Write-Host "Created $destinationProject"
+Write-Host "Created $destinationBundle"
 Write-Host "ZIP contract: Glide Image Viewer/ only; one comprehensive handoff inside it."

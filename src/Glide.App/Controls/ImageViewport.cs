@@ -882,26 +882,14 @@ public sealed class ImageViewport : Control
     private const int VkRButton = 0x02;
     private const int VkMButton = 0x04;
 
-    [DllImport("user32.dll")]
-    private static extern short GetAsyncKeyState(int vKey);
-
     private static (bool Left, bool Right, bool Middle) ReadPressedButtons(PointerPoint point)
     {
-        if (!OperatingSystem.IsWindows())
-            return (point.Properties.IsLeftButtonPressed, point.Properties.IsRightButtonPressed, point.Properties.IsMiddleButtonPressed);
-        try
-        {
-            var left = (GetAsyncKeyState(VkLButton) & 0x8000) != 0;
-            var right = (GetAsyncKeyState(VkRButton) & 0x8000) != 0;
-            var middle = (GetAsyncKeyState(VkMButton) & 0x8000) != 0;
-            // On a genuine left press, stale Avalonia right-button state after a Win32 resize must not
-            // reclassify the press as secondary. Physical Win32 state is authoritative on Windows.
-            return (left, right, middle);
-        }
-        catch
-        {
-            return (point.Properties.IsLeftButtonPressed, point.Properties.IsRightButtonPressed, point.Properties.IsMiddleButtonPressed);
-        }
+        var kind = point.Properties.PointerUpdateKind;
+        if (kind == PointerUpdateKind.LeftButtonPressed) return (true, false, false);
+        if (kind == PointerUpdateKind.RightButtonPressed) return (false, true, false);
+        if (kind == PointerUpdateKind.MiddleButtonPressed) return (false, false, true);
+
+        return (point.Properties.IsLeftButtonPressed, point.Properties.IsRightButtonPressed, point.Properties.IsMiddleButtonPressed);
     }
 
     private void OnPressed(object? sender, PointerPressedEventArgs e)
@@ -1388,12 +1376,6 @@ public sealed class ImageViewport : Control
                 var configuredClick = ResolveGesture("windowed.leftClickImage");
                 if (!string.Equals(configuredClick, GestureCatalog.Default, StringComparison.OrdinalIgnoreCase))
                     DispatchGestureAction(configuredClick, e.GetPosition(this));
-                else if (!IsFullscreen && CanPanImage() && Environment.TickCount64 - _leftPressTicks <= 420)
-                {
-                    // A quick, stationary left click on a cropped/zoomed image is intentionally a
-                    // context-menu gesture. Holds/drags exceed the threshold and retain pan/selection semantics.
-                    ContextMenuRequested?.Invoke(e.GetPosition(this));
-                }
             }
             _leftPressOnImage = false;
             e.Handled = true;

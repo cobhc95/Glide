@@ -4,12 +4,14 @@
         xmlns:platform="using:Glide.App.Platform"
         x:Class="Glide.App.MainWindow"
         Width="1064" Height="687" MinWidth="180" MinHeight="360"
-        Title="Glide 3.5 — Home"
+        Title="Glide 3.5-6 — Home"
         Icon="/Assets/Glide.ico"
         SystemDecorations="None"
         ExtendClientAreaToDecorationsHint="False"
-        Background="{DynamicResource BrushWindow}">
-  <Grid x:Name="MainRoot" RowDefinitions="44,*">
+        Background="Transparent"
+        TransparencyLevelHint="Transparent"
+        TransparencyBackgroundFallback="Transparent">
+  <Grid x:Name="MainRoot" RowDefinitions="44,*" Background="{DynamicResource BrushWindow}">
     <!-- Browser-style integrated title/tab bar. On Windows the visual row is client-drawn, while a
          Win32 frame controller returns native non-client hit-test codes for caption buttons and the
          resize edge. This mirrors the Chromium/Firefox architecture rather than Avalonia system chrome. -->
@@ -35,9 +37,9 @@
         <!-- Browser-like Back/Forward live on the right-side chrome, visually separated from
              user-configurable utility actions. Their history is per tab. -->
         <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center" Margin="0,4,6,4">
-          <StackPanel x:Name="TabNavigationHost" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
-            <Button x:Name="TabNavBackButton" Classes="tabNavUtility back" Width="34" Height="34" Click="TabNavBackClicked" ToolTip.Tip="Up / return to containing folder">
-              <controls:GlideIconView Kind="Previous" Width="14" Height="14" IconBrush="{DynamicResource BrushAccent}" StrokeWidth="2"/>
+          <StackPanel x:Name="TabNavigationHost" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center" Background="Transparent">
+            <Button x:Name="TabNavBackButton" Classes="tabNavUtility back" Width="34" Height="34" Click="TabNavBackClicked" ToolTip.Tip="Up to containing folder">
+              <controls:GlideIconView Kind="Up" Width="14" Height="14" IconBrush="{DynamicResource BrushAccent}" StrokeWidth="2"/>
             </Button>
             <Button x:Name="TabNavForwardButton" Classes="tabNavUtility forward" Width="34" Height="34" Click="TabNavForwardClicked" ToolTip.Tip="Forward">
               <controls:GlideIconView Kind="Next" Width="14" Height="14" IconBrush="{DynamicResource BrushText}" StrokeWidth="2"/>

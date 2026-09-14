@@ -27,11 +27,12 @@ public sealed class SettingsCatalogTests
     }
 
     [Fact]
-    public void Glide30_catalog_has_159_current_and_no_future_entries()
+    public void Glide30_catalog_has_166_current_and_no_future_entries()
     {
-        Assert.Equal(159, SettingsCatalog.All.Count);
-        Assert.Equal(159, SettingsCatalog.All.Count(x => x.FuturePhase is null));
+        Assert.Equal(166, SettingsCatalog.All.Count);
+        Assert.Equal(166, SettingsCatalog.All.Count(x => x.FuturePhase is null));
         Assert.Empty(SettingsCatalog.All.Where(x => x.FuturePhase is not null));
+        Assert.Contains(SettingsCatalog.All, x => x.Id == "keyboard.tabFocusNavigation" && x.FuturePhase is null && x.DefaultValue is bool tabNav && !tabNav);
         Assert.Contains(SettingsCatalog.All, x => x.Id == "performance.compressedCacheMb" && x.FuturePhase is null);
         Assert.Contains(SettingsCatalog.All, x => x.Id == "performance.decodedCacheMb" && x.FuturePhase is null);
         Assert.Contains(SettingsCatalog.All, x => x.Id == "performance.sequentialReads" && x.FuturePhase is null);

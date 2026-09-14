@@ -37,4 +37,25 @@ public sealed class ImageFormatRegistryTests
         Assert.False(ImageFormatRegistry.IsCoreFastPath(path));
         Assert.True(ImageNavigator.IsSupported(path));
     }
+
+    [Theory]
+    [InlineData("transparent.png")]
+    [InlineData("overlay.webp")]
+    [InlineData("icon.ico")]
+    [InlineData("layered.avif")]
+    [InlineData("sprite.tga")]
+    [InlineData("scene.exr")]
+    public void TransparencyCapableFormats_AreIdentified(string path)
+    {
+        Assert.True(ImageFormatRegistry.MayContainTransparency(path));
+    }
+
+    [Theory]
+    [InlineData("photo.jpg")]
+    [InlineData("scan.bmp")]
+    [InlineData("document.pbm")]
+    public void OpaqueFormats_AreNotMarkedTransparencyCapable(string path)
+    {
+        Assert.False(ImageFormatRegistry.MayContainTransparency(path));
+    }
 }

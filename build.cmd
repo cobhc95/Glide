@@ -213,7 +213,7 @@ if not exist "dist\Glide.Native.dll" (
 )
 call :progress 90 "Diagnostic fixtures"
 if "%GLIDE_FAST%"=="1" (
-  powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File "tools\fixture-manifest.ps1" -Mode Validate -Directory "artifacts\diagnostic-fixtures" -Generator "dist\Glide.exe" -SourceIdentity "Glide-3.5" >nul 2>&1
+  powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File "tools\fixture-manifest.ps1" -Mode Validate -Directory "artifacts\diagnostic-fixtures" -Generator "dist\Glide.exe" -SourceIdentity "Glide-3.5-3" >nul 2>&1
   if errorlevel 1 (
     echo [8/8] Fast fixture cache is absent/stale/partial; regenerating...
     call :generate_diagnostic_fixtures
@@ -245,6 +245,12 @@ if /I "%GLIDE_SKIP_INSTALLER%"=="1" (
   )
 )
 
+echo Packaging clean zero-context handover zip...
+powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File "package-source.ps1"
+if errorlevel 1 (
+  echo WARNING: package-source.ps1 failed, continuing build completion.
+)
+
 call :progress 100 "Complete"
 echo.
 echo ============================================================
@@ -254,6 +260,7 @@ if /I "%GLIDE_SKIP_INSTALLER%"=="1" (
 ) else (
   echo   INSTALLER: dist-installer\Glide Setup.exe
 )
+echo   HANDOVER:  Glide-Zero-Context-Handover.zip
 echo ============================================================
 echo Run: dist\Glide.exe
 exit /b 0
@@ -271,13 +278,13 @@ if not exist "artifacts\diagnostic-fixtures" (
   set "GLIDE_BUILD_RC=1"
   exit /b 1
 )
-powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File "tools\fixture-manifest.ps1" -Mode Write -Directory "artifacts\diagnostic-fixtures" -Generator "dist\Glide.exe" -SourceIdentity "Glide-3.5"
+powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File "tools\fixture-manifest.ps1" -Mode Write -Directory "artifacts\diagnostic-fixtures" -Generator "dist\Glide.exe" -SourceIdentity "Glide-3.5-3"
 if errorlevel 1 (
   echo ERROR: Diagnostic fixture identity manifest creation/validation failed.
   set "GLIDE_BUILD_RC=!errorlevel!"
   exit /b !GLIDE_BUILD_RC!
 )
-powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File "tools\fixture-manifest.ps1" -Mode Validate -Directory "artifacts\diagnostic-fixtures" -Generator "dist\Glide.exe" -SourceIdentity "Glide-3.5"
+powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File "tools\fixture-manifest.ps1" -Mode Validate -Directory "artifacts\diagnostic-fixtures" -Generator "dist\Glide.exe" -SourceIdentity "Glide-3.5-3"
 if errorlevel 1 (
   echo ERROR: Generated diagnostic fixtures did not pass identity validation.
   set "GLIDE_BUILD_RC=!errorlevel!"
@@ -288,7 +295,7 @@ exit /b 0
 :progress
 set "GLIDE_PROGRESS=%~1"
 set "GLIDE_PROGRESS_LABEL=%~2"
-title Glide 3.5 Build - %GLIDE_PROGRESS%%% - %GLIDE_PROGRESS_LABEL%
+title Glide 3.5-6 Build - %GLIDE_PROGRESS%%% - %GLIDE_PROGRESS_LABEL%
 echo [ %GLIDE_PROGRESS%%% ] %GLIDE_PROGRESS_LABEL%
 exit /b 0
 

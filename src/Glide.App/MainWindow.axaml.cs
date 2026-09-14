@@ -89,6 +89,8 @@ public partial class MainWindow : Window
     private readonly Dictionary<Guid, string> _tabForwardImageTargets = new();
     private readonly Dictionary<Guid, Stack<string>> _tabForwardFolderTargets = new();
     private readonly Dictionary<Guid, string> _browserHighlightTargets = new();
+    private bool _titleNavCanBack;
+    private bool _titleNavCanForward;
     private readonly StartupPathQueue _startupPaths = new();
     private bool _hasExplicitStartupOpen;
 
@@ -166,6 +168,8 @@ public partial class MainWindow : Window
     private PixelPoint _lastNormalWindowPosition;
     private Size _lastNormalWindowSize;
     private bool _normalPlacementKnown;
+    private WindowState _stateBeforeMinimize = WindowState.Normal;
+    private WindowState _lastKnownWindowState = WindowState.Normal;
 
     // Whole-application Overlay / Window-in-Window mode is deliberately session state, separate
     // from the existing per-image WindowInWindowOverlayManager. Normal Glide stays the default.
@@ -195,6 +199,12 @@ public partial class MainWindow : Window
         // Normal Glide remains visually opaque because its normal theme background is still painted.
         TransparencyLevelHint = new[] { WindowTransparencyLevel.Transparent };
         TransparencyBackgroundFallback = Brushes.Transparent;
+        // CRITICAL INVARIANT: the top-level Window itself remains transparent for its entire
+        // lifetime. Normal Glide paints BrushWindow on MainRoot instead. Never put an opaque
+        // brush back on Window.Background: doing so can lock an already-created Windows/Avalonia
+        // composition surface into an opaque/redirection path and makes PNG alpha appear grey
+        // when Whole-App Overlay is enabled later.
+        Background = Brushes.Transparent;
         _startupSettingsBaseline = _settings.CloneState();
         // XAML can raise ComboBox.SelectionChanged while InitializeComponent is still constructing
         // named controls. Explorer handlers must not touch the partially-built visual tree.
@@ -261,9 +271,29 @@ public partial class MainWindow : Window
             StatusInfoButton, StatusOptionsButton, SlideshowButton, SlideshowStopButton,
             StatusFirstButton, StatusPreviousButton, StatusNextButton, StatusLastButton,
             StatusCollapseButton, StatusCloseButton, OverlayAddButton, OverlayLoadButton, OverlaySaveButton, OverlayClearButton,
-            TabNavBackButton, TabNavForwardButton, CaptionMinimizeButton, CaptionMaximizeButton, CaptionCloseButton
+            CaptionMinimizeButton, CaptionMaximizeButton, CaptionCloseButton
         })
             button.AddHandler(InputElement.PointerPressedEvent, ReliableCommandButtonPressed, RoutingStrategies.Tunnel, true);
+        TabNavigationHost.AddHandler(InputElement.PointerReleasedEvent, (s, e) =>
+        {
+            if (e.InitialPressMouseButton == MouseButton.Right)
+            {
+                var posBack = e.GetPosition(TabNavBackButton);
+                if (TabNavBackButton.IsVisible && new Rect(0, 0, TabNavBackButton.Bounds.Width, TabNavBackButton.Bounds.Height).Contains(posBack))
+                {
+                    TabNavBackButton.ContextMenu?.Open(TabNavBackButton);
+                    e.Handled = true;
+                    return;
+                }
+                var posFwd = e.GetPosition(TabNavForwardButton);
+                if (TabNavForwardButton.IsVisible && new Rect(0, 0, TabNavForwardButton.Bounds.Width, TabNavForwardButton.Bounds.Height).Contains(posFwd))
+                {
+                    TabNavForwardButton.ContextMenu?.Open(TabNavForwardButton);
+                    e.Handled = true;
+                    return;
+                }
+            }
+        }, RoutingStrategies.Tunnel | RoutingStrategies.Bubble, true);
         DragDrop.SetAllowDrop(this, true);
         AddHandler(DragDrop.DropEvent, DropReceived);
         KeyDown += OnKeyDown;
@@ -308,6 +338,12 @@ public partial class MainWindow : Window
         PropertyChanged += (_, args) =>
         {
             if (args.Property != WindowStateProperty) return;
+            var oldState = _lastKnownWindowState;
+            var newState = WindowState;
+            _lastKnownWindowState = newState;
+            if (oldState != WindowState.Minimized)
+                _stateBeforeMinimize = oldState;
+
             ApplyChromeLayoutForWindowState();
             Viewport.IsFullscreen = WindowState == WindowState.FullScreen;
             Viewport.RightDragWindowMoveAllowed = WindowState == WindowState.Normal;
@@ -316,8 +352,12 @@ public partial class MainWindow : Window
             ApplyStatusVisibility();
             UpdateIntegratedTitleBarInset();
             UpdateCaptionButtonState();
-            if (WindowState == WindowState.Minimized && _settings.PurgeCacheOnMinimize)
-                _loader.PurgeCaches();
+            if (newState == WindowState.Minimized)
+            {
+                SaveWindowPlacement();
+                if (_settings.PurgeCacheOnMinimize)
+                    _loader.PurgeCaches();
+            }
         };
         ApplyChromeLayoutForWindowState();
         ApplyCompactChromeLayout();
@@ -778,7 +818,17 @@ public partial class MainWindow : Window
         _lastNormalWindowPosition = Position;
         _lastNormalWindowSize = new Size(Width, Height);
         _normalPlacementKnown = true;
-        if (_settings.WindowWasMaximized) WindowState = WindowState.Maximized;
+        if (_settings.WindowWasMaximized)
+        {
+            WindowState = WindowState.Maximized;
+            _lastKnownWindowState = WindowState.Maximized;
+            _stateBeforeMinimize = WindowState.Maximized;
+        }
+        else
+        {
+            _lastKnownWindowState = WindowState.Normal;
+            _stateBeforeMinimize = WindowState.Normal;
+        }
     }
 
     private bool IsSafeSavedWindowPosition(PixelPoint position, double widthDip, double heightDip, double scale)
@@ -814,6 +864,12 @@ public partial class MainWindow : Window
         _lastNormalWindowPosition = Position;
         _lastNormalWindowSize = Bounds.Size;
         _normalPlacementKnown = true;
+        _settings.WindowX = _lastNormalWindowPosition.X;
+        _settings.WindowY = _lastNormalWindowPosition.Y;
+        _settings.WindowWidth = _lastNormalWindowSize.Width;
+        _settings.WindowHeight = _lastNormalWindowSize.Height;
+        _settings.WindowWasMaximized = false;
+        App.PublishCurrentSettings(_settings);
     }
 
     private void SaveWindowPlacement()
@@ -831,7 +887,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        _settings.WindowWasMaximized = WindowState == WindowState.Maximized;
+        _settings.WindowWasMaximized = WindowState == WindowState.Maximized || (WindowState == WindowState.Minimized && _stateBeforeMinimize == WindowState.Maximized);
         if (WindowState == WindowState.Normal) TrackNormalWindowPlacement();
         if (_normalPlacementKnown)
         {
@@ -975,7 +1031,7 @@ public partial class MainWindow : Window
     {
         if (!File.Exists(path) || !ImageNavigator.IsSupported(path))
         {
-            Title = "Glide 3.5 — Unsupported or missing image";
+            Title = "Glide 3.5-6 — Unsupported or missing image";
             return;
         }
         if (!_workspace.ReplaceActiveWithImage(path)) _workspace.AddImage(path);
@@ -1250,7 +1306,7 @@ public partial class MainWindow : Window
             if (IsRequestCurrent(request))
             {
                 _diagnostics.Write("decode", "foreground_failed", new { path, request = request.ImageRequestId, error = ex.GetType().Name, ex.Message });
-                Title = $"Glide 3.5 — Open failed: {ex.GetType().Name}";
+                Title = $"Glide 3.5-6 — Open failed: {ex.GetType().Name}";
             }
             return new PresentationOutcome(PresentationStatus.Failed, request);
         }
@@ -1628,7 +1684,7 @@ public partial class MainWindow : Window
             : "Fast browsing, precise zooming, and familiar Windows controls.";
         home.TipsGrid.IsVisible = !recentLanding && _settings.ShowHomeTips;
         ApplyWelcomeLayout();
-        Title = recentLanding ? "Glide 3.5 — Recent pictures" : "Glide 3.5 — Home";
+        Title = recentLanding ? "Glide 3.5-6 — Recent pictures" : "Glide 3.5-6 — Home";
         RefreshRecentHistoryHome();
         ApplyStatusVisibility();
     }
@@ -1787,7 +1843,7 @@ public partial class MainWindow : Window
                 ShowBrowserSurface();
                 RestoreBrowserNavigationState(browser);
                 NavigateBrowserTo(browser.Folder, addHistory: false);
-                Title = $"Glide 3.5 — Explorer — {browser.Folder}";
+                Title = $"Glide 3.5-6 — Explorer — {browser.Folder}";
                 break;
         }
         RebuildTabStrip();
@@ -1875,10 +1931,16 @@ public partial class MainWindow : Window
             ? Math.Clamp(natural, configuredMin, max)
             : Math.Clamp(natural, emergencyMin, configuredMin);
 
+        var edgeHitTabs = WindowState is WindowState.Maximized or WindowState.FullScreen;
+        if (NewTabButton is not null)
+        {
+            NewTabButton.Height = edgeHitTabs ? 44 : 36;
+            NewTabButton.VerticalAlignment = edgeHitTabs ? Avalonia.Layout.VerticalAlignment.Top : Avalonia.Layout.VerticalAlignment.Center;
+        }
+
         foreach (var tab in _workspace.Tabs)
         {
             var active = _workspace.Active?.Id == tab.Id;
-            var edgeHitTabs = WindowState is WindowState.Maximized or WindowState.FullScreen;
             var container = new Border
             {
                 DataContext = tab.Id,
@@ -2393,18 +2455,12 @@ public partial class MainWindow : Window
 
     private static (bool Left, bool Right, bool Middle) PhysicalMouseButtons(PointerPoint point)
     {
-        if (!OperatingSystem.IsWindows())
-            return (point.Properties.IsLeftButtonPressed, point.Properties.IsRightButtonPressed, point.Properties.IsMiddleButtonPressed);
-        try
-        {
-            return ((GetAsyncKeyState(VkLButton) & 0x8000) != 0,
-                    (GetAsyncKeyState(VkRButton) & 0x8000) != 0,
-                    (GetAsyncKeyState(VkMButton) & 0x8000) != 0);
-        }
-        catch
-        {
-            return (point.Properties.IsLeftButtonPressed, point.Properties.IsRightButtonPressed, point.Properties.IsMiddleButtonPressed);
-        }
+        var kind = point.Properties.PointerUpdateKind;
+        if (kind == PointerUpdateKind.LeftButtonPressed) return (true, false, false);
+        if (kind == PointerUpdateKind.RightButtonPressed) return (false, true, false);
+        if (kind == PointerUpdateKind.MiddleButtonPressed) return (false, false, true);
+
+        return (point.Properties.IsLeftButtonPressed, point.Properties.IsRightButtonPressed, point.Properties.IsMiddleButtonPressed);
     }
 
     private static bool TryGetPhysicalCursor(out PixelPoint point)
@@ -2682,7 +2738,10 @@ public partial class MainWindow : Window
     }
 
     private async void TabNavBackClicked(object? sender, RoutedEventArgs e)
-        => await NavigateTitleUpAsync();
+    {
+        if (!_titleNavCanBack) return;
+        await NavigateTitleUpAsync();
+    }
 
     /// <summary>
     /// Title-bar Back is deliberately an Up/containing-folder operation, not classical history Back.
@@ -2748,6 +2807,7 @@ public partial class MainWindow : Window
 
     private async void TabNavForwardClicked(object? sender, RoutedEventArgs e)
     {
+        if (!_titleNavCanForward) return;
         if (_workspace.Active is not BrowserTabState browser) return;
 
         // Forward first retraces folders traversed by the Up button, then returns to the image state.
@@ -2802,8 +2862,14 @@ public partial class MainWindow : Window
                     || (_tabForwardImageTargets.TryGetValue(browser.Id, out var target) && File.Exists(target));
                 break;
         }
-        TabNavBackButton.IsEnabled = canBack;
-        TabNavForwardButton.IsEnabled = canForward;
+        _titleNavCanBack = canBack;
+        _titleNavCanForward = canForward;
+        TabNavBackButton.Classes.Set("inactive", !canBack);
+        TabNavForwardButton.Classes.Set("inactive", !canForward);
+        TabNavBackButton.Opacity = canBack ? 1.0 : 0.34;
+        TabNavForwardButton.Opacity = canForward ? 1.0 : 0.34;
+        TabNavBackButton.IsEnabled = true;
+        TabNavForwardButton.IsEnabled = true;
     }
 
     private void SelectBrowserHighlight(Guid tabId)
@@ -2826,11 +2892,23 @@ public partial class MainWindow : Window
 
     private ContextMenu BuildTabUtilityContextMenu(string label, Action remove)
     {
-        var removeItem = new MenuItem { Header = $"Remove {label} button" };
-        removeItem.Click += (_, _) => remove();
-        var settingsItem = new MenuItem { Header = "Open Settings…" };
-        settingsItem.Click += (_, _) => SettingsClicked(this, new RoutedEventArgs());
-        return new ContextMenu { ItemsSource = new object[] { removeItem, settingsItem } };
+        var menu = new ContextMenu();
+        var items = new List<MenuItem>();
+        MenuItem Item(string header, Action action, bool enabled = true)
+        {
+            var item = new MenuItem { Header = header, IsEnabled = enabled };
+            item.Click += (_, _) => action();
+            return item;
+        }
+
+        items.Add(Item($"Remove {label} button from title bar", remove));
+        items.Add(new MenuItem { Header = "-" });
+        items.Add(Item("Customize title-bar buttons…", () => _ = ShowTitleBarCustomizerAsync()));
+        items.Add(Item("Open Settings…", () => SettingsClicked(this, new RoutedEventArgs())));
+        items.Add(new MenuItem { Header = "-" });
+        AppendWholeAppOverlayMenuItems(items);
+        menu.ItemsSource = items;
+        return menu;
     }
 
     private async void ChromeMiddleClickReleased(object? sender, PointerReleasedEventArgs e)
@@ -3211,10 +3289,10 @@ public partial class MainWindow : Window
 
         BrowserAddressBox.Text = folder;
         RefreshManagedBrowser(folder);
-        BrowserBackButton.IsEnabled = session.Index > 0;
+        BrowserBackButton.IsEnabled = session.Index > 0 || (_tabForwardImageTargets.TryGetValue(id, out var backTarget) && File.Exists(backTarget));
         BrowserForwardButton.IsEnabled = session.Index >= 0 && session.Index < session.History.Count - 1;
         BrowserUpButton.IsEnabled = Directory.GetParent(folder) is not null;
-        Title = $"Glide 3.5 — Explorer — {folder}";
+        Title = $"Glide 3.5-6 — Explorer — {folder}";
         RebuildTabStrip();
         SelectBrowserHighlight(id);
         UpdateTabNavigationButtons();
@@ -3249,10 +3327,10 @@ public partial class MainWindow : Window
             });
 
         BrowserAddressBox.Text = folder;
-        BrowserBackButton.IsEnabled = session.Index > 0;
+        BrowserBackButton.IsEnabled = session.Index > 0 || (_tabForwardImageTargets.TryGetValue(browser.Id, out var nativeBackTarget) && File.Exists(nativeBackTarget));
         BrowserForwardButton.IsEnabled = session.Index >= 0 && session.Index < session.History.Count - 1;
         BrowserUpButton.IsEnabled = Directory.GetParent(folder) is not null;
-        Title = $"Glide 3.5 — Explorer — {folder}";
+        Title = $"Glide 3.5-6 — Explorer — {folder}";
         RebuildTabStrip();
         SelectBrowserHighlight(browser.Id);
         UpdateTabNavigationButtons();
@@ -3726,11 +3804,28 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
-    private void BrowserBackClicked(object? sender, RoutedEventArgs e)
+    private async void BrowserBackClicked(object? sender, RoutedEventArgs e)
     {
-        if (_workspace.Active is not BrowserTabState browser || !_browserSessions.TryGetValue(browser.Id, out var session) || session.Index <= 0) return;
-        session.Index--;
-        NavigateBrowserTo(session.History[session.Index], addHistory: false);
+        if (_workspace.Active is not BrowserTabState browser || !_browserSessions.TryGetValue(browser.Id, out var session)) return;
+        if (session.Index > 0)
+        {
+            session.Index--;
+            NavigateBrowserTo(session.History[session.Index], addHistory: false);
+            return;
+        }
+
+        if (_tabForwardImageTargets.TryGetValue(browser.Id, out var imagePath) &&
+            File.Exists(imagePath) && ImageNavigator.IsSupported(imagePath))
+        {
+            _workspace.ReplaceTab(new ImageTabState(browser.Id, imagePath));
+            _tabForwardImageTargets.Remove(browser.Id);
+            _tabForwardFolderTargets.Remove(browser.Id);
+            _browserHighlightTargets.Remove(browser.Id);
+            _browserSessions.Remove(browser.Id);
+            await ActivateWorkspaceAsync();
+            UpdateTabNavigationButtons();
+            _diagnostics.Write("browser", "back_to_image", new { path = imagePath, tab = browser.Id });
+        }
     }
 
     private void BrowserForwardClicked(object? sender, RoutedEventArgs e)
@@ -3790,8 +3885,6 @@ public partial class MainWindow : Window
         else if (ReferenceEquals(button, StatusOptionsButton) || (_homeSurface is not null && ReferenceEquals(button, _homeSurface.OptionsButton))) SettingsClicked(button, new RoutedEventArgs());
         else if (ReferenceEquals(button, StatusCollapseButton) || (_homeSurface is not null && ReferenceEquals(button, _homeSurface.StatusCollapseButton))) CollapseStatusClicked(button, new RoutedEventArgs());
         else if (ReferenceEquals(button, StatusCloseButton)) CloseStatusClicked(button, new RoutedEventArgs());
-        else if (ReferenceEquals(button, TabNavBackButton)) await NavigateTitleUpAsync();
-        else if (ReferenceEquals(button, TabNavForwardButton)) TabNavForwardClicked(button, new RoutedEventArgs());
         else if (ReferenceEquals(button, OverlayAddButton)) { _diagnostics.Write("overlay", "status_command", new { command = "add" }); OverlayAddClicked(button, new RoutedEventArgs()); }
         else if (ReferenceEquals(button, OverlayLoadButton)) { _diagnostics.Write("overlay", "status_command", new { command = "load" }); OverlayLoadClicked(button, new RoutedEventArgs()); }
         else if (ReferenceEquals(button, OverlaySaveButton)) { if (_overlays?.HasOverlays == true) { _diagnostics.Write("overlay", "status_command", new { command = "save" }); OverlaySaveClicked(button, new RoutedEventArgs()); } }
@@ -4120,6 +4213,8 @@ public partial class MainWindow : Window
             }
         }
 
+        ApplySettingsVisuals();
+
         // Overlay is a genuinely transparent top-level surface: only image pixels/chrome render.
         // This preserves PNG alpha all the way to the Windows desktop and leaves letterbox/unused
         // aspect-ratio space completely see-through instead of painting Glide's viewport colour.
@@ -4138,7 +4233,6 @@ public partial class MainWindow : Window
         overlayControls.ContextMenu = BuildWholeAppOverlayOnlyContextMenu();
         TransparencyPanel.IsVisible = false;
 
-        ApplySettingsVisuals();
         ApplyChromeLayoutForWindowState();
         ApplyStatusVisibility();
         UpdateViewportScrollbars();
@@ -4164,7 +4258,13 @@ public partial class MainWindow : Window
         }
         TransparencyPanel.IsVisible = false;
         Viewport.SetBackgroundFillSuppressed(false);
-        MainRoot.Background = null;
+        // Restore normal UI opacity on the inner visual root only. The native top-level stays
+        // transparent-capable permanently; this is what preserves per-pixel image alpha when
+        // Overlay is entered again without recreating the HWND.
+        if (Application.Current?.Resources["BrushWindow"] is IBrush normalWindowBrush)
+            MainRoot.Background = normalWindowBrush;
+        else
+            MainRoot.Background = Brushes.Black;
         WorkspaceLayer.Background = null;
         ImageView.Background = null;
         // Keep the top-level permanently transparency-capable. The normal theme paints an opaque
@@ -4643,8 +4743,16 @@ public partial class MainWindow : Window
     {
         ApplyPalette(_settings.ThemeChoice, _settings.AccentChoice, _settings.GlowChoice, _settings.GlowIntensityPercent, _settings.CustomAccentHex, _settings.CustomGlowHex, _settings.MainBackgroundChoice, _settings.CustomMainBackgroundHex);
         Topmost = _settings.AlwaysOnTop;
-        if (!_wholeAppOverlayMode && Application.Current?.Resources["BrushWindow"] is IBrush normalWindowBrush)
-            Background = normalWindowBrush;
+        KeyboardNavigation.SetTabNavigation(this, _settings.EnableTabFocusNavigation ? KeyboardNavigationMode.Continue : KeyboardNavigationMode.None);
+        // Window.Background is a compositor contract, not the normal theme surface. Keep the
+        // top-level transparent for the lifetime of the HWND and paint the ordinary application
+        // background on MainRoot instead. This is required for true PNG/WebP alpha in Overlay.
+        Background = Brushes.Transparent;
+        TransparencyBackgroundFallback = Brushes.Transparent;
+        if (_wholeAppOverlayMode)
+            MainRoot.Background = Brushes.Transparent;
+        else if (Application.Current?.Resources["BrushWindow"] is IBrush normalWindowBrush)
+            MainRoot.Background = normalWindowBrush;
         if (_homeSurface is not null) _homeSurface.TipsGrid.IsVisible = _settings.ShowHomeTips && !string.Equals(_settings.HomePageMode, "Recent pictures page", StringComparison.OrdinalIgnoreCase);
         ApplyWelcomeLayout();
         if (_settings.RecentHistoryEnabled) RecentHistoryStore.Trim(_settings.HistorySize);
@@ -5035,11 +5143,20 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (WindowState == WindowState.FullScreen && physicalButtons.Right)
+        if (physicalButtons.Right && !IsInteractiveSource(e.Source))
         {
-            ShowFullscreenChromeContextMenu();
-            e.Handled = true;
-            return;
+            if (WindowState == WindowState.FullScreen)
+            {
+                ShowFullscreenChromeContextMenu();
+                e.Handled = true;
+                return;
+            }
+            if (_wholeAppOverlayMode)
+            {
+                BuildWholeAppOverlayOnlyContextMenu().Open(ChromeBorder);
+                e.Handled = true;
+                return;
+            }
         }
 
         // Treat non-interactive chrome exactly like a native Windows caption. This deliberately
@@ -5526,6 +5643,9 @@ public partial class MainWindow : Window
             child.Width = Math.Max(child.MinWidth, Bounds.Width);
             child.Height = Math.Max(child.MinHeight, Bounds.Height);
         }
+
+        if (WindowState == WindowState.Maximized || (WindowState == WindowState.Minimized && _stateBeforeMinimize == WindowState.Maximized))
+            child.WindowState = WindowState.Maximized;
     }
 
     private static TabState CloneTabForIndependentWindow(TabState tab) => tab switch
@@ -5775,14 +5895,14 @@ public partial class MainWindow : Window
     {
         if (string.IsNullOrWhiteSpace(_currentPath) || !ImageView.IsVisible)
         {
-            if (HomeHost.IsVisible) Title = "Glide 3.5 — Home";
+            if (HomeHost.IsVisible) Title = "Glide 3.5-6 — Home";
             return;
         }
         var display = _settings.FullPathInTitle ? _currentPath : Path.GetFileName(_currentPath);
         var index = _navigator.Count > 0 ? $"[{_navigator.Index + 1}/{_navigator.Count}]" : string.Empty;
         Title = prefix is null
-            ? $"Glide 3.5 — {display}  {index}  {Viewport.ZoomPercent}%"
-            : $"Glide 3.5 — {prefix} — {display}";
+            ? $"Glide 3.5-6 — {display}  {index}  {Viewport.ZoomPercent}%"
+            : $"Glide 3.5-6 — {prefix} — {display}";
     }
 
     private static string FormatFileSize(long bytes)
@@ -5994,11 +6114,29 @@ public partial class MainWindow : Window
 
     private async void GlobalKeyDown(object? sender, KeyEventArgs e)
     {
-        if (e.Key != Key.Tab || !e.KeyModifiers.HasFlag(KeyModifiers.Control)) return;
-        var command = e.KeyModifiers.HasFlag(KeyModifiers.Shift) ? GlideCommand.PreviousTab : GlideCommand.NextTab;
-        e.Handled = true;
-        _diagnostics.Write("input", "global_tab_cycle", new { command = command.ToString() });
-        await ExecuteCommandAsync(command);
+        if (e.Key == Key.Tab && e.KeyModifiers.HasFlag(KeyModifiers.Control))
+        {
+            var command = e.KeyModifiers.HasFlag(KeyModifiers.Shift) ? GlideCommand.PreviousTab : GlideCommand.NextTab;
+            e.Handled = true;
+            _diagnostics.Write("input", "global_tab_cycle", new { command = command.ToString() });
+            await ExecuteCommandAsync(command);
+            return;
+        }
+
+        if (!_settings.EnableTabFocusNavigation && e.Key == Key.Tab && !e.KeyModifiers.HasFlag(KeyModifiers.Control))
+        {
+            // When Tab focus navigation is disabled, suppress Tab and Shift+Tab from navigating focus through UI buttons
+            // unless active input is inside a text box.
+            if (e.Source is not TextBox)
+            {
+                var shortcut = CanonicalShortcut(e);
+                var mapped = _inputRouter.ResolveShortcut(shortcut, _settings.Hotkeys);
+                if (mapped == GlideCommand.None)
+                {
+                    e.Handled = true;
+                }
+            }
+        }
     }
 
     private async void OnKeyDown(object? sender, KeyEventArgs e)
@@ -6449,6 +6587,12 @@ public partial class MainWindow : Window
         if (clipboard is not null) await clipboard.SetTextAsync(text);
     }
 
+    private void RestoreFromMinimizedIfNeeded()
+    {
+        if (WindowState == WindowState.Minimized)
+            WindowState = _stateBeforeMinimize == WindowState.Maximized ? WindowState.Maximized : WindowState.Normal;
+    }
+
     internal async Task<ExternalLaunchItemResult> HandleExternalFolderOpenAsync(Guid requestId, string path)
     {
         if (!Directory.Exists(path))
@@ -6474,6 +6618,7 @@ public partial class MainWindow : Window
             _workspace.AddBrowser(fullPath);
             await ActivateWorkspaceAsync();
         }
+        RestoreFromMinimizedIfNeeded();
         Activate();
         return new(requestId, ExternalLaunchItemStatus.Accepted, "Folder accepted.");
     }
@@ -6496,6 +6641,7 @@ public partial class MainWindow : Window
         // Force an actual refresh rather than silently reusing the currently presented frame.
         _loader.InvalidatePath(full);
         await LoadPathAsync(full, updateActiveTab: false);
+        RestoreFromMinimizedIfNeeded();
         Activate();
     }
 
@@ -6534,6 +6680,7 @@ public partial class MainWindow : Window
             if (string.Equals(duplicateBehavior, "Open new tab", StringComparison.OrdinalIgnoreCase))
             {
                 await OpenAsImageTabAsync(path);
+                RestoreFromMinimizedIfNeeded();
                 Activate();
                 return new(requestId, ExternalLaunchItemStatus.Accepted, "Opened duplicate image in new tab.");
             }
@@ -6552,6 +6699,7 @@ public partial class MainWindow : Window
             _workspace.Active is { } active && _workspace.Tabs.Count > 0)
             _workspace.Close(active.Id, ensureHome: false);
         await OpenAsImageTabAsync(path);
+        RestoreFromMinimizedIfNeeded();
         Activate();
         return new(requestId, ExternalLaunchItemStatus.Accepted, "Image accepted.");
     }
@@ -6598,13 +6746,12 @@ public partial class MainWindow : Window
     private async Task OpenContainingFolderInCurrentTabAsync(Guid tabId, string imagePath, string folder)
     {
         _tabForwardImageTargets[tabId] = imagePath;
+        _tabForwardFolderTargets[tabId] = new Stack<string>();
         _browserHighlightTargets[tabId] = imagePath;
 
         var session = new BrowserSession();
-        var parent = Directory.GetParent(folder)?.FullName;
-        if (!string.IsNullOrWhiteSpace(parent) && Directory.Exists(parent)) session.History.Add(parent);
         session.History.Add(folder);
-        session.Index = session.History.Count - 1;
+        session.Index = 0;
         _browserSessions[tabId] = session;
 
         _workspace.ReplaceTab(new BrowserTabState(tabId, folder)
@@ -6722,17 +6869,26 @@ public partial class MainWindow : Window
         items.Add(Item("Rotate right", GlideCommand.RotateRight, Viewport.Bitmap is not null));
         items.Add(Item("Flip horizontally", GlideCommand.FlipHorizontal, Viewport.Bitmap is not null));
         items.Add(Item("Flip vertically", GlideCommand.FlipVertical, Viewport.Bitmap is not null));
-        items.Add(Item("Fullscreen", GlideCommand.ToggleFullscreen));
-        items.Add(new MenuItem { Header = "-" });
+        // Primary Copy Image/Selection Pixels - easily and directly visible
         items.Add(Item(Viewport.HasSelection ? "Copy selected pixels" : "Copy image pixels", GlideCommand.CopyImage, Viewport.Bitmap is not null));
-        items.Add(Item("Export selected region…", GlideCommand.ExportSelection, Viewport.HasSelection && Viewport.Bitmap is not null));
-        items.Add(Item("Copy image file", GlideCommand.CopyFile, _currentPath is not null));
-        items.Add(Item("Copy file name", GlideCommand.CopyFileName, _currentPath is not null));
-        items.Add(Item("Copy folder path", GlideCommand.CopyFolderPath, _currentPath is not null));
-        items.Add(Item("Copy full path", GlideCommand.CopyFullPath, _currentPath is not null));
+
+        // Tidied secondary copy and export actions
+        var copyOther = new MenuItem { Header = "Copy other" };
+        copyOther.ItemsSource = new object[]
+        {
+            Item("Copy image file", GlideCommand.CopyFile, _currentPath is not null),
+            Item("Copy full path", GlideCommand.CopyFullPath, _currentPath is not null),
+            Item("Copy file name", GlideCommand.CopyFileName, _currentPath is not null),
+            Item("Copy folder path", GlideCommand.CopyFolderPath, _currentPath is not null),
+            new MenuItem { Header = "-" },
+            Item("Export selected region…", GlideCommand.ExportSelection, Viewport.HasSelection && Viewport.Bitmap is not null)
+        };
+        items.Add(copyOther);
+
+        // File operations
+        items.Add(Item("Open containing folder", GlideCommand.OpenContainingFolder, _currentPath is not null));
         items.Add(Item("Rename…", GlideCommand.RenameFile, _currentPath is not null));
         items.Add(Item("Delete to Recycle Bin", GlideCommand.DeleteFile, _currentPath is not null));
-        items.Add(Item("Open containing folder", GlideCommand.OpenContainingFolder, _currentPath is not null));
         items.Add(new MenuItem { Header = "-" });
 
         var navigation = new MenuItem { Header = "Navigation" };
@@ -6789,6 +6945,7 @@ public partial class MainWindow : Window
         AppendWholeAppOverlayMenuItems(items);
         items.Add(new MenuItem { Header = "-" });
         items.Add(Item("Settings", GlideCommand.Settings));
+        items.Add(Item("Exit program", GlideCommand.CloseWindow));
         menu.ItemsSource = items;
         return menu;
     }

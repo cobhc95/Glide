@@ -122,6 +122,21 @@ public sealed class Glide23FeatureContractTests
     }
 
     [Fact]
+    public void WholeAppOverlayKeepsTopLevelTransparentForEntireWindowLifetime()
+    {
+        var xaml = Source("src/Glide.App/MainWindow.axaml");
+        var code = Source("src/Glide.App/MainWindow.axaml.cs");
+
+        Assert.Contains("Background=\"Transparent\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("TransparencyLevelHint=\"Transparent\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"MainRoot\" RowDefinitions=\"44,*\" Background=\"{DynamicResource BrushWindow}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Background = Brushes.Transparent;", code, StringComparison.Ordinal);
+        Assert.Contains("MainRoot.Background = Brushes.Transparent;", code, StringComparison.Ordinal);
+        Assert.Contains("MainRoot.Background = normalWindowBrush;", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("Background = normalWindowBrush;", code.Replace("MainRoot.Background = normalWindowBrush;", string.Empty), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ThemeContractUsesDarkNeutralLightAndAuthoritativeThemeChoice()
     {
         var state = new GlideSettingsState();

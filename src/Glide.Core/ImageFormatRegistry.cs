@@ -31,6 +31,20 @@ public static class ImageFormatRegistry
     private static readonly HashSet<string> ExtensionSet = new(Extensions, StringComparer.OrdinalIgnoreCase);
     private static readonly HashSet<string> CoreSet = new(CoreFastPathExtensions, StringComparer.OrdinalIgnoreCase);
 
+    // Formats in this set may carry real per-pixel transparency. Their fast-preview/full-fallback
+    // paths must never consume Windows Shell thumbnails because Explorer is permitted to flatten
+    // alpha against an opaque thumbnail background (commonly grey). Once flattened, Overlay mode
+    // cannot recover the original alpha. Keep this deliberately conservative: a small performance
+    // cost on these formats is preferable to silently corrupting transparent pixels.
+    private static readonly HashSet<string> TransparencyCapableSet = new(new[]
+    {
+        ".png", ".apng", ".mng", ".jng", ".gif", ".ico", ".cur", ".ani", ".icns",
+        ".webp", ".heic", ".heif", ".heics", ".heifs", ".hif", ".avif", ".avifs",
+        ".svg", ".svgz", ".jxl", ".psd", ".psb", ".pdd", ".xcf", ".ora", ".kra",
+        ".tga", ".targa", ".icb", ".vda", ".vst", ".sgi", ".rgba", ".pam", ".qoi",
+        ".exr", ".dds", ".xpm", ".ktx", ".ktx2", ".pvr", ".astc", ".basis"
+    }, StringComparer.OrdinalIgnoreCase);
+
     // Only five declared suffixes are compound. Keep these in longest-first order so matching a
     // folder containing tens of thousands of files remains O(1)-ish instead of 196 EndsWith calls
     // per file. This matters because the 196-format contract must not make navigation slower.
@@ -77,4 +91,8 @@ public static class ImageFormatRegistry
     public static bool IsSupported(string path) => ExtensionSet.Contains(GetLongestExtension(path));
 
     public static bool IsCoreFastPath(string extensionOrPath) => CoreSet.Contains(GetLongestExtension(extensionOrPath));
+
+    /// <summary>True when the format can legitimately contain pixels with alpha &lt; 255.</summary>
+    public static bool MayContainTransparency(string extensionOrPath) =>
+        TransparencyCapableSet.Contains(GetLongestExtension(extensionOrPath));
 }

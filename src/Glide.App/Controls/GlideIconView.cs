@@ -32,7 +32,7 @@ public sealed class GlideIconView : Control
         if (Bounds.Width <= 1 || Bounds.Height <= 1) return;
 
         var brush = IconBrush ?? Brushes.White;
-        var pen = new Pen(brush, StrokeWidth);
+        var pen = new Pen(brush, StrokeWidth, lineCap: PenLineCap.Round, lineJoin: PenLineJoin.Round);
         Point P(double x, double y) => new(x * Bounds.Width / 24.0, y * Bounds.Height / 24.0);
         Rect R(double x, double y, double w, double h) => new(x * Bounds.Width / 24.0, y * Bounds.Height / 24.0, w * Bounds.Width / 24.0, h * Bounds.Height / 24.0);
         void L(double x1, double y1, double x2, double y2) => context.DrawLine(pen, P(x1, y1), P(x2, y2));
@@ -56,9 +56,9 @@ public sealed class GlideIconView : Control
             case "FolderNext":
                 L(3.5, 8, 8.5, 8); L(8.5, 8, 10.5, 5.5); L(10.5, 5.5, 20, 5.5); L(20, 5.5, 20.5, 18.5); L(3.5, 8, 3.5, 18.5); L(3.5, 18.5, 20.5, 18.5); L(9.5, 10, 14, 14); L(14, 14, 9.5, 18); break;
             case "Up":
-                L(5, 14.5, 12, 7.5); L(12, 7.5, 19, 14.5); L(12, 7.5, 12, 19); break;
+                L(5.5, 13.5, 12, 6.5); L(12, 6.5, 18.5, 13.5); L(12, 6.5, 12, 18.5); break;
             case "Down":
-                L(5, 9.5, 12, 16.5); L(12, 16.5, 19, 9.5); L(12, 5, 12, 16.5); break;
+                L(5.5, 10.5, 12, 17.5); L(12, 17.5, 18.5, 10.5); L(12, 5.5, 12, 17.5); break;
             case "Refresh":
                 Circle(12, 12, 7); L(17, 5, 19.5, 8.5); L(19.5, 8.5, 15.5, 8.5); break;
             case "First":
@@ -128,6 +128,8 @@ public sealed class GlideIconView : Control
                 L(7, 5, 17, 5); L(9, 5, 10, 11); L(15, 5, 14, 11); L(8, 11, 16, 11); L(12, 11, 12, 20); break;
             case "Appearance":
                 Circle(8, 8, 3, true); Circle(16, 9, 2.4, true); Circle(11, 16, 2.7, true); L(5, 19, 19, 5); break;
+            case "Interface":
+                Box(3.5, 4.5, 17, 15); L(3.5, 9, 20.5, 9); Circle(6.5, 6.8, 0.7, true); Circle(9.5, 6.8, 0.7, true); break;
             case "Viewing":
                 Box(4, 5, 16, 11); L(9, 20, 15, 20); L(12, 16, 12, 20); break;
             case "Mouse":

@@ -2,7 +2,13 @@
 **/obj/
 **/build/
 dist/
+dist-installer/
+.artifacts/
+artifacts/
 diagnostics-out/
 .vs/
 .idea/
 *.user
+*.zip
+*.log
+*-output.txt

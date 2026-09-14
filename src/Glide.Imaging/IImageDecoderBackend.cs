@@ -142,7 +142,19 @@ public sealed class AvaloniaImageDecoderBackend : IImageDecoderBackend, IPathOpt
                         $"elapsed={System.Diagnostics.Stopwatch.GetElapsedTime(nativeStarted).TotalMilliseconds:F3}ms");
             }
 
-            // All supported formats may opportunistically consume an already-existing Windows Shell
+            // Never use Explorer/Shell cached thumbnails for formats that may contain alpha. Windows
+            // is allowed to pre-composite those thumbnail pixels against an opaque background; using
+            // that cache would make a genuinely transparent PNG/WebP/etc appear grey in Overlay mode.
+            // Return to the normal codec path instead, which preserves source alpha end-to-end.
+            if (ImageFormatRegistry.MayContainTransparency(path))
+            {
+                if (GlidePerformanceTrace.Enabled)
+                    GlidePerformanceTrace.Mark("shell_cached_preview_skipped_alpha",
+                        $"extension={ImageFormatRegistry.GetLongestExtension(path)}");
+                return null;
+            }
+
+            // Opaque-only formats may opportunistically consume an already-existing Windows Shell
             // thumbnail. INCACHEONLY forbids extraction, so this never turns into hidden foreground
             // decode work. Tiny/icon-like cache entries are rejected and the normal codec path wins.
             var shellStarted = System.Diagnostics.Stopwatch.GetTimestamp();
@@ -179,7 +191,9 @@ public sealed class AvaloniaImageDecoderBackend : IImageDecoderBackend, IPathOpt
     }
 
     private static bool ShouldTryShellFallback(string path) =>
-        ImageFormatRegistry.IsSupported(path) && !ImageFormatRegistry.IsCoreFastPath(path);
+        ImageFormatRegistry.IsSupported(path) &&
+        !ImageFormatRegistry.IsCoreFastPath(path) &&
+        !ImageFormatRegistry.MayContainTransparency(path);
 }
 
 /// <summary>

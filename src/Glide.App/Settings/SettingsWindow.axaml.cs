@@ -95,6 +95,7 @@ public partial class SettingsWindow : Window
             ["General"] = GeneralPanel,
             ["Appearance"] = AppearancePanel,
             ["Viewing"] = ViewingPanel,
+            ["Interface"] = InterfacePanel,
             ["Mouse"] = MousePanel,
             ["Performance"] = PerformancePanel,
             ["Status"] = StatusPanel,
@@ -256,10 +257,17 @@ public partial class SettingsWindow : Window
             FullscreenStatusAlwaysCheck.IsChecked = s.FullscreenStatusAlwaysOn;
             FullscreenKeepTabBarOpenCheck.IsChecked = s.FullscreenKeepTabBarOpen;
             AlwaysOnTopCheck.IsChecked = s.AlwaysOnTop;
+            AutoCenterWindowOnRestoreCheck.IsChecked = s.AutoCenterWindowOnRestore;
             SelectByText(FullscreenExitBehaviorCombo, string.IsNullOrWhiteSpace(s.FullscreenExitBehavior) ? "Restore size and location" : s.FullscreenExitBehavior);
             SelectByText(DefaultViewCombo, s.DefaultViewMode);
             PointerZoomCheck.IsChecked = s.PointerZoom;
             PreserveZoomCheck.IsChecked = s.PreserveManualZoomOnNavigate;
+            ViewportZoomStepBox.Value = Math.Clamp(s.ViewportZoomStepPercent, 1, 100);
+            UpscaleSmallImagesCheck.IsChecked = s.UpscaleSmallImages;
+            SubpixelRenderingCheck.IsChecked = s.HighPrecisionSubpixelRendering;
+            ShowLoadingIndicatorCheck.IsChecked = s.ShowImageLoadingIndicator;
+            FullscreenHideCursorDelayBox.Value = Math.Clamp(s.FullscreenHideCursorDelaySeconds, 1, 30);
+            TabFocusNavigationCheck.IsChecked = s.EnableTabFocusNavigation;
             EscStopsSlideshowCheck.IsChecked = s.EscStopsSlideshow;
             EscExitsFullscreenCheck.IsChecked = s.EscExitsFullscreen;
             EscWindowedConfirmCheck.IsChecked = s.EscWindowedConfirm;
@@ -445,10 +453,17 @@ public partial class SettingsWindow : Window
         state.FullscreenStatusAlwaysOn = FullscreenStatusAlwaysCheck.IsChecked == true;
         state.FullscreenKeepTabBarOpen = FullscreenKeepTabBarOpenCheck.IsChecked == true;
         state.AlwaysOnTop = AlwaysOnTopCheck.IsChecked == true;
+        state.AutoCenterWindowOnRestore = AutoCenterWindowOnRestoreCheck.IsChecked == true;
         state.FullscreenExitBehavior = SelectedText(FullscreenExitBehaviorCombo, "Restore size and location");
         state.DefaultViewMode = SelectedText(DefaultViewCombo, "Fit image");
         state.PointerZoom = PointerZoomCheck.IsChecked == true;
         state.PreserveManualZoomOnNavigate = PreserveZoomCheck.IsChecked == true;
+        state.ViewportZoomStepPercent = (int)(ViewportZoomStepBox.Value ?? 10);
+        state.UpscaleSmallImages = UpscaleSmallImagesCheck.IsChecked == true;
+        state.HighPrecisionSubpixelRendering = SubpixelRenderingCheck.IsChecked == true;
+        state.ShowImageLoadingIndicator = ShowLoadingIndicatorCheck.IsChecked == true;
+        state.FullscreenHideCursorDelaySeconds = (int)(FullscreenHideCursorDelayBox.Value ?? 2);
+        state.EnableTabFocusNavigation = TabFocusNavigationCheck.IsChecked == true;
         state.EscStopsSlideshow = EscStopsSlideshowCheck.IsChecked == true;
         state.EscExitsFullscreen = EscExitsFullscreenCheck.IsChecked == true;
         state.EscWindowedConfirm = EscWindowedConfirmCheck.IsChecked == true;
@@ -891,7 +906,8 @@ public partial class SettingsWindow : Window
         {
             "General" => "Application behavior, history, navigation and startup/new-tab preferences",
             "Appearance" => "Themes, colours, sizing and visual styling without changing interaction behavior",
-            "Viewing" => "Image presentation, fullscreen chrome and interface behavior",
+            "Viewing" => "Image presentation, viewport scaling, zoom behavior, scrollbars, text overlay HUD and overlays",
+            "Interface" => "Window behavior, folder traversal, tab layout, caption controls, navigation buttons and window interactions",
             "Mouse" => "Mouse gestures, selection, zoom, panning and fullscreen interaction",
             "Performance" => "Cold-start, decode quality, prefetch, refinement and memory controls",
             "Status" => "Choose the controls and information shown on Glide's status surface",
@@ -911,7 +927,8 @@ public partial class SettingsWindow : Window
     private static string DisplayCategory(string key) => key switch
     {
         "Appearance" => "Themes & Colours",
-        "Viewing" => "Viewing & Interface",
+        "Viewing" => "Viewing & Appearance",
+        "Interface" => "Interface & Behavior",
         "Mouse" => "Mouse & Fullscreen",
         "Performance" => "Performance & Startup",
         "Status" => "Status Bar",
@@ -1343,11 +1360,12 @@ public partial class SettingsWindow : Window
         M("appearance.theme", ThemeCombo); M("appearance.explorerTheme", ExplorerThemeCombo); M("appearance.accent", AccentCombo); M("appearance.glowColor", GlowCombo); M("appearance.background", MainBackgroundCombo); M("appearance.glowIntensity", GlowIntensityBox);
         M("appearance.homeTips", HomeTipsCheck); M("general.showRecentOnHome", ShowRecentOnHomeCheck); M("general.confirmDiscardSettings", ConfirmDiscardSettingsCheck);
         M("general.startupAction", StartupActionCombo); M("general.startupCustomPath", StartupCustomPathBox); M("general.newTabAction", NewTabActionCombo); M("general.newTabCustomPath", NewTabCustomPathBox); M("titlebar.customize", CustomizeTitleBarButton); M("escape.resetRememberedClose", ResetEscChoiceButton);
-        M("status.visible", StatusCheck); M("status.hoverWhenClosed", StatusHoverWhenClosedCheck); M("view.scrollbars", ShowScrollbarsCheck); M("window.fullPathTitle", FullPathTitleCheck); M("fullscreen.hideCursor", HideCursorFullscreenCheck);
+        M("status.visible", StatusCheck); M("status.hoverWhenClosed", StatusHoverWhenClosedCheck); M("view.scrollbars", ShowScrollbarsCheck); M("window.fullPathTitle", FullPathTitleCheck); M("fullscreen.hideCursor", HideCursorFullscreenCheck); M("fullscreen.hideCursorDelay", FullscreenHideCursorDelayBox);
         M("fullscreen.autoHideChrome", AutoHideFullscreenChromeCheck); M("fullscreen.keepTabBarOpen", FullscreenKeepTabBarOpenCheck); M("tabs.enabled", TabsCheck); M("tabs.navigateToFolderBehavior", NavigateToFolderBehaviorCombo); M("tabs.showBackButton", TabBarBackButtonCheck); M("tabs.showForwardButton", TabBarForwardButtonCheck); M("fullscreen.statusAlways", FullscreenStatusAlwaysCheck);
         M("caption.windowedMinimize", CaptionWindowedMinimizeCombo); M("caption.windowedMaximize", CaptionWindowedMaximizeCombo); M("caption.windowedClose", CaptionWindowedCloseCombo);
         M("caption.fullscreenMinimize", CaptionFullscreenMinimizeCombo); M("caption.fullscreenMaximize", CaptionFullscreenMaximizeCombo); M("caption.fullscreenClose", CaptionFullscreenCloseCombo);
-        M("windows.alwaysOnTop", AlwaysOnTopCheck); M("view.defaultMode", DefaultViewCombo); M("view.pointerZoom", PointerZoomCheck); M("view.keepZoom", PreserveZoomCheck);
+        M("windows.alwaysOnTop", AlwaysOnTopCheck); M("window.centerOnDisplay", AutoCenterWindowOnRestoreCheck); M("view.defaultMode", DefaultViewCombo); M("view.pointerZoom", PointerZoomCheck); M("view.keepZoom", PreserveZoomCheck);
+        M("view.zoomStep", ViewportZoomStepBox); M("view.upscaleSmallImages", UpscaleSmallImagesCheck); M("view.subpixelRendering", SubpixelRenderingCheck); M("view.showLoadingIndicator", ShowLoadingIndicatorCheck); M("keyboard.tabFocusNavigation", TabFocusNavigationCheck);
         M("escape.stopSlideshow", EscStopsSlideshowCheck); M("escape.exitFullscreen", EscExitsFullscreenCheck); M("escape.confirmWindowedClose", EscWindowedConfirmCheck);
         M("mouse.doubleClickFullscreen", DoubleClickFullscreenCheck); M("mouse.doubleClickExitFullscreen", DoubleClickExitFullscreenCheck); M("mouse.fullscreenClicks", FullscreenClicksCheck);
         M("mouse.windowedWheelZoom", WindowedWheelZoomCheck); M("mouse.invertWheel", InvertWheelCheck); M("mouse.leftDrag", LeftDragModeCombo); M("mouse.leftWindowDrag", LeftWindowDragBehaviorCombo); M("mouse.rightDragPan", RightDragBehaviorCombo);

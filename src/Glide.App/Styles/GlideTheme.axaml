@@ -149,6 +149,8 @@
   <Style Selector="Button.tabNavUtility:pointerover"><Setter Property="Background" Value="#2438A9F5"/></Style>
   <Style Selector="Button.tabNavUtility:pressed"><Setter Property="Background" Value="#3038A9F5"/></Style>
   <Style Selector="Button.tabNavUtility:disabled"><Setter Property="Opacity" Value="0.34"/></Style>
+  <Style Selector="Button.tabNavUtility.inactive"><Setter Property="Opacity" Value="0.34"/></Style>
+  <Style Selector="Button.tabNavUtility.inactive:pointerover"><Setter Property="Background" Value="#1200AEEF"/></Style>
   <Style Selector="Button.tabPlus">
     <Setter Property="Background" Value="Transparent"/><Setter Property="Foreground" Value="{DynamicResource BrushText}"/>
     <Setter Property="BorderThickness" Value="0"/><Setter Property="CornerRadius" Value="5"/><Setter Property="Padding" Value="0"/>

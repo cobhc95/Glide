@@ -2,10 +2,10 @@
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <!-- Public Glide release label follows feature-dot / bug-hyphen convention. 3.3 adds fullscreen-exit, duplicate-image, Overlay pin, status-wrap and resize-input capabilities. -->
-    <Version>3.5.0</Version>
-    <AssemblyVersion>3.5.0.0</AssemblyVersion>
-    <FileVersion>3.5.0.0</FileVersion>
-    <InformationalVersion>3.5</InformationalVersion>
+    <Version>3.5.6</Version>
+    <AssemblyVersion>3.5.6.0</AssemblyVersion>
+    <FileVersion>3.5.6.0</FileVersion>
+    <InformationalVersion>3.5-6</InformationalVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>

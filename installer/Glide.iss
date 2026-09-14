@@ -1,6 +1,6 @@
 #define MyAppName "Glide Image Viewer"
 #define MyAppShortName "Glide"
-#define MyAppVersion "3.5.0"
+#define MyAppVersion "3.5.6"
 #define MyAppExeName "Glide.exe"
 
 [Setup]
@@ -15,6 +15,7 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir=..\dist-installer
 OutputBaseFilename=Glide Setup
+SetupIconFile=..\src\Glide.App\Assets\Glide.ico
 Compression=lzma
 SolidCompression=no
 WizardStyle=modern
@@ -22,7 +23,7 @@ UsePreviousAppDir=yes
 CloseApplications=yes
 RestartApplications=no
 UninstallDisplayIcon={app}\{#MyAppExeName}
-VersionInfoVersion=3.5.0.0
+VersionInfoVersion=3.5.6.0
 VersionInfoProductName={#MyAppName}
 VersionInfoDescription=Glide Image Viewer Setup
 

@@ -56,8 +56,8 @@ public static class DiagnosticRunner
             $"{snapshot.SettingsSchemaCount} declarative settings registered"));
         var currentSettings = SettingsCatalog.All.Count(x => x.FuturePhase is null);
         var futureSettings = SettingsCatalog.All.Count(x => x.FuturePhase is not null);
-        checks.Add(Check("settings_schema_glide30_contract", snapshot.SettingsSchemaCount == 159 && currentSettings == 159 && futureSettings == 0,
-            $"Glide 3.0 catalogue contract: total={snapshot.SettingsSchemaCount}, current={currentSettings}, future={futureSettings}; expected 159/159/0."));
+        checks.Add(Check("settings_schema_glide30_contract", snapshot.SettingsSchemaCount == 160 && currentSettings == 160 && futureSettings == 0,
+            $"Glide 3.0 catalogue contract: total={snapshot.SettingsSchemaCount}, current={currentSettings}, future={futureSettings}; expected 160/160/0."));
         var progressiveColor = SettingsCatalog.All.FirstOrDefault(x => string.Equals(x.Id, "performance.progressiveColor", StringComparison.OrdinalIgnoreCase));
         checks.Add(Check("progressive_color_runtime_contract",
             progressiveColor is not null && progressiveColor.FuturePhase is null && progressiveColor.DefaultValue is bool enabled && enabled,
@@ -90,8 +90,8 @@ public static class DiagnosticRunner
 
         checks.Add(Check("workspace_tab_transfer_model", VerifyWorkspaceTransferModel(),
             "Typed tab transfer preserves stable ID/state across workspaces and leaves the source empty."));
-        checks.Add(Check("hotkey_contract", HotkeyCatalog.All.Count == 68 &&
-            HotkeyCatalog.All.Select(x => x.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count() == 68 &&
+        checks.Add(Check("hotkey_contract", HotkeyCatalog.All.Count == 70 &&
+            HotkeyCatalog.All.Select(x => x.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count() == 70 &&
             HotkeyCatalog.ShortcutsForCommand(GlideCommand.AddOverlay, defaultHotkeys).Contains("Shift+O"),
             $"{HotkeyCatalog.All.Count} editable semantic hotkey actions registered, including Shift+O overlay add."));
         var irfanHotkeys = HotkeyCatalog.CreatePresetMap("IrfanView");

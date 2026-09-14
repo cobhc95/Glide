@@ -54,12 +54,13 @@ public sealed record GlideSettingsState
     public string WelcomeRecentPosition { get; set; } = "Below tips";
     public string WelcomeRecentSize { get; set; } = "Normal";
 
-    // Viewing & Interface
+    // Interface & Behavior
     public bool ShowStatusSurface { get; set; } = true;
     public bool StatusShowOnHoverWhenClosed { get; set; } = false;
     public bool ShowScrollbars { get; set; } = true;
     public bool FullPathInTitle { get; set; }
     public bool HideCursorFullscreen { get; set; } = true;
+    public int FullscreenHideCursorDelaySeconds { get; set; } = 2;
     public bool AutoHideFullscreenChrome { get; set; } = true;
     public bool TabsEnabled { get; set; } = true;
     // Explorer launches while another Glide instance is available.
@@ -86,12 +87,18 @@ public sealed record GlideSettingsState
     public bool FullscreenStatusAlwaysOn { get; set; } = true;
     public bool FullscreenKeepTabBarOpen { get; set; }
     public bool AlwaysOnTop { get; set; }
+    public bool AutoCenterWindowOnRestore { get; set; }
     // What F11/Escape/fullscreen toggle should do when leaving fullscreen.
     // Default restores the exact pre-fullscreen normal placement/state captured on entry.
     public string FullscreenExitBehavior { get; set; } = "Restore size and location";
     public string DefaultViewMode { get; set; } = "Fit image";
     public bool PointerZoom { get; set; } = true;
     public bool PreserveManualZoomOnNavigate { get; set; }
+    public int ViewportZoomStepPercent { get; set; } = 10;
+    public bool UpscaleSmallImages { get; set; }
+    public bool HighPrecisionSubpixelRendering { get; set; } = true;
+    public bool ShowImageLoadingIndicator { get; set; } = true;
+    public bool EnableTabFocusNavigation { get; set; }
     public bool EscStopsSlideshow { get; set; } = true;
     public bool EscExitsFullscreen { get; set; } = true;
     public bool EscWindowedConfirm { get; set; }
