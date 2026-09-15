@@ -1,0 +1,54 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Glide.Core", "src\Glide.Core\Glide.Core.csproj", "{B6A98D50-9BA6-4E04-B3E4-08021C38EC01}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Glide.Imaging", "src\Glide.Imaging\Glide.Imaging.csproj", "{B6A98D50-9BA6-4E04-B3E4-08021C38EC02}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Glide.Diagnostics", "src\Glide.Diagnostics\Glide.Diagnostics.csproj", "{B6A98D50-9BA6-4E04-B3E4-08021C38EC03}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Glide.App", "src\Glide.App\Glide.App.csproj", "{B6A98D50-9BA6-4E04-B3E4-08021C38EC04}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Glide.Core.Tests", "tests\Glide.Core.Tests\Glide.Core.Tests.csproj", "{B6A98D50-9BA6-4E04-B3E4-08021C38EC05}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Glide.Input", "src\Glide.Input\Glide.Input.csproj", "{B6A98D50-9BA6-4E04-B3E4-08021C38EC06}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Glide.Input.Tests", "tests\Glide.Input.Tests\Glide.Input.Tests.csproj", "{B6A98D50-9BA6-4E04-B3E4-08021C38EC07}"
+EndProject
+Global
+  GlobalSection(SolutionConfigurationPlatforms) = preSolution
+    Debug|Any CPU = Debug|Any CPU
+    Release|Any CPU = Release|Any CPU
+  EndGlobalSection
+  GlobalSection(ProjectConfigurationPlatforms) = postSolution
+    {B6A98D50-9BA6-4E04-B3E4-08021C38EC01}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+    {B6A98D50-9BA6-4E04-B3E4-08021C38EC01}.Debug|Any CPU.Build.0 = Debug|Any CPU
+    {B6A98D50-9BA6-4E04-B3E4-08021C38EC01}.Release|Any CPU.ActiveCfg = Release|Any CPU
+    {B6A98D50-9BA6-4E04-B3E4-08021C38EC01}.Release|Any CPU.Build.0 = Release|Any CPU
+    {B6A98D50-9BA6-4E04-B3E4-08021C38EC02}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+    {B6A98D50-9BA6-4E04-B3E4-08021C38EC02}.Debug|Any CPU.Build.0 = Debug|Any CPU
+    {B6A98D50-9BA6-4E04-B3E4-08021C38EC02}.Release|Any CPU.ActiveCfg = Release|Any CPU
+    {B6A98D50-9BA6-4E04-B3E4-08021C38EC02}.Release|Any CPU.Build.0 = Release|Any CPU
+    {B6A98D50-9BA6-4E04-B3E4-08021C38EC03}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+    {B6A98D50-9BA6-4E04-B3E4-08021C38EC03}.Debug|Any CPU.Build.0 = Debug|Any CPU
+    {B6A98D50-9BA6-4E04-B3E4-08021C38EC03}.Release|Any CPU.ActiveCfg = Release|Any CPU
+    {B6A98D50-9BA6-4E04-B3E4-08021C38EC03}.Release|Any CPU.Build.0 = Release|Any CPU
+    {B6A98D50-9BA6-4E04-B3E4-08021C38EC04}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+    {B6A98D50-9BA6-4E04-B3E4-08021C38EC04}.Debug|Any CPU.Build.0 = Debug|Any CPU
+    {B6A98D50-9BA6-4E04-B3E4-08021C38EC04}.Release|Any CPU.ActiveCfg = Release|Any CPU
+    {B6A98D50-9BA6-4E04-B3E4-08021C38EC04}.Release|Any CPU.Build.0 = Release|Any CPU
+    {B6A98D50-9BA6-4E04-B3E4-08021C38EC05}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+    {B6A98D50-9BA6-4E04-B3E4-08021C38EC05}.Debug|Any CPU.Build.0 = Debug|Any CPU
+    {B6A98D50-9BA6-4E04-B3E4-08021C38EC05}.Release|Any CPU.ActiveCfg = Release|Any CPU
+    {B6A98D50-9BA6-4E04-B3E4-08021C38EC05}.Release|Any CPU.Build.0 = Release|Any CPU
+    {B6A98D50-9BA6-4E04-B3E4-08021C38EC06}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+    {B6A98D50-9BA6-4E04-B3E4-08021C38EC06}.Debug|Any CPU.Build.0 = Debug|Any CPU
+    {B6A98D50-9BA6-4E04-B3E4-08021C38EC06}.Release|Any CPU.ActiveCfg = Release|Any CPU
+    {B6A98D50-9BA6-4E04-B3E4-08021C38EC06}.Release|Any CPU.Build.0 = Release|Any CPU
+    {B6A98D50-9BA6-4E04-B3E4-08021C38EC07}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+    {B6A98D50-9BA6-4E04-B3E4-08021C38EC07}.Debug|Any CPU.Build.0 = Debug|Any CPU
+    {B6A98D50-9BA6-4E04-B3E4-08021C38EC07}.Release|Any CPU.ActiveCfg = Release|Any CPU
+    {B6A98D50-9BA6-4E04-B3E4-08021C38EC07}.Release|Any CPU.Build.0 = Release|Any CPU
+  EndGlobalSection
+EndGlobal

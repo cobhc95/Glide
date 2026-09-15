@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="..\Glide.Core\Glide.Core.csproj" />
+    <ProjectReference Include="..\Glide.Imaging\Glide.Imaging.csproj" />
+  </ItemGroup>
+</Project>

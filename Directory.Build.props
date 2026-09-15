@@ -1,0 +1,28 @@
+<Project>
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <!-- Glide 4.1 release: warm-engine Launch Speed Boost, background standby, and the current image-opening pipeline. -->
+    <Version>4.1.4</Version>
+    <AssemblyVersion>4.1.4.0</AssemblyVersion>
+    <FileVersion>4.1.4.0</FileVersion>
+    <InformationalVersion>4.1.4</InformationalVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <Deterministic>true</Deterministic>
+    <TieredPGO Condition="'$(Configuration)' == 'Release'">true</TieredPGO>
+    <PublishReadyToRun Condition="'$(Configuration)' == 'Release'">true</PublishReadyToRun>
+    <!-- Cold launch is Glide 3.0's overriding constraint. Composite R2R trades some publish size
+         and build time for less cross-assembly JIT/runtime work before first useful pixels. -->
+    <PublishReadyToRunComposite Condition="'$(Configuration)' == 'Release'">true</PublishReadyToRunComposite>
+    <UseArtifactsOutput>true</UseArtifactsOutput>
+    <ArtifactsPath>$(MSBuildThisFileDirectory).artifacts</ArtifactsPath>
+  </PropertyGroup>
+  <ItemGroup Condition="Exists('$(MSBuildThisFileDirectory)dist\Glide.Native.dll')">
+    <None Include="$(MSBuildThisFileDirectory)dist\Glide.Native.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Visible>false</Visible>
+    </None>
+  </ItemGroup>
+</Project>

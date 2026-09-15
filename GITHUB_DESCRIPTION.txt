@@ -1,0 +1,1 @@
+Fast, lightweight Windows image viewer with multi-tab/multi-window workflows, deep customization, overlay mode, ~14 MB installer and routing for 196 image/document extensions.

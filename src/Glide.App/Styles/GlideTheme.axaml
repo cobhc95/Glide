@@ -1,0 +1,322 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="using:Glide.App.Controls">
+  <Styles.Resources>
+    <Color x:Key="GlideWindow">#181A1D</Color>
+    <Color x:Key="GlideViewport">#0E0F10</Color>
+    <Color x:Key="GlideChrome">#1A2224</Color>
+    <Color x:Key="GlideTabStrip">#161616</Color>
+    <Color x:Key="GlideSurface">#1B1E23</Color>
+    <Color x:Key="GlideSurfaceRaised">#202329</Color>
+    <Color x:Key="GlideSurfaceHover">#21364A</Color>
+    <Color x:Key="GlideCard">#191C1F</Color>
+    <Color x:Key="GlideCardAccent">#22384C</Color>
+    <Color x:Key="GlideBorder">#343C42</Color>
+    <Color x:Key="GlideBorderSoft">#2A3035</Color>
+    <Color x:Key="GlideText">#F2F4F6</Color>
+    <Color x:Key="GlideMuted">#AAB5C2</Color>
+    <Color x:Key="GlideMuted2">#7E8995</Color>
+    <Color x:Key="GlideAccent">#38A9F5</Color>
+    <Color x:Key="GlideAccentSoft">#27435E</Color>
+    <Color x:Key="GlideNavAccent">#39A9E5</Color>
+    <Color x:Key="GlideOverlayAccent">#AE94FF</Color>
+    <Color x:Key="GlideSettingsRail">#1A1D20</Color>
+
+    <SolidColorBrush x:Key="BrushWindow" Color="{StaticResource GlideWindow}"/>
+    <SolidColorBrush x:Key="BrushViewport" Color="{StaticResource GlideViewport}"/>
+    <SolidColorBrush x:Key="BrushChrome" Color="{StaticResource GlideChrome}"/>
+    <SolidColorBrush x:Key="BrushTabStrip" Color="{StaticResource GlideTabStrip}"/>
+    <SolidColorBrush x:Key="BrushSurface" Color="{StaticResource GlideSurface}"/>
+    <SolidColorBrush x:Key="BrushSurfaceRaised" Color="{StaticResource GlideSurfaceRaised}"/>
+    <SolidColorBrush x:Key="BrushSurfaceHover" Color="{StaticResource GlideSurfaceHover}"/>
+    <SolidColorBrush x:Key="BrushCard" Color="{StaticResource GlideCard}"/>
+    <SolidColorBrush x:Key="BrushCardAccent" Color="{StaticResource GlideCardAccent}"/>
+    <SolidColorBrush x:Key="BrushBorder" Color="{StaticResource GlideBorder}"/>
+    <SolidColorBrush x:Key="BrushBorderSoft" Color="{StaticResource GlideBorderSoft}"/>
+    <SolidColorBrush x:Key="BrushText" Color="{StaticResource GlideText}"/>
+    <SolidColorBrush x:Key="BrushMuted" Color="{StaticResource GlideMuted}"/>
+    <SolidColorBrush x:Key="BrushMuted2" Color="{StaticResource GlideMuted2}"/>
+    <SolidColorBrush x:Key="BrushAccent" Color="{StaticResource GlideAccent}"/>
+    <SolidColorBrush x:Key="BrushAccentSoft" Color="{StaticResource GlideAccentSoft}"/>
+    <SolidColorBrush x:Key="BrushNavAccent" Color="{StaticResource GlideNavAccent}"/>
+    <SolidColorBrush x:Key="BrushOverlayAccent" Color="{StaticResource GlideOverlayAccent}"/>
+    <SolidColorBrush x:Key="BrushSettingsRail" Color="{StaticResource GlideSettingsRail}"/>
+
+    <SolidColorBrush x:Key="BrushChromeButton" Color="#161616"/>
+    <SolidColorBrush x:Key="BrushChromeButtonHover" Color="#303030"/>
+    <SolidColorBrush x:Key="BrushChromeButtonPressed" Color="#3A3A3A"/>
+    <SolidColorBrush x:Key="BrushChromeButtonBorder" Color="#161616"/>
+    <SolidColorBrush x:Key="BrushTabHover" Color="#292929"/>
+    <SolidColorBrush x:Key="BrushTabActive" Color="#333333"/>
+    <SolidColorBrush x:Key="BrushTabCloseHover" Color="#474747"/>
+    <SolidColorBrush x:Key="BrushStatusSurface" Color="#D9202327"/>
+    <SolidColorBrush x:Key="BrushStatusButton" Color="#1B1F24"/>
+    <SolidColorBrush x:Key="BrushStatusButtonHover" Color="#23384A"/>
+    <SolidColorBrush x:Key="BrushStatusButtonPressed" Color="#2A455E"/>
+    <SolidColorBrush x:Key="BrushStatusBorder" Color="#30373D"/>
+    <SolidColorBrush x:Key="BrushStatusButtonBorder" Color="#303840"/>
+    <SolidColorBrush x:Key="BrushStatusNavBorder" Color="#28536A"/>
+    <SolidColorBrush x:Key="BrushSettingsNavHover" Color="#202A33"/>
+    <SolidColorBrush x:Key="BrushSettingsNavSelected" Color="#29465F"/>
+    <SolidColorBrush x:Key="BrushInput" Color="#202226"/>
+    <SolidColorBrush x:Key="BrushInputBorder" Color="#30363C"/>
+    <SolidColorBrush x:Key="BrushSearch" Color="#202328"/>
+    <SolidColorBrush x:Key="BrushFooter" Color="#181B1E"/>
+    <SolidColorBrush x:Key="BrushPrimaryAction" Color="#2C76AA"/>
+    <SolidColorBrush x:Key="BrushPrimaryActionHover" Color="#3787BC"/>
+    <SolidColorBrush x:Key="BrushSecondaryAction" Color="#1A1C20"/>
+    <SolidColorBrush x:Key="BrushSecondaryActionHover" Color="#242A30"/>
+  </Styles.Resources>
+
+  <Style Selector="Window">
+    <Setter Property="Background" Value="{DynamicResource BrushWindow}"/>
+    <Setter Property="Foreground" Value="{DynamicResource BrushText}"/>
+    <Setter Property="FontFamily" Value="Segoe UI"/>
+  </Style>
+  <Style Selector="TextBlock"><Setter Property="FontFamily" Value="Segoe UI"/></Style>
+  <Style Selector="Button"><Setter Property="FontFamily" Value="Segoe UI"/></Style>
+
+  <!-- Vector glyph sizing. -->
+  <Style Selector="controls|GlideIconView.toolbarGlyph">
+    <Setter Property="Width" Value="18"/><Setter Property="Height" Value="18"/>
+    <Setter Property="IconBrush" Value="{DynamicResource BrushText}"/><Setter Property="StrokeWidth" Value="1.55"/>
+  </Style>
+  <Style Selector="controls|GlideIconView.statusGlyph">
+    <Setter Property="Width" Value="20"/><Setter Property="Height" Value="20"/>
+    <Setter Property="IconBrush" Value="{DynamicResource BrushAccent}"/><Setter Property="StrokeWidth" Value="1.55"/>
+  </Style>
+
+
+  <Style Selector="controls|GlideIconView.homeGlyph">
+    <Setter Property="Width" Value="19"/><Setter Property="Height" Value="19"/>
+    <Setter Property="IconBrush" Value="{DynamicResource BrushAccent}"/><Setter Property="StrokeWidth" Value="1.55"/>
+    <Setter Property="HorizontalAlignment" Value="Center"/><Setter Property="VerticalAlignment" Value="Top"/><Setter Property="Margin" Value="0,2,0,0"/>
+  </Style>
+
+  <!-- Main window chrome -->
+  <Style Selector="Button.glideIcon">
+    <Setter Property="Background" Value="Transparent"/>
+    <Setter Property="Foreground" Value="{DynamicResource BrushText}"/>
+    <Setter Property="BorderBrush" Value="Transparent"/>
+    <Setter Property="BorderThickness" Value="0"/>
+    <Setter Property="CornerRadius" Value="7"/>
+    <Setter Property="Padding" Value="0"/>
+    <Setter Property="Width" Value="40"/>
+    <Setter Property="Height" Value="36"/>
+    <Setter Property="HorizontalContentAlignment" Value="Center"/>
+    <Setter Property="VerticalContentAlignment" Value="Center"/>
+  </Style>
+  <Style Selector="Button.glideIcon:pointerover"><Setter Property="Background" Value="{DynamicResource BrushChromeButtonHover}"/></Style>
+  <Style Selector="Button.glideIcon:pressed"><Setter Property="Background" Value="{DynamicResource BrushChromeButtonPressed}"/></Style>
+  <Style Selector="Button.glideIcon.active"><Setter Property="Background" Value="{DynamicResource BrushChromeButtonPressed}"/></Style>
+  <Style Selector="Button.glideIcon:disabled"><Setter Property="Opacity" Value="0.30"/></Style>
+  <Style Selector="Button.glideIcon.nav"><Setter Property="BorderBrush" Value="Transparent"/></Style>
+  <Style Selector="Button.glideIcon.nav controls|GlideIconView"><Setter Property="IconBrush" Value="{DynamicResource BrushText}"/></Style>
+
+
+  <Style Selector="Button.captionButton">
+    <Setter Property="Background" Value="Transparent"/><Setter Property="Foreground" Value="{DynamicResource BrushText}"/>
+    <Setter Property="BorderThickness" Value="0"/><Setter Property="CornerRadius" Value="0"/><Setter Property="Padding" Value="0"/>
+    <Setter Property="HorizontalContentAlignment" Value="Center"/><Setter Property="VerticalContentAlignment" Value="Center"/>
+  </Style>
+  <Style Selector="Button.captionButton:pointerover"><Setter Property="Background" Value="#18FFFFFF"/></Style>
+  <Style Selector="Button.captionButton:pressed"><Setter Property="Background" Value="#26FFFFFF"/></Style>
+  <Style Selector="Button.captionButton.nativeHot"><Setter Property="Background" Value="#18FFFFFF"/></Style>
+  <Style Selector="Button.captionButton.nativePressed"><Setter Property="Background" Value="#26FFFFFF"/></Style>
+  <Style Selector="Button.captionButton.close:pointerover"><Setter Property="Background" Value="#C42B1C"/></Style>
+  <Style Selector="Button.captionButton.close:pressed"><Setter Property="Background" Value="#A92317"/></Style>
+  <Style Selector="Button.captionButton.close.nativeHot"><Setter Property="Background" Value="#C42B1C"/></Style>
+  <Style Selector="Button.captionButton.close.nativePressed"><Setter Property="Background" Value="#A92317"/></Style>
+  <Style Selector="Button.fullscreenCornerHit"><Setter Property="Background" Value="Transparent"/><Setter Property="BorderThickness" Value="0"/><Setter Property="Padding" Value="0"/></Style>
+  <Style Selector="Button.fullscreenCornerHit:pointerover"><Setter Property="Background" Value="Transparent"/></Style>
+  <Style Selector="Button.fullscreenCornerHit:pressed"><Setter Property="Background" Value="Transparent"/></Style>
+  <Style Selector="TextBlock.captionGlyph"><Setter Property="Foreground" Value="#D9FFFFFF"/><Setter Property="Opacity" Value="0.92"/><Setter Property="VerticalAlignment" Value="Center"/><Setter Property="HorizontalAlignment" Value="Center"/></Style>
+  <Style Selector="TextBlock.modernSettingsGlyph"><Setter Property="Foreground" Value="{DynamicResource BrushAccent}"/><Setter Property="Opacity" Value="0.96"/><Setter Property="VerticalAlignment" Value="Center"/><Setter Property="HorizontalAlignment" Value="Center"/></Style>
+  <Style Selector="TextBlock.modernTitleSettingsGlyph"><Setter Property="Foreground" Value="{DynamicResource BrushText}"/><Setter Property="Opacity" Value="0.96"/><Setter Property="VerticalAlignment" Value="Center"/><Setter Property="HorizontalAlignment" Value="Center"/></Style>
+
+  <Style Selector="Border.chromeBorder"><Setter Property="Background" Value="{DynamicResource BrushTabStrip}"/><Setter Property="BorderBrush" Value="{DynamicResource BrushBorderSoft}"/><Setter Property="BorderThickness" Value="0,0,0,1"/></Style>
+  <!-- Shown while a dragged tab is inside the forgiving cross-window attach zone. The more
+       specific selector intentionally overrides the normal chrome visuals. -->
+  <Style Selector="Border.chromeBorder.attachTargetStrip"><Setter Property="BorderBrush" Value="{DynamicResource BrushAccent}"/><Setter Property="BorderThickness" Value="2"/><Setter Property="CornerRadius" Value="4"/><Setter Property="Background" Value="{DynamicResource BrushAccentSoft}"/></Style>
+
+  <Style Selector="Button.tabNavUtility">
+    <Setter Property="Background" Value="#1200AEEF"/>
+    <Setter Property="BorderBrush" Value="#2638A9F5"/>
+    <Setter Property="BorderThickness" Value="1"/>
+    <Setter Property="CornerRadius" Value="7"/>
+    <Setter Property="Padding" Value="0"/>
+  </Style>
+  <Style Selector="Button.tabNavUtility:pointerover"><Setter Property="Background" Value="#2438A9F5"/></Style>
+  <Style Selector="Button.tabNavUtility:pressed"><Setter Property="Background" Value="#3038A9F5"/></Style>
+  <Style Selector="Button.tabNavUtility:disabled"><Setter Property="Opacity" Value="0.34"/></Style>
+  <Style Selector="Button.tabNavUtility.inactive"><Setter Property="Opacity" Value="0.34"/></Style>
+  <Style Selector="Button.tabNavUtility.inactive:pointerover"><Setter Property="Background" Value="#1200AEEF"/></Style>
+  <Style Selector="Button.tabPlus">
+    <Setter Property="Background" Value="Transparent"/><Setter Property="Foreground" Value="{DynamicResource BrushText}"/>
+    <Setter Property="BorderThickness" Value="0"/><Setter Property="CornerRadius" Value="5"/><Setter Property="Padding" Value="0"/>
+  </Style>
+  <Style Selector="Button.tabPlus:pointerover"><Setter Property="Background" Value="{DynamicResource BrushTabHover}"/></Style>
+  <Style Selector="Button.tabOverflowArrow"><Setter Property="Background" Value="{DynamicResource BrushAccent}"/><Setter Property="BorderBrush" Value="{DynamicResource BrushAccent}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="7"/><Setter Property="Padding" Value="0"/><Setter Property="Margin" Value="1,4"/></Style>
+  <Style Selector="Button.tabOverflowArrow:pointerover"><Setter Property="Opacity" Value="0.88"/></Style>
+  <Style Selector="Button.tabOverflowArrow:pressed"><Setter Property="Opacity" Value="0.72"/></Style>
+  <Style Selector="Border.glideTab"><Setter Property="Background" Value="Transparent"/><Setter Property="CornerRadius" Value="8"/></Style>
+  <Style Selector="Border.glideTab:pointerover"><Setter Property="Background" Value="{DynamicResource BrushTabHover}"/></Style>
+  <Style Selector="Border.glideTab.active"><Setter Property="Background" Value="{DynamicResource BrushTabActive}"/></Style>
+  <Style Selector="Border.glideTab.dragging"><Setter Property="Opacity" Value="0.82"/><Setter Property="BorderBrush" Value="{DynamicResource BrushAccent}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="BoxShadow" Value="0 5 16 0 #66000000"/></Style>
+  <Style Selector="Border.glideTab.attachTarget"><Setter Property="Background" Value="{DynamicResource BrushAccentSoft}"/><Setter Property="BorderBrush" Value="{DynamicResource BrushAccent}"/><Setter Property="BorderThickness" Value="1"/></Style>
+  <Style Selector="Border.tabHit"><Setter Property="Background" Value="Transparent"/><Setter Property="BorderThickness" Value="0"/><Setter Property="CornerRadius" Value="8"/></Style>
+  <Style Selector="Border.tabHit:pointerover"><Setter Property="Background" Value="Transparent"/></Style>
+  <Style Selector="Button.tabClose"><Setter Property="Background" Value="Transparent"/><Setter Property="BorderThickness" Value="0"/><Setter Property="Padding" Value="0"/><Setter Property="Width" Value="20"/><Setter Property="Height" Value="20"/><Setter Property="CornerRadius" Value="10"/></Style>
+  <Style Selector="Button.tabClose:pointerover"><Setter Property="Background" Value="{DynamicResource BrushTabCloseHover}"/></Style>
+
+  <!-- Home -->
+  <Style Selector="Border.homeCard"><Setter Property="Background" Value="{DynamicResource BrushCard}"/><Setter Property="BorderBrush" Value="{DynamicResource BrushBorder}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="8"/><Setter Property="Padding" Value="13,10"/><Setter Property="MinHeight" Value="82"/></Style>
+  <Style Selector="Border.homeCardAccent"><Setter Property="Background" Value="{DynamicResource BrushCardAccent}"/></Style>
+  <Style Selector="TextBlock.homeTitle"><Setter Property="FontSize" Value="14.5"/><Setter Property="FontWeight" Value="SemiBold"/></Style>
+  <Style Selector="TextBlock.homeDescription"><Setter Property="FontSize" Value="11.5"/><Setter Property="Foreground" Value="{DynamicResource BrushMuted}"/><Setter Property="TextWrapping" Value="Wrap"/><Setter Property="Margin" Value="0,3,0,0"/></Style>
+
+  <!-- Floating status surface -->
+  <Style Selector="Border.statusSurface"><Setter Property="Background" Value="{DynamicResource BrushStatusSurface}"/><Setter Property="BorderBrush" Value="{DynamicResource BrushStatusBorder}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="10"/><Setter Property="BoxShadow" Value="0 4 18 0 #55000000"/></Style>
+  <Style Selector="Button.statusIcon"><Setter Property="Background" Value="{DynamicResource BrushStatusButton}"/><Setter Property="BorderBrush" Value="{DynamicResource BrushStatusButtonBorder}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="7"/><Setter Property="Padding" Value="0"/><Setter Property="Width" Value="42"/><Setter Property="Height" Value="42"/></Style>
+  <Style Selector="Button.statusIcon:pointerover"><Setter Property="Background" Value="{DynamicResource BrushStatusButtonHover}"/><Setter Property="BorderBrush" Value="{DynamicResource BrushStatusNavBorder}"/></Style>
+  <Style Selector="Button.statusIcon:pressed"><Setter Property="Background" Value="{DynamicResource BrushStatusButtonPressed}"/></Style>
+  <Style Selector="Button.statusIcon:disabled"><Setter Property="Opacity" Value="0.27"/></Style>
+  <Style Selector="Button.statusIcon.nav"><Setter Property="BorderBrush" Value="{DynamicResource BrushStatusNavBorder}"/></Style>
+  <Style Selector="Button.legacyStatusIcon"><Setter Property="Width" Value="46"/><Setter Property="Height" Value="46"/><Setter Property="CornerRadius" Value="7"/></Style>
+  <Style Selector="Border.legacyViewerStatus"><Setter Property="Height" Value="58"/><Setter Property="MaxWidth" Value="1080"/></Style>
+  <Style Selector="TextBlock.statusStats"><Setter Property="MaxWidth" Value="250"/><Setter Property="FontSize" Value="13.5"/></Style>
+  <Style Selector="Border.legacyViewerStatus.statusVerySmall"><Setter Property="Height" Value="40"/><Setter Property="MaxWidth" Value="780"/></Style>
+  <Style Selector="Border.legacyViewerStatus.statusSmall"><Setter Property="Height" Value="48"/><Setter Property="MaxWidth" Value="930"/></Style>
+  <Style Selector="Border.legacyViewerStatus.statusMedium"><Setter Property="Height" Value="58"/><Setter Property="MaxWidth" Value="1080"/></Style>
+  <Style Selector="Border.legacyViewerStatus.statusLarge"><Setter Property="Height" Value="68"/><Setter Property="MaxWidth" Value="1240"/></Style>
+  <Style Selector="Border.legacyViewerStatus.statusExtraLarge"><Setter Property="Height" Value="80"/><Setter Property="MaxWidth" Value="1420"/></Style>
+  <Style Selector="Border.legacyViewerStatus.statusVerySmall Button.legacyStatusIcon"><Setter Property="Width" Value="32"/><Setter Property="Height" Value="32"/><Setter Property="CornerRadius" Value="5"/></Style>
+  <Style Selector="Border.legacyViewerStatus.statusSmall Button.legacyStatusIcon"><Setter Property="Width" Value="38"/><Setter Property="Height" Value="38"/><Setter Property="CornerRadius" Value="6"/></Style>
+  <Style Selector="Border.legacyViewerStatus.statusMedium Button.legacyStatusIcon"><Setter Property="Width" Value="46"/><Setter Property="Height" Value="46"/><Setter Property="CornerRadius" Value="7"/></Style>
+  <Style Selector="Border.legacyViewerStatus.statusLarge Button.legacyStatusIcon"><Setter Property="Width" Value="54"/><Setter Property="Height" Value="54"/><Setter Property="CornerRadius" Value="8"/></Style>
+  <Style Selector="Border.legacyViewerStatus.statusExtraLarge Button.legacyStatusIcon"><Setter Property="Width" Value="64"/><Setter Property="Height" Value="64"/><Setter Property="CornerRadius" Value="9"/></Style>
+  <Style Selector="Border.legacyViewerStatus.statusVerySmall TextBlock.statusStats"><Setter Property="MaxWidth" Value="170"/><Setter Property="FontSize" Value="12.5"/></Style>
+  <Style Selector="Border.legacyViewerStatus.statusSmall TextBlock.statusStats"><Setter Property="MaxWidth" Value="210"/><Setter Property="FontSize" Value="13"/></Style>
+  <Style Selector="Border.legacyViewerStatus.statusMedium TextBlock.statusStats"><Setter Property="MaxWidth" Value="250"/><Setter Property="FontSize" Value="13.5"/></Style>
+  <Style Selector="Border.legacyViewerStatus.statusLarge TextBlock.statusStats"><Setter Property="MaxWidth" Value="290"/><Setter Property="FontSize" Value="14"/></Style>
+  <Style Selector="Border.legacyViewerStatus.statusExtraLarge TextBlock.statusStats"><Setter Property="MaxWidth" Value="340"/><Setter Property="FontSize" Value="15"/></Style>
+  <Style Selector="Button.statusIcon.nav controls|GlideIconView"><Setter Property="IconBrush" Value="{DynamicResource BrushNavAccent}"/></Style>
+  <Style Selector="Border.statusGroup"><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="7"/><Setter Property="Padding" Value="2"/></Style>
+  <Style Selector="Border.statusGroup.viewGroup"><Setter Property="Background" Value="#164EA3D8"/><Setter Property="BorderBrush" Value="#554EA3D8"/></Style>
+  <Style Selector="Border.statusGroup.overlayGroup"><Setter Property="Background" Value="#17A86AE3"/><Setter Property="BorderBrush" Value="#58A86AE3"/></Style>
+  <Style Selector="Border.statusGroup.slideshowGroup"><Setter Property="Background" Value="#18D7963A"/><Setter Property="BorderBrush" Value="#58D7963A"/></Style>
+  <Style Selector="Border.statusGroup.navGroup"><Setter Property="Background" Value="#173AAE75"/><Setter Property="BorderBrush" Value="#583AAE75"/></Style>
+  <Style Selector="Border.statusGroup.viewGroup controls|GlideIconView.statusGlyph"><Setter Property="IconBrush" Value="#67C8FF"/></Style>
+  <Style Selector="Border.statusGroup.overlayGroup controls|GlideIconView.statusGlyph"><Setter Property="IconBrush" Value="#C590FF"/></Style>
+  <Style Selector="Border.statusGroup.slideshowGroup controls|GlideIconView.statusGlyph"><Setter Property="IconBrush" Value="#F1B85B"/></Style>
+  <Style Selector="Border.statusGroup.navGroup controls|GlideIconView.statusGlyph"><Setter Property="IconBrush" Value="#68D99B"/></Style>
+  <Style Selector="Button.statusRestore">
+    <Setter Property="Background" Value="{DynamicResource BrushStatusSurface}"/>
+    <Setter Property="BorderBrush" Value="{DynamicResource BrushStatusNavBorder}"/>
+    <Setter Property="BorderThickness" Value="1"/>
+    <Setter Property="CornerRadius" Value="9"/>
+    <Setter Property="Padding" Value="0"/>
+    <Setter Property="Width" Value="44"/>
+    <Setter Property="Height" Value="44"/>
+  </Style>
+  <Style Selector="Button.statusRestore:pointerover"><Setter Property="Background" Value="{DynamicResource BrushStatusButtonHover}"/></Style>
+
+
+  <Style Selector="Border.recentPanel">
+    <Setter Property="Background" Value="{DynamicResource BrushSurface}"/>
+    <Setter Property="BorderBrush" Value="{DynamicResource BrushBorderSoft}"/>
+    <Setter Property="BorderThickness" Value="1"/>
+    <Setter Property="CornerRadius" Value="7"/>
+  </Style>
+  <Style Selector="Button.recentItem">
+    <Setter Property="HorizontalAlignment" Value="Stretch"/>
+    <Setter Property="HorizontalContentAlignment" Value="Left"/>
+    <Setter Property="Background" Value="Transparent"/>
+    <Setter Property="BorderThickness" Value="0"/>
+    <Setter Property="CornerRadius" Value="5"/>
+    <Setter Property="Padding" Value="7,5"/>
+    <Setter Property="FontSize" Value="12"/>
+  </Style>
+  <Style Selector="Button.recentItem:pointerover"><Setter Property="Background" Value="{DynamicResource BrushChromeButtonHover}"/></Style>
+  <Style Selector="Button.recentClear">
+    <Setter Property="Background" Value="Transparent"/><Setter Property="BorderThickness" Value="0"/>
+    <Setter Property="Foreground" Value="{DynamicResource BrushMuted}"/><Setter Property="Padding" Value="8,3"/>
+    <Setter Property="CornerRadius" Value="5"/><Setter Property="FontSize" Value="11.5"/>
+  </Style>
+  <Style Selector="Button.recentClear:pointerover"><Setter Property="Background" Value="{DynamicResource BrushChromeButtonHover}"/><Setter Property="Foreground" Value="{DynamicResource BrushText}"/></Style>
+
+  <Style Selector="Button.browserTool">
+    <Setter Property="Background" Value="{DynamicResource BrushChromeButton}"/><Setter Property="BorderBrush" Value="{DynamicResource BrushChromeButtonBorder}"/>
+    <Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="5"/><Setter Property="Width" Value="31"/><Setter Property="Height" Value="31"/><Setter Property="Padding" Value="0"/>
+  </Style>
+  <Style Selector="Button.browserTool:pointerover"><Setter Property="Background" Value="{DynamicResource BrushChromeButtonHover}"/></Style>
+  <Style Selector="Border.transparencyPanel">
+    <Setter Property="Background" Value="{DynamicResource BrushSurfaceRaised}"/>
+    <Setter Property="BorderBrush" Value="{DynamicResource BrushBorder}"/>
+    <Setter Property="BorderThickness" Value="1"/>
+    <Setter Property="CornerRadius" Value="8"/>
+    <Setter Property="BoxShadow" Value="0 6 24 0 #66000000"/>
+  </Style>
+  <Style Selector="Button.miniAction">
+    <Setter Property="Background" Value="{DynamicResource BrushSecondaryAction}"/>
+    <Setter Property="Foreground" Value="{DynamicResource BrushText}"/>
+    <Setter Property="BorderBrush" Value="{DynamicResource BrushInputBorder}"/>
+    <Setter Property="BorderThickness" Value="1"/>
+    <Setter Property="CornerRadius" Value="5"/>
+    <Setter Property="Padding" Value="10,4"/>
+    <Setter Property="MinHeight" Value="28"/>
+  </Style>
+  <Style Selector="Button.miniAction:pointerover"><Setter Property="Background" Value="{DynamicResource BrushSecondaryActionHover}"/></Style>
+  <Style Selector="TextBox.browserAddress"><Setter Property="Background" Value="{DynamicResource BrushSearch}"/><Setter Property="Foreground" Value="{DynamicResource BrushText}"/><Setter Property="BorderBrush" Value="{DynamicResource BrushInputBorder}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="5"/><Setter Property="Height" Value="31"/><Setter Property="Padding" Value="9,3"/></Style>
+  <Style Selector="ListBoxItem.browserItem"><Setter Property="Padding" Value="10,7"/><Setter Property="CornerRadius" Value="5"/></Style>
+  <Style Selector="ListBoxItem.browserItem:pointerover"><Setter Property="Background" Value="{DynamicResource BrushSurfaceHover}"/></Style>
+
+
+  <!-- Viewer scrollbars stay visually subordinate to direct pan gestures. -->
+  <Style Selector="ScrollBar.viewportScroll">
+    <Setter Property="Opacity" Value="0.62"/>
+    <Setter Property="Background" Value="Transparent"/>
+  </Style>
+  <Style Selector="ScrollBar.viewportScroll:pointerover"><Setter Property="Opacity" Value="0.92"/></Style>
+
+  <!-- Settings uses a responsive grid; rail/content scroll independently and the footer remains fixed. -->
+  <Style Selector="Button.settingsNav">
+    <Setter Property="Background" Value="Transparent"/><Setter Property="Foreground" Value="{DynamicResource BrushText}"/>
+    <Setter Property="BorderThickness" Value="0"/><Setter Property="CornerRadius" Value="7"/>
+    <Setter Property="Height" Value="50"/><Setter Property="HorizontalAlignment" Value="Stretch"/><Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+    <Setter Property="Padding" Value="26,0"/><Setter Property="FontSize" Value="15"/>
+  </Style>
+  <Style Selector="Button.settingsNav:pointerover"><Setter Property="Background" Value="{DynamicResource BrushSettingsNavHover}"/></Style>
+  <Style Selector="Button.settingsNav.selected"><Setter Property="Background" Value="{DynamicResource BrushSettingsNavSelected}"/><Setter Property="BorderBrush" Value="{DynamicResource BrushAccent}"/><Setter Property="BorderThickness" Value="3,0,0,0"/></Style>
+  <Style Selector="Button.settingsNav.overlayNav"><Setter Property="Foreground" Value="{DynamicResource BrushText}"/></Style>
+  <Style Selector="controls|GlideIconView.navGlyph"><Setter Property="Width" Value="25"/><Setter Property="Height" Value="25"/><Setter Property="IconBrush" Value="#98A3AE"/><Setter Property="StrokeWidth" Value="1.5"/></Style>
+  <Style Selector="Button.settingsNav.selected controls|GlideIconView.navGlyph"><Setter Property="IconBrush" Value="{DynamicResource BrushAccent}"/></Style>
+  <Style Selector="Button.settingsNav.overlayNav controls|GlideIconView.navGlyph"><Setter Property="IconBrush" Value="{DynamicResource BrushMuted}"/></Style>
+
+  <Style Selector="TextBox.settingsSearch"><Setter Property="Background" Value="{DynamicResource BrushSearch}"/><Setter Property="Foreground" Value="{DynamicResource BrushText}"/><Setter Property="BorderBrush" Value="{DynamicResource BrushInputBorder}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="0"/><Setter Property="Height" Value="30"/><Setter Property="FontSize" Value="14"/><Setter Property="Padding" Value="13,3"/></Style>
+  <Style Selector="ComboBox"><Setter Property="MinHeight" Value="29"/><Setter Property="FontSize" Value="14"/><Setter Property="Background" Value="{DynamicResource BrushInput}"/><Setter Property="Foreground" Value="{DynamicResource BrushText}"/><Setter Property="BorderBrush" Value="{DynamicResource BrushInputBorder}"/><Setter Property="BorderThickness" Value="1"/></Style>
+  <Style Selector="NumericUpDown"><Setter Property="MinHeight" Value="27"/><Setter Property="MinWidth" Value="128"/><Setter Property="FontSize" Value="14"/><Setter Property="Background" Value="{DynamicResource BrushInput}"/><Setter Property="Foreground" Value="{DynamicResource BrushText}"/><Setter Property="BorderBrush" Value="{DynamicResource BrushInputBorder}"/><Setter Property="BorderThickness" Value="1"/></Style>
+  <Style Selector="CheckBox"><Setter Property="FontSize" Value="15"/><Setter Property="VerticalContentAlignment" Value="Center"/></Style>
+  <Style Selector="CheckBox:disabled"><Setter Property="Opacity" Value="0.42"/></Style>
+  <Style Selector="TextBlock.settingsSectionLabel"><Setter Property="FontSize" Value="14"/><Setter Property="Foreground" Value="{DynamicResource BrushMuted}"/></Style>
+  <Style Selector="TextBlock.phaseNote"><Setter Property="FontSize" Value="13"/><Setter Property="Foreground" Value="{DynamicResource BrushMuted2}"/><Setter Property="TextWrapping" Value="Wrap"/></Style>
+
+  <Style Selector="Button.primaryAction"><Setter Property="Background" Value="{DynamicResource BrushPrimaryAction}"/><Setter Property="Foreground" Value="White"/><Setter Property="BorderThickness" Value="0"/><Setter Property="CornerRadius" Value="6"/><Setter Property="Padding" Value="14,7"/><Setter Property="MinWidth" Value="90"/><Setter Property="Height" Value="38"/></Style>
+  <Style Selector="Button.primaryAction:pointerover"><Setter Property="Background" Value="{DynamicResource BrushPrimaryActionHover}"/></Style>
+  <Style Selector="Button.secondaryAction"><Setter Property="Background" Value="{DynamicResource BrushSecondaryAction}"/><Setter Property="Foreground" Value="{DynamicResource BrushText}"/><Setter Property="BorderBrush" Value="{DynamicResource BrushInputBorder}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="6"/><Setter Property="Padding" Value="14,7"/><Setter Property="MinWidth" Value="90"/><Setter Property="Height" Value="38"/></Style>
+  <Style Selector="Button.secondaryAction:pointerover"><Setter Property="Background" Value="{DynamicResource BrushSecondaryActionHover}"/></Style>
+  <Style Selector="Button.secondaryAction:disabled"><Setter Property="Opacity" Value="0.42"/></Style>
+
+  <!-- Editable Hotkeys/Search surfaces. -->
+  <Style Selector="Border.hotkeyTable"><Setter Property="Background" Value="{DynamicResource BrushSurface}"/><Setter Property="BorderBrush" Value="{DynamicResource BrushBorder}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="5"/></Style>
+  <Style Selector="ListBox.hotkeyList"><Setter Property="Background" Value="Transparent"/><Setter Property="BorderThickness" Value="0"/></Style>
+  <Style Selector="ListBoxItem.hotkeyRow"><Setter Property="Padding" Value="9,5"/><Setter Property="CornerRadius" Value="4"/><Setter Property="HorizontalContentAlignment" Value="Stretch"/></Style>
+  <Style Selector="ListBoxItem.hotkeyRow:pointerover"><Setter Property="Background" Value="{DynamicResource BrushSettingsNavHover}"/></Style>
+  <Style Selector="ListBoxItem.hotkeyRow:selected"><Setter Property="Background" Value="{DynamicResource BrushSettingsNavSelected}"/></Style>
+  <Style Selector="ListBoxItem.hotkeyRow.capturePending"><Setter Property="Background" Value="{DynamicResource BrushAccentSoft}"/><Setter Property="BorderBrush" Value="{DynamicResource BrushAccent}"/><Setter Property="BorderThickness" Value="1"/></Style>
+  <Style Selector="Border.searchResult"><Setter Property="Background" Value="{DynamicResource BrushSurface}"/><Setter Property="BorderBrush" Value="{DynamicResource BrushBorderSoft}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="6"/><Setter Property="Padding" Value="10,8"/><Setter Property="Margin" Value="0,0,0,5"/></Style>
+  <Style Selector="Border.searchResult:pointerover"><Setter Property="Background" Value="{DynamicResource BrushSurfaceHover}"/></Style>
+  <Style Selector="Border.searchResult.capturePending"><Setter Property="Background" Value="{DynamicResource BrushAccentSoft}"/><Setter Property="BorderBrush" Value="{DynamicResource BrushAccent}"/><Setter Property="BorderThickness" Value="2"/></Style>
+  <Style Selector="Button.searchOpen"><Setter Property="Background" Value="{DynamicResource BrushSecondaryAction}"/><Setter Property="Foreground" Value="{DynamicResource BrushText}"/><Setter Property="BorderBrush" Value="{DynamicResource BrushInputBorder}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="5"/><Setter Property="Padding" Value="10,4"/></Style>
+
+</Styles>
