@@ -1,7 +1,6 @@
 param([string]$Output = "Glide-Zero-Context-Handover.zip")
 $ErrorActionPreference = 'Stop'
 $project = Split-Path -Parent $MyInvocation.MyCommand.Path
-$bundleRoot = Split-Path -Parent $project
 $handoff = Join-Path $project 'GLIDE_MANIFESTO_AND_HANDOFF.md'
 if (-not (Test-Path $handoff)) { throw "Missing Glide Image Viewer\GLIDE_MANIFESTO_AND_HANDOFF.md" }
 
@@ -22,9 +21,9 @@ if ((Test-Path $codecDir) -and (Test-Path $indexTool)) {
     & $indexTool -CodecDirectory $codecDir
 }
 
-Get-ChildItem $stagedProject -Directory -Recurse | Where-Object { $_.Name -in @('bin','obj','build','dist','artifacts','.artifacts','dist-installer','.git') } | Remove-Item -Recurse -Force
+Get-ChildItem $stagedProject -Directory -Recurse | Where-Object { $_.Name -in @('bin','obj','build','dist','artifacts','.artifacts','dist-installer','.git','screenshots','docs','diagnostic_corpus') } | Remove-Item -Recurse -Force
 Get-ChildItem $stagedProject -File -Recurse | Where-Object {
-    $_.Name -match '\.(bak|tmp|orig|prehelddrag|log)$' -or $_.Name -like '*.zip' -or $_.Name -like 'build-output.txt' -or $_.Name -like 'installer-output.txt'
+    $_.Name -match '\.(bak|tmp|orig|prehelddrag|log|pdb|exe|dll|ilk|exp|lib|obj|pch|idb)$' -or $_.Name -like '*.zip' -or $_.Name -like 'build-output.txt' -or $_.Name -like 'installer-output.txt'
 } | Remove-Item -Force
 
 # Permanent transfer contract: exactly one handoff document, inside Glide Image Viewer.
@@ -37,15 +36,11 @@ if ($handoffs.Count -ne 1 -or $handoffs[0].Name -ne 'GLIDE_MANIFESTO_AND_HANDOFF
 }
 
 $destinationProject = Join-Path $project $Output
-$destinationBundle = Join-Path $bundleRoot $Output
 
 if (Test-Path $destinationProject) { Remove-Item $destinationProject -Force }
 Compress-Archive -Path $stagedProject -DestinationPath $destinationProject -CompressionLevel Optimal
 
-if (Test-Path $destinationBundle) { Remove-Item $destinationBundle -Force }
-Copy-Item $destinationProject $destinationBundle -Force
-
 Remove-Item $temp -Recurse -Force
 Write-Host "Created $destinationProject"
-Write-Host "Created $destinationBundle"
-Write-Host "ZIP contract: Glide Image Viewer/ only; one comprehensive handoff inside it."
+Write-Host "ZIP contract: output remains inside Glide Image Viewer; one comprehensive handoff inside it."
+
