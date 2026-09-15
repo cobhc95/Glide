@@ -1,10 +1,10 @@
-# Glide 3.58
+# Glide 4.0
 
 ## Fast. Lightweight. Multi-tabbed. Multi-window. Highly customizable.
 
-![Glide 3.5 Main User Interface](docs/screenshots/screenshot_1.jpg)
+![Glide main user interface](docs/screenshots/screenshot_1.jpg)
 
-**Glide is a high-performance Windows image viewer built around instant-feeling image opening, a compact ~14 MB installer, multi-tab and multi-window workflows, transparent overlays, deep mouse/keyboard customization, and recognition/routing for 196 image and document filename extensions.**
+**Glide 4.0 is a high-performance Windows image viewer built around instant-feeling image opening, a compact installer, multi-tab and multi-window workflows, transparent overlays, deep mouse/keyboard customization, Launch Speed Boost, and recognition/routing for 196 image and document filename extensions.**
 
 Glide is designed for users who desire the instantaneous startup and minimal resource footprint of classic lightweight viewers without sacrificing modern multi-tabbed navigation, configurable fullscreen behaviour, non-destructive overlays, extensive hotkey mapping, viewer emulation profiles, prefetch controls, and an exhaustively configurable settings engine.
 
@@ -24,7 +24,7 @@ Glide's interface is engineered with a responsive design system that reflows sea
 
 ## Core Feature Reference & Settings Gallery
 
-The Glide Settings engine exposes nearly every aspect of the viewer's execution, rendering, input handling, and presentation. The complete feature set is detailed below alongside screenshots captured directly from Glide 3.5.
+The Glide Settings engine exposes nearly every aspect of the viewer's execution, rendering, input handling, and presentation. The existing screenshots below are retained as the historical UI gallery while Glide 4.0 adds the warm-engine launch and Windows Snap restore improvements.
 
 ---
 
@@ -129,6 +129,10 @@ Engineered for blazing speed even when browsing folders containing thousands of 
   * Dedicated decoded-frame cache and compressed-image memory budgets (MB limit and item count).
 * **Rapid Navigation Burst Mode:** Detects rapid wheel or arrow key scrolling and renders lightweight preview frames during bursts, restoring full quality the instant scrolling settles.
 * **Resource Optimization:** Automatic cache purging when Glide is minimized to release system memory.
+
+#### Launch Speed Boost
+
+Launch Speed Boost keeps Glide's window, decoder, and external-open broker initialized in the background. When the last Glide window is closed, the window is hidden rather than tearing down the process; image caches are purged, managed memory is compacted, and the Windows working set is trimmed to a negligible **3–4 MB**. When an image is opened from File Explorer, the warm Glide process receives the request, restores its native window frame, and loads the requested file immediately. The feature can be enabled in **Settings → Performance & Startup** and can optionally start with Windows in the background.
 
 ---
 
@@ -252,6 +256,8 @@ On Windows:
 * Build the application: run `build.cmd`
 * Build the complete standalone installer: run `build.cmd` (or `build.cmd fast --no-pause`)
 
+Release builds produce four deliverables: `Glide-4.0-Portable.zip`, `dist-installer\Glide Setup.exe`, `Glide-4.0.exe` for direct testing, and the compact `Glide-Zero-Context-Handover.zip`.
+
 ---
 
 ## Architectural Philosophy
@@ -263,4 +269,5 @@ Glide follows six core design principles:
 4. **Deep Customizability:** Total control over keyboard, mouse, gestures, UI layout, and performance policies.
 5. **Modern Tabbed Multitasking:** Drag-and-drop tab detachable workflows across independent windows.
 6. **Self-Documenting Architecture:** Thoroughly documented codebase with diagnostic instrumentation for easy maintenance.
+
 
