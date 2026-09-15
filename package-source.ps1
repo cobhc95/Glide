@@ -43,4 +43,3 @@ Compress-Archive -Path $stagedProject -DestinationPath $destinationProject -Comp
 Remove-Item $temp -Recurse -Force
 Write-Host "Created $destinationProject"
 Write-Host "ZIP contract: output remains inside Glide Image Viewer; one comprehensive handoff inside it."
-

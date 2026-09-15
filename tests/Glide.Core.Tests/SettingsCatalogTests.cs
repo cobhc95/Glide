@@ -29,9 +29,11 @@ public sealed class SettingsCatalogTests
     [Fact]
     public void Glide30_catalog_has_166_current_and_no_future_entries()
     {
-        Assert.Equal(166, SettingsCatalog.All.Count);
-        Assert.Equal(166, SettingsCatalog.All.Count(x => x.FuturePhase is null));
+        Assert.Equal(168, SettingsCatalog.All.Count);
+        Assert.Equal(168, SettingsCatalog.All.Count(x => x.FuturePhase is null));
         Assert.Empty(SettingsCatalog.All.Where(x => x.FuturePhase is not null));
+        Assert.Contains(SettingsCatalog.All, x => x.Id == "performance.speedBoost" && x.FuturePhase is null && (bool)x.DefaultValue);
+        Assert.Contains(SettingsCatalog.All, x => x.Id == "performance.startWithWindowsInBackground" && x.FuturePhase is null && !(bool)x.DefaultValue);
         Assert.Contains(SettingsCatalog.All, x => x.Id == "keyboard.tabFocusNavigation" && x.FuturePhase is null && x.DefaultValue is bool tabNav && !tabNav);
         Assert.Contains(SettingsCatalog.All, x => x.Id == "performance.compressedCacheMb" && x.FuturePhase is null);
         Assert.Contains(SettingsCatalog.All, x => x.Id == "performance.decodedCacheMb" && x.FuturePhase is null);

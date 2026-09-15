@@ -104,6 +104,11 @@ internal static class Program
                 App.NotifyFirstFrameEventName = args[++i];
                 continue;
             }
+            if (args[i].Equals("--background", StringComparison.OrdinalIgnoreCase))
+            {
+                App.StartHidden = true;
+                continue;
+            }
             if (args[i].Equals("--force-new-instance", StringComparison.OrdinalIgnoreCase))
             {
                 forceNewInstance = true;
@@ -121,6 +126,9 @@ internal static class Program
         GlidePerformanceTrace.Mark("process_entry");
         try
         {
+            if (App.StartHidden && ExternalLaunchBroker.ExistingProcessPresent())
+                return 0;
+
             App.StartupPaths = appArgs.Where(a => File.Exists(a) || Directory.Exists(a)).ToArray();
             if (App.StartupPaths.Count > 0 && File.Exists(App.StartupPaths[0]) && ImageNavigator.IsSupported(App.StartupPaths[0]))
             {
@@ -140,8 +148,8 @@ internal static class Program
             // Prepare one immutable request batch for the entire launch attempt. The same request IDs
             // are reused by both forwarding attempts so a lost acknowledgement cannot turn the second
             // attempt into a duplicate open under fresh IDs.
-            var forwardBatch = App.StartupPaths.Count > 0 && shouldReuse
-                ? ExternalLaunchBroker.PrepareForwardBatch(App.StartupPaths)
+            var forwardBatch = shouldReuse
+                ? (App.StartupPaths.Count > 0 ? ExternalLaunchBroker.PrepareForwardBatch(App.StartupPaths) : (!App.StartHidden ? ExternalLaunchBroker.PrepareActivateBatch() : null))
                 : null;
             if (forwardBatch is not null && ExternalLaunchBroker.TryForwardToExisting(forwardBatch))
                 return 0;
@@ -149,9 +157,25 @@ internal static class Program
             // Presence is claimed only after the forwarding attempt, so this cold process never
             // mistakes its own kernel object for an already-running Glide instance.
             var electedBrokerOwner = ExternalLaunchBroker.ClaimProcessPresence();
-            if (!electedBrokerOwner && forwardBatch is not null &&
-                ExternalLaunchBroker.TryForwardToExisting(forwardBatch))
-                return 0;
+            if (!electedBrokerOwner)
+            {
+                if (forwardBatch is not null &&
+                    ExternalLaunchBroker.TryForwardToExisting(forwardBatch, TimeSpan.FromSeconds(2)))
+                    return 0;
+
+                // A presence object that survived the bounded handshake still belongs to a live
+                // owner. Starting Avalonia here creates the duplicate cold process regression. The
+                // owner will either accept a later retry or release the object as it exits.
+                if (forwardBatch is not null && ExternalLaunchBroker.ExistingProcessPresent())
+                    return 0;
+
+                // The owner released between the handshake and the probe. Make one final election;
+                // if another launcher won it, terminate this forwarding helper rather than creating
+                // an unowned second UI process.
+                electedBrokerOwner = ExternalLaunchBroker.ClaimProcessPresence();
+                if (!electedBrokerOwner)
+                    return 0;
+            }
 
             // Do not start storage warm-up before Avalonia. The real Glide shell now owns perceived
             // startup latency; file speculation begins only after that shell has had a chance to paint.

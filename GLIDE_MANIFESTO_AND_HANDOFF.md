@@ -4,9 +4,9 @@
 
 Every clean Glide release build must remove generated caches and prior compiled outputs before compilation, while preserving source and user-authored deliverables. A completed release output consists of all four items below:
 
-1. `Glide-4.1-Portable.zip` — portable build archive containing the published `dist` contents.
+1. `Glide-4.1.1-Portable.zip` — portable build archive containing the published `dist` contents.
 2. `dist-installer\Glide Setup.exe` — compiled Windows setup installer.
-3. `Glide-4.1.exe` — standalone executable for immediate testing.
+3. `Glide-4.1.1.exe` — standalone executable for immediate testing.
 4. `Glide-Zero-Context-Handover.zip` — compact essentials-only handoff containing source, tests, build scripts, and this handoff document, with binaries, caches, generated artifacts, logs, and nested ZIPs excluded. It is always written inside the `Glide Image Viewer` program folder; never export a duplicate to the parent Downloads directory.
 
 The clean step may remove `.artifacts`, `artifacts\diagnostic-fixtures`, `native\Glide.Native\build`, `dist`, `dist-installer`, generated codec indexes, and build logs. It must not remove source, tests, scripts, documentation, or an existing handoff ZIP unless explicitly requested.

@@ -297,6 +297,8 @@ public partial class SettingsWindow : Window
 
             SelectByText(InitialQualityCombo, s.InitialImageQuality);
             SelectByText(InteractivePanQualityCombo, string.IsNullOrWhiteSpace(s.InteractivePanQuality) ? "Full quality" : s.InteractivePanQuality);
+            SpeedBoostCheck.IsChecked = s.SpeedBoostEnabled;
+            StartWithWindowsInBackgroundCheck.IsChecked = s.StartWithWindowsInBackground;
             AdaptiveFastPreviewCheck.IsChecked = s.AdaptiveFastPreview;
             AdaptivePreviewDelayBox.Value = s.AdaptivePreviewDelayMs;
             SequentialReadCheck.IsChecked = s.SequentialForegroundReads;
@@ -491,6 +493,8 @@ public partial class SettingsWindow : Window
         state.InitialImageQuality = SelectedText(InitialQualityCombo, "Balanced");
         state.PerformanceUserCustom = string.Equals(state.InitialImageQuality, "User custom", StringComparison.OrdinalIgnoreCase);
         state.InteractivePanQuality = SelectedText(InteractivePanQualityCombo, "Full quality");
+        state.SpeedBoostEnabled = SpeedBoostCheck.IsChecked == true;
+        state.StartWithWindowsInBackground = StartWithWindowsInBackgroundCheck.IsChecked == true;
         state.AdaptiveFastPreview = AdaptiveFastPreviewCheck.IsChecked == true;
         state.AdaptivePreviewDelayMs = (int)(AdaptivePreviewDelayBox.Value ?? 40);
         state.SequentialForegroundReads = SequentialReadCheck.IsChecked == true;
@@ -1374,6 +1378,7 @@ public partial class SettingsWindow : Window
         M("performance.initialQuality", InitialQualityCombo); M("performance.saveCustomPreset", SaveUserPerformancePresetButton); M("performance.adaptivePreview", AdaptiveFastPreviewCheck); M("performance.previewDelay", AdaptivePreviewDelayBox);
         M("performance.interactivePanQuality", InteractivePanQualityCombo);
         M("performance.sequentialReads", SequentialReadCheck); M("performance.prefetch", PrefetchCheck); M("performance.backgroundRefinement", BackgroundRefinementCheck);
+        M("performance.speedBoost", SpeedBoostCheck); M("performance.startWithWindowsInBackground", StartWithWindowsInBackgroundCheck);
         M("performance.purgeOnMinimize", PurgeCacheCheck); M("developer.startupDiagnostics", StartupDiagnosticsCheck); M("performance.prefetchDepth", PrefetchDepthBox);
         M("performance.prefetchSiblingFolders", PrefetchSiblingFoldersCheck); M("performance.prefetchSiblingFolderCount", PrefetchSiblingFolderCountBox);
         M("performance.cacheItems", CacheItemsBox); M("performance.compressedCacheMb", CompressedCacheMbBox); M("performance.decodedCacheMb", DecodedCacheMbBox); M("performance.rapidPreviewSize", RapidPreviewBox); M("performance.rapidBrowsePreviewSize", RapidBrowsePreviewBox); M("performance.progressiveColor", ProgressiveColorCheck);
@@ -1721,6 +1726,10 @@ public partial class SettingsWindow : Window
 
     private void CommitState(GlideSettingsState next)
     {
+        if (next.StartWithWindowsInBackground != _committed.StartWithWindowsInBackground)
+        {
+            WindowsStartupRegistration.SetRunAtStartup(next.StartWithWindowsInBackground, out _);
+        }
         _committed = next.CloneState();
         _apply(_committed.CloneState(), true);
         UpdateDirtyState(_committed);

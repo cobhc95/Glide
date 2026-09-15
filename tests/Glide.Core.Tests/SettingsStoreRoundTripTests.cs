@@ -377,6 +377,32 @@ public sealed class SettingsStoreRoundTripTests
             try { Directory.Delete(root, true); } catch { }
         }
     }
+    [Fact]
+    public void SpeedBoost_settings_roundtrip_properly()
+    {
+        WithIsolatedStore(() =>
+        {
+            var initial = new GlideSettingsState
+            {
+                SpeedBoostEnabled = true,
+                StartWithWindowsInBackground = true,
+                ShowTrayIcon = true
+            };
+            SettingsStore.Save(initial);
+            var loaded = SettingsStore.Load();
+            Assert.True(loaded.SpeedBoostEnabled);
+            Assert.True(loaded.StartWithWindowsInBackground);
+            Assert.True(loaded.ShowTrayIcon);
+
+            loaded.SpeedBoostEnabled = false;
+            loaded.StartWithWindowsInBackground = false;
+            SettingsStore.Save(loaded);
+
+            var reloaded = SettingsStore.Load();
+            Assert.False(reloaded.SpeedBoostEnabled);
+            Assert.False(reloaded.StartWithWindowsInBackground);
+        });
+    }
 
     private static Dictionary<string, List<string>> CloneMap(Dictionary<string, List<string>> map) =>
         map.ToDictionary(x => x.Key, x => x.Value.ToList(), StringComparer.OrdinalIgnoreCase);

@@ -1,10 +1,10 @@
-# Glide 4.1
+# Glide 4.1.1
 
 ## Fast. Lightweight. Multi-tabbed. Multi-window. Highly customizable.
 
 ![Glide main user interface](docs/screenshots/screenshot_1.jpg)
 
-**Glide 4.1 is a high-performance Windows image viewer built around instant-feeling image opening, a compact installer, multi-tab and multi-window workflows, transparent overlays, deep mouse/keyboard customization, Launch Speed Boost, and recognition/routing for 196 image and document filename extensions.**
+**Glide 4.1.1 is a high-performance Windows image viewer built around instant-feeling image opening, a compact installer, multi-tab and multi-window workflows, transparent overlays, deep mouse/keyboard customization, Launch Speed Boost, and recognition/routing for 196 image and document filename extensions.**
 
 Glide is designed for users who desire the instantaneous startup and minimal resource footprint of classic lightweight viewers without sacrificing modern multi-tabbed navigation, configurable fullscreen behaviour, non-destructive overlays, extensive hotkey mapping, viewer emulation profiles, prefetch controls, and an exhaustively configurable settings engine.
 
@@ -24,7 +24,7 @@ Glide's interface is engineered with a responsive design system that reflows sea
 
 ## Core Feature Reference & Settings Gallery
 
-The Glide Settings engine exposes nearly every aspect of the viewer's execution, rendering, input handling, and presentation. The existing screenshots below are retained as the historical UI gallery while Glide 4.1 adds the warm-engine launch, Windows Snap restore, and warm-process privacy improvements.
+The Glide Settings engine exposes nearly every aspect of the viewer's execution, rendering, input handling, and presentation. The existing screenshots below are retained as the historical UI gallery while Glide 4.1.1 adds the warm-engine launch, Windows Snap restore, and warm-process privacy improvements.
 
 ---
 
@@ -256,7 +256,7 @@ On Windows:
 * Build the application: run `build.cmd`
 * Build the complete standalone installer: run `build.cmd` (or `build.cmd fast --no-pause`)
 
-Release builds produce four deliverables: `Glide-4.1-Portable.zip`, `dist-installer\Glide Setup.exe`, `Glide-4.1.exe` for direct testing, and the compact `Glide-Zero-Context-Handover.zip`.
+Release builds produce four deliverables: `Glide-4.1.1-Portable.zip`, `dist-installer\Glide Setup.exe`, `Glide-4.1.1.exe` for direct testing, and the compact `Glide-Zero-Context-Handover.zip`.
 
 ---
 

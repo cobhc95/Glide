@@ -33,7 +33,7 @@ exit /b 0
 
 :main
 echo ============================================================
-echo   Glide 4.1 Installer Builder
+echo   Glide 4.1.1 Installer Builder
  echo ============================================================
 echo.
 

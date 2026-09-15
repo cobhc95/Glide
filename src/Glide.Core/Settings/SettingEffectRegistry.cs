@@ -126,6 +126,8 @@ public static class SettingEffectRegistry
         new("performance.rapidBrowsePreviewSize", SettingEffectOwner.Performance, SettingEditorKind.FromCatalog, SettingApplySemantics.CommitOnly, "settings.effect.performance.rapidBrowsePreviewSize", SettingEvidenceStatus.Unknown),
         new("performance.progressiveColor", SettingEffectOwner.Performance, SettingEditorKind.FromCatalog, SettingApplySemantics.CommitOnly, "settings.effect.performance.progressiveColor", SettingEvidenceStatus.Unknown),
         new("developer.startupDiagnostics", SettingEffectOwner.Developer, SettingEditorKind.FromCatalog, SettingApplySemantics.CommitOnly, "settings.effect.developer.startupDiagnostics", SettingEvidenceStatus.Unknown),
+        new("performance.speedBoost", SettingEffectOwner.Performance, SettingEditorKind.FromCatalog, SettingApplySemantics.CommitOnly, "settings.effect.performance.speedBoost", SettingEvidenceStatus.Unknown),
+        new("performance.startWithWindowsInBackground", SettingEffectOwner.WindowIntegration, SettingEditorKind.FromCatalog, SettingApplySemantics.CommitOnly, "settings.effect.performance.startWithWindowsInBackground", SettingEvidenceStatus.Unknown),
         new("status.navigation", SettingEffectOwner.StatusBar, SettingEditorKind.FromCatalog, SettingApplySemantics.LivePreview, "settings.effect.status.navigation", SettingEvidenceStatus.Unknown),
         new("status.zoom", SettingEffectOwner.StatusBar, SettingEditorKind.FromCatalog, SettingApplySemantics.LivePreview, "settings.effect.status.zoom", SettingEvidenceStatus.Unknown),
         new("status.slideshow", SettingEffectOwner.StatusBar, SettingEditorKind.FromCatalog, SettingApplySemantics.LivePreview, "settings.effect.status.slideshow", SettingEvidenceStatus.Unknown),

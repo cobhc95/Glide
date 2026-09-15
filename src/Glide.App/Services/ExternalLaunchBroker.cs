@@ -29,9 +29,13 @@ internal static class ExternalLaunchBroker
     // the elected owner releases/exits and another live Glide process can take over.
     private const string PresenceName = @"Local\Glide3.ProcessPresence.v3";
     private const string ProtocolHeader = "GLIDE3\t2";
-    private static readonly TimeSpan ClientDeadline = TimeSpan.FromMilliseconds(120);
+    // A ready warm broker normally accepts the connection immediately. This deadline is only a
+    // bounded safety net for the owner-startup/pipe-replacement race; it is not a hot-path delay.
+    private static readonly TimeSpan ClientDeadline = TimeSpan.FromMilliseconds(250);
     private static readonly TimeSpan ServerPeerDeadline = TimeSpan.FromSeconds(2);
     private const int MaxProtocolLineChars = 128 * 1024;
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool AllowSetForegroundWindow(int dwProcessId);
     private static readonly object Gate = new();
     private static readonly List<WeakReference<MainWindow>> Windows = new();
     private static readonly Dictionary<Guid, ExternalLaunchItemResult> CompletedRequests = new();
@@ -61,6 +65,11 @@ internal static class ExternalLaunchBroker
             .Where(x => x != default)
             .ToArray();
         return requests.Length == 0 ? null : new ExternalLaunchBatch(requests);
+    }
+
+    public static ExternalLaunchBatch PrepareActivateBatch()
+    {
+        return new ExternalLaunchBatch(new[] { new ExternalLaunchRequest('A', string.Empty, Guid.NewGuid()) });
     }
 
     public static bool ClaimProcessPresence()
@@ -114,7 +123,7 @@ internal static class ExternalLaunchBroker
         catch { return false; }
     }
 
-    private static bool ExistingProcessPresent()
+    internal static bool ExistingProcessPresent()
     {
         if (!OperatingSystem.IsWindows()) return false;
         try
@@ -125,25 +134,50 @@ internal static class ExternalLaunchBroker
         catch { return false; }
     }
 
+    private static bool WaitForReadyPresence(TimeSpan timeout)
+    {
+        if (!OperatingSystem.IsWindows()) return true;
+        try
+        {
+            using var existing = EventWaitHandle.OpenExisting(PresenceName);
+            return existing.WaitOne(timeout);
+        }
+        catch { return false; }
+    }
+
     public static bool TryForwardToExisting(ExternalLaunchBatch? batch)
     {
-        if (batch is null || batch.Requests.Count == 0 || !ExistingProcessPresent()) return false;
-        try { return TryForwardAsync(batch.Requests, ClientDeadline).GetAwaiter().GetResult(); }
+        return TryForwardToExisting(batch, ClientDeadline);
+    }
+
+    internal static bool TryForwardToExisting(ExternalLaunchBatch? batch, TimeSpan timeout)
+    {
+        if (batch is null || batch.Requests.Count == 0 || timeout <= TimeSpan.Zero) return false;
+        try { return TryForwardAsync(batch.Requests, timeout).GetAwaiter().GetResult(); }
         catch { return false; }
     }
 
     private static async Task<bool> TryForwardAsync(IReadOnlyList<ExternalLaunchRequest> requests, TimeSpan timeout)
     {
         var started = Stopwatch.GetTimestamp();
-        while (Stopwatch.GetElapsedTime(started) < timeout && ExistingProcessPresent())
+        while (Stopwatch.GetElapsedTime(started) < timeout)
         {
             var remaining = timeout - Stopwatch.GetElapsedTime(started);
+            if (remaining <= TimeSpan.Zero) break;
+            // Presence is published only after the owner has created its pipe server. Waiting on
+            // the event avoids turning a legitimate cold-start race into a second UI process.
+            if (!WaitForReadyPresence(remaining)) return false;
+            remaining = timeout - Stopwatch.GetElapsedTime(started);
             if (remaining <= TimeSpan.Zero) break;
             using var attemptCts = new CancellationTokenSource(remaining);
             try
             {
                 await using var client = new NamedPipeClientStream(".", PipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
                 await client.ConnectAsync(attemptCts.Token).ConfigureAwait(false);
+                if (OperatingSystem.IsWindows())
+                {
+                    try { AllowSetForegroundWindow(-1); } catch { }
+                }
                 using var writer = new StreamWriter(client, new UTF8Encoding(false), leaveOpen: true) { AutoFlush = true };
                 using var reader = new StreamReader(client, Encoding.UTF8, leaveOpen: true);
                 var batchId = Guid.NewGuid();
@@ -169,7 +203,7 @@ internal static class ExternalLaunchBroker
                 }
                 return seen.Count == requests.Count;
             }
-            catch (OperationCanceledException) { return false; }
+            catch (OperationCanceledException) { continue; }
             catch
             {
                 var pause = timeout - Stopwatch.GetElapsedTime(started);
@@ -416,7 +450,7 @@ internal static class ExternalLaunchBroker
                     var line = await ReadBoundedLineAsync(reader, peerCts.Token).ConfigureAwait(false);
                     if (line is null) { malformed = true; break; }
                     var parts = line.Split('\t', 3);
-                    if (parts.Length != 3 || parts[0].Length != 1 || (parts[0][0] != 'F' && parts[0][0] != 'D') ||
+                    if (parts.Length != 3 || parts[0].Length != 1 || (parts[0][0] != 'F' && parts[0][0] != 'D' && parts[0][0] != 'A') ||
                         !Guid.TryParseExact(parts[1], "N", out var requestId)) { malformed = true; break; }
                     try
                     {
@@ -460,7 +494,9 @@ internal static class ExternalLaunchBroker
                 }
 
                 ExternalLaunchItemResult result;
-                if (request.Kind == 'D')
+                if (request.Kind == 'A')
+                    result = new(request.RequestId, ExternalLaunchItemStatus.Accepted, "Activation queued by owner.");
+                else if (request.Kind == 'D')
                     result = Directory.Exists(request.Path)
                         ? new(request.RequestId, ExternalLaunchItemStatus.Accepted, "Folder queued by owner.")
                         : new(request.RequestId, ExternalLaunchItemStatus.Rejected, "Folder does not exist.");
@@ -527,9 +563,12 @@ internal static class ExternalLaunchBroker
                         continue;
                     }
 
-                    ExternalLaunchItemResult result = request.Kind == 'D'
-                        ? await receiver.HandleExternalFolderOpenAsync(request.RequestId, request.Path)
-                        : await receiver.HandleExternalOpenAsync(request.RequestId, request.Path, receiver.CurrentExternalOpenBehavior);
+                    ExternalLaunchItemResult result = request.Kind switch
+                    {
+                        'D' => await receiver.HandleExternalFolderOpenAsync(request.RequestId, request.Path),
+                        'A' => await receiver.HandleExternalActivateAsync(request.RequestId),
+                        _ => await receiver.HandleExternalOpenAsync(request.RequestId, request.Path, receiver.CurrentExternalOpenBehavior)
+                    };
                     if (result.Status != ExternalLaunchItemStatus.Accepted)
                     {
                         lock (Gate) CompletedRequests[request.RequestId] = result;

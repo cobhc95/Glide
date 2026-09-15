@@ -1118,7 +1118,7 @@ public partial class MainWindow : Window
     {
         if (!File.Exists(path) || !ImageNavigator.IsSupported(path))
         {
-            Title = "Glide 4.1 — Unsupported or missing image";
+            Title = "Glide 4.1.1 — Unsupported or missing image";
             return;
         }
         if (!_workspace.ReplaceActiveWithImage(path)) _workspace.AddImage(path);
@@ -1419,7 +1419,7 @@ public partial class MainWindow : Window
             if (IsRequestCurrent(request))
             {
                 _diagnostics.Write("decode", "foreground_failed", new { path, request = request.ImageRequestId, error = ex.GetType().Name, ex.Message });
-                Title = $"Glide 4.1 — Open failed: {ex.GetType().Name}";
+                Title = $"Glide 4.1.1 — Open failed: {ex.GetType().Name}";
             }
             if (_warmPresentationGateActive)
                 await ReleaseWarmPresentationGateAsync(safeFrameReady: false);
@@ -1864,7 +1864,7 @@ public partial class MainWindow : Window
             : "Fast browsing, precise zooming, and familiar Windows controls.";
         home.TipsGrid.IsVisible = !recentLanding && _settings.ShowHomeTips;
         ApplyWelcomeLayout();
-        Title = recentLanding ? "Glide 4.1 — Recent pictures" : "Glide 4.1 — Home";
+        Title = recentLanding ? "Glide 4.1.1 — Recent pictures" : "Glide 4.1.1 — Home";
         RefreshRecentHistoryHome();
         ApplyStatusVisibility();
     }
@@ -2024,7 +2024,7 @@ public partial class MainWindow : Window
                 ShowBrowserSurface();
                 RestoreBrowserNavigationState(browser);
                 NavigateBrowserTo(browser.Folder, addHistory: false);
-                Title = $"Glide 4.1 — Explorer — {browser.Folder}";
+                Title = $"Glide 4.1.1 — Explorer — {browser.Folder}";
                 break;
         }
         RebuildTabStrip();
@@ -3473,7 +3473,7 @@ public partial class MainWindow : Window
         BrowserBackButton.IsEnabled = session.Index > 0 || (_tabForwardImageTargets.TryGetValue(id, out var backTarget) && File.Exists(backTarget));
         BrowserForwardButton.IsEnabled = session.Index >= 0 && session.Index < session.History.Count - 1;
         BrowserUpButton.IsEnabled = Directory.GetParent(folder) is not null;
-        Title = $"Glide 4.1 — Explorer — {folder}";
+        Title = $"Glide 4.1.1 — Explorer — {folder}";
         RebuildTabStrip();
         SelectBrowserHighlight(id);
         UpdateTabNavigationButtons();
@@ -3511,7 +3511,7 @@ public partial class MainWindow : Window
         BrowserBackButton.IsEnabled = session.Index > 0 || (_tabForwardImageTargets.TryGetValue(browser.Id, out var nativeBackTarget) && File.Exists(nativeBackTarget));
         BrowserForwardButton.IsEnabled = session.Index >= 0 && session.Index < session.History.Count - 1;
         BrowserUpButton.IsEnabled = Directory.GetParent(folder) is not null;
-        Title = $"Glide 4.1 — Explorer — {folder}";
+        Title = $"Glide 4.1.1 — Explorer — {folder}";
         RebuildTabStrip();
         SelectBrowserHighlight(browser.Id);
         UpdateTabNavigationButtons();
@@ -6108,14 +6108,14 @@ public partial class MainWindow : Window
     {
         if (string.IsNullOrWhiteSpace(_currentPath) || !ImageView.IsVisible)
         {
-            if (HomeHost.IsVisible) Title = "Glide 4.1 — Home";
+            if (HomeHost.IsVisible) Title = "Glide 4.1.1 — Home";
             return;
         }
         var display = _settings.FullPathInTitle ? _currentPath : Path.GetFileName(_currentPath);
         var index = _navigator.Count > 0 ? $"[{_navigator.Index + 1}/{_navigator.Count}]" : string.Empty;
         Title = prefix is null
-            ? $"Glide 4.1 — {display}  {index}  {Viewport.ZoomPercent}%"
-            : $"Glide 4.1 — {prefix} — {display}";
+            ? $"Glide 4.1.1 — {display}  {index}  {Viewport.ZoomPercent}%"
+            : $"Glide 4.1.1 — {prefix} — {display}";
     }
 
     private static string FormatFileSize(long bytes)
@@ -7021,6 +7021,20 @@ public partial class MainWindow : Window
         var duplicateWindow = ExternalLaunchBroker.FindWindowContainingImage(path);
         if (duplicateWindow is not null)
         {
+            // Standby deliberately clears the displayed bitmap and presented path for privacy, but
+            // retains the image tab's path so workspace identity and navigation survive. If Explorer
+            // opens that same path again, this warm window is the receiver we want; applying the
+            // normal duplicate policy here would incorrectly spawn a cold process (the default is
+            // "Open new instance"). Refresh through the existing tab so the privacy gate remains in
+            // place until the new frame is actually ready.
+            if (wasSpeedBoostStandby && ReferenceEquals(duplicateWindow, this))
+            {
+                await duplicateWindow.RefreshExistingImageFromExternalAsync(path);
+                RestoreFromMinimizedIfNeeded();
+                Activate();
+                return new(requestId, ExternalLaunchItemStatus.Accepted, "Reopened image in warm Glide instance.");
+            }
+
             var duplicateBehavior = _settings.SameImageAlreadyOpenBehavior ?? "Open new instance";
             if (string.Equals(duplicateBehavior, "Refresh existing image", StringComparison.OrdinalIgnoreCase))
             {

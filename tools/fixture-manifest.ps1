@@ -25,6 +25,17 @@ function Get-PayloadFiles {
         $_.FullName -ne $manifestPath -and $_.FullName -ne $completePath
     } | Sort-Object FullName)
 }
+function Get-Sha256([string]$path) {
+    $sha = [Security.Cryptography.SHA256]::Create()
+    $stream = [IO.File]::OpenRead($path)
+    try {
+        ([BitConverter]::ToString($sha.ComputeHash($stream))).Replace('-', '')
+    }
+    finally {
+        $stream.Dispose()
+        $sha.Dispose()
+    }
+}
 
 if ($Mode -eq 'Write') {
     if (-not (Test-Path -LiteralPath $Directory -PathType Container)) { throw "Fixture directory missing: $Directory" }
@@ -34,13 +45,13 @@ if ($Mode -eq 'Write') {
     $files = @(Get-PayloadFiles)
     if ($files.Count -eq 0) { throw 'Fixture generation produced no files.' }
     $rows = @($files | ForEach-Object {
-        [ordered]@{ path=(Get-Relative $Directory $_.FullName); bytes=$_.Length; sha256=(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash }
+        [ordered]@{ path=(Get-Relative $Directory $_.FullName); bytes=$_.Length; sha256=(Get-Sha256 $_.FullName) }
     })
     $manifest = [ordered]@{
         schema=$Schema
         source_identity=$SourceIdentity
         generator_path=$Generator
-        generator_sha256=(Get-FileHash -LiteralPath $Generator -Algorithm SHA256).Hash
+        generator_sha256=(Get-Sha256 $Generator)
         created_utc=[DateTime]::UtcNow.ToString('O')
         expected_files=$rows
     }
@@ -48,7 +59,7 @@ if ($Mode -eq 'Write') {
     $manifest | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $tmp -Encoding UTF8
     Move-Item -LiteralPath $tmp -Destination $manifestPath -Force
     # The completion marker is deliberately last. Reuse is forbidden without it.
-    "schema=$Schema`nmanifest_sha256=$((Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash)" | Set-Content -LiteralPath $completePath -Encoding Ascii
+    "schema=$Schema`nmanifest_sha256=$(Get-Sha256 $manifestPath)" | Set-Content -LiteralPath $completePath -Encoding Ascii
     exit 0
 }
 
@@ -58,10 +69,10 @@ $m = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
 if ([int]$m.schema -ne $Schema) { throw "Fixture schema mismatch: $($m.schema) != $Schema" }
 if ([string]$m.source_identity -ne $SourceIdentity) { throw "Fixture source identity mismatch: $($m.source_identity) != $SourceIdentity" }
 if (-not (Test-Path -LiteralPath $Generator -PathType Leaf)) { throw 'Current generator missing.' }
-$generatorHash=(Get-FileHash -LiteralPath $Generator -Algorithm SHA256).Hash
+$generatorHash=Get-Sha256 $Generator
 if ([string]$m.generator_sha256 -ne $generatorHash) { throw 'Fixture generator hash is stale.' }
 $marker = Get-Content -LiteralPath $completePath -Raw
-$currentManifestHash=(Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash
+$currentManifestHash=Get-Sha256 $manifestPath
 if ($marker -notmatch [regex]::Escape("manifest_sha256=$currentManifestHash")) { throw 'Fixture completion marker does not match manifest.' }
 $expected=@($m.expected_files)
 if ($expected.Count -eq 0) { throw 'Fixture manifest has no expected files.' }
@@ -70,7 +81,7 @@ foreach($row in $expected) {
     if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "Fixture missing: $($row.path)" }
     $info=Get-Item -LiteralPath $file
     if ([long]$info.Length -ne [long]$row.bytes) { throw "Fixture length mismatch: $($row.path)" }
-    if ((Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash -ne [string]$row.sha256) { throw "Fixture hash mismatch: $($row.path)" }
+    if ((Get-Sha256 $file) -ne [string]$row.sha256) { throw "Fixture hash mismatch: $($row.path)" }
 }
 # Reject partial/extra payloads as well; a stale directory is not reusable.
 $actual=@(Get-PayloadFiles | ForEach-Object { Get-Relative $Directory $_.FullName })

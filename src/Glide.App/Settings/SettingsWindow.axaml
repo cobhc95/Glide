@@ -378,7 +378,7 @@
       <Border Grid.Row="2" Grid.ColumnSpan="2" Background="{DynamicResource BrushFooter}" BorderBrush="{DynamicResource BrushBorder}" BorderThickness="0,1,0,0">
         <Grid ColumnDefinitions="*,Auto" Margin="22,14,38,14">
           <StackPanel Spacing="9" VerticalAlignment="Center">
-            <TextBlock Text="Glide 4.1" Foreground="{DynamicResource BrushMuted}" FontSize="13"/>
+            <TextBlock Text="Glide 4.1.1" Foreground="{DynamicResource BrushMuted}" FontSize="13"/>
             <Button Classes="secondaryAction" Content="Restore defaults" Click="RestoreDefaultsClicked" HorizontalAlignment="Left" MinWidth="180"/>
           </StackPanel>
           <StackPanel Grid.Column="1" VerticalAlignment="Center" Orientation="Horizontal" Spacing="10">

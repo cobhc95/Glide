@@ -153,6 +153,9 @@ public sealed record GlideSettingsState
     // "Fast", "Balanced", or "Full quality". The stock Balanced performance preset intentionally
     // uses Full quality while dragging/panning; users can still override this independently.
     public string InteractivePanQuality { get; set; } = "Full quality";
+    public bool SpeedBoostEnabled { get; set; } = true;
+    public bool StartWithWindowsInBackground { get; set; }
+    public bool ShowTrayIcon { get; set; } = true;
     public bool PerformanceUserCustom { get; set; }
     public bool PerformanceUserCustomSaved { get; set; }
     public string UserCustomPanQuality { get; set; } = "Full quality";

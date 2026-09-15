@@ -621,4 +621,3 @@ internal sealed class WindowsBrowserFrameController : IDisposable
     [DllImport("Glide.Native", CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr GlideCreateZoomCursor(int zoomOut);
 }
-

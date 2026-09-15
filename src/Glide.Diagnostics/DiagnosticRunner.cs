@@ -59,8 +59,8 @@ public static class DiagnosticRunner
             $"{snapshot.SettingsSchemaCount} declarative settings registered"));
         var currentSettings = SettingsCatalog.All.Count(x => x.FuturePhase is null);
         var futureSettings = SettingsCatalog.All.Count(x => x.FuturePhase is not null);
-        checks.Add(Check("settings_schema_glide30_contract", snapshot.SettingsSchemaCount == 166 && currentSettings == 166 && futureSettings == 0,
-            $"Glide 3.0 catalogue contract: total={snapshot.SettingsSchemaCount}, current={currentSettings}, future={futureSettings}; expected 166/166/0."));
+        checks.Add(Check("settings_schema_glide30_contract", snapshot.SettingsSchemaCount == 168 && currentSettings == 168 && futureSettings == 0,
+            $"Glide 3.0 catalogue contract: total={snapshot.SettingsSchemaCount}, current={currentSettings}, future={futureSettings}; expected 168/168/0."));
         var progressiveColor = SettingsCatalog.All.FirstOrDefault(x => string.Equals(x.Id, "performance.progressiveColor", StringComparison.OrdinalIgnoreCase));
         checks.Add(Check("progressive_color_runtime_contract",
             progressiveColor is not null && progressiveColor.FuturePhase is null && progressiveColor.DefaultValue is bool enabled && enabled,
