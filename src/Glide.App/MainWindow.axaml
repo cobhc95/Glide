@@ -4,7 +4,7 @@
         xmlns:platform="using:Glide.App.Platform"
         x:Class="Glide.App.MainWindow"
         Width="1064" Height="687" MinWidth="180" MinHeight="360"
-        Title="Glide 3.5-8 — Home"
+        Title="Glide 4.1 — Home"
         Icon="/Assets/Glide.ico"
         SystemDecorations="None"
         ExtendClientAreaToDecorationsHint="False"
@@ -75,6 +75,10 @@
     <Grid x:Name="WorkspaceLayer" Grid.Row="1">
       <!-- HOME: the heavy welcome/history/status tree is constructed only if a Home tab is shown. -->
       <ContentControl x:Name="HomeHost" IsVisible="False"/>
+
+      <!-- Warm external opens use a neutral surface while the first frame is decoded. This prevents
+           the previous image or the welcome cards from appearing for a single compositor frame. -->
+      <Border x:Name="WarmOpenTransitionHost" IsVisible="False" Background="{DynamicResource BrushViewport}"/>
 
       <!-- VIEWER -->
       <Grid x:Name="ImageView" IsVisible="False">

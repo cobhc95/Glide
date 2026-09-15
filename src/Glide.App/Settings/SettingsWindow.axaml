@@ -211,6 +211,7 @@
 
           <!-- PERFORMANCE -->
           <StackPanel x:Name="PerformancePanel" IsVisible="False" Spacing="10">
+            <CheckBox x:Name="SpeedBoostCheck" Content="Launch Speed Boost (keep Glide warm in background for instant image opening)" ToolTip.Tip="When enabled, closing the window keeps the engine warm in the background and in the system tray so double-clicking images in File Explorer opens instantly (~20ms)."/>
             <TextBlock Text="Glide uses a staged first-frame → full-resolution pipeline. Profiles coordinate preview size, interpolation, refinement, prefetch and decoded-neighbour policy; advanced controls remain independently editable." Classes="phaseNote" Margin="0,0,0,4"/>
             <Grid ColumnDefinitions="270,240,Auto,*" Margin="6,0,0,0"><TextBlock Text="Browsing / image quality profile" VerticalAlignment="Center"/><ComboBox x:Name="InitialQualityCombo" Grid.Column="1" Width="240" SelectionChanged="PerformanceProfileChanged" ToolTip.Tip="Stock profiles apply coordinated defaults. Any non-matching edit automatically becomes User custom."><ComboBoxItem Content="Maximum speed"/><ComboBoxItem Content="Balanced"/><ComboBoxItem Content="Maximum quality"/><ComboBoxItem Content="User custom"/></ComboBox><Button x:Name="SaveUserPerformancePresetButton" Grid.Column="2" Classes="secondaryAction" Content="Save custom" Click="SaveUserPerformancePresetClicked" Margin="10,0,0,0" ToolTip.Tip="Save the current performance controls as your reusable User custom preset."/></Grid>
             <Grid ColumnDefinitions="270,240,*" Margin="6,0,0,0"><TextBlock Text="Quality while dragging / panning" VerticalAlignment="Center"/><ComboBox x:Name="InteractivePanQualityCombo" Grid.Column="1" Width="240" ToolTip.Tip="The Balanced and Maximum quality presets default to Full quality while moving. Fast prefers the lightest available interaction preview. This control remains independently overridable."><ComboBoxItem Content="Fast"/><ComboBoxItem Content="Balanced"/><ComboBoxItem Content="Full quality"/></ComboBox></Grid>
@@ -348,6 +349,7 @@
 
           <!-- WINDOWS -->
           <StackPanel x:Name="WindowsPanel" IsVisible="False" Spacing="10">
+            <CheckBox x:Name="StartWithWindowsInBackgroundCheck" Content="Start Glide with Windows in background" ToolTip.Tip="Automatically starts Glide minimized in the background when Windows boots, enabling instant image viewing anytime."/>
             <TextBlock Text="Register Glide in Windows Open With without changing your Windows default-app choice. Registration is per-user and does not require administrator privileges." Classes="phaseNote"/>
             <StackPanel Orientation="Horizontal" Spacing="12"><Button x:Name="AddOpenWithButton" Classes="secondaryAction" Content="Add Glide to Open With" Click="AddOpenWithClicked" MinWidth="220"/><Button x:Name="RemoveOpenWithButton" Classes="secondaryAction" Content="Remove Glide Open With entries" Click="RemoveOpenWithClicked" MinWidth="240"/></StackPanel>
             <TextBlock x:Name="WindowsIntegrationStatusText" Text="" Classes="phaseNote" TextWrapping="Wrap"/>
@@ -376,7 +378,7 @@
       <Border Grid.Row="2" Grid.ColumnSpan="2" Background="{DynamicResource BrushFooter}" BorderBrush="{DynamicResource BrushBorder}" BorderThickness="0,1,0,0">
         <Grid ColumnDefinitions="*,Auto" Margin="22,14,38,14">
           <StackPanel Spacing="9" VerticalAlignment="Center">
-            <TextBlock Text="Glide 3.5-6" Foreground="{DynamicResource BrushMuted}" FontSize="13"/>
+            <TextBlock Text="Glide 4.1" Foreground="{DynamicResource BrushMuted}" FontSize="13"/>
             <Button Classes="secondaryAction" Content="Restore defaults" Click="RestoreDefaultsClicked" HorizontalAlignment="Left" MinWidth="180"/>
           </StackPanel>
           <StackPanel Grid.Column="1" VerticalAlignment="Center" Orientation="Horizontal" Spacing="10">

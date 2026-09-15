@@ -1,6 +1,6 @@
 #define MyAppName "Glide Image Viewer"
 #define MyAppShortName "Glide"
-#define MyAppVersion "3.5.8"
+#define MyAppVersion "4.1"
 #define MyAppExeName "Glide.exe"
 
 [Setup]
@@ -23,7 +23,7 @@ UsePreviousAppDir=yes
 CloseApplications=yes
 RestartApplications=no
 UninstallDisplayIcon={app}\{#MyAppExeName}
-VersionInfoVersion=3.5.8.0
+VersionInfoVersion=4.1.0.0
 VersionInfoProductName={#MyAppName}
 VersionInfoDescription=Glide Image Viewer Setup
 
@@ -85,4 +85,73 @@ begin
     Result := Candidate
   else
     Result := ExpandConstant('{autopf}\Glide');
+end;
+
+function GlideProcessIsRunning(): Boolean;
+var
+  ResultCode: Integer;
+  Output: TExecOutput;
+  I: Integer;
+begin
+  Result := False;
+  if not ExecAndCaptureOutput(ExpandConstant('{cmd}'),
+    '/C tasklist /FI "IMAGENAME eq Glide.exe" /FO CSV /NH', '', SW_HIDE,
+    ewWaitUntilTerminated, ResultCode, Output) then
+    Exit;
+  if ResultCode <> 0 then
+    Exit;
+  for I := 0 to GetArrayLength(Output.StdOut) - 1 do
+    if Pos('"Glide.exe"', Output.StdOut[I]) > 0 then
+    begin
+      Result := True;
+      Exit;
+    end;
+end;
+
+function CloseRunningGlide(): Boolean;
+var
+  ResultCode: Integer;
+begin
+  Result := Exec(ExpandConstant('{cmd}'),
+    '/C taskkill /IM Glide.exe /T /F', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and
+    (ResultCode = 0);
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  Choice: Integer;
+  Attempts: Integer;
+begin
+  Result := '';
+  NeedsRestart := False;
+  Attempts := 0;
+  while GlideProcessIsRunning() do
+  begin
+    Choice := MsgBox('Glide is currently running and must be closed before Setup can continue.' + #13#10 + #13#10 +
+      'Would you like Setup to close Glide automatically?', mbConfirmation, MB_YESNOCANCEL);
+    if Choice = IDCANCEL then
+    begin
+      Result := 'Please close Glide before continuing Setup.';
+      Exit;
+    end;
+    if Choice = IDYES then
+    begin
+      CloseRunningGlide();
+      Sleep(250);
+      Inc(Attempts);
+      if Attempts >= 20 then
+      begin
+        Result := 'Setup could not close Glide. Please close it manually and run Setup again.';
+        Exit;
+      end;
+    end
+    else
+    begin
+      if MsgBox('Please close Glide manually, then choose Yes to retry Setup.', mbInformation, MB_YESNO) <> IDYES then
+      begin
+        Result := 'Please close Glide before continuing Setup.';
+        Exit;
+      end;
+    end;
+  end;
 end;

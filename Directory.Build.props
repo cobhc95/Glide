@@ -1,11 +1,11 @@
 <Project>
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
-    <!-- Public Glide release label follows feature-dot / bug-hyphen convention. 3.5-8 adds multi-format WIC native acceleration (WebP, GIF, ICO), visual tree startup deferral, and live on-screen multi-format cold launch benchmarking. -->
-    <Version>3.5.8</Version>
-    <AssemblyVersion>3.5.8.0</AssemblyVersion>
-    <FileVersion>3.5.8.0</FileVersion>
-    <InformationalVersion>3.5-8</InformationalVersion>
+    <!-- Glide 4.1 release: warm-engine Launch Speed Boost, background standby, and the current image-opening pipeline. -->
+    <Version>4.1.0</Version>
+    <AssemblyVersion>4.1.0.0</AssemblyVersion>
+    <FileVersion>4.1.0.0</FileVersion>
+    <InformationalVersion>4.1</InformationalVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>

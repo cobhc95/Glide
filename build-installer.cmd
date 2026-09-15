@@ -33,7 +33,7 @@ exit /b 0
 
 :main
 echo ============================================================
-echo   Glide 3.5 Installer Builder
+echo   Glide 4.1 Installer Builder
  echo ============================================================
 echo.
 
@@ -100,7 +100,7 @@ if !SETUP_SIZE! LSS 1048576 (
 )
 
 powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -Command ^
-  "$p=(Resolve-Path 'dist-installer\Glide Setup.exe').Path; $h=(Get-FileHash -Algorithm SHA256 $p).Hash; $s=(Get-Item $p).Length; 'SHA256='+$h; 'Bytes='+$s; Set-Content -Encoding ASCII 'dist-installer\Glide Setup.sha256' ($h+'  Glide Setup.exe')"
+  "$p=(Resolve-Path 'dist-installer\Glide Setup.exe').Path; $sha=[Security.Cryptography.SHA256]::Create(); try { $stream=[IO.File]::OpenRead($p); try { $h=([BitConverter]::ToString($sha.ComputeHash($stream))).Replace('-','') } finally { $stream.Dispose() } } finally { $sha.Dispose() }; $s=(Get-Item $p).Length; 'SHA256='+$h; 'Bytes='+$s; Set-Content -Encoding ASCII 'dist-installer\Glide Setup.sha256' ($h+'  Glide Setup.exe')"
 if errorlevel 1 (
   echo ERROR: Could not fingerprint generated installer.
   exit /b 1
