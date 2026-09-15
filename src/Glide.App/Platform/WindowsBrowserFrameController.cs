@@ -21,6 +21,11 @@ internal sealed class WindowsBrowserFrameController : IDisposable
 {
     private const int GwlpWndProc = -4;
     private const int GwlStyle = -16;
+    private const uint SwpNoSize = 0x0001;
+    private const uint SwpNoMove = 0x0002;
+    private const uint SwpNoZOrder = 0x0004;
+    private const uint SwpNoActivate = 0x0010;
+    private const uint SwpFrameChanged = 0x0020;
 
     private const long WsSysMenu = 0x00080000L;
     private const long WsThickFrame = 0x00040000L;
@@ -36,6 +41,8 @@ internal sealed class WindowsBrowserFrameController : IDisposable
     private const uint WmSysCommand = 0x0112;
     private const uint WmSetCursor = 0x0020;
     private const uint WmRButtonUp = 0x0205;
+    private const uint WmCtlColorStatic = 0x0138;
+    private const uint WmSize = 0x0005;
     private const uint WmEnterSizeMove = 0x0231;
     private const uint WmExitSizeMove = 0x0232;
     private const int VkRButton = 0x02;
@@ -61,6 +68,12 @@ internal sealed class WindowsBrowserFrameController : IDisposable
 
     private const uint TmeLeave = 0x00000002;
     private const uint TmeNonClient = 0x00000010;
+    private const uint WsChild = 0x40000000;
+    private const uint WsVisible = 0x10000000;
+    private const uint WsExNoActivate = 0x08000000;
+    private const uint SwpShowWindow = 0x0040;
+    private const uint SwpHideWindow = 0x0080;
+    private const uint WmSetRedraw = 0x000B;
 
     private readonly Window _window;
     private readonly Button _minimize;
@@ -82,6 +95,9 @@ internal sealed class WindowsBrowserFrameController : IDisposable
     private int _pressedHit = HtClient;
     private bool _disposed;
     private bool _selectionZoomOutPressed;
+    private IntPtr _privacyCurtain;
+    private IntPtr _privacyBrush;
+    private uint _privacyColor;
 
     private WindowsBrowserFrameController(Window window, Button minimize, Button maximize, Button close, IntPtr hwnd, Func<PixelPoint, bool>? selectionHitTest, Func<PixelPoint, bool>? imageHitTest, Action? minimizeAction, Action? maximizeAction, Action? closeAction, Action? nativeResizeStarted, Action? nativeResizeEnded)
     {
@@ -130,6 +146,62 @@ internal sealed class WindowsBrowserFrameController : IDisposable
         RefreshZoomCursorAtPointer();
     }
 
+    /// <summary>
+    /// Reassert the native frame capabilities after a hidden warm window is shown again.
+    /// Windows can stop offering Snap Layouts for a custom-framed HWND after a Hide/Show
+    /// transition unless the style and non-client frame are refreshed.
+    /// </summary>
+    public void RefreshForWarmRestore()
+    {
+        if (_disposed || _hwnd == IntPtr.Zero) return;
+        try
+        {
+            var style = GetWindowLongPtrCompat(_hwnd, GwlStyle).ToInt64();
+            style |= WsSysMenu | WsThickFrame | WsMinimizeBox | WsMaximizeBox;
+            SetWindowLongPtrCompat(_hwnd, GwlStyle, new IntPtr(style));
+            SetWindowPos(_hwnd, IntPtr.Zero, 0, 0, 0, 0,
+                SwpNoSize | SwpNoMove | SwpNoZOrder | SwpNoActivate | SwpFrameChanged);
+        }
+        catch { }
+    }
+
+    /// <summary>Cover the client area of a warm HWND before it is shown.</summary>
+    public void ShowPrivacyCurtain(uint rgb)
+    {
+        if (_disposed || _hwnd == IntPtr.Zero) return;
+        try
+        {
+            HidePrivacyCurtain();
+            _privacyColor = rgb;
+            _privacyBrush = CreateSolidBrush(new IntPtr((int)rgb));
+            _privacyCurtain = CreateWindowExW(WsExNoActivate, "STATIC", "", WsChild | WsVisible,
+                0, 0, 0, 0, _hwnd, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
+            ResizePrivacyCurtain(show: true);
+        }
+        catch { HidePrivacyCurtain(); }
+    }
+
+    public void HidePrivacyCurtain()
+    {
+        if (_privacyCurtain != IntPtr.Zero)
+        {
+            try { DestroyWindow(_privacyCurtain); } catch { }
+            _privacyCurtain = IntPtr.Zero;
+        }
+        if (_privacyBrush != IntPtr.Zero)
+        {
+            try { DeleteObject(_privacyBrush); } catch { }
+            _privacyBrush = IntPtr.Zero;
+        }
+    }
+
+    private void ResizePrivacyCurtain(bool show)
+    {
+        if (_privacyCurtain == IntPtr.Zero || !GetClientRect(_hwnd, out var client)) return;
+        SetWindowPos(_privacyCurtain, IntPtr.Zero, 0, 0, client.Right - client.Left, client.Bottom - client.Top,
+            SwpNoMove | SwpNoActivate | (show ? SwpShowWindow : SwpHideWindow));
+    }
+
     private void RefreshZoomCursorAtPointer()
     {
         if (!GetCursorPos(out var cursorPoint)) return;
@@ -156,6 +228,12 @@ internal sealed class WindowsBrowserFrameController : IDisposable
     {
         switch (message)
         {
+            case WmSize:
+                ResizePrivacyCurtain(show: true);
+                break;
+            case WmCtlColorStatic when lParam == _privacyCurtain && _privacyBrush != IntPtr.Zero:
+                SetBkColor(wParam, _privacyColor);
+                return _privacyBrush;
             case WmSetCursor:
             {
                 // Legacy 1.2.125 path: let Win32 own the +/- magnifier. Cursor movement is then
@@ -441,6 +519,7 @@ internal sealed class WindowsBrowserFrameController : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        HidePrivacyCurtain();
         ClearVisualState();
         if (_hwnd != IntPtr.Zero && _previousWndProc != IntPtr.Zero)
         {
@@ -496,6 +575,28 @@ internal sealed class WindowsBrowserFrameController : IDisposable
     [DllImport("user32.dll")]
     private static extern bool GetWindowRect(IntPtr hwnd, out NativeRect rect);
 
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetWindowPos(IntPtr hwnd, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr CreateWindowExW(uint exStyle, string className, string windowName, uint style,
+        int x, int y, int width, int height, IntPtr parent, IntPtr menu, IntPtr instance, IntPtr param);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool DestroyWindow(IntPtr hwnd);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool GetClientRect(IntPtr hwnd, out NativeRect rect);
+
+    [DllImport("gdi32.dll", SetLastError = true)]
+    private static extern IntPtr CreateSolidBrush(IntPtr colorRef);
+
+    [DllImport("gdi32.dll", SetLastError = true)]
+    private static extern bool DeleteObject(IntPtr objectHandle);
+
+    [DllImport("gdi32.dll")]
+    private static extern uint SetBkColor(IntPtr hdc, uint colorRef);
+
     [DllImport("user32.dll")]
     private static extern bool PostMessageW(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);
 
@@ -520,3 +621,4 @@ internal sealed class WindowsBrowserFrameController : IDisposable
     [DllImport("Glide.Native", CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr GlideCreateZoomCursor(int zoomOut);
 }
+
