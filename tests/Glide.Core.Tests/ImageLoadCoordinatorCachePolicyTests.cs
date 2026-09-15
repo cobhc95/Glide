@@ -95,7 +95,7 @@ public sealed class ImageLoadCoordinatorCachePolicyTests
 
         Assert.Equal(3, speed.PrefetchDepth);
         Assert.Equal(5, balanced.PrefetchDepth);
-        Assert.Equal(5, quality.PrefetchDepth);
+        Assert.Equal(15, quality.PrefetchDepth);
     }
 
     [Fact]

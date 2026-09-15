@@ -19,12 +19,12 @@ namespace Glide.Diagnostics;
 /// </summary>
 public static class DiagnosticRunner
 {
-    public const string BuildVersion = "4.1.4";
+    public const string BuildVersion = "4.1.5";
 
     public static DiagnosticSnapshot Capture() => new(
         Product: "Glide",
         Version: BuildVersion,
-        Release: "Glide 4.1.4 (Navigation Crash & Presentation Stability)",
+        Release: "Glide 4.1.5 (Navigation Crash & Presentation Stability)",
         Architecture: "C# + Avalonia retained-mode UI + semantic core + small native C++ bridge; NativeAOT blocked pending COM isolation",
         TimestampUtc: DateTimeOffset.UtcNow,
         Framework: RuntimeInformation.FrameworkDescription,
@@ -59,8 +59,8 @@ public static class DiagnosticRunner
             $"{snapshot.SettingsSchemaCount} declarative settings registered"));
         var currentSettings = SettingsCatalog.All.Count(x => x.FuturePhase is null);
         var futureSettings = SettingsCatalog.All.Count(x => x.FuturePhase is not null);
-        checks.Add(Check("settings_schema_glide30_contract", snapshot.SettingsSchemaCount == 168 && currentSettings == 168 && futureSettings == 0,
-            $"Glide 3.0 catalogue contract: total={snapshot.SettingsSchemaCount}, current={currentSettings}, future={futureSettings}; expected 168/168/0."));
+        checks.Add(Check("settings_schema_glide30_contract", snapshot.SettingsSchemaCount == 170 && currentSettings == 170 && futureSettings == 0,
+            $"Glide 3.0 catalogue contract: total={snapshot.SettingsSchemaCount}, current={currentSettings}, future={futureSettings}; expected 170/170/0."));
         var progressiveColor = SettingsCatalog.All.FirstOrDefault(x => string.Equals(x.Id, "performance.progressiveColor", StringComparison.OrdinalIgnoreCase));
         checks.Add(Check("progressive_color_runtime_contract",
             progressiveColor is not null && progressiveColor.FuturePhase is null && progressiveColor.DefaultValue is bool enabled && enabled,
@@ -152,12 +152,13 @@ public static class DiagnosticRunner
         var balanced = ImagePerformancePolicy.ForProfile("Balanced");
         var quality = ImagePerformancePolicy.ForProfile("Maximum quality");
         checks.Add(Check("phase3_staged_decode_policy",
-            speed.PreviewLongestSide < balanced.PreviewLongestSide && balanced.PreviewLongestSide < quality.PreviewLongestSide &&
+            speed.PreviewLongestSide < balanced.PreviewLongestSide && balanced.PreviewLongestSide <= quality.PreviewLongestSide &&
             speed.RefinementDelayMs > balanced.RefinementDelayMs && balanced.RefinementDelayMs > quality.RefinementDelayMs &&
             !speed.ProgressiveColorFirstPreview && balanced.ProgressiveColorFirstPreview && quality.ProgressiveColorFirstPreview &&
             speed.FullNeighbourPredecodeCount == 0 && balanced.FullNeighbourPredecodeCount == 0 && quality.FullNeighbourPredecodeCount > balanced.FullNeighbourPredecodeCount &&
-            speed.PrefetchDepth == 3 && balanced.PrefetchDepth == 5 && quality.PrefetchDepth == 5,
-            "Maximum speed/Balanced/Maximum quality coordinate preview size, refinement grace, progressive colour-first policy, full-neighbour preparation and neighbour-prefetch defaults 3/5/5."));
+            speed.PrefetchDepth == 3 && balanced.PrefetchDepth == 5 && quality.PrefetchDepth == 15 &&
+            quality.CompressedCacheItems == 20 && quality.CompressedCacheMegabytes == 999 && quality.DecodedCacheMegabytes == 999,
+            "Maximum speed/Balanced/Maximum quality coordinate preview size, refinement grace, progressive colour-first policy, full-neighbour preparation, cache budgets and neighbour-prefetch defaults 3/5/15."));
         var plan = ImageLoadCoordinator.BuildNeighbourPlan(new[] { "0", "1", "2", "3", "4" }, 2, 1, 2);
         var deepPaths = Enumerable.Range(0, 80).Select(x => x.ToString()).ToArray();
         var deepPlan = ImageLoadCoordinator.BuildNeighbourPlan(deepPaths, 40, 1, 99);

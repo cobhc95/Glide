@@ -44,7 +44,7 @@ exit /b %GLIDE_WRAPPER_RC%
 :captured_entry
 setlocal EnableExtensions EnableDelayedExpansion
 cd /d "%~dp0"
-title Glide 4.1.4
+title Glide 4.1.5
 
 set "GLIDE_AOT=0"
 if /I "%GLIDE_FORCE_FAST%"=="1" (set "GLIDE_FAST=1") else (set "GLIDE_FAST=0")
@@ -53,6 +53,12 @@ set "DOTNET_CLI_TELEMETRY_OPTOUT=1"
 set "DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1"
 set "NUGET_XMLDOC_MODE=skip"
 set "GLIDE_BUILD_RC="
+
+rem The solution is authored for Any CPU. Normalize these properties so an inherited
+rem developer-shell Platform/Configuration value cannot select the invalid Debug|x64
+rem solution configuration during restore, build or test.
+set "Platform=Any CPU"
+set "Configuration=Release"
 
 :parse_args
 if "%~1"=="" goto :args_done
@@ -68,7 +74,7 @@ rem This avoids argument-forwarding quirks through the PowerShell live-log wrapp
 if /I "%GLIDE_FORCE_FAST%"=="1" set "GLIDE_FAST=1"
 echo.
 echo ============================================================
-echo   Glide 4.1.4
+echo   Glide 4.1.5
 echo ============================================================
 echo.
 if "%GLIDE_AOT%"=="1" (
@@ -113,6 +119,21 @@ if exist native\Glide.Native\CMakeLists.txt (
   ) else (
     call :progress 8 "Native configure/toolchain validation"
 
+    rem The Visual Studio generator is the normal Windows path. Some managed developer
+    rem environments expose PATH and Path as duplicate case variants; MSBuild then refuses
+    rem to launch CL.exe. Allow the caller to select the installed Ninja toolchain for that
+    rem environment without changing the shipped native target or output layout.
+    set "GLIDE_NATIVE_NINJA=0"
+    if /I "%GLIDE_NATIVE_GENERATOR%"=="Ninja" set "GLIDE_NATIVE_NINJA=1"
+    if "!GLIDE_NATIVE_NINJA!"=="1" (
+      where ninja >nul 2>nul
+      if errorlevel 1 (
+        echo ERROR: GLIDE_NATIVE_GENERATOR=Ninja was requested but ninja.exe was not found on PATH.
+        set "GLIDE_BUILD_RC=1"
+        goto :fail
+      )
+    )
+
     rem Validate the reusable native cache by generator/platform, not by looking for
     rem CMAKE_CXX_COMPILER in CMakeCache.txt. Visual Studio generators do not reliably
     rem expose that variable there; compiler metadata is normally stored under CMakeFiles.
@@ -125,10 +146,14 @@ if exist native\Glide.Native\CMakeLists.txt (
       for /f "tokens=1,* delims==" %%A in ('findstr /b /c:"CMAKE_GENERATOR_PLATFORM:INTERNAL=" "!GLIDE_NATIVE_CACHE!" 2^>nul') do set "GLIDE_CACHED_PLATFORM=%%B"
       set "GLIDE_RESET_NATIVE_CACHE=0"
       if defined GLIDE_CACHED_GENERATOR (
-        echo !GLIDE_CACHED_GENERATOR! | findstr /i /c:"Visual Studio" >nul
-        if errorlevel 1 set "GLIDE_RESET_NATIVE_CACHE=1"
+        if "!GLIDE_NATIVE_NINJA!"=="1" (
+          if /I not "!GLIDE_CACHED_GENERATOR!"=="Ninja" set "GLIDE_RESET_NATIVE_CACHE=1"
+        ) else (
+          echo !GLIDE_CACHED_GENERATOR! | findstr /i /c:"Visual Studio" >nul
+          if errorlevel 1 set "GLIDE_RESET_NATIVE_CACHE=1"
+        )
       )
-      if defined GLIDE_CACHED_PLATFORM if /I not "!GLIDE_CACHED_PLATFORM!"=="x64" set "GLIDE_RESET_NATIVE_CACHE=1"
+      if "!GLIDE_NATIVE_NINJA!"=="0" if defined GLIDE_CACHED_PLATFORM if /I not "!GLIDE_CACHED_PLATFORM!"=="x64" set "GLIDE_RESET_NATIVE_CACHE=1"
       if "!GLIDE_RESET_NATIVE_CACHE!"=="1" (
         echo [1/8] Native CMake cache targets a different generator/platform; resetting it...
         rmdir /s /q "native\Glide.Native\build"
@@ -136,7 +161,11 @@ if exist native\Glide.Native\CMakeLists.txt (
     )
 
     echo [1/8] Configuring/refreshing native bridge for x64...
-    cmake -S native\Glide.Native -B native\Glide.Native\build -A x64
+    if "!GLIDE_NATIVE_NINJA!"=="1" (
+      cmake -G Ninja -S native\Glide.Native -B native\Glide.Native\build -DCMAKE_BUILD_TYPE=Release
+    ) else (
+      cmake -S native\Glide.Native -B native\Glide.Native\build -A x64
+    )
     if errorlevel 1 (
       echo ERROR: Native configure failed. If Visual Studio Build Tools was recently upgraded, delete native\Glide.Native\build and rerun.
       set "GLIDE_BUILD_RC=!errorlevel!"
@@ -146,7 +175,7 @@ if exist native\Glide.Native\CMakeLists.txt (
     rem A successful Visual Studio configure already proves that CMake resolved the
     rem requested x64 toolchain. The following build is the authoritative compiler/linker
     rem validation and gives the real MSVC diagnostic if that toolchain is incomplete.
-    echo       CMake accepted the Visual Studio x64 native toolchain.
+    if "!GLIDE_NATIVE_NINJA!"=="1" (echo       CMake accepted the Ninja x64 native toolchain.) else (echo       CMake accepted the Visual Studio x64 native toolchain.)
 
     call :progress 18 "Native incremental build"
     echo [2/8] Building native bridge ^(parallel, incremental^)...
@@ -237,10 +266,10 @@ if not exist "dist\Glide.Native.dll" (
 )
 
 rem Release deliverables: a clean portable archive and a directly testable EXE.
-if exist "Glide-4.1.4-Portable.zip" del /q "Glide-4.1.4-Portable.zip"
-if exist "Glide-4.1.4.exe" del /q "Glide-4.1.4.exe"
-copy /y "dist\Glide.exe" "Glide-4.1.4.exe" >nul
-powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "Compress-Archive -Path 'dist\*' -DestinationPath 'Glide-4.1.4-Portable.zip' -CompressionLevel Optimal"
+if exist "Glide-4.1.5-Portable.zip" del /q "Glide-4.1.5-Portable.zip"
+if exist "Glide-4.1.5.exe" del /q "Glide-4.1.5.exe"
+copy /y "dist\Glide.exe" "Glide-4.1.5.exe" >nul
+powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "Compress-Archive -Path 'dist\*' -DestinationPath 'Glide-4.1.5-Portable.zip' -CompressionLevel Optimal"
 if errorlevel 1 (
   echo ERROR: Portable ZIP creation failed.
   set "GLIDE_BUILD_RC=!errorlevel!"
@@ -248,7 +277,7 @@ if errorlevel 1 (
 )
 call :progress 90 "Diagnostic fixtures"
 if "%GLIDE_FAST%"=="1" (
-  powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File "tools\fixture-manifest.ps1" -Mode Validate -Directory "artifacts\diagnostic-fixtures" -Generator "dist\Glide.exe" -SourceIdentity "Glide-4.1.4" >nul 2>&1
+  powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File "tools\fixture-manifest.ps1" -Mode Validate -Directory "artifacts\diagnostic-fixtures" -Generator "dist\Glide.exe" -SourceIdentity "Glide-4.1.5" >nul 2>&1
   if errorlevel 1 (
     echo [8/8] Fast fixture cache is absent/stale/partial; regenerating...
     call :generate_diagnostic_fixtures
@@ -290,8 +319,8 @@ call :progress 100 "Complete"
 echo.
 echo ============================================================
 echo   BUILD COMPLETE - portable: dist\
-echo   PORTABLE ZIP: Glide-4.1.4-Portable.zip
-echo   EXE:          Glide-4.1.4.exe
+echo   PORTABLE ZIP: Glide-4.1.5-Portable.zip
+echo   EXE:          Glide-4.1.5.exe
 if /I "%GLIDE_SKIP_INSTALLER%"=="1" (
   echo   INSTALLER: skipped by caller
 ) else (
@@ -315,13 +344,13 @@ if not exist "artifacts\diagnostic-fixtures" (
   set "GLIDE_BUILD_RC=1"
   exit /b 1
 )
-powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File "tools\fixture-manifest.ps1" -Mode Write -Directory "artifacts\diagnostic-fixtures" -Generator "dist\Glide.exe" -SourceIdentity "Glide-4.1.4"
+powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File "tools\fixture-manifest.ps1" -Mode Write -Directory "artifacts\diagnostic-fixtures" -Generator "dist\Glide.exe" -SourceIdentity "Glide-4.1.5"
 if errorlevel 1 (
   echo ERROR: Diagnostic fixture identity manifest creation/validation failed.
   set "GLIDE_BUILD_RC=!errorlevel!"
   exit /b !GLIDE_BUILD_RC!
 )
-powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File "tools\fixture-manifest.ps1" -Mode Validate -Directory "artifacts\diagnostic-fixtures" -Generator "dist\Glide.exe" -SourceIdentity "Glide-4.1.4"
+powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File "tools\fixture-manifest.ps1" -Mode Validate -Directory "artifacts\diagnostic-fixtures" -Generator "dist\Glide.exe" -SourceIdentity "Glide-4.1.5"
 if errorlevel 1 (
   echo ERROR: Generated diagnostic fixtures did not pass identity validation.
   set "GLIDE_BUILD_RC=!errorlevel!"
@@ -332,7 +361,7 @@ exit /b 0
 :progress
 set "GLIDE_PROGRESS=%~1"
 set "GLIDE_PROGRESS_LABEL=%~2"
-title Glide 4.1.4 Build - %GLIDE_PROGRESS%%% - %GLIDE_PROGRESS_LABEL%
+title Glide 4.1.5 Build - %GLIDE_PROGRESS%%% - %GLIDE_PROGRESS_LABEL%
 echo [ %GLIDE_PROGRESS%%% ] %GLIDE_PROGRESS_LABEL%
 exit /b 0
 
@@ -346,8 +375,8 @@ for %%D in (".artifacts" "artifacts\diagnostic-fixtures" "native\Glide.Native\bu
   )
 )
 if exist "codecs\codecs.index.json" del /q "codecs\codecs.index.json"
-if exist "Glide-4.1.4.exe" del /q "Glide-4.1.4.exe"
-if exist "Glide-4.1.4-Portable.zip" del /q "Glide-4.1.4-Portable.zip"
+if exist "Glide-4.1.5.exe" del /q "Glide-4.1.5.exe"
+if exist "Glide-4.1.5-Portable.zip" del /q "Glide-4.1.5-Portable.zip"
 exit /b 0
 
 :fail

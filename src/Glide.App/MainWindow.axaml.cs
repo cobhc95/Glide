@@ -46,7 +46,10 @@ public partial class MainWindow : Window
     private ImageLoadCoordinator? _overlayLoader;
     private string? _selectionZoomDemandPath;
     private readonly InputRouter _inputRouter = new();
-    private readonly WorkspaceState _workspace = new();
+    // Do not create a placeholder Home tab before startup arguments are classified. An explicit
+    // Explorer image launch must begin with the requested image only; standalone launches create
+    // their configured Home/Explorer destination during startup planning.
+    private readonly WorkspaceState _workspace = new(createHome: false);
     private readonly DispatcherTimer _fullscreenCursorTimer = new();
     private CancellationTokenSource? _resizeInputResetCts;
     private CancellationTokenSource? _navigationBoundaryNoticeCts;
@@ -137,6 +140,7 @@ public partial class MainWindow : Window
     private bool _closeConfirmationInProgress;
     private bool _closeConfirmed;
     private bool _forceProcessExit;
+    private bool _forceCloseFromCaptionAction;
     private bool _closeForSpeedBoostStandby;
     private bool _homeKeyDown;
     private double _sessionOpacity = 1.0;
@@ -173,10 +177,10 @@ public partial class MainWindow : Window
     private bool _chromeMiddlePressStartedOnEmptyChrome;
     private WindowsBrowserFrameController? _windowsBrowserFrame;
     private WindowsExplorerHost? NativeExplorerHost;
-    private bool _forceCloseFromCaptionAction;
     private PixelPoint _lastNormalWindowPosition;
     private Size _lastNormalWindowSize;
     private bool _normalPlacementKnown;
+    private PixelPoint? _validatedStartupNormalPosition;
     private WindowState _stateBeforeMinimize = WindowState.Normal;
     private WindowState _lastKnownWindowState = WindowState.Normal;
 
@@ -188,6 +192,12 @@ public partial class MainWindow : Window
     private BrowserSurface? _browserSurface;
     private bool _startupWholeAppOverlayPreferenceApplied;
     private bool _speedBoostStandbyActive;
+    private bool _standbyClosePending;
+    private bool _pendingExternalReceiver;
+    // Secondary windows may temporarily be the only visible window during Speed Boost delegation,
+    // but a newly restored primary must always reclaim the single taskbar representative slot.
+    internal bool IsSecondaryWindow { get; private set; }
+    internal bool IsStandbyClosePending => _standbyClosePending;
     // A hidden warm HWND can retain its last DWM-composed pixels across Hide/Show. Keep the HWND
     // visually suppressed until a new image or Home surface has completed a safe composition.
     private bool _warmPresentationGateActive;
@@ -496,6 +506,7 @@ public partial class MainWindow : Window
             var menu = BuildViewerContextMenu();
             menu.Open(Viewport);
         };
+        Viewport.SlideshowRightClickStopRequested += () => StopSlideshow(restoreStartingMode: true);
         AddHandler(InputElement.KeyDownEvent, OverlayKeyboardShortcut, RoutingStrategies.Tunnel, true);
 
         _fullscreenCursorTimer.Interval = TimeSpan.FromMilliseconds(1400);
@@ -703,6 +714,13 @@ public partial class MainWindow : Window
             GlidePerformanceTrace.Mark("opened_call_complete_startup_start");
             await CompleteOpenedStartupAsync(explicitStartupPaths);
             GlidePerformanceTrace.Mark("opened_call_complete_startup_end");
+
+            // Setting Avalonia's WindowState before the HWND is shown can make the client area
+            // occupy the screen while Windows still considers the HWND restored. Reassert the
+            // native maximize command after the real frame exists so the taskbar, Snap and edge
+            // maximization state match an actual click on Windows' maximize button.
+            Dispatcher.UIThread.Post(RestoreValidatedStartupNormalPosition, DispatcherPriority.Loaded);
+            Dispatcher.UIThread.Post(EnsureNativeMaximizedState, DispatcherPriority.Loaded);
         };
 
         // Resolve the final startup geometry before Windows ever shows the HWND. Applying reference
@@ -746,6 +764,8 @@ public partial class MainWindow : Window
             }
         }
         BeginDeferredRecentHistoryInitialization();
+        if (_pendingExternalReceiver)
+            Dispatcher.UIThread.Post(() => _ = EnsurePendingExternalReceiverFallbackAsync(), DispatcherPriority.Background);
         Dispatcher.UIThread.Post(() =>
             MainRoot.AddHandler(InputElement.PointerReleasedEvent, WholeAppOverlayContextPointerReleased, RoutingStrategies.Bubble, false),
             DispatcherPriority.Background);
@@ -786,7 +806,7 @@ public partial class MainWindow : Window
         overlays.Diagnostic += (name, data) => _diagnostics.Write("overlay", name, data);
         overlays.OverlayCountChanged += UpdateOverlayStatusButtons;
         overlays.OpenFileLocationRequested = path => RevealInWindowsExplorer(path, directory: false);
-        overlays.OpenInNewTabRequested = path => Dispatcher.UIThread.Post(async () => await OpenAsImageTabAsync(path));
+        overlays.OpenInNewTabRequested = path => Dispatcher.UIThread.Post(async () => await OpenAsImageTabAsync(path, openInNewTab: true));
         overlays.OpenWithRequested = path => WindowsOpenWith.Show(path);
         ApplyOverlaySettingsToManager(overlays);
         _overlays = overlays;
@@ -873,6 +893,37 @@ public partial class MainWindow : Window
         _queuedOpen = path;
         _diagnostics.Write("launch", "queue_open", new { path });
     }
+
+    internal void PrepareForPendingExternalOpen()
+    {
+        // A Speed Boost standby receiver is not a standalone launch. The broker will populate its
+        // workspace immediately after Opened; suppressing the no-file startup destination avoids a
+        // transient or persistent Home tab beside the requested external image.
+        _pendingExternalReceiver = true;
+        _hasExplicitStartupOpen = true;
+        _diagnostics.Write("launch", "pending_external_receiver_prepared");
+    }
+
+    private async Task EnsurePendingExternalReceiverFallbackAsync()
+    {
+        // Give the broker's already-accepted request a chance to reach the receiver first. If no
+        // request arrives (for example, a warm activation raced the final standby close), never
+        // leave the newly-created window with zero tabs or an Alt-Tab-only ghost shell.
+        try { await Task.Delay(250, _windowLifetimeCts.Token).ConfigureAwait(true); }
+        catch (OperationCanceledException) { return; }
+        if (!_pendingExternalReceiver || _windowLifetimeCts.IsCancellationRequested || _workspace.Tabs.Count > 0)
+        {
+            _pendingExternalReceiver = false;
+            return;
+        }
+
+        _pendingExternalReceiver = false;
+        ApplyConfiguredStartupWorkspace();
+        RebuildTabStrip();
+        await ActivateWorkspaceAsync();
+        _diagnostics.Write("launch", "pending_external_receiver_fallback_home");
+    }
+
     public void QueueOpenPaths(IEnumerable<string> paths)
     {
         var materialized = paths.Where(path => !string.IsNullOrWhiteSpace(path)).ToArray();
@@ -974,6 +1025,7 @@ public partial class MainWindow : Window
         var saved = new PixelPoint(_settings.WindowX, _settings.WindowY);
         if (IsSafeSavedWindowPosition(saved, Width, Height, scale))
         {
+            _validatedStartupNormalPosition = saved;
             WindowStartupLocation = WindowStartupLocation.Manual;
             Position = saved;
         }
@@ -995,6 +1047,19 @@ public partial class MainWindow : Window
             _lastKnownWindowState = WindowState.Normal;
             _stateBeforeMinimize = WindowState.Normal;
         }
+    }
+
+    private void RestoreValidatedStartupNormalPosition()
+    {
+        // Avalonia can apply a pre-show Position before the Windows HWND has its final frame
+        // metrics. Reapply only the validated normal placement after the HWND is visible; native
+        // maximized/fullscreen/overlay states deliberately use their own restoration paths.
+        if (!OperatingSystem.IsWindows() || !IsVisible || _speedBoostStandbyActive ||
+            _wholeAppOverlayMode || WindowState != WindowState.Normal ||
+            _validatedStartupNormalPosition is not { } saved) return;
+        Position = saved;
+        _lastNormalWindowPosition = saved;
+        _normalPlacementKnown = true;
     }
 
     private bool IsSafeSavedWindowPosition(PixelPoint position, double widthDip, double heightDip, double scale)
@@ -1193,14 +1258,14 @@ public partial class MainWindow : Window
         }
     }
 
-    private async Task OpenAsImageTabAsync(string path)
+    private async Task OpenAsImageTabAsync(string path, bool openInNewTab = false)
     {
         if (!File.Exists(path) || !ImageNavigator.IsSupported(path))
         {
-            Title = "Glide 4.1.4 — Unsupported or missing image";
+            Title = "Glide 4.1.5 — Unsupported or missing image";
             return;
         }
-        if (!_workspace.ReplaceActiveWithImage(path)) _workspace.AddImage(path);
+        if (openInNewTab || !_workspace.ReplaceActiveWithImage(path)) _workspace.AddImage(path);
         RebuildTabStrip();
         await LoadPathAsync(path, updateActiveTab: true);
         if (_settings.RecentHistoryEnabled) RecentHistoryStore.RecordFile(path, _settings.HistorySize);
@@ -1558,7 +1623,7 @@ public partial class MainWindow : Window
             if (IsRequestCurrent(request))
             {
                 _diagnostics.Write("decode", "foreground_failed", new { path, request = request.ImageRequestId, error = ex.GetType().Name, ex.Message });
-                Title = $"Glide 4.1.4 — Open failed: {ex.GetType().Name}";
+                Title = $"Glide 4.1.5 — Open failed: {ex.GetType().Name}";
             }
             if (_warmPresentationGateActive)
                 await ReleaseWarmPresentationGateAsync(safeFrameReady: false);
@@ -2152,7 +2217,7 @@ public partial class MainWindow : Window
             : "Fast browsing, precise zooming, and familiar Windows controls.";
         home.TipsGrid.IsVisible = !recentLanding && _settings.ShowHomeTips;
         ApplyWelcomeLayout();
-        Title = recentLanding ? "Glide 4.1.4 — Recent pictures" : "Glide 4.1.4 — Home";
+        Title = recentLanding ? "Glide 4.1.5 — Recent pictures" : "Glide 4.1.5 — Home";
         RefreshRecentHistoryHome();
         ApplyStatusVisibility();
     }
@@ -2312,7 +2377,7 @@ public partial class MainWindow : Window
                 ShowBrowserSurface();
                 RestoreBrowserNavigationState(browser);
                 NavigateBrowserTo(browser.Folder, addHistory: false);
-                Title = $"Glide 4.1.4 — Explorer — {browser.Folder}";
+                Title = $"Glide 4.1.5 — Explorer — {browser.Folder}";
                 break;
         }
         RebuildTabStrip();
@@ -2704,7 +2769,7 @@ public partial class MainWindow : Window
 
         var detached = new MainWindow(transferred, _settings.CloneState(), deferWorkspaceActivation: true);
         CopyWindowGeometryTo(detached);
-        detached.Show();
+        ShowSecondaryWindow(detached);
         detached.Position = new PixelPoint(Math.Max(0, cursor.X - 120), Math.Max(0, cursor.Y - 22));
         RebuildTabStrip();
         _diagnostics.Write("tabs", "held_tearoff_started", new { id, screenX = cursor.X, screenY = cursor.Y, moveLoop = "native-windows" });
@@ -3032,7 +3097,7 @@ public partial class MainWindow : Window
         if (transferred is null) return;
         var detached = new MainWindow(transferred, _settings.CloneState());
         CopyWindowGeometryTo(detached);
-        detached.Show();
+        ShowSecondaryWindow(detached);
         detached.Position = new PixelPoint(Math.Max(0, screenPoint.X - 100), Math.Max(0, screenPoint.Y - 24));
         _diagnostics.Write("tabs", "detached", new { id, screenX = screenPoint.X, screenY = screenPoint.Y });
         HandleSourceAfterTransfer();
@@ -3106,6 +3171,13 @@ public partial class MainWindow : Window
                 Close();
                 return;
             }
+            // Closing the final tab returns to a real Home destination. The Home page mode decides
+            // whether that destination is the Welcome page, the configured Browser page, or the
+            // recent-pictures landing page; the default is the Welcome page.
+            CreateConfiguredHomeDestination();
+            RebuildTabStrip();
+            await ActivateWorkspaceAsync();
+            _diagnostics.Write("tabs", "last_tab_fallback_home", new { homePage = _settings.HomePageMode });
             return;
         }
         await ActivateWorkspaceAsync();
@@ -3761,7 +3833,7 @@ public partial class MainWindow : Window
         BrowserBackButton.IsEnabled = session.Index > 0 || (_tabForwardImageTargets.TryGetValue(id, out var backTarget) && File.Exists(backTarget));
         BrowserForwardButton.IsEnabled = session.Index >= 0 && session.Index < session.History.Count - 1;
         BrowserUpButton.IsEnabled = Directory.GetParent(folder) is not null;
-        Title = $"Glide 4.1.4 — Explorer — {folder}";
+        Title = $"Glide 4.1.5 — Explorer — {folder}";
         RebuildTabStrip();
         SelectBrowserHighlight(id);
         UpdateTabNavigationButtons();
@@ -3799,7 +3871,7 @@ public partial class MainWindow : Window
         BrowserBackButton.IsEnabled = session.Index > 0 || (_tabForwardImageTargets.TryGetValue(browser.Id, out var nativeBackTarget) && File.Exists(nativeBackTarget));
         BrowserForwardButton.IsEnabled = session.Index >= 0 && session.Index < session.History.Count - 1;
         BrowserUpButton.IsEnabled = Directory.GetParent(folder) is not null;
-        Title = $"Glide 4.1.4 — Explorer — {folder}";
+        Title = $"Glide 4.1.5 — Explorer — {folder}";
         RebuildTabStrip();
         SelectBrowserHighlight(browser.Id);
         UpdateTabNavigationButtons();
@@ -3832,11 +3904,21 @@ public partial class MainWindow : Window
         _browserSelection.Clear();
         _browserSelectionAnchor = -1;
         _browserCurrentIndex = -1;
-        _browserEntries.Clear();
+        // Never mutate the list currently owned by ItemsRepeater. During a folder transition the
+        // repeater may still be clearing old realized elements; mutating its source in place lets
+        // old and new entries briefly share indices and produces mixed-folder contents.
+        _browserEntries = new List<BrowserEntry>();
         ApplyManagedExplorerTheme();
-        BrowserRepeater.ItemsSource = null;
+        BrowserRepeater.ItemsSource = _browserEntries;
         try
         {
+            // ItemsRepeater clears realized visuals at a render boundary. Let that pass complete
+            // before assigning a different folder source, otherwise old tiles can be reused under
+            // new indices while Up/Back/Refresh requests overlap.
+            await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Render);
+            if (generation != Volatile.Read(ref _browserGeneration) ||
+                _workspace.Active is not BrowserTabState current || current.Id != activeTabId ||
+                !string.Equals(current.Folder, folder, StringComparison.OrdinalIgnoreCase)) return;
             // Enumeration/sorting is the only O(N) folder operation. UI controls, context menus,
             // tooltips and thumbnail decoders are created strictly by ItemsRepeater realization.
             var entries = await Task.Run(() => EnumerateBrowserEntries(folder, token), token);
@@ -3883,6 +3965,7 @@ public partial class MainWindow : Window
     {
         var path = entry.Path;
         var directory = entry.Directory;
+        var generation = Volatile.Read(ref _browserGeneration);
         var lifetime = CancellationTokenSource.CreateLinkedTokenSource(_browserThumbnailCts?.Token ?? CancellationToken.None);
         var token = lifetime.Token;
         var compact = _browserViewMode == 2;
@@ -3949,6 +4032,7 @@ public partial class MainWindow : Window
                     var previewStack = new Grid();
                     thumbnailTarget = new Image
                     {
+                        Tag = path,
                         Stretch = Stretch.Uniform,
                         HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch,
                         VerticalAlignment = Avalonia.Layout.VerticalAlignment.Stretch
@@ -3997,7 +4081,7 @@ public partial class MainWindow : Window
         _ = LoadBrowserMetadataTooltipAsync(path, directory, item, token);
 
         if (thumbnailTarget is not null)
-            _ = LoadBrowserThumbnailAsync(path, thumbnailTarget, thumbnailFallback, previewWidth, token);
+            _ = LoadBrowserThumbnailAsync(path, thumbnailTarget, thumbnailFallback, previewWidth, token, generation);
         return item;
     }
 
@@ -4038,9 +4122,9 @@ public partial class MainWindow : Window
     {
         // FuncDataTemplate is configured without recycling; ElementPrepared still re-applies model
         // selection after realization so off-screen selection cannot depend on stale visual state.
-        if (e.Element is not ListBoxItem item || (uint)e.Index >= (uint)_browserEntries.Count) return;
-        var path = _browserEntries[e.Index].Path;
-        item.IsSelected = _browserSelection.Contains(path);
+        if (e.Element is not ListBoxItem item) return;
+        var path = item.Tag as string;
+        item.IsSelected = path is not null && _browserSelection.Contains(path);
     }
 
     private void BrowserRepeaterElementClearing(object? sender, ItemsRepeaterElementClearingEventArgs e)
@@ -4097,7 +4181,7 @@ public partial class MainWindow : Window
         catch { }
     }
 
-    private async Task LoadBrowserThumbnailAsync(string path, Image target, Control? fallback, int width, CancellationToken token)
+    private async Task LoadBrowserThumbnailAsync(string path, Image target, Control? fallback, int width, CancellationToken token, long generation)
     {
         var entered = false;
         try
@@ -4113,10 +4197,11 @@ public partial class MainWindow : Window
                     64 * 1024, FileOptions.SequentialScan);
                 return Bitmap.DecodeToWidth(stream, width, BitmapInterpolationMode.LowQuality);
             }, token).ConfigureAwait(false);
-            if (token.IsCancellationRequested) { bitmap.Dispose(); return; }
+            if (token.IsCancellationRequested || generation != Volatile.Read(ref _browserGeneration)) { bitmap.Dispose(); return; }
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
-                if (token.IsCancellationRequested) { bitmap.Dispose(); return; }
+                if (token.IsCancellationRequested || generation != Volatile.Read(ref _browserGeneration) ||
+                    !string.Equals(target.Tag as string, path, StringComparison.OrdinalIgnoreCase)) { bitmap.Dispose(); return; }
                 if (target.Source is IDisposable previous) previous.Dispose();
                 target.Source = bitmap;
                 if (fallback is not null) fallback.IsVisible = false;
@@ -4197,7 +4282,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private void BrowserViewModeChanged(object? sender, SelectionChangedEventArgs e)
+    private async void BrowserViewModeChanged(object? sender, SelectionChangedEventArgs e)
     {
         // Avalonia may raise SelectionChanged while InitializeComponent is still assigning x:Name
         // fields. Returning here prevents a startup-time NullReferenceException before the window can
@@ -4206,6 +4291,8 @@ public partial class MainWindow : Window
         _browserViewMode = combo.SelectedIndex;
         ConfigureBrowserRepeaterLayout();
         BrowserRepeater.ItemsSource = null;
+        await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Render);
+        if (!_browserUiReady || !ReferenceEquals(sender, BrowserViewModeCombo)) return;
         BrowserRepeater.ItemsSource = _browserEntries;
     }
 
@@ -5348,6 +5435,7 @@ public partial class MainWindow : Window
             };
         Viewport.IsFullscreen = WindowState == WindowState.FullScreen;
         Viewport.FullscreenClickNavigationEnabled = _settings.FullscreenClickNavigation;
+        UpdateSlideshowUi();
 
         NavigationGroup.IsVisible = _settings.StatusShowNavigation;
         ZoomGroup.IsVisible = _settings.StatusShowZoom;
@@ -5679,9 +5767,8 @@ public partial class MainWindow : Window
                     break;
                 }
                 _forceCloseFromCaptionAction = true;
-                // The custom caption X is under our control, so do not round-trip through WM_CLOSE
-                // when Launch Speed Boost owns the last window. Enter standby directly; this avoids
-                // a native close racing the async Closing handler and accidentally ending residency.
+                // The custom caption X returns the last window to Speed Boost standby. The standby
+                // path removes the render HWND while preserving the resident broker for warm opens.
                 if (ShouldEnterSpeedBoostStandby()) EnterSpeedBoostStandby();
                 else if (!TrySendNativeSystemCommand(ScClose)) Close();
                 break;
@@ -6023,6 +6110,8 @@ public partial class MainWindow : Window
         };
         var startFullscreen = new CheckBox { Content = "Start slideshow in fullscreen", IsChecked = _settings.SlideshowStartFullscreen };
         var pauseInactive = new CheckBox { Content = "Pause while Glide is not the active window", IsChecked = _settings.SlideshowPauseWhenInactive };
+        var rightClickStops = new CheckBox { Content = "Right-click stops an active slideshow", IsChecked = _settings.SlideshowRightClickStops };
+        var qualityIndicator = new CheckBox { Content = "Show slideshow playing indicator", IsChecked = _settings.SlideshowShowQualityIndicator };
         var start = new Button { Content = "Start slideshow", MinWidth = 130 };
         var cancel = new Button { Content = "Cancel", MinWidth = 90 };
         var buttons = new StackPanel { Orientation = Avalonia.Layout.Orientation.Horizontal, Spacing = 10, HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right };
@@ -6048,6 +6137,8 @@ public partial class MainWindow : Window
         root.Children.Add(shuffle);
         root.Children.Add(startFullscreen);
         root.Children.Add(pauseInactive);
+        root.Children.Add(rightClickStops);
+        root.Children.Add(qualityIndicator);
         root.Children.Add(buttons);
         var dialog = new Window
         {
@@ -6057,6 +6148,12 @@ public partial class MainWindow : Window
         PopupPlacementStore.Track(dialog, "slideshow-start");
         start.Click += (_, _) => dialog.Close(true);
         cancel.Click += (_, _) => dialog.Close(false);
+        dialog.KeyDown += (_, e) =>
+        {
+            if (e.Key != Key.Enter) return;
+            dialog.Close(true);
+            e.Handled = true;
+        };
         var accepted = await dialog.ShowDialog<bool>(this);
         if (!accepted) return false;
         _settings.SlideshowIntervalMs = (int)(interval.Value ?? 3000);
@@ -6066,6 +6163,8 @@ public partial class MainWindow : Window
         _settings.SlideshowDirection = direction.SelectedItem?.ToString() == "Backward" ? "Backward" : "Forward";
         _settings.SlideshowStartFullscreen = startFullscreen.IsChecked == true;
         _settings.SlideshowPauseWhenInactive = pauseInactive.IsChecked == true;
+        _settings.SlideshowRightClickStops = rightClickStops.IsChecked == true;
+        _settings.SlideshowShowQualityIndicator = qualityIndicator.IsChecked == true;
         SaveSettingsAndPublish();
         return true;
     }
@@ -6076,10 +6175,22 @@ public partial class MainWindow : Window
         var slideshow = _slideshow;
         var active = slideshow?.IsActive == true;
         var running = slideshow?.IsRunning == true;
+        if (Viewport is not null)
+            Viewport.SlideshowRightClickStopEnabled = running && _settings.SlideshowRightClickStops;
+        if (SlideshowQualityIndicator is not null)
+            SlideshowQualityIndicator.IsVisible = running && _settings.SlideshowShowQualityIndicator;
         if (SlideshowIcon is not null) SlideshowIcon.Kind = running ? "Pause" : "Play";
         if (SlideshowStopButton is not null) SlideshowStopButton.IsVisible = active;
         if (SlideshowButton is not null)
         {
+            // The status-bar slideshow control itself is the authoritative playback indicator.
+            // A separate badge can be clipped/disabled by layout or persisted settings, so never
+            // rely on it as the only indication that playback is actually running.
+            SlideshowButton.Classes.Remove("slideshowPlaying");
+            SlideshowButton.Classes.Remove("slideshowPaused");
+            if (running) SlideshowButton.Classes.Add("slideshowPlaying");
+            else if (active) SlideshowButton.Classes.Add("slideshowPaused");
+
             var verb = !active ? "Start slideshow" : running ? "Pause slideshow" : "Resume slideshow";
             ToolTip.SetTip(SlideshowButton, $"[{verb} ({ShortcutFor(GlideCommand.StartPauseSlideshow)})]");
             ToolTip.SetShowDelay(SlideshowButton, 650);
@@ -6250,7 +6361,7 @@ public partial class MainWindow : Window
         var cloned = CloneTabForIndependentWindow(source);
         var child = new MainWindow(cloned, _settings.CloneState(), deferWorkspaceActivation: true);
         CopyWindowGeometryTo(child);
-        child.Show();
+        ShowSecondaryWindow(child);
         await child.ActivateWorkspaceAsync();
         child.Activate();
     }
@@ -6264,7 +6375,7 @@ public partial class MainWindow : Window
         var child = new MainWindow(clones[0], _settings.CloneState(), deferWorkspaceActivation: true);
         child._workspace.Reset(clones, Math.Clamp(activeIndex, 0, clones.Length - 1));
         CopyWindowGeometryTo(child);
-        child.Show();
+        ShowSecondaryWindow(child);
         await child.ActivateWorkspaceAsync();
         child.Activate();
     }
@@ -6480,14 +6591,14 @@ public partial class MainWindow : Window
     {
         if (string.IsNullOrWhiteSpace(_currentPath) || !ImageView.IsVisible)
         {
-            if (HomeHost.IsVisible) Title = "Glide 4.1.4 — Home";
+            if (HomeHost.IsVisible) Title = "Glide 4.1.5 — Home";
             return;
         }
         var display = _settings.FullPathInTitle ? _currentPath : Path.GetFileName(_currentPath);
         var index = _navigator.Count > 0 ? $"[{_navigator.Index + 1}/{_navigator.Count}]" : string.Empty;
         Title = prefix is null
-            ? $"Glide 4.1.4 — {display}  {index}  {Viewport.ZoomPercent}%"
-            : $"Glide 4.1.4 — {prefix} — {display}";
+            ? $"Glide 4.1.5 — {display}  {index}  {Viewport.ZoomPercent}%"
+            : $"Glide 4.1.5 — {prefix} — {display}";
     }
 
     private static string FormatFileSize(long bytes)
@@ -7270,6 +7381,17 @@ public partial class MainWindow : Window
     {
         if (WindowState == WindowState.Minimized)
             WindowState = _stateBeforeMinimize == WindowState.Maximized ? WindowState.Maximized : WindowState.Normal;
+        EnsureNativeMaximizedState();
+    }
+
+    private void EnsureNativeMaximizedState()
+    {
+        if (!OperatingSystem.IsWindows() || !IsVisible || WindowState != WindowState.Maximized) return;
+        _windowsBrowserFrame?.RefreshForWarmRestore();
+        // WindowState can already be Maximized here even when the native HWND was restored by a
+        // Hide/Show or pre-show state assignment. SC_MAXIMIZE is idempotent for a truly maximized
+        // HWND and repairs that split-brain state for the warm-start path.
+        TrySendNativeSystemCommand(ScMaximize);
     }
 
     private void ClearPresentedImageForSpeedBoostStandby()
@@ -7320,7 +7442,21 @@ public partial class MainWindow : Window
         _warmPresentationGateActive = false;
         Opacity = _sessionOpacity;
         WarmOpenTransitionHost.IsVisible = false;
+        // Remove taskbar eligibility before hiding the warm HWND. Waiting until Closed can leave
+        // a stale button behind while the next Speed Boost window is being created.
+        ShowInTaskbar = false;
         Hide();
+        GlideWindowRegistry.RefreshTaskbarRepresentative();
+    }
+
+    private static void ShowSecondaryWindow(MainWindow child)
+    {
+        // Secondary windows remain independently movable and activatable, but the registry keeps
+        // exactly one visible Glide window as the taskbar representative.
+        child.IsSecondaryWindow = true;
+        child.ShowInTaskbar = false;
+        child.Show();
+        GlideWindowRegistry.RefreshTaskbarRepresentative();
     }
 
     private bool ShouldEnterSpeedBoostStandby()
@@ -7330,6 +7466,15 @@ public partial class MainWindow : Window
     internal void EnterSpeedBoostStandby()
     {
         if (_closeForSpeedBoostStandby) return;
+        // Mark the transition before Hide(). The broker can receive another Explorer request
+        // synchronously during this method; App must wait for this owner to finish its internal
+        // close instead of creating a second hidden receiver.
+        _standbyClosePending = true;
+        _closeForSpeedBoostStandby = true;
+        // Caption-close enters standby directly and therefore bypasses the normal async Closing
+        // persistence branch. Capture the current state here as well, otherwise a maximized
+        // window can come back as normal after the warm window is recreated.
+        SaveWindowPlacement();
         _speedBoostStandbyActive = true;
         _warmPresentationGateActive = false;
         Opacity = _sessionOpacity;
@@ -7344,7 +7489,11 @@ public partial class MainWindow : Window
         // the empty image surface visible if the user presses X before an image request finishes.
         WarmOpenTransitionHost.IsVisible = false;
         ImageView.IsVisible = false;
+        // Make the taskbar removal happen while this HWND is still valid. If it is deferred to the
+        // Closed callback, Windows can retain the old Glide button when the next warm window opens.
+        ShowInTaskbar = false;
         Hide();
+        GlideWindowRegistry.RefreshTaskbarRepresentative();
         try
         {
             GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
@@ -7356,7 +7505,6 @@ public partial class MainWindow : Window
         catch { }
         App.PublishCurrentSettings(_settings);
         App.UpdateTrayIconState(_settings);
-        _closeForSpeedBoostStandby = true;
         // Closing the warm window is what releases Avalonia's composition target. The process and
         // broker remain resident; App creates a fresh render window on the next activation.
         Dispatcher.UIThread.Post(Close, DispatcherPriority.Send);
@@ -7373,6 +7521,7 @@ public partial class MainWindow : Window
             // Refresh the native frame so Windows Snap Layouts and edge snapping remain available
             // after the Hide/Show standby transition.
             _windowsBrowserFrame?.RefreshForWarmRestore();
+            Dispatcher.UIThread.Post(EnsureNativeMaximizedState, DispatcherPriority.Loaded);
         }
         _speedBoostStandbyActive = false;
 
@@ -7423,6 +7572,10 @@ public partial class MainWindow : Window
 
     internal async Task<ExternalLaunchItemResult> HandleExternalFolderOpenAsync(Guid requestId, string path)
     {
+        // A post-standby receiver is itself the requested warm window. Do not spawn a second
+        // child when the user's normal Explorer policy is "Open new window".
+        var isPendingWarmReceiver = _pendingExternalReceiver;
+        if (isPendingWarmReceiver) _pendingExternalReceiver = false;
         ExitStandby();
         if (!Directory.Exists(path))
         {
@@ -7431,11 +7584,11 @@ public partial class MainWindow : Window
         }
         var fullPath = Path.GetFullPath(path);
         var behavior = CurrentExternalOpenBehavior;
-        if (string.Equals(behavior, "Open new window", StringComparison.OrdinalIgnoreCase))
+        if (!isPendingWarmReceiver && string.Equals(behavior, "Open new window", StringComparison.OrdinalIgnoreCase))
         {
             var child = new MainWindow();
             child.QueueOpen(fullPath);
-            child.Show();
+            ShowSecondaryWindow(child);
             await ReleaseWarmPresentationGateAsync(safeFrameReady: true);
             return new(requestId, ExternalLaunchItemStatus.Accepted, "Opened folder in new window.");
         }
@@ -7479,25 +7632,18 @@ public partial class MainWindow : Window
         Activate();
     }
 
-    private static bool SpawnIndependentGlideProcess(string path)
-    {
-        try
-        {
-            var exe = Environment.ProcessPath;
-            if (string.IsNullOrWhiteSpace(exe)) return false;
-            Process.Start(new ProcessStartInfo(exe)
-            {
-                UseShellExecute = false,
-                ArgumentList = { "--force-new-instance", Path.GetFullPath(path) }
-            });
-            return true;
-        }
-        catch { return false; }
-    }
+    private bool IsDefaultHomeOnlyWorkspace()
+        => _workspace.Tabs.Count == 1 && _workspace.Active is HomeTabState;
 
     internal async Task<ExternalLaunchItemResult> HandleExternalOpenAsync(Guid requestId, string path, string behavior)
     {
-        var wasSpeedBoostStandby = _speedBoostStandbyActive;
+        // After Speed Boost standby the broker creates one fresh render receiver. That receiver is
+        // already the logical "new window" for this Explorer launch. If the normal external-open
+        // policy is also "Open new window", spawning a child here leaves the receiver behind as an
+        // Alt+Tab-only ghost. Consume the first forwarded request in the receiver itself.
+        var isPendingWarmReceiver = _pendingExternalReceiver;
+        if (isPendingWarmReceiver) _pendingExternalReceiver = false;
+        var wasSpeedBoostStandby = _speedBoostStandbyActive || isPendingWarmReceiver;
         if (!File.Exists(path))
             return new(requestId, ExternalLaunchItemStatus.Rejected, "File does not exist.");
         if (!ImageNavigator.IsSupported(path))
@@ -7536,38 +7682,43 @@ public partial class MainWindow : Window
             }
             if (string.Equals(duplicateBehavior, "Open new tab", StringComparison.OrdinalIgnoreCase))
             {
-                await OpenAsImageTabAsync(path);
+                await OpenAsImageTabAsync(path, openInNewTab: true);
                 if (wasSpeedBoostStandby)
                     ShowImageSurface();
                 RestoreFromMinimizedIfNeeded();
                 Activate();
                 return new(requestId, ExternalLaunchItemStatus.Accepted, "Opened duplicate image in new tab.");
             }
-            if (SpawnIndependentGlideProcess(path))
-            {
-                if (wasSpeedBoostStandby)
-                    ReturnToSpeedBoostStandbyAfterDelegatedOpen();
-                return new(requestId, ExternalLaunchItemStatus.Accepted, "Opened duplicate image in independent Glide process.");
-            }
+            var duplicateChild = new MainWindow();
+            duplicateChild.QueueOpen(path);
+            ShowSecondaryWindow(duplicateChild);
+            if (wasSpeedBoostStandby)
+                ReturnToSpeedBoostStandbyAfterDelegatedOpen();
+            return new(requestId, ExternalLaunchItemStatus.Accepted, "Opened duplicate image in a separate Glide window.");
         }
 
-        if (string.Equals(behavior, "Open new window", StringComparison.OrdinalIgnoreCase))
+        if (!isPendingWarmReceiver && string.Equals(behavior, "Open new window", StringComparison.OrdinalIgnoreCase))
         {
             var child = new MainWindow();
             child.QueueOpen(path);
-            child.Show();
+            ShowSecondaryWindow(child);
             if (wasSpeedBoostStandby)
                 ReturnToSpeedBoostStandbyAfterDelegatedOpen();
             return new(requestId, ExternalLaunchItemStatus.Accepted, "Opened image in new window.");
         }
-        if (string.Equals(behavior, "Overwrite existing tab", StringComparison.OrdinalIgnoreCase) &&
-            _workspace.Active is { } active && _workspace.Tabs.Count > 0)
-            _workspace.Close(active.Id, ensureHome: false);
+        var overwriteExistingTab = string.Equals(behavior, "Overwrite existing tab", StringComparison.OrdinalIgnoreCase);
         // Cold opens and warm starts activated from the Start menu retain the normal welcome surface.
         // Only the external image-open path from Speed Boost uses the neutral transition surface.
         if (!wasSpeedBoostStandby && HomeHost.IsVisible)
             ShowImageSurface();
-        await OpenAsImageTabAsync(path);
+        // OpenAsImageTabAsync replaces the active tab when requested. Do not close that tab first:
+        // closing it can activate a neighbouring tab and then overwrite the wrong destination.
+        // A warm/previously standalone Glide shell can still contain its untouched default Home
+        // tab. The first explicit Explorer image open should turn that placeholder into the image,
+        // even when the normal external policy is "Open in new tab"; otherwise Explorer launches
+        // visibly retain an unrelated Home tab beside the requested picture.
+        var replaceDefaultHome = IsDefaultHomeOnlyWorkspace();
+        await OpenAsImageTabAsync(path, openInNewTab: !overwriteExistingTab && !replaceDefaultHome);
         if (wasSpeedBoostStandby)
         {
             ShowImageSurface();

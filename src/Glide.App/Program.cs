@@ -144,8 +144,11 @@ internal static class Program
             // reads only the compact scalar first-frame policy, avoiding hotkey/gesture/profile migration on a forwarding
             // process that is about to exit anyway.
             var benchmarkForcesColdProcess = string.Equals(Environment.GetEnvironmentVariable("GLIDE_BENCHMARK_DISABLE_REUSE"), "1", StringComparison.Ordinal);
-            var shouldReuse = !forceNewInstance && !benchmarkForcesColdProcess && !App.BenchmarkExitAfterFirstFrame && launchPolicy.ReuseSingleInstance &&
-                !string.Equals(launchPolicy.ExternalOpenBehavior, "Open new window", StringComparison.OrdinalIgnoreCase);
+            // The external-open behavior is handled by the elected UI owner. In particular,
+            // "Open new window" still needs to reach that owner so it can create a real child
+            // window; starting a helper process here used to make that process lose the broker
+            // election and exit before it ever opened the image.
+            var shouldReuse = !forceNewInstance && !benchmarkForcesColdProcess && !App.BenchmarkExitAfterFirstFrame && launchPolicy.ReuseSingleInstance;
             // Prepare one immutable request batch for the entire launch attempt. The same request IDs
             // are reused by both forwarding attempts so a lost acknowledgement cannot turn the second
             // attempt into a duplicate open under fresh IDs.
@@ -158,7 +161,7 @@ internal static class Program
             // Presence is claimed only after the forwarding attempt, so this cold process never
             // mistakes its own kernel object for an already-running Glide instance.
             var electedBrokerOwner = ExternalLaunchBroker.ClaimProcessPresence();
-            if (!electedBrokerOwner)
+            if (!electedBrokerOwner && !forceNewInstance)
             {
                 if (forwardBatch is not null &&
                     ExternalLaunchBroker.TryForwardToExisting(forwardBatch, TimeSpan.FromSeconds(2)))
@@ -180,7 +183,7 @@ internal static class Program
 
             // This process is now the elected UI/broker owner. Start the crash breadcrumb file only
             // here so short-lived forwarding helper processes cannot overwrite the live owner trace.
-            LiveDiagnosticTrace.Initialize("4.1.4-diagnostic");
+            LiveDiagnosticTrace.Initialize("4.1.5-diagnostic");
             AppDomain.CurrentDomain.UnhandledException += (_, eventArgs) =>
             {
                 if (eventArgs.ExceptionObject is Exception fatal)

@@ -1,12 +1,16 @@
-# ACTIVE IMPLEMENTATION CHECKPOINT — GLIDE 4.1
+# ACTIVE IMPLEMENTATION CHECKPOINT — GLIDE 4.1.5
+
+**Current active release:** Glide 4.1.5. The release files and source metadata must stay aligned
+to 4.1.5 until a newer version is explicitly requested. Historical sections below retain their
+original version labels where they describe earlier milestones.
 
 ## Release output contract — permanent
 
 Every clean Glide release build must remove generated caches and prior compiled outputs before compilation, while preserving source and user-authored deliverables. A completed release output consists of all four items below:
 
-1. `Glide-4.1.1-Portable.zip` — portable build archive containing the published `dist` contents.
+1. `Glide-4.1.5-Portable.zip` — portable build archive containing the published `dist` contents.
 2. `dist-installer\Glide Setup.exe` — compiled Windows setup installer.
-3. `Glide-4.1.1.exe` — standalone executable for immediate testing.
+3. `Glide-4.1.5.exe` — standalone executable for immediate testing.
 4. `Glide-Zero-Context-Handover.zip` — compact essentials-only handoff containing source, tests, build scripts, and this handoff document, with binaries, caches, generated artifacts, logs, and nested ZIPs excluded. It is always written inside the `Glide Image Viewer` program folder; never export a duplicate to the parent Downloads directory.
 
 The clean step may remove `.artifacts`, `artifacts\diagnostic-fixtures`, `native\Glide.Native\build`, `dist`, `dist-installer`, generated codec indexes, and build logs. It must not remove source, tests, scripts, documentation, or an existing handoff ZIP unless explicitly requested.
@@ -1898,6 +1902,26 @@ Prerequisites are documented by existing build scripts. Normal authoritative gat
 8. diagnostic fixtures are generated under `artifacts\diagnostic-fixtures`, **not** `dist`;
 9. `Glide.Native.dll` and optional codec payloads are copied into `dist`;
 10. Inno builds `dist-installer\Glide-3.0-Setup.exe`.
+
+### Required Windows build environment on the handoff machine
+
+The build must normalize the shell before invoking `build.cmd`; otherwise inherited developer-shell
+properties can select the invalid `Debug|x64` solution configuration or leave CMake without a usable
+native toolchain. `build.cmd` now sets `Configuration=Release` and `Platform=Any CPU` itself. When the
+native bridge is built through Ninja, use this sequence from the project directory:
+
+1. Call the installed Visual Studio 2022 `VC\Auxiliary\Build\vcvars64.bat`.
+2. Ensure the Windows SDK x64 `rc.exe`/`mt.exe` directory is on `PATH` (for example,
+   `Windows Kits\10\bin\10.0.26100.0\x64`).
+3. Ensure the installed Visual Studio CMake Ninja directory is on `PATH` and set
+   `GLIDE_NATIVE_GENERATOR=Ninja`.
+4. If CMake cannot resolve MSVC, set `CXX` to the installed x64 `cl.exe` full path.
+5. Run `build.cmd --no-pause` and require native configure/link, managed build, all tests,
+   headless diagnostics, publish and Inno Setup to pass.
+
+This environment setup is part of the reproducible compile contract and should be preserved in any
+future handoff or agent takeover. Do not publish to GitHub as part of a local verification build
+unless the user explicitly requests publication.
 
 Then perform live Windows regression and cold-launch benchmark. Do not accept a build that gets faster by breaking decode fidelity, extensions, internal Explorer, navigation or the user's established interactions.
 

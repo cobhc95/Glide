@@ -341,6 +341,8 @@ public partial class SettingsWindow : Window
             SelectByText(SlideshowDirectionCombo, string.IsNullOrWhiteSpace(s.SlideshowDirection) ? "Forward" : s.SlideshowDirection);
             SlideshowStartFullscreenCheck.IsChecked = s.SlideshowStartFullscreen;
             SlideshowPauseInactiveCheck.IsChecked = s.SlideshowPauseWhenInactive;
+            SlideshowRightClickStopsCheck.IsChecked = s.SlideshowRightClickStops;
+            SlideshowQualityIndicatorCheck.IsChecked = s.SlideshowShowQualityIndicator;
 
             TabMinWidthBox.Value = s.TabMinWidth;
             TabMaxWidthBox.Value = s.TabMaxWidth;
@@ -351,7 +353,7 @@ public partial class SettingsWindow : Window
             CloseEmptyAfterDetachCheck.IsChecked = s.CloseEmptyWindowAfterDetach;
             DetachedHomeTabCheck.IsChecked = s.DetachedWindowHomeTab;
             DoubleClickTabCloseCheck.IsChecked = s.DoubleClickTabCloses;
-            SelectByText(LastTabBehaviorCombo, string.IsNullOrWhiteSpace(s.LastTabCloseBehavior) ? "Keep last tab open" : s.LastTabCloseBehavior);
+            SelectByText(LastTabBehaviorCombo, string.IsNullOrWhiteSpace(s.LastTabCloseBehavior) ? "Open home page" : s.LastTabCloseBehavior);
             ConfirmCloseMultipleTabsCheck.IsChecked = s.ConfirmCloseMultipleTabs;
             SelectByText(HomePageCombo, s.HomePageMode);
             FolderNavGroupCheck.IsChecked = s.FolderNavShowGroup;
@@ -537,6 +539,8 @@ public partial class SettingsWindow : Window
         state.SlideshowDirection = SelectedText(SlideshowDirectionCombo, "Forward");
         state.SlideshowStartFullscreen = SlideshowStartFullscreenCheck.IsChecked == true;
         state.SlideshowPauseWhenInactive = SlideshowPauseInactiveCheck.IsChecked == true;
+        state.SlideshowRightClickStops = SlideshowRightClickStopsCheck.IsChecked == true;
+        state.SlideshowShowQualityIndicator = SlideshowQualityIndicatorCheck.IsChecked == true;
 
         state.TabMinWidth = (int)(TabMinWidthBox.Value ?? 120);
         state.TabMaxWidth = (int)(TabMaxWidthBox.Value ?? 240);
@@ -547,7 +551,7 @@ public partial class SettingsWindow : Window
         state.CloseEmptyWindowAfterDetach = CloseEmptyAfterDetachCheck.IsChecked == true;
         state.DetachedWindowHomeTab = DetachedHomeTabCheck.IsChecked == true;
         state.DoubleClickTabCloses = DoubleClickTabCloseCheck.IsChecked == true;
-        state.LastTabCloseBehavior = SelectedText(LastTabBehaviorCombo, "Keep last tab open");
+        state.LastTabCloseBehavior = SelectedText(LastTabBehaviorCombo, "Open home page");
         state.ConfirmCloseMultipleTabs = ConfirmCloseMultipleTabsCheck.IsChecked == true;
         if (state.ConfirmCloseMultipleTabs) state.RememberedMultiTabCloseChoice = "Ask";
         state.HomePageMode = SelectedText(HomePageCombo, "Welcome page");
@@ -635,8 +639,8 @@ public partial class SettingsWindow : Window
 
 
     private bool IsPerformanceTuningControl(object? sender) => sender is not null && sender != InitialQualityCombo &&
-        new Control[] { InteractivePanQualityCombo, AdaptiveFastPreviewCheck, AdaptivePreviewDelayBox, SequentialReadCheck, PrefetchCheck, PrefetchDepthBox,
-            BackgroundRefinementCheck, CacheItemsBox, CompressedCacheMbBox, DecodedCacheMbBox, RapidPreviewBox, RapidBrowsePreviewBox, ProgressiveColorCheck }
+            new Control[] { InteractivePanQualityCombo, AdaptiveFastPreviewCheck, AdaptivePreviewDelayBox, SequentialReadCheck, PrefetchCheck, PrefetchDepthBox,
+            BackgroundRefinementCheck, PrefetchSiblingFoldersCheck, PrefetchSiblingFolderCountBox, CacheItemsBox, CompressedCacheMbBox, DecodedCacheMbBox, RapidPreviewBox, RapidBrowsePreviewBox, ProgressiveColorCheck }
         .Any(x => ReferenceEquals(x, sender));
 
     private void DetectPerformanceProfileFromControls()
@@ -646,16 +650,21 @@ public partial class SettingsWindow : Window
         {
             var policy = ImagePerformancePolicy.ForProfile(candidate);
             var expectedPan = candidate == "Maximum speed" ? "Fast" : "Full quality";
-            var expectedRapid = candidate == "Maximum speed" ? 960 : candidate == "Maximum quality" ? 2048 : 1440;
+            var expectedRapid = candidate == "Maximum speed" ? 960 : candidate == "Maximum quality" ? 3500 : 1440;
+            var expectedSiblingCount = candidate == "Maximum quality" ? 7 : 3;
             if (SelectedText(InteractivePanQualityCombo, "Full quality") == expectedPan &&
                 AdaptiveFastPreviewCheck.IsChecked == policy.DecoderScaledFirstFrame &&
                 (int)(AdaptivePreviewDelayBox.Value ?? 20) == policy.RefinementDelayMs &&
                 SequentialReadCheck.IsChecked == policy.SequentialForegroundReads && PrefetchCheck.IsChecked == policy.PredictivePrefetch &&
                 (int)(PrefetchDepthBox.Value ?? 5) == policy.PrefetchDepth &&
-                BackgroundRefinementCheck.IsChecked == policy.BackgroundRefinement && (int)(CacheItemsBox.Value ?? 16) == policy.CompressedCacheItems &&
+                BackgroundRefinementCheck.IsChecked == policy.BackgroundRefinement &&
+                PurgeCacheCheck.IsChecked == false && StartupDiagnosticsCheck.IsChecked == false &&
+                PrefetchSiblingFoldersCheck.IsChecked == (candidate == "Maximum quality") &&
+                (int)(PrefetchSiblingFolderCountBox.Value ?? 3) == expectedSiblingCount &&
+                (int)(CacheItemsBox.Value ?? 16) == policy.CompressedCacheItems &&
                 (int)(CompressedCacheMbBox.Value ?? 256) == policy.CompressedCacheMegabytes && (int)(DecodedCacheMbBox.Value ?? 256) == policy.DecodedCacheMegabytes &&
                 (int)(RapidPreviewBox.Value ?? 3000) == policy.PreviewLongestSide && (int)(RapidBrowsePreviewBox.Value ?? 1440) == expectedRapid &&
-                ProgressiveColorCheck.IsChecked == true)
+                ProgressiveColorCheck.IsChecked == policy.ProgressiveColorFirstPreview)
             { detected = candidate; break; }
         }
         _loadingControls = true;
@@ -752,6 +761,10 @@ public partial class SettingsWindow : Window
             PrefetchCheck.IsChecked = policy.PredictivePrefetch;
             PrefetchDepthBox.Value = policy.PrefetchDepth;
             BackgroundRefinementCheck.IsChecked = policy.BackgroundRefinement;
+            PurgeCacheCheck.IsChecked = false;
+            StartupDiagnosticsCheck.IsChecked = false;
+            PrefetchSiblingFoldersCheck.IsChecked = profileName == "Maximum quality";
+            PrefetchSiblingFolderCountBox.Value = profileName == "Maximum quality" ? 7 : 3;
             CacheItemsBox.Value = policy.CompressedCacheItems;
             CompressedCacheMbBox.Value = policy.CompressedCacheMegabytes;
             DecodedCacheMbBox.Value = policy.DecodedCacheMegabytes;
@@ -759,7 +772,7 @@ public partial class SettingsWindow : Window
             RapidBrowsePreviewBox.Value = profileName switch
             {
                 "Maximum speed" => 960,
-                "Maximum quality" => 2048,
+                "Maximum quality" => 3500,
                 _ => 1440
             };
             ProgressiveColorCheck.IsChecked = true;
@@ -1388,6 +1401,7 @@ public partial class SettingsWindow : Window
         M("status.statResolution", StatResolutionCheck); M("status.statZoom", StatZoomCheck); M("status.statFileSize", StatFileSizeCheck); M("status.statFormat", StatFormatCheck);
         M("slideshow.interval", SlideshowIntervalBox); M("slideshow.loop", SlideshowLoopCheck); M("slideshow.crossFolders", SlideshowCrossFoldersCheck); M("slideshow.shuffle", SlideshowShuffleCheck);
         M("slideshow.direction", SlideshowDirectionCombo); M("slideshow.startFullscreen", SlideshowStartFullscreenCheck); M("slideshow.pauseInactive", SlideshowPauseInactiveCheck);
+        M("slideshow.rightClickStops", SlideshowRightClickStopsCheck); M("slideshow.showQualityIndicator", SlideshowQualityIndicatorCheck);
         M("tabs.minWidth", TabMinWidthBox); M("tabs.maxWidth", TabMaxWidthBox); M("tabs.overflowArrows", TabOverflowArrowsCheck); M("tabs.detach", TabDetachCheck); M("tabs.attach", TabAttachCheck); M("tabs.closedHistory", ClosedHistoryBox);
         M("tabs.closeEmptyAfterDetach", CloseEmptyAfterDetachCheck); M("tabs.detachedHome", DetachedHomeTabCheck); M("tabs.doubleClickClose", DoubleClickTabCloseCheck);
         M("tabs.lastTabBehavior", LastTabBehaviorCombo); M("tabs.confirmCloseMultiple", ConfirmCloseMultipleTabsCheck); M("tabs.homePage", HomePageCombo); M("folderNav.group", FolderNavGroupCheck); M("folderNav.previous", FolderNavPreviousCheck);
@@ -2302,8 +2316,9 @@ public partial class SettingsWindow : Window
                 speed.RefinementDelayMs > balanced.RefinementDelayMs && balanced.RefinementDelayMs > quality.RefinementDelayMs &&
                 !speed.ProgressiveColorFirstPreview && balanced.ProgressiveColorFirstPreview && quality.ProgressiveColorFirstPreview &&
                 speed.FullNeighbourPredecodeCount == 0 && balanced.FullNeighbourPredecodeCount == 0 && quality.FullNeighbourPredecodeCount > balanced.FullNeighbourPredecodeCount &&
-                speed.PrefetchDepth == 3 && balanced.PrefetchDepth == 5 && quality.PrefetchDepth == 5,
-                $"preview={speed.PreviewLongestSide}/{balanced.PreviewLongestSide}/{quality.PreviewLongestSide}, delay={speed.RefinementDelayMs}/{balanced.RefinementDelayMs}/{quality.RefinementDelayMs}, progressive-colour={speed.ProgressiveColorFirstPreview}/{balanced.ProgressiveColorFirstPreview}/{quality.ProgressiveColorFirstPreview}, full-neighbours={speed.FullNeighbourPredecodeCount}/{balanced.FullNeighbourPredecodeCount}/{quality.FullNeighbourPredecodeCount}, prefetch={speed.PrefetchDepth}/{balanced.PrefetchDepth}/{quality.PrefetchDepth}");
+                speed.PrefetchDepth == 3 && balanced.PrefetchDepth == 5 && quality.PrefetchDepth == 15 &&
+                quality.CompressedCacheItems == 20 && quality.CompressedCacheMegabytes == 999 && quality.DecodedCacheMegabytes == 999,
+                $"preview={speed.PreviewLongestSide}/{balanced.PreviewLongestSide}/{quality.PreviewLongestSide}, delay={speed.RefinementDelayMs}/{balanced.RefinementDelayMs}/{quality.RefinementDelayMs}, progressive-colour={speed.ProgressiveColorFirstPreview}/{balanced.ProgressiveColorFirstPreview}/{quality.ProgressiveColorFirstPreview}, full-neighbours={speed.FullNeighbourPredecodeCount}/{balanced.FullNeighbourPredecodeCount}/{quality.FullNeighbourPredecodeCount}, prefetch={speed.PrefetchDepth}/{balanced.PrefetchDepth}/{quality.PrefetchDepth}, cache={quality.CompressedCacheItems}/{quality.CompressedCacheMegabytes}/{quality.DecodedCacheMegabytes}");
 
             var plan = Glide.Imaging.ImageLoadCoordinator.BuildNeighbourPlan(new[] { "0", "1", "2", "3", "4" }, 2, 1, 2);
             Add("direction_aware_prefetch", plan.SequenceEqual(new[] { "3", "1", "4", "0" }), string.Join(" -> ", plan));

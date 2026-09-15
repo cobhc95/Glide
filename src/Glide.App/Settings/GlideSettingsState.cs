@@ -199,6 +199,8 @@ public sealed record GlideSettingsState
     public string SlideshowDirection { get; set; } = "Forward";
     public bool SlideshowStartFullscreen { get; set; }
     public bool SlideshowPauseWhenInactive { get; set; } = true;
+    public bool SlideshowRightClickStops { get; set; } = true;
+    public bool SlideshowShowQualityIndicator { get; set; } = true;
 
     // Tabs & Workspace (only the currently implemented subset is active in UI)
     public int TabMinWidth { get; set; } = 120;
@@ -210,8 +212,8 @@ public sealed record GlideSettingsState
     public bool CloseEmptyWindowAfterDetach { get; set; }
     public bool DetachedWindowHomeTab { get; set; }
     public bool DoubleClickTabCloses { get; set; } = true;
-    // "Open home page" or "Close program". Applies when the user closes the final ordinary tab.
-    public string LastTabCloseBehavior { get; set; } = "Keep last tab open";
+    // "Open home page", "Keep last tab open", or "Close program". Applies when the user closes the final ordinary tab.
+    public string LastTabCloseBehavior { get; set; } = "Open home page";
     // "Welcome page", "Browser page", or "Recent pictures page".
     public string HomePageMode { get; set; } = "Welcome page";
     public bool FolderNavShowGroup { get; set; } = true;

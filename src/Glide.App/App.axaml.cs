@@ -22,6 +22,7 @@ public partial class App : Application
     private static readonly object SettingsGate = new();
     private static Glide.App.Settings.GlideSettingsState? _currentSettings;
     private static int _pendingWindowCreation;
+    private static int _standbyRetryScheduled;
 
     /// <summary>
     /// Rehydrates the render window when the process-level broker owns accepted work during
@@ -34,13 +35,40 @@ public partial class App : Application
             Dispatcher.UIThread.Post(EnsureMainWindowForPendingExternalRequest);
             return;
         }
-        if (Current?.ApplicationLifetime is not IClassicDesktopStyleApplicationLifetime desktop ||
-            desktop.MainWindow is MainWindow)
+        if (Current?.ApplicationLifetime is not IClassicDesktopStyleApplicationLifetime desktop)
             return;
+        // Speed Boost closes the render window while keeping the process and broker alive. During
+        // the short standby-close interval the old HWND is intentionally hidden but is still the
+        // broker owner. Creating a replacement in that gap produced the invisible Alt-Tab/empty
+        // window reported by users. Wait for the owner to finish its internal close instead.
+        if (desktop.MainWindow is MainWindow existing)
+        {
+            if (existing.IsStandbyClosePending)
+            {
+                if (Interlocked.Exchange(ref _standbyRetryScheduled, 1) == 0)
+                {
+                    Dispatcher.UIThread.Post(async () =>
+                    {
+                        try { await Task.Delay(50).ConfigureAwait(true); }
+                        finally
+                        {
+                            Volatile.Write(ref _standbyRetryScheduled, 0);
+                            EnsureMainWindowForPendingExternalRequest();
+                        }
+                    }, DispatcherPriority.Background);
+                }
+                return;
+            }
+            if (existing.IsVisible) return;
+        }
         if (Interlocked.Exchange(ref _pendingWindowCreation, 1) != 0) return;
         try
         {
             var window = new MainWindow();
+            // This window exists only to receive work already accepted by the resident broker.
+            // Treat it as an explicit external launch so the normal standalone Home destination
+            // is not created before the queued image/folder request is dispatched.
+            window.PrepareForPendingExternalOpen();
             desktop.MainWindow = window;
             window.Show();
             window.Activate();
@@ -176,7 +204,7 @@ public partial class App : Application
     {
         if (Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            if (desktop.MainWindow is MainWindow window)
+            if (desktop.MainWindow is MainWindow window && window.IsVisible)
             {
                 window.ExitStandby();
                 window.RestoreFromMinimizedIfNeeded();
@@ -196,7 +224,7 @@ public partial class App : Application
     {
         if (Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            if (desktop.MainWindow is not MainWindow)
+            if (desktop.MainWindow is not MainWindow existing || !existing.IsVisible)
             {
                 var replacement = new MainWindow();
                 desktop.MainWindow = replacement;

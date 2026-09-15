@@ -4,7 +4,7 @@
         xmlns:platform="using:Glide.App.Platform"
         x:Class="Glide.App.MainWindow"
         Width="1064" Height="687" MinWidth="180" MinHeight="360"
-Title="Glide 4.1.4 — Home"
+    Title="Glide 4.1.5 — Home"
         Icon="/Assets/Glide.ico"
         SystemDecorations="None"
         ExtendClientAreaToDecorationsHint="False"
@@ -114,9 +114,22 @@ Title="Glide 4.1.4 — Home"
           <TextBlock x:Name="NavigationBoundaryNoticeText" Text="End of folder" FontSize="18" FontWeight="SemiBold" Foreground="White"/>
         </Border>
 
+        <Border x:Name="SlideshowQualityIndicator" IsVisible="False" IsHitTestVisible="False"
+                HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,18,0,0" ZIndex="1500"
+                Width="42" Height="42" Background="#D9181B20" BorderBrush="#D95BB7F5"
+                BorderThickness="1.5" CornerRadius="21" Opacity="0.96"
+                ToolTip.Tip="Slideshow is playing">
+          <controls:GlideIconView Kind="Slideshow" Width="25" Height="25"
+                                  HorizontalAlignment="Center" VerticalAlignment="Center"
+                                  IconBrush="{DynamicResource BrushAccent}" StrokeWidth="2.1"/>
+        </Border>
+
+
         <Border x:Name="ViewerStatusSurface" Classes="statusSurface legacyViewerStatus" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="14,0,14,14">
           <Grid ColumnDefinitions="Auto,*" Margin="10,3,4,3" ColumnSpacing="8">
-            <TextBlock x:Name="StatusStatsText" Classes="statusStats" Text="Ready" FontWeight="SemiBold" Foreground="{DynamicResource BrushMuted}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+              <TextBlock x:Name="StatusStatsText" Classes="statusStats" Text="Ready" FontWeight="SemiBold" Foreground="{DynamicResource BrushMuted}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+            </StackPanel>
             <!-- Narrow-window contract: controls always flow left-to-right, then wrap onto a second/third
                  horizontal row. Never rotate the controls into one vertical tower. Small independent
                  groups keep any one group from establishing a large minimum width. -->

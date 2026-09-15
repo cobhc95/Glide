@@ -158,6 +158,7 @@
             <Grid ColumnDefinitions="260,230,*" Margin="6,0,0,0">
               <TextBlock Text="When the last tab is closed" VerticalAlignment="Center"/>
               <ComboBox x:Name="LastTabBehaviorCombo" Grid.Column="1" Width="220">
+                <ComboBoxItem Content="Open home page"/>
                 <ComboBoxItem Content="Keep last tab open"/>
                 <ComboBoxItem Content="Close program"/>
               </ComboBox>
@@ -259,6 +260,8 @@
             <Grid ColumnDefinitions="255,200,*" Margin="6,0,0,0"><TextBlock Text="Direction when not shuffled" VerticalAlignment="Center"/><ComboBox x:Name="SlideshowDirectionCombo" Grid.Column="1" Width="190"><ComboBoxItem Content="Forward"/><ComboBoxItem Content="Backward"/></ComboBox></Grid>
             <CheckBox x:Name="SlideshowStartFullscreenCheck" Content="Enter fullscreen when slideshow starts"/>
             <CheckBox x:Name="SlideshowPauseInactiveCheck" Content="Pause slideshow while Glide is not the active window"/>
+            <CheckBox x:Name="SlideshowRightClickStopsCheck" Content="Right-click stops an active slideshow"/>
+            <CheckBox x:Name="SlideshowQualityIndicatorCheck" Content="Show slideshow playing indicator"/>
           </StackPanel>
 
           <!-- HOTKEYS -->
@@ -378,7 +381,7 @@
       <Border Grid.Row="2" Grid.ColumnSpan="2" Background="{DynamicResource BrushFooter}" BorderBrush="{DynamicResource BrushBorder}" BorderThickness="0,1,0,0">
         <Grid ColumnDefinitions="*,Auto" Margin="22,14,38,14">
           <StackPanel Spacing="9" VerticalAlignment="Center">
-            <TextBlock Text="Glide 4.1.4" Foreground="{DynamicResource BrushMuted}" FontSize="13"/>
+            <TextBlock Text="Glide 4.1.5" Foreground="{DynamicResource BrushMuted}" FontSize="13"/>
             <Button Classes="secondaryAction" Content="Restore defaults" Click="RestoreDefaultsClicked" HorizontalAlignment="Left" MinWidth="180"/>
           </StackPanel>
           <StackPanel Grid.Column="1" VerticalAlignment="Center" Orientation="Horizontal" Spacing="10">

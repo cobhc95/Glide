@@ -142,9 +142,12 @@ public sealed class ImageViewport : Control
     public bool PreserveManualZoomOnBitmapChange { get; set; }
     public bool IsFullscreen { get; set; }
     public bool FullscreenClickNavigationEnabled { get; set; } = true;
+    public bool SlideshowRightClickStopEnabled { get; set; }
     public LeftImageDragMode LeftDragMode { get; set; } = LeftImageDragMode.Selection;
     public IReadOnlyDictionary<string, string>? GestureBindings { get; set; }
     public ImageSelectionOverlay? SelectionOverlayTarget { get; set; }
+
+    public event Action? SlideshowRightClickStopRequested;
 
     public Bitmap? Bitmap
     {
@@ -953,6 +956,18 @@ public sealed class ImageViewport : Control
         _rightPressOnSelection = _rightPressOnImage && Bitmap is not null && IsPointInsideSelection(point.Position);
         _middlePressOnImage = pressed.Middle && Bitmap is not null && _lastImageDest.Contains(point.Position);
 
+        // Slideshow owns a viewer right-click only while it is actively playing and the user has
+        // enabled this session option. Handle it before selection/pan/context-menu ownership so a
+        // slideshow stop can never also open a normal viewer menu or zoom a retained selection.
+        if (pressed.Right && SlideshowRightClickStopEnabled)
+        {
+            SlideshowRightClickStopRequested?.Invoke();
+            _rightPressOnImage = false;
+            _rightPressOnSelection = false;
+            e.Handled = true;
+            return;
+        }
+
         // Avalonia exposes a generic DoubleTapped event, but the legacy gesture matrix distinguishes
         // double-right from double-left. Detect double-right from physical presses so that slot is not
         // a decorative setting. Keep a tight spatial/time threshold to avoid turning a slow pan into it.
@@ -990,6 +1005,7 @@ public sealed class ImageViewport : Control
             }
             if (FullscreenClickNavigationEnabled && pressed.Left)
             {
+                // In fullscreen the primary click advances to the next image.
                 BrowseRequested?.Invoke(this, 1);
                 e.Handled = true;
                 return;

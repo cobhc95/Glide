@@ -371,9 +371,9 @@ public static class SettingsStore
             {
                 loaded.InteractivePanQuality = "Full quality";
             }
-            if (string.Equals(loaded.LastTabCloseBehavior, "Open home page", StringComparison.OrdinalIgnoreCase) ||
-                string.IsNullOrWhiteSpace(loaded.LastTabCloseBehavior))
-                loaded.LastTabCloseBehavior = "Keep last tab open";
+            if (string.IsNullOrWhiteSpace(loaded.LastTabCloseBehavior) ||
+                (loaded.LastTabCloseBehavior is not ("Open home page" or "Keep last tab open" or "Close program")))
+                loaded.LastTabCloseBehavior = "Open home page";
             loaded.GlowIntensityPercent = Math.Clamp(loaded.GlowIntensityPercent, 0, 100);
             // 2.9-5 makes neighbour-prefetch depth part of the stock performance profile. Older builds
             // shipped 2 as the untouched persisted default and deliberately left it profile-independent.

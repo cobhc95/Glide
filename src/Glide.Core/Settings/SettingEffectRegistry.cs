@@ -148,6 +148,8 @@ public static class SettingEffectRegistry
         new("slideshow.direction", SettingEffectOwner.Slideshow, SettingEditorKind.FromCatalog, SettingApplySemantics.CommitOnly, "settings.effect.slideshow.direction", SettingEvidenceStatus.Unknown),
         new("slideshow.startFullscreen", SettingEffectOwner.Slideshow, SettingEditorKind.FromCatalog, SettingApplySemantics.CommitOnly, "settings.effect.slideshow.startFullscreen", SettingEvidenceStatus.Unknown),
         new("slideshow.pauseInactive", SettingEffectOwner.Slideshow, SettingEditorKind.FromCatalog, SettingApplySemantics.CommitOnly, "settings.effect.slideshow.pauseInactive", SettingEvidenceStatus.Unknown),
+        new("slideshow.rightClickStops", SettingEffectOwner.Slideshow, SettingEditorKind.FromCatalog, SettingApplySemantics.CommitOnly, "settings.effect.slideshow.rightClickStops", SettingEvidenceStatus.Unknown),
+        new("slideshow.showQualityIndicator", SettingEffectOwner.Slideshow, SettingEditorKind.FromCatalog, SettingApplySemantics.CommitOnly, "settings.effect.slideshow.showQualityIndicator", SettingEvidenceStatus.Unknown),
         new("hotkeys.registry", SettingEffectOwner.Input, SettingEditorKind.DynamicAction, SettingApplySemantics.Action, "settings.effect.hotkeys.registry", SettingEvidenceStatus.Unknown),
         new("tabs.minWidth", SettingEffectOwner.TabsWorkspace, SettingEditorKind.FromCatalog, SettingApplySemantics.CommitOnly, "settings.effect.tabs.minWidth", SettingEvidenceStatus.Unknown),
         new("tabs.maxWidth", SettingEffectOwner.TabsWorkspace, SettingEditorKind.FromCatalog, SettingApplySemantics.CommitOnly, "settings.effect.tabs.maxWidth", SettingEvidenceStatus.Unknown),

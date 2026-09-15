@@ -209,6 +209,20 @@
   <Style Selector="Border.statusGroup.viewGroup controls|GlideIconView.statusGlyph"><Setter Property="IconBrush" Value="#67C8FF"/></Style>
   <Style Selector="Border.statusGroup.overlayGroup controls|GlideIconView.statusGlyph"><Setter Property="IconBrush" Value="#C590FF"/></Style>
   <Style Selector="Border.statusGroup.slideshowGroup controls|GlideIconView.statusGlyph"><Setter Property="IconBrush" Value="#F1B85B"/></Style>
+  <!-- Slideshow state must be obvious on the persistent status-bar control itself. -->
+  <Style Selector="Button.statusIcon.slideshowPlaying">
+    <Setter Property="Background" Value="#5538C879"/>
+    <Setter Property="BorderBrush" Value="#FF63E6A2"/>
+    <Setter Property="BorderThickness" Value="2"/>
+  </Style>
+  <Style Selector="Button.statusIcon.slideshowPlaying controls|GlideIconView.statusGlyph">
+    <Setter Property="IconBrush" Value="#E8FFF2"/>
+    <Setter Property="StrokeWidth" Value="2.2"/>
+  </Style>
+  <Style Selector="Button.statusIcon.slideshowPaused">
+    <Setter Property="Background" Value="#334E5968"/>
+    <Setter Property="BorderBrush" Value="#888C98A8"/>
+  </Style>
   <Style Selector="Border.statusGroup.navGroup controls|GlideIconView.statusGlyph"><Setter Property="IconBrush" Value="#68D99B"/></Style>
   <Style Selector="Button.statusRestore">
     <Setter Property="Background" Value="{DynamicResource BrushStatusSurface}"/>

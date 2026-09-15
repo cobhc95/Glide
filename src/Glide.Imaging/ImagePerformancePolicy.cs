@@ -51,14 +51,14 @@ public sealed record ImagePerformancePolicy
         "Maximum quality" => new ImagePerformancePolicy
         {
             Profile = "Maximum quality",
-            PreviewLongestSide = 2600,
+            PreviewLongestSide = 1800,
             PreviewInterpolation = BitmapInterpolationMode.HighQuality,
             ProgressiveColorFirstPreview = true,
             RefinementDelayMs = 5,
-            PrefetchDepth = 5,
-            CompressedCacheItems = 12,
-            CompressedCacheMegabytes = 256,
-            DecodedCacheMegabytes = 512,
+            PrefetchDepth = 15,
+            CompressedCacheItems = 20,
+            CompressedCacheMegabytes = 999,
+            DecodedCacheMegabytes = 999,
             FullNeighbourPredecodeCount = 2
         },
         _ => new ImagePerformancePolicy()

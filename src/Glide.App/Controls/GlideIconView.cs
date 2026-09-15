@@ -140,6 +140,11 @@ public sealed class GlideIconView : Control
                 Circle(12, 12, 8); Circle(12, 12, 3, true); break;
             case "Slideshow":
                 L(7, 4, 19, 12); L(19, 12, 7, 20); L(7, 20, 7, 4); break;
+            case "HighQuality":
+                // Legacy high-quality badge retained for compatibility with older layouts.
+                // The live slideshow-playing indicator now uses the dedicated Slideshow glyph.
+                Box(3, 4, 18, 16); L(7, 8, 7, 16); L(11, 8, 11, 16); L(7, 12, 11, 12);
+                Circle(16, 11, 3.2); L(18.3, 13.3, 20.5, 15.5); break;
             case "Hotkeys":
                 Box(3, 6, 18, 12); for (var x = 6; x <= 18; x += 4) { L(x, 9, x + 1, 9); L(x, 13, x + 1, 13); } L(8, 16, 16, 16); break;
             case "Tabs":
