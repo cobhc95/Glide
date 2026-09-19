@@ -1,4 +1,4 @@
-# Glide 4.1.5
+# Glide Image Viewer 4.2
 
 ## Fast. Lightweight. Multi-tabbed. Multi-window. Highly customizable.
 
