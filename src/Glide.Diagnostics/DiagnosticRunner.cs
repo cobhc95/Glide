@@ -19,12 +19,12 @@ namespace Glide.Diagnostics;
 /// </summary>
 public static class DiagnosticRunner
 {
-    public const string BuildVersion = "4.1.5";
+    public const string BuildVersion = "4.2.3";
 
     public static DiagnosticSnapshot Capture() => new(
         Product: "Glide",
         Version: BuildVersion,
-        Release: "Glide 4.1.5 (Navigation Crash & Presentation Stability)",
+        Release: "Glide 4.2.3 (Search Coverage & Small-Screen Fixes)",
         Architecture: "C# + Avalonia retained-mode UI + semantic core + small native C++ bridge; NativeAOT blocked pending COM isolation",
         TimestampUtc: DateTimeOffset.UtcNow,
         Framework: RuntimeInformation.FrameworkDescription,
@@ -59,8 +59,16 @@ public static class DiagnosticRunner
             $"{snapshot.SettingsSchemaCount} declarative settings registered"));
         var currentSettings = SettingsCatalog.All.Count(x => x.FuturePhase is null);
         var futureSettings = SettingsCatalog.All.Count(x => x.FuturePhase is not null);
-        checks.Add(Check("settings_schema_glide30_contract", snapshot.SettingsSchemaCount == 170 && currentSettings == 170 && futureSettings == 0,
-            $"Glide 3.0 catalogue contract: total={snapshot.SettingsSchemaCount}, current={currentSettings}, future={futureSettings}; expected 170/170/0."));
+        checks.Add(Check("settings_schema_glide30_contract", snapshot.SettingsSchemaCount == 188 && currentSettings == 188 && futureSettings == 0,
+            $"Glide catalogue contract: total={snapshot.SettingsSchemaCount}, current={currentSettings}, future={futureSettings}; expected 188/188/0."));
+        var overlayAvoidOverlap = SettingsCatalog.All.FirstOrDefault(x => string.Equals(x.Id, "overlay.animationAvoidOverlap", StringComparison.OrdinalIgnoreCase));
+        checks.Add(Check("overlay_animation_avoid_overlap_contract",
+            overlayAvoidOverlap is not null && overlayAvoidOverlap.FuturePhase is null && overlayAvoidOverlap.DefaultValue is bool avoidOverlapEnabled && avoidOverlapEnabled,
+            "Animated overlay overlap avoidance is an active persisted setting enabled by default."));
+        var overlayRefreshRate = SettingsCatalog.All.FirstOrDefault(x => string.Equals(x.Id, "overlay.animationRefreshRateHz", StringComparison.OrdinalIgnoreCase));
+        checks.Add(Check("overlay_animation_refresh_rate_contract",
+            overlayRefreshRate is not null && overlayRefreshRate.FuturePhase is null && overlayRefreshRate.DefaultValue is int refreshRate && refreshRate == 144,
+            "Animated overlay refresh target is an active persisted setting with a 144 Hz default."));
         var progressiveColor = SettingsCatalog.All.FirstOrDefault(x => string.Equals(x.Id, "performance.progressiveColor", StringComparison.OrdinalIgnoreCase));
         checks.Add(Check("progressive_color_runtime_contract",
             progressiveColor is not null && progressiveColor.FuturePhase is null && progressiveColor.DefaultValue is bool enabled && enabled,
@@ -93,10 +101,18 @@ public static class DiagnosticRunner
 
         checks.Add(Check("workspace_tab_transfer_model", VerifyWorkspaceTransferModel(),
             "Typed tab transfer preserves stable ID/state across workspaces and leaves the source empty."));
-        checks.Add(Check("hotkey_contract", HotkeyCatalog.All.Count == 70 &&
-            HotkeyCatalog.All.Select(x => x.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count() == 70 &&
-            HotkeyCatalog.ShortcutsForCommand(GlideCommand.AddOverlay, defaultHotkeys).Contains("Shift+O"),
-            $"{HotkeyCatalog.All.Count} editable semantic hotkey actions registered, including Shift+O overlay add."));
+        var defaultHotkeyCollisions = HotkeyCatalog.All
+            .SelectMany(action => action.DefaultShortcuts.Select(shortcut => (action.Id, shortcut)))
+            .GroupBy(x => x.shortcut, StringComparer.OrdinalIgnoreCase)
+            .Where(group => group.Select(x => x.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count() > 1)
+            .ToArray();
+        checks.Add(Check("hotkey_contract", HotkeyCatalog.All.Count == 68 &&
+            HotkeyCatalog.All.Select(x => x.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count() == 68 &&
+            HotkeyCatalog.ShortcutsForCommand(GlideCommand.AddOverlay, defaultHotkeys).Contains("Shift+O") &&
+            defaultHotkeys["overlay.saveLayout"].SequenceEqual(new[] { "Ctrl+Shift+S" }, StringComparer.OrdinalIgnoreCase) &&
+            defaultHotkeys["overlay.loadLayout"].SequenceEqual(new[] { "Ctrl+Shift+L" }, StringComparer.OrdinalIgnoreCase) &&
+            defaultHotkeyCollisions.Length == 0,
+            $"{HotkeyCatalog.All.Count} editable semantic hotkey actions registered; overlay layout defaults and collision-free bindings verified."));
         var irfanHotkeys = HotkeyCatalog.CreatePresetMap("IrfanView");
         var nomacsHotkeys = HotkeyCatalog.CreatePresetMap("nomacs");
         checks.Add(Check("interaction_customization_contract",
@@ -127,7 +143,6 @@ public static class DiagnosticRunner
             SettingsCatalog.All.Any(x => x.Id == "developer.overlayAbsoluteCoordinates") &&
             SettingsCatalog.All.Any(x => x.Id == "general.startupAction") &&
             SettingsCatalog.All.Any(x => x.Id == "general.newTabAction") &&
-            SettingsCatalog.All.Any(x => x.Id == "general.newExplorerTabLastLocation") &&
             SettingsCatalog.All.Any(x => x.Id == "navigation.hierarchicalFolders") &&
             SettingsCatalog.All.Any(x => x.Id == "navigation.confirmHierarchicalBoundary") &&
             SettingsCatalog.All.Any(x => x.Id == "developer.reverseSelectionZoomOut"),
@@ -264,7 +279,7 @@ public static class DiagnosticRunner
                 ? CodecProviderRuntime.Shared.Artifacts
                 : Array.Empty<CodecProviderArtifact>(), jsonOptions));
         File.WriteAllText(Path.Combine(folder, "README.txt"),
-            "Glide 3.0 evidence bundle. PASS means a named assertion actually ran. SKIP means the owning subsystem is absent or the check requires a live UI. codec_capabilities.json separates recognised/routed suffixes from guaranteed decode; codec_providers.json reports only providers already indexed/verified in this process and never wakes optional providers during export. When exported from Settings > Developer Options, Glide.App appends immediate/settled screenshots, logical-control geometry/layout audit, settings-effect coverage, current settings, capability/provider inventory and a live behaviour event trace. Do not infer UI parity from headless structural PASS.\n");
+            "Glide 4.2.3 evidence bundle. PASS means a named assertion actually ran. SKIP means the owning subsystem is absent or the check requires a live UI. codec_capabilities.json separates recognised/routed suffixes from guaranteed decode; codec_providers.json reports only providers already indexed/verified in this process and never wakes optional providers during export. When exported from Settings > Developer Options, Glide.App appends immediate/settled screenshots, logical-control geometry/layout audit, settings-effect coverage, current settings, capability/provider inventory and a live behaviour event trace. Do not infer UI parity from headless structural PASS.\n");
         output.WriteLine($"Diagnostics exported to: {Path.GetFullPath(folder)}");
         return checks.Any(x => x.Status == "FAIL") ? 1 : 0;
     }

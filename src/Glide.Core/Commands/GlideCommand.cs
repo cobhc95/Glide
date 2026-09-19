@@ -62,6 +62,8 @@ public enum GlideCommand
     BrowserForward,
     BrowserUp,
     AddOverlay,
+    SaveOverlayLayout,
+    LoadOverlayLayout,
     ResetSelectedOverlayZoom,
     BringSelectedOverlayFront,
     CopyImage,

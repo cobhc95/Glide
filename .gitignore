@@ -18,3 +18,11 @@ diagnostics-out/
 *handover*
 *Handover*
 diagnostic_corpus/
+
+# Generated Avalonia XAML compiler caches and versioned release deliverables
+**/AvaloniaUI/BuildServices/
+/Glide-*.exe
+Glide Setup.exe
+
+# Generated lazy codec routing index (shipped inside the published app, not source)
+codecs/codecs.index.json

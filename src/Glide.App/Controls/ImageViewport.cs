@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Runtime.CompilerServices;
 using Avalonia;
@@ -125,6 +126,8 @@ public sealed class ImageViewport : Control
     public ViewportPresentationFrame PresentedFrame => _presentedFrame;
     internal void RecordPresentationDrawForTests(long requestId) => PresentationDrawRecorded?.Invoke(requestId);
 
+    public event Action<Bitmap?>? PriorBitmapReleased;
+
     public bool PointerCenteredZoomEnabled { get; set; } = true;
     // Right-drag policy is intentionally independent from stationary right-click/context-menu
     // behavior. Smart is Glide's default: pan only when the image is actually cropped/zoomed;
@@ -182,19 +185,22 @@ public sealed class ImageViewport : Control
             _fitMode = FitMode.FitImage;
             _zoom = 1;
         }
+
         InteractionDiagnostic?.Invoke("viewport.frame_swap", new
         {
             oldRequest = old.RequestId, newRequest = requestId,
             oldBitmap = old.Bitmap is null ? (int?)null : RuntimeHelpers.GetHashCode(old.Bitmap),
-            newBitmap = bitmap is null ? (int?)null : RuntimeHelpers.GetHashCode(bitmap), path
+            newBitmap = bitmap is null ? (int?)null : RuntimeHelpers.GetHashCode(bitmap),
+            path,
+            transition = false
         });
+
         InvalidateVisual();
         InvalidateSelectionOverlay();
         RaiseViewChanged();
         return old;
     }
 
-    /// <summary>Swaps a preview for its full-resolution refinement without resetting zoom/pan/selection.</summary>
     public Bitmap? ReplaceBitmapPreservingView(Bitmap? bitmap)
     {
         var old = _presentedFrame.Bitmap;
@@ -682,15 +688,16 @@ public sealed class ImageViewport : Control
             var left = (Bounds.Width - width) / 2 + _pan.X;
             var top = (Bounds.Height - height) / 2 + _pan.Y;
             _lastImageDest = new Rect(left, top, width, height);
+
             using (context.PushTransform(BuildImageToViewMatrix(bitmapFrame.BitmapSize, _lastImageDest)))
                 context.DrawImage(bitmap, source, source);
+
             if (frame.RequestId != 0) PresentationDrawRecorded?.Invoke(frame.RequestId);
         }
         catch (Exception ex) when (ex is ObjectDisposedException or NullReferenceException or InvalidOperationException)
         {
             InteractionDiagnostic?.Invoke("viewport.render_skipped_invalid_frame", new
             { request = frame.RequestId, error = ex.GetType().Name, message = ex.Message });
-            _lastImageDest = default;
         }
     }
 
@@ -952,7 +959,10 @@ public sealed class ImageViewport : Control
         _pressPoint = point.Position;
         if (pressed.Left) _leftPressTicks = Environment.TickCount64;
         _leftPressOnImage = pressed.Left && Bitmap is not null && _lastImageDest.Contains(point.Position);
-        _rightPressOnImage = pressed.Right && Bitmap is not null && _lastImageDest.Contains(point.Position);
+        // In fullscreen the entire viewer surface owns plain right-click navigation, including
+        // letterbox/pillarbox space. Overlay tunnel routing runs before this control and still owns
+        // overlay right-clicks, so broadening the canvas hit here cannot steal overlay menus.
+        _rightPressOnImage = pressed.Right && Bitmap is not null && (IsFullscreen || _lastImageDest.Contains(point.Position));
         _rightPressOnSelection = _rightPressOnImage && Bitmap is not null && IsPointInsideSelection(point.Position);
         _middlePressOnImage = pressed.Middle && Bitmap is not null && _lastImageDest.Contains(point.Position);
 
@@ -1005,7 +1015,10 @@ public sealed class ImageViewport : Control
             }
             if (FullscreenClickNavigationEnabled && pressed.Left)
             {
-                // In fullscreen the primary click advances to the next image.
+                // Fullscreen mouse-button navigation is deliberately unambiguous: left-click
+                // advances and right-click (handled on release below) goes backwards. The older
+                // half-of-screen rule made the result depend on pointer position and conflicted
+                // with overlay routing.
                 BrowseRequested?.Invoke(this, 1);
                 e.Handled = true;
                 return;
@@ -1015,7 +1028,7 @@ public sealed class ImageViewport : Control
             // image, without accidentally navigating backwards on the initial button press.
         }
 
-        var overImage = Bitmap is not null && _lastImageDest.Contains(point.Position);
+        var overImage = Bitmap is not null && (_lastImageDest.Contains(point.Position) || (IsFullscreen && pressed.Right));
         if (!overImage && (pressed.Left || pressed.Right))
         {
             var slot = pressed.Left ? "drag.leftEmpty" : "drag.rightEmpty";
@@ -1358,7 +1371,12 @@ public sealed class ImageViewport : Control
                     if (restore is { } prior) RestoreViewState(prior);
                     var configuredClick = ResolveGesture(IsFullscreen ? "fullscreen.rightClickImage" : "windowed.rightClickImage");
                     if (string.Equals(configuredClick, GestureCatalog.Default, StringComparison.OrdinalIgnoreCase))
-                        ContextMenuRequested?.Invoke(clickPosition);
+                    {
+                        // A stationary fullscreen right-click is always Previous, even when the
+                        // press entered the right-drag pan candidate path. Actual movement still pans.
+                        if (IsFullscreen && FullscreenClickNavigationEnabled) BrowseRequested?.Invoke(this, -1);
+                        else ContextMenuRequested?.Invoke(clickPosition);
+                    }
                     else
                         DispatchGestureAction(configuredClick, clickPosition);
                 }
@@ -1610,6 +1628,11 @@ public sealed class ImageViewport : Control
         _pan = ClampPan(_pan);
         InvalidateVisual();
         RaiseViewChanged();
+    }
+
+    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnDetachedFromVisualTree(e);
     }
 
     private void RaiseViewChanged() => ViewChanged?.Invoke(this, EventArgs.Empty);

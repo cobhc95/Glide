@@ -20,6 +20,18 @@ public sealed record GlideSettingsState
     public bool ContinueSiblingFolders { get; set; } = true;
     public bool HierarchicalFolderTraversal { get; set; } = true;
     public bool ConfirmHierarchicalFolderTraversal { get; set; } = true;
+    // When Previous crosses into a parent/grandparent branch, choose which image opens.
+    // "First image" is the user-facing default; "Last image" preserves strict reversal semantics.
+    public string HierarchicalPreviousFolderEntry { get; set; } = "First image";
+    // Optional navigation-rate limiter. 0 ms means unlimited.
+    public int NavigationRateLimitMs { get; set; } = 80;
+    // Mouse only, Keyboard only, or Both.
+    public string NavigationRateLimitInput { get; set; } = "Both";
+    public bool NavigationRateLimitShowIndicator { get; set; } = true;
+    public string NavigationRateLimitIndicatorPosition { get; set; } = "Top left";
+    public bool NavigationRateLimitWindowed { get; set; } = true;
+    public bool NavigationRateLimitFullscreen { get; set; } = true;
+    public bool NavigationRateLimitSlideshow { get; set; } = true;
     public bool RememberLastOpenLocation { get; set; } = true;
     // New Explorer tabs have their own navigation-memory scope. Default = last Explorer-tab folder.
     public bool NewExplorerTabsUseLastLocation { get; set; } = true;
@@ -47,7 +59,7 @@ public sealed record GlideSettingsState
     // HomePageMode controls the Home command/last-tab fallback, while these control process startup/new tabs.
     public string StartupAction { get; set; } = "Welcome tab";
     public string StartupCustomPath { get; set; } = string.Empty;
-    public string NewTabAction { get; set; } = "Explorer tab";
+    public string NewTabAction { get; set; } = "Welcome tab";
     public string NewTabCustomPath { get; set; } = string.Empty;
 
     // Welcome-page layout is deliberately small and durable rather than storing raw pixels.
@@ -83,10 +95,16 @@ public sealed record GlideSettingsState
     public bool TabBarShowBackButton { get; set; } = true;
     public bool TabBarShowForwardButton { get; set; } = true;
     // Navigate-to-folder title action: Internal browser (default) or Windows Explorer.
-    public string NavigateToFolderBehavior { get; set; } = "Internal browser";
+    public string NavigateToFolderBehavior { get; set; } = "Windows Explorer";
     public bool FullscreenStatusAlwaysOn { get; set; } = true;
     public bool FullscreenKeepTabBarOpen { get; set; }
     public bool AlwaysOnTop { get; set; }
+    // Overlay mode owns an independent topmost preference; normal-window topmost must not leak into it.
+    public bool OverlayAlwaysOnTop { get; set; }
+    // Soft uses the ordinary OS topmost band; Hard periodically reasserts native HWND_TOPMOST.
+    public string AlwaysOnTopMode { get; set; } = "Hard";
+    // Per-image Overlay geometry. Keys are normalized full image paths. Kept bounded by MainWindow.
+    public Dictionary<string, OverlayWindowPlacementState> OverlayWindowPlacements { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public bool AutoCenterWindowOnRestore { get; set; }
     // What F11/Escape/fullscreen toggle should do when leaving fullscreen.
     // Default restores the exact pre-fullscreen normal placement/state captured on entry.
@@ -98,6 +116,8 @@ public sealed record GlideSettingsState
     public bool UpscaleSmallImages { get; set; }
     public bool HighPrecisionSubpixelRendering { get; set; } = true;
     public bool ShowImageLoadingIndicator { get; set; } = true;
+
+    // Backward compatibility aliases for general/windowed
     public bool EnableTabFocusNavigation { get; set; }
     public bool EscStopsSlideshow { get; set; } = true;
     public bool EscExitsFullscreen { get; set; } = true;
@@ -214,7 +234,7 @@ public sealed record GlideSettingsState
     public bool DoubleClickTabCloses { get; set; } = true;
     // "Open home page", "Keep last tab open", or "Close program". Applies when the user closes the final ordinary tab.
     public string LastTabCloseBehavior { get; set; } = "Open home page";
-    // "Welcome page", "Browser page", or "Recent pictures page".
+    // "Welcome page" or "Recent pictures page". Legacy Browser page values are migrated to Welcome.
     public string HomePageMode { get; set; } = "Welcome page";
     public bool FolderNavShowGroup { get; set; } = true;
     public bool FolderNavShowPrevious { get; set; } = true;
@@ -224,6 +244,9 @@ public sealed record GlideSettingsState
     public bool FolderNavIncludeHidden { get; set; }
     public bool FolderNavWrap { get; set; }
     public bool FolderNavOpenFirstImage { get; set; } = true;
+    // Folder ordering is deliberately alphabetical by default. Date modes are oldest first,
+    // with deterministic name/path tie-breakers in the traversal service.
+    public string FolderNavOrder { get; set; } = "Alphabetical";
 
     // Text overlay template (legacy property names retained for profile/settings compatibility; distinct from Window-in-Window image overlays)
     public bool PictureCounterEnabled { get; set; } = true;
@@ -254,6 +277,13 @@ public sealed record GlideSettingsState
     // and keeps overlays visible across maximize/fullscreen transitions.
     public bool OverlayAbsoluteCoordinatesOnResize { get; set; }
     public bool OverlayScaleWithWindow { get; set; } = true;
+    public string OverlayAnimationRegion { get; set; } = "Anywhere";
+    public int OverlayAnimationSpeedDipsPerSecond { get; set; } = 90;
+    public int OverlayAnimationTurnIntervalMs { get; set; } = 2500;
+    public int OverlayAnimationTurnAngleDegrees { get; set; } = 120;
+    public bool OverlayAnimationPauseWhileInteracting { get; set; } = true;
+    public bool OverlayAnimationAvoidOverlap { get; set; } = true;
+    public int OverlayAnimationRefreshRateHz { get; set; } = 144;
     public string LastOverlayDirectory { get; set; } = string.Empty;
     public string LastProfileDirectory { get; set; } = string.Empty;
     public string OpenFileDefaultDirectory { get; set; } = string.Empty;
@@ -321,4 +351,13 @@ public sealed record GlideSettingsState
         if (!leftTitleBarButtons.SequenceEqual(rightTitleBarButtons, StringComparer.OrdinalIgnoreCase)) return false;
         return true;
     }
+}
+
+public sealed record OverlayWindowPlacementState
+{
+    public int X { get; set; }
+    public int Y { get; set; }
+    public double Width { get; set; }
+    public double Height { get; set; }
+    public long LastUsedUtcTicks { get; set; }
 }

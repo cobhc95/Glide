@@ -84,12 +84,23 @@ internal static class Program
             return DiagnosticRunner.MeasureLaunch(target, runs, Console.Out);
         }
 
+        // Crash breadcrumbs are opt-in only: a consumer install must never drop diagnostic text into
+        // the user's Downloads folder. Crash investigations and benchmarks enable the trace with
+        // --diagnostic-trace or GLIDE_DIAGNOSTIC_TRACE=1.
+        var diagnosticTraceRequested =
+            string.Equals(Environment.GetEnvironmentVariable("GLIDE_DIAGNOSTIC_TRACE"), "1", StringComparison.Ordinal);
+
         // Optional benchmark trace. Strip our private switch before passing arguments to Avalonia.
         // Example: Glide.exe --perf-trace "C:\temp\glide-start.tsv" image.jpg
         var appArgs = new List<string>(args.Length);
         var forceNewInstance = false;
         for (var i = 0; i < args.Length; i++)
         {
+            if (args[i].Equals("--diagnostic-trace", StringComparison.OrdinalIgnoreCase))
+            {
+                diagnosticTraceRequested = true;
+                continue;
+            }
             if (args[i].Equals("--perf-trace", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
             {
                 GlidePerformanceTrace.Configure(args[++i]);
@@ -183,7 +194,8 @@ internal static class Program
 
             // This process is now the elected UI/broker owner. Start the crash breadcrumb file only
             // here so short-lived forwarding helper processes cannot overwrite the live owner trace.
-            LiveDiagnosticTrace.Initialize("4.1.5-diagnostic");
+            if (diagnosticTraceRequested)
+                LiveDiagnosticTrace.Initialize("4.2.3-diagnostic");
             AppDomain.CurrentDomain.UnhandledException += (_, eventArgs) =>
             {
                 if (eventArgs.ExceptionObject is Exception fatal)
@@ -230,7 +242,7 @@ internal static class Program
             var root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Glide");
             Directory.CreateDirectory(root);
             var path = Path.Combine(root, "startup-crash.log");
-            File.WriteAllText(path, $"Glide 3.0 fatal startup failure\nUTC: {DateTime.UtcNow:O}\n\n{ex}");
+            File.WriteAllText(path, $"Glide fatal startup failure\nUTC: {DateTime.UtcNow:O}\n\n{ex}");
         }
         catch { }
     }

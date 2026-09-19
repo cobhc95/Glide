@@ -6,10 +6,27 @@ namespace Glide.Core.Tests;
 public sealed class HotkeyCatalogTests
 {
     [Fact]
-    public void Legacy_phase3_contract_has_67_editable_hotkey_rows()
+    public void Hotkey_contract_has_68_editable_hotkey_rows()
     {
-        Assert.Equal(70, HotkeyCatalog.All.Count);
-        Assert.Equal(70, HotkeyCatalog.All.Select(x => x.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count());
+        Assert.Equal(68, HotkeyCatalog.All.Count);
+        Assert.Equal(68, HotkeyCatalog.All.Select(x => x.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count());
+    }
+
+    [Fact]
+    public void Overlay_layout_defaults_are_ctrl_shifted_and_collision_free()
+    {
+        var bindings = HotkeyCatalog.CreateDefaultMap();
+
+        Assert.Equal(new[] { "Ctrl+Shift+S" }, bindings["overlay.saveLayout"]);
+        Assert.Equal(new[] { "Ctrl+Shift+L" }, bindings["overlay.loadLayout"]);
+        Assert.Empty(bindings["slideshow.stop"]);
+
+        var collisions = HotkeyCatalog.All
+            .SelectMany(action => action.DefaultShortcuts.Select(shortcut => (action.Id, shortcut)))
+            .GroupBy(x => x.shortcut, StringComparer.OrdinalIgnoreCase)
+            .Where(group => group.Select(x => x.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count() > 1)
+            .ToArray();
+        Assert.Empty(collisions);
     }
 
     [Fact]

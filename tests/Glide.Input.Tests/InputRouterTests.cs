@@ -25,7 +25,8 @@ public sealed class InputRouterTests
     [InlineData("F11", false, false, GlideCommand.ToggleFullscreen)]
     [InlineData("SPACE", false, false, GlideCommand.NextImage)]
     [InlineData("S", false, false, GlideCommand.StartPauseSlideshow)]
-    [InlineData("S", false, true, GlideCommand.StopSlideshow)]
+    [InlineData("S", true, true, GlideCommand.SaveOverlayLayout)]
+    [InlineData("L", true, true, GlideCommand.LoadOverlayLayout)]
     [InlineData("TAB", true, false, GlideCommand.NextTab)]
     [InlineData("TAB", true, true, GlideCommand.PreviousTab)]
     public void Phase3Bindings_MapToSemanticCommands(string key, bool control, bool shift, GlideCommand expected)

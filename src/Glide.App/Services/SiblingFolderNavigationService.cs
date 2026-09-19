@@ -1,3 +1,5 @@
+using System.Runtime.InteropServices;
+
 namespace Glide.App.Services;
 
 public sealed record SiblingFolderNavigationOptions(
@@ -5,7 +7,9 @@ public sealed record SiblingFolderNavigationOptions(
     bool Wrap,
     bool SkipEmpty,
     bool OpenFirstImage,
-    bool HierarchicalTraversal = true);
+    bool HierarchicalTraversal = true,
+    string FolderOrder = "Alphabetical",
+    bool HierarchicalPreviousOpenFirstImage = true);
 
 public sealed record SiblingFolderNavigationResult(
     string Folder,
@@ -19,7 +23,7 @@ public sealed record SiblingFolderNavigationResult(
 /// Canonical picture-folder traversal. Direct sibling navigation remains the fast path. When enabled,
 /// exhaustion of the current sibling set advances through the directory tree in a reversible lexical
 /// depth-first order: Next ascends until a following branch exists; Previous enters the deepest trailing
-/// branch of the previous sibling. Hidden/inaccessible/reparse directories are skipped safely.
+/// branch of the previous sibling. Hidden directories are optional; inaccessible folders fail locally, and reparse siblings are included without recursive link traversal.
 /// </summary>
 public static class SiblingFolderNavigationService
 {
@@ -74,7 +78,7 @@ public static class SiblingFolderNavigationService
 
             // Hierarchical transitions are directional edges by definition: Next enters at the
             // first image; Previous returns to the last image, preserving exact reversal.
-            var selected = direction > 0 ? images[0] : images[^1];
+            var selected = direction > 0 ? images[0] : (options.HierarchicalPreviousOpenFirstImage ? images[0] : images[^1]);
             return new SiblingFolderNavigationResult(
                 cursor, images, selected, true,
                 Path.GetDirectoryName(currentFolder), Path.GetDirectoryName(cursor));
@@ -87,40 +91,57 @@ public static class SiblingFolderNavigationService
         Func<string, bool> isSupported, CancellationToken token)
     {
         var parent = Directory.GetParent(currentFolder)?.FullName;
-        if (parent is null || !Directory.Exists(parent)) return null;
+        if (parent is null) return null;
+
+        // One canonical sibling snapshot is used for the entire move. Never recurse into an
+        // adjacent sibling while deciding what the "next sibling" is: that made traversal
+        // direction-dependent and caused folders to disappear depending on the starting point.
         var siblings = EnumerateChildDirectories(parent, options, includePath: currentFolder);
         var index = Array.FindIndex(siblings, path => SamePath(path, currentFolder));
         if (index < 0) return null;
 
+        var sign = Math.Sign(direction);
         for (var step = 1; step < siblings.Length; step++)
         {
             token.ThrowIfCancellationRequested();
-            var next = index + direction * step;
+
+            var candidateIndex = index + sign * step;
             if (options.Wrap)
             {
-                next %= siblings.Length;
-                if (next < 0) next += siblings.Length;
+                candidateIndex %= siblings.Length;
+                if (candidateIndex < 0) candidateIndex += siblings.Length;
             }
-            else if (next < 0 || next >= siblings.Length) break;
-
-            var candidateFolder = direction < 0 && options.HierarchicalTraversal
-                ? DeepestTrailingDescendant(siblings[next], options, new HashSet<string>(StringComparer.OrdinalIgnoreCase) { currentFolder })
-                : siblings[next];
-            var images = EnumerateImages(candidateFolder, isSupported);
-            if (images is null) continue;
-            if (images.Length == 0 && options.SkipEmpty)
+            else if (candidateIndex < 0 || candidateIndex >= siblings.Length)
             {
-                // Hierarchical Previous may need to walk back out of an empty trailing descendant;
-                // defer that to the canonical tree walker rather than returning the branch root.
-                if (direction < 0 && options.HierarchicalTraversal) break;
+                break;
+            }
+
+            var candidateFolder = siblings[candidateIndex];
+            var images = EnumerateImages(candidateFolder, isSupported);
+            if (images is null)
+            {
+                // An inaccessible folder is a local failure only. Continue to the next sibling;
+                // never abandon the rest of the parent's sibling list.
                 continue;
             }
-            if (images.Length == 0) return null;
-            var crossed = direction < 0 && options.HierarchicalTraversal && !SamePath(candidateFolder, siblings[next]);
-            var selected = crossed ? images[^1] : (forceFirstImage || direction > 0 || options.OpenFirstImage ? images[0] : images[^1]);
-            return new SiblingFolderNavigationResult(candidateFolder, images, selected, crossed,
-                crossed ? parent : null, crossed ? Path.GetDirectoryName(candidateFolder) : null);
+
+            if (images.Length == 0)
+            {
+                if (options.HierarchicalTraversal && EnumerateChildDirectories(candidateFolder, options, includePath: null).Length > 0)
+                    return null;
+                if (options.SkipEmpty) continue;
+                return null;
+            }
+
+            var selected = forceFirstImage || options.OpenFirstImage
+                ? images[0]
+                : images[^1];
+
+            return new SiblingFolderNavigationResult(
+                candidateFolder, images, selected, false,
+                direction > 0 ? "direct-next-sibling" : "direct-previous-sibling");
         }
+
         return null;
     }
 
@@ -176,19 +197,183 @@ public static class SiblingFolderNavigationService
         return cursor;
     }
 
+    private static string? FindFirstImageFolderInBranch(
+        string root, SiblingFolderNavigationOptions options, Func<string, bool> isSupported, CancellationToken token)
+    {
+        var pending = new Stack<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        pending.Push(root);
+        var steps = 0;
+        while (pending.Count > 0 && steps++ < MaxTraversalSteps)
+        {
+            token.ThrowIfCancellationRequested();
+            var folder = pending.Pop();
+            var normalized = SafeFullPath(folder) ?? folder;
+            if (!seen.Add(normalized)) continue;
+
+            var images = EnumerateImages(folder, isSupported);
+            if (images is { Length: > 0 }) return folder;
+
+            // Include linked/reparse directories as sibling candidates, but do not recurse through
+            // them. This preserves legitimate linked folders without risking junction cycles.
+            if (IsReparseDirectory(folder)) continue;
+
+            var children = EnumerateChildDirectories(folder, options, includePath: null);
+            for (var i = children.Length - 1; i >= 0; i--)
+                pending.Push(children[i]);
+        }
+        return null;
+    }
+
+    private static string? FindLastImageFolderInBranch(
+        string root, SiblingFolderNavigationOptions options, Func<string, bool> isSupported, CancellationToken token)
+    {
+        string? last = null;
+        var steps = 0;
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        void Visit(string folder)
+        {
+            if (steps++ >= MaxTraversalSteps) return;
+            token.ThrowIfCancellationRequested();
+            var normalized = SafeFullPath(folder) ?? folder;
+            if (!seen.Add(normalized)) return;
+
+            var images = EnumerateImages(folder, isSupported);
+            if (images is { Length: > 0 }) last = folder;
+
+            if (IsReparseDirectory(folder)) return;
+            foreach (var child in EnumerateChildDirectories(folder, options, includePath: null))
+                Visit(child);
+        }
+
+        Visit(root);
+        return last;
+    }
+
     private static string[] EnumerateChildDirectories(string parent, SiblingFolderNavigationOptions options, string? includePath)
     {
         try
         {
-            return Directory.EnumerateDirectories(parent)
+            var paths = Directory.EnumerateDirectories(parent)
                 .Select(path => SafeFullPath(path) ?? path)
-                .Where(path => !IsReparseDirectory(path))
                 .Where(path => options.IncludeHidden || (includePath is not null && SamePath(path, includePath)) || !IsHiddenDirectory(path))
-                .OrderBy(path => Path.GetFileName(path), StringComparer.OrdinalIgnoreCase)
-                .ThenBy(path => path, StringComparer.OrdinalIgnoreCase)
                 .ToArray();
+            return OrderDirectories(paths, options.FolderOrder);
         }
         catch { return Array.Empty<string>(); }
+    }
+
+    private static string[] OrderDirectories(IEnumerable<string> paths, string? order)
+    {
+        var entries = paths.Select(path =>
+        {
+            try
+            {
+                var info = new DirectoryInfo(path);
+                return (Path: path, Name: info.Name, Modified: info.LastWriteTimeUtc, Created: info.CreationTimeUtc);
+            }
+            catch
+            {
+                // Keep the candidate visible even when metadata is temporarily unavailable.
+                return (Path: path, Name: Path.GetFileName(path), Modified: DateTime.MinValue, Created: DateTime.MinValue);
+            }
+        });
+
+        return order switch
+        {
+            "Modified date (oldest first)" => entries
+                .OrderBy(x => x.Modified)
+                .ThenBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(x => x.Path, StringComparer.OrdinalIgnoreCase)
+                .Select(x => x.Path).ToArray(),
+            "Creation date (oldest first)" => entries
+                .OrderBy(x => x.Created)
+                .ThenBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(x => x.Path, StringComparer.OrdinalIgnoreCase)
+                .Select(x => x.Path).ToArray(),
+            _ => entries
+                .OrderBy(x => x.Name, WindowsLogicalStringComparer.Instance)
+                .ThenBy(x => x.Path, WindowsLogicalStringComparer.Instance)
+                .Select(x => x.Path).ToArray()
+        };
+    }
+
+    /// <summary>
+    /// Matches Windows Explorer's logical/natural ordering on Windows (e.g. 2 before 10).
+    /// A deterministic token-aware fallback is used outside Windows and if shell comparison fails.
+    /// </summary>
+    private sealed class WindowsLogicalStringComparer : IComparer<string>
+    {
+        public static WindowsLogicalStringComparer Instance { get; } = new();
+
+        public int Compare(string? x, string? y)
+        {
+            x ??= string.Empty;
+            y ??= string.Empty;
+            if (ReferenceEquals(x, y)) return 0;
+
+            if (OperatingSystem.IsWindows())
+            {
+                try
+                {
+                    var result = StrCmpLogicalW(x, y);
+                    if (result != 0) return result;
+                }
+                catch { }
+            }
+
+            return NaturalCompare(x, y);
+        }
+
+        private static int NaturalCompare(string a, string b)
+        {
+            var ia = 0;
+            var ib = 0;
+            while (ia < a.Length && ib < b.Length)
+            {
+                var ca = a[ia];
+                var cb = b[ib];
+                if (char.IsDigit(ca) && char.IsDigit(cb))
+                {
+                    var sa = ia;
+                    var sb = ib;
+                    while (ia < a.Length && char.IsDigit(a[ia])) ia++;
+                    while (ib < b.Length && char.IsDigit(b[ib])) ib++;
+
+                    var za = sa;
+                    var zb = sb;
+                    while (za < ia && a[za] == '0') za++;
+                    while (zb < ib && b[zb] == '0') zb++;
+
+                    var lena = ia - za;
+                    var lenb = ib - zb;
+                    if (lena != lenb) return lena.CompareTo(lenb);
+
+                    var numeric = string.Compare(a, za, b, zb, lena, StringComparison.Ordinal);
+                    if (numeric != 0) return numeric;
+
+                    var rawLenA = ia - sa;
+                    var rawLenB = ib - sb;
+                    if (rawLenA != rawLenB) return rawLenA.CompareTo(rawLenB);
+                    continue;
+                }
+
+                var upperA = char.ToUpperInvariant(ca);
+                var upperB = char.ToUpperInvariant(cb);
+                if (upperA != upperB) return upperA.CompareTo(upperB);
+                ia++;
+                ib++;
+            }
+
+            if (ia != a.Length || ib != b.Length)
+                return (a.Length - ia).CompareTo(b.Length - ib);
+
+            return string.Compare(a, b, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [DllImport("shlwapi.dll", CharSet = CharSet.Unicode)]
+        private static extern int StrCmpLogicalW(string psz1, string psz2);
     }
 
     private static string[]? EnumerateImages(string folder, Func<string, bool> isSupported)

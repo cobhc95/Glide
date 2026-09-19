@@ -551,6 +551,16 @@ internal static class ExternalLaunchBroker
         Dispatcher.UIThread.Post(() => _ = ProcessPendingQueueAsync(), DispatcherPriority.Send);
     }
 
+    /// <summary>
+    /// True only while the broker still owns work which requires a render window.  Window
+    /// rehydration retries must consult this instead of relying on an earlier queue snapshot: a
+    /// different receiver can consume the request while a standby-close retry is waiting.
+    /// </summary>
+    internal static bool HasPendingExternalRequests()
+    {
+        lock (Gate) return PendingRequests.Count != 0;
+    }
+
     private static async Task ProcessPendingQueueAsync()
     {
         try

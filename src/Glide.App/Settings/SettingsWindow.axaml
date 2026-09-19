@@ -19,7 +19,7 @@
         <Grid ColumnDefinitions="*,220" ColumnSpacing="10" Margin="20,23,48,0" VerticalAlignment="Top">
           <TextBox x:Name="SearchBox" Classes="settingsSearch" Watermark="Search settings..." TextChanged="SearchChanged"/>
           <ComboBox x:Name="SearchCategoryCombo" Grid.Column="1" Width="220" SelectedIndex="0" SelectionChanged="SearchCategoryChanged" ToolTip.Tip="Limit Settings search to one category. All categories is the default.">
-            <ComboBoxItem Content="All categories"/><ComboBoxItem Content="General"/><ComboBoxItem Content="Themes &amp; Colours"/><ComboBoxItem Content="Viewing &amp; Appearance"/><ComboBoxItem Content="Interface &amp; Behavior"/><ComboBoxItem Content="Mouse &amp; Fullscreen"/><ComboBoxItem Content="Performance &amp; Startup"/><ComboBoxItem Content="Status Bar"/><ComboBoxItem Content="Slideshow"/><ComboBoxItem Content="Hotkeys"/><ComboBoxItem Content="Tabs &amp; Workspace"/><ComboBoxItem Content="Window in Window"/><ComboBoxItem Content="Profiles &amp; Presets"/><ComboBoxItem Content="Windows Integration"/><ComboBoxItem Content="Developer Options"/>
+            <ComboBoxItem Content="All categories"/><ComboBoxItem Content="General"/><ComboBoxItem Content="Themes &amp; Colours"/><ComboBoxItem Content="Viewing &amp; Appearance"/><ComboBoxItem Content="Animation"/><ComboBoxItem Content="Interface &amp; Behavior"/><ComboBoxItem Content="Mouse &amp; Fullscreen"/><ComboBoxItem Content="Performance &amp; Startup"/><ComboBoxItem Content="Status Bar"/><ComboBoxItem Content="Slideshow"/><ComboBoxItem Content="Hotkeys"/><ComboBoxItem Content="Tabs &amp; Workspace"/><ComboBoxItem Content="Window in Window"/><ComboBoxItem Content="Profiles &amp; Presets"/><ComboBoxItem Content="Windows Integration"/><ComboBoxItem Content="Developer Options"/>
           </ComboBox>
         </Grid>
       </Border>
@@ -31,6 +31,7 @@
             <Button Classes="settingsNav selected" Tag="General" Click="CategoryClicked"><Grid ColumnDefinitions="28,*"><controls:GlideIconView Kind="General" Classes="navGlyph" HorizontalAlignment="Center" VerticalAlignment="Center"/><TextBlock Grid.Column="1" Text="General" VerticalAlignment="Center" Margin="8,0,0,0"/></Grid></Button>
             <Button Classes="settingsNav" Tag="Appearance" Click="CategoryClicked"><Grid ColumnDefinitions="28,*"><controls:GlideIconView Kind="Appearance" Classes="navGlyph" HorizontalAlignment="Center" VerticalAlignment="Center"/><TextBlock Grid.Column="1" Text="Themes &amp; Colours" VerticalAlignment="Center" Margin="8,0,0,0"/></Grid></Button>
             <Button Classes="settingsNav" Tag="Viewing" Click="CategoryClicked"><Grid ColumnDefinitions="28,*"><controls:GlideIconView Kind="Viewing" Classes="navGlyph" HorizontalAlignment="Center" VerticalAlignment="Center"/><TextBlock Grid.Column="1" Text="Viewing &amp; Appearance" VerticalAlignment="Center" Margin="8,0,0,0"/></Grid></Button>
+            <Button Classes="settingsNav" Tag="Animation" Click="CategoryClicked"><Grid ColumnDefinitions="28,*"><controls:GlideIconView Kind="Animation" Classes="navGlyph" HorizontalAlignment="Center" VerticalAlignment="Center"/><TextBlock Grid.Column="1" Text="Animation" VerticalAlignment="Center" Margin="8,0,0,0"/></Grid></Button>
             <Button Classes="settingsNav" Tag="Interface" Click="CategoryClicked"><Grid ColumnDefinitions="28,*"><controls:GlideIconView Kind="Interface" Classes="navGlyph" HorizontalAlignment="Center" VerticalAlignment="Center"/><TextBlock Grid.Column="1" Text="Interface &amp; Behavior" VerticalAlignment="Center" Margin="8,0,0,0"/></Grid></Button>
             <Button Classes="settingsNav" Tag="Mouse" Click="CategoryClicked"><Grid ColumnDefinitions="28,*"><controls:GlideIconView Kind="Mouse" Classes="navGlyph" HorizontalAlignment="Center" VerticalAlignment="Center"/><TextBlock Grid.Column="1" Text="Mouse &amp; Fullscreen" VerticalAlignment="Center" Margin="8,0,0,0"/></Grid></Button>
             <Button Classes="settingsNav" Tag="Performance" Click="CategoryClicked"><Grid ColumnDefinitions="28,*"><controls:GlideIconView Kind="Performance" Classes="navGlyph" HorizontalAlignment="Center" VerticalAlignment="Center"/><TextBlock Grid.Column="1" Text="Performance &amp; Startup" VerticalAlignment="Center" Margin="8,0,0,0"/></Grid></Button>
@@ -65,11 +66,11 @@
             <CheckBox x:Name="ShowRecentOnHomeCheck" Content="Show recently opened files/folders on Home" ToolTip.Tip="Hides only the Home/Welcome Recent section; it does not erase or disable recent-history storage."/>
             <CheckBox x:Name="ConfirmDiscardSettingsCheck" Content="Warn before discarding unapplied Settings changes" ToolTip.Tip="Controls the discard confirmation shown by Cancel and window close when there are unapplied settings changes."/>
             <TextBlock Text="Startup and new tabs" Classes="settingsSectionLabel" FontWeight="SemiBold" Margin="4,10,0,0"/>
-            <Grid ColumnDefinitions="205,245,*" Margin="6,0,0,0"><TextBlock Text="When Glide opens" VerticalAlignment="Center"/><ComboBox x:Name="StartupActionCombo" Grid.Column="1" Width="235"><ComboBoxItem Content="Welcome tab"/><ComboBoxItem Content="Open last session"/><ComboBoxItem Content="Explorer tab"/><ComboBoxItem Content="Custom"/></ComboBox></Grid>
+            <Grid ColumnDefinitions="205,245,*" Margin="6,0,0,0"><TextBlock Text="When Glide opens" VerticalAlignment="Center"/><ComboBox x:Name="StartupActionCombo" Grid.Column="1" Width="235"><ComboBoxItem Content="Welcome tab"/><ComboBoxItem Content="Open last session"/><ComboBoxItem Content="Explorer tab" IsVisible="False"/><ComboBoxItem Content="Custom"/></ComboBox></Grid>
             <Grid ColumnDefinitions="205,*,Auto,Auto" ColumnSpacing="7" Margin="6,0,0,0"><TextBlock Text="Startup custom path" VerticalAlignment="Center"/><TextBox x:Name="StartupCustomPathBox" Grid.Column="1" IsReadOnly="True" Watermark="Choose an image or folder"/><Button Grid.Column="2" Classes="secondaryAction" Content="File..." Click="BrowseStartupFileClicked"/><Button Grid.Column="3" Classes="secondaryAction" Content="Folder..." Click="BrowseStartupFolderClicked"/></Grid>
-            <Grid ColumnDefinitions="205,245,*" Margin="6,0,0,0"><TextBlock Text="New tab opens" VerticalAlignment="Center"/><ComboBox x:Name="NewTabActionCombo" Grid.Column="1" Width="235"><ComboBoxItem Content="Explorer tab"/><ComboBoxItem Content="Welcome tab"/><ComboBoxItem Content="Custom"/></ComboBox></Grid>
-            <CheckBox x:Name="NewExplorerTabLastLocationCheck" Content="New Explorer tabs use their last navigated directory" ToolTip.Tip="Default: each new Explorer tab starts in the last directory navigated by the Explorer-tab scope. This history is independent of Open File, overlays, profiles and other pickers."/>
-            <Grid ColumnDefinitions="205,*,Auto" ColumnSpacing="7" Margin="6,0,0,0"><TextBlock Text="Default New Explorer tab directory" VerticalAlignment="Center"/><TextBox x:Name="NewExplorerTabDefaultDirectoryBox" Grid.Column="1"/><Button Grid.Column="2" Classes="secondaryAction" Content="Browse..." Click="BrowseNewExplorerDefaultDirectoryClicked"/></Grid>
+            <Grid ColumnDefinitions="205,245,*" Margin="6,0,0,0"><TextBlock Text="New tab opens" VerticalAlignment="Center"/><ComboBox x:Name="NewTabActionCombo" Grid.Column="1" Width="235"><ComboBoxItem Content="Explorer tab" IsVisible="False"/><ComboBoxItem Content="Welcome tab"/><ComboBoxItem Content="Custom"/></ComboBox></Grid>
+            <CheckBox x:Name="NewExplorerTabLastLocationCheck" IsVisible="False" Content="New Explorer tabs use their last navigated directory" ToolTip.Tip="Default: each new Explorer tab starts in the last directory navigated by the Explorer-tab scope. This history is independent of Open File, overlays, profiles and other pickers."/>
+            <Grid IsVisible="False" ColumnDefinitions="205,*,Auto" ColumnSpacing="7" Margin="6,0,0,0"><TextBlock Text="Default New Explorer tab directory" VerticalAlignment="Center"/><TextBox x:Name="NewExplorerTabDefaultDirectoryBox" Grid.Column="1"/><Button Grid.Column="2" Classes="secondaryAction" Content="Browse..." Click="BrowseNewExplorerDefaultDirectoryClicked"/></Grid>
             <Grid ColumnDefinitions="205,*,Auto,Auto" ColumnSpacing="7" Margin="6,0,0,0"><TextBlock Text="New-tab custom path" VerticalAlignment="Center"/><TextBox x:Name="NewTabCustomPathBox" Grid.Column="1" IsReadOnly="True" Watermark="Choose an image or folder"/><Button Grid.Column="2" Classes="secondaryAction" Content="File..." Click="BrowseNewTabFileClicked"/><Button Grid.Column="3" Classes="secondaryAction" Content="Folder..." Click="BrowseNewTabFolderClicked"/></Grid>
           </StackPanel>
 
@@ -77,7 +78,7 @@
           <StackPanel x:Name="AppearancePanel" IsVisible="False" Spacing="10">
             <TextBlock Text="Theme and colour" Classes="settingsSectionLabel" FontWeight="SemiBold"/>
             <Grid ColumnDefinitions="245,210,*" Margin="6,0,0,0"><TextBlock Text="Theme" VerticalAlignment="Center"/><ComboBox x:Name="ThemeCombo" Grid.Column="1" Width="210"><ComboBoxItem Content="Dark"/><ComboBoxItem Content="Neutral"/><ComboBoxItem Content="Light"/></ComboBox></Grid>
-            <Grid ColumnDefinitions="245,210,*" Margin="6,0,0,0"><TextBlock Text="Explorer theme" VerticalAlignment="Center"/><ComboBox x:Name="ExplorerThemeCombo" Grid.Column="1" Width="210" ToolTip.Tip="Follow Glide theme is the default. Override only the Glide Explorer surface if you prefer a different light/neutral/dark treatment."><ComboBoxItem Content="Follow Glide theme"/><ComboBoxItem Content="Dark"/><ComboBoxItem Content="Neutral"/><ComboBoxItem Content="Light"/></ComboBox></Grid>
+            <Grid IsVisible="False" ColumnDefinitions="245,210,*" Margin="6,0,0,0"><TextBlock Text="Explorer theme" VerticalAlignment="Center"/><ComboBox x:Name="ExplorerThemeCombo" Grid.Column="1" Width="210" ToolTip.Tip="Follow Glide theme is the default. Override only the Glide Explorer surface if you prefer a different light/neutral/dark treatment."><ComboBoxItem Content="Follow Glide theme"/><ComboBoxItem Content="Dark"/><ComboBoxItem Content="Neutral"/><ComboBoxItem Content="Light"/></ComboBox></Grid>
             <Grid ColumnDefinitions="245,210,110,*" Margin="6,0,0,0"><TextBlock Text="Accent colour" VerticalAlignment="Center"/><ComboBox x:Name="AccentCombo" Grid.Column="1" Width="210"><ComboBoxItem Content="Glide blue"/><ComboBoxItem Content="Cyan"/><ComboBoxItem Content="Teal"/><ComboBoxItem Content="Emerald"/><ComboBoxItem Content="Lime"/><ComboBoxItem Content="Violet"/><ComboBoxItem Content="Indigo"/><ComboBoxItem Content="Magenta"/><ComboBoxItem Content="Rose"/><ComboBoxItem Content="Crimson"/><ComboBoxItem Content="Orange"/><ComboBoxItem Content="Amber"/><ComboBoxItem Content="Custom"/></ComboBox><Button Grid.Column="2" Classes="secondaryAction" Content="Pick..." Click="PickAccentColorClicked" Margin="8,0,0,0"/></Grid>
             <Grid ColumnDefinitions="245,210,110,*" Margin="6,0,0,0"><TextBlock Text="Glow colour" VerticalAlignment="Center"/><ComboBox x:Name="GlowCombo" Grid.Column="1" Width="210"><ComboBoxItem Content="Follow accent"/><ComboBoxItem Content="Ice blue"/><ComboBoxItem Content="Cyan"/><ComboBoxItem Content="Teal"/><ComboBoxItem Content="Emerald"/><ComboBoxItem Content="Violet"/><ComboBoxItem Content="Magenta"/><ComboBoxItem Content="Rose"/><ComboBoxItem Content="Amber"/><ComboBoxItem Content="White"/><ComboBoxItem Content="Custom"/></ComboBox><Button Grid.Column="2" Classes="secondaryAction" Content="Pick..." Click="PickGlowColorClicked" Margin="8,0,0,0"/></Grid>
             <Grid ColumnDefinitions="245,210,110,*" Margin="6,0,0,0"><TextBlock Text="Main image background" VerticalAlignment="Center"/><ComboBox x:Name="MainBackgroundCombo" Grid.Column="1" Width="210"><ComboBoxItem Content="Follow theme"/><ComboBoxItem Content="Black"/><ComboBoxItem Content="Dark gray"/><ComboBoxItem Content="Neutral gray"/><ComboBoxItem Content="Light gray"/><ComboBoxItem Content="White"/><ComboBoxItem Content="Custom"/></ComboBox><Button Grid.Column="2" Classes="secondaryAction" Content="Pick..." Click="PickBackgroundColorClicked" Margin="8,0,0,0"/></Grid>
@@ -123,11 +124,28 @@
             <TextBlock Classes="phaseNote" Margin="6,-2,8,2" TextWrapping="Wrap" Text="Tokens: {index}, {total}, {file}, {filename}, {stem}, {extension}, {format}, {folder}, {folderpath}, {path}, {width}, {height}, {dimensions}, {megapixels}, {filesize}, {filesizebytes}, {zoom}. Example: {stem}  •  {dimensions}  •  {filesize}  •  {index}/{total}"/>
           </StackPanel>
 
+          <!-- TRANSITIONS & ANIMATION -->
+          <StackPanel x:Name="AnimationPanel" IsVisible="False" Spacing="10">
+            <TextBlock Text="Image navigation transitions" Classes="settingsSectionLabel" FontWeight="SemiBold"/>
+
+            
+            <TextBlock Text="Window-in-Window overlay animation" Classes="settingsSectionLabel" FontWeight="SemiBold" Margin="4,10,0,0"/>
+            <TextBlock Text="Animated overlays move smoothly within the selected region. Right-click an overlay and choose Animate to start or stop movement." Classes="phaseNote" TextWrapping="Wrap"/>
+            <Grid ColumnDefinitions="205,250,*" Margin="6,0,0,0"><TextBlock Text="Animation region" VerticalAlignment="Center"/><ComboBox x:Name="OverlayAnimationRegionCombo" Grid.Column="1"><ComboBoxItem Content="Anywhere"/><ComboBoxItem Content="Top half"/><ComboBoxItem Content="Bottom half"/><ComboBoxItem Content="Top left quarter"/><ComboBoxItem Content="Top right quarter"/><ComboBoxItem Content="Bottom left quarter"/><ComboBoxItem Content="Bottom right quarter"/></ComboBox></Grid>
+            <Grid ColumnDefinitions="205,150,*" Margin="6,0,0,0"><TextBlock Text="Speed (DIPs per second)" VerticalAlignment="Center"/><NumericUpDown x:Name="OverlayAnimationSpeedBox" Grid.Column="1" Minimum="10" Maximum="2000" Increment="10"/></Grid>
+            <Grid ColumnDefinitions="205,150,*" Margin="6,0,0,0"><TextBlock Text="Turn interval (ms)" VerticalAlignment="Center"/><NumericUpDown x:Name="OverlayAnimationTurnIntervalBox" Grid.Column="1" Minimum="0" Maximum="60000" Increment="100"/></Grid>
+            <Grid ColumnDefinitions="205,150,*" Margin="6,0,0,0"><TextBlock Text="Turn angle (degrees)" VerticalAlignment="Center"/><NumericUpDown x:Name="OverlayAnimationTurnAngleBox" Grid.Column="1" Minimum="0" Maximum="180" Increment="5"/></Grid>
+            <CheckBox x:Name="OverlayAnimationPauseCheck" Content="Pause overlay animation while interacting" IsChecked="True"/>
+            <CheckBox x:Name="OverlayAnimationAvoidOverlapCheck" Content="Animated overlays avoid overlapping" IsChecked="True"/>
+            <Grid ColumnDefinitions="205,250,*" Margin="6,0,0,0"><TextBlock Text="Animation refresh target" VerticalAlignment="Center"/><ComboBox x:Name="OverlayAnimationRefreshRateCombo" Grid.Column="1"><ComboBoxItem Content="60 Hz" Tag="60"/><ComboBoxItem Content="120 Hz" Tag="120"/><ComboBoxItem Content="144 Hz" Tag="144"/><ComboBoxItem Content="160 Hz" Tag="160"/><ComboBoxItem Content="240 Hz" Tag="240"/><ComboBoxItem Content="360 Hz" Tag="360"/></ComboBox></Grid>
+          </StackPanel>
+
           <!-- INTERFACE & BEHAVIOR -->
           <StackPanel x:Name="InterfacePanel" IsVisible="False" Spacing="10">
             <TextBlock Text="Window and title bar behavior" Classes="settingsSectionLabel" FontWeight="SemiBold"/>
             <CheckBox x:Name="FullPathTitleCheck" Content="Show full path in title"/>
             <CheckBox x:Name="AlwaysOnTopCheck" Content="Always keep Glide on top"/>
+            <Grid ColumnDefinitions="205,250,*" Margin="6,0,0,0"><TextBlock Text="Always-on-top strength" VerticalAlignment="Center"/><ComboBox x:Name="AlwaysOnTopModeCombo" Grid.Column="1" Width="240" ToolTip.Tip="Soft applies HWND_TOPMOST normally. Hard also reasserts HWND_TOPMOST after competing Z-order changes, helping Glide stay above fullscreen windows."><ComboBoxItem Content="Soft"/><ComboBoxItem Content="Hard"/></ComboBox><TextBlock Grid.Column="2" Classes="phaseNote" Text="Soft applies HWND_TOPMOST normally; Hard also reasserts it after competing Z-order changes." VerticalAlignment="Center" Margin="8,0,0,0"/></Grid>
             <CheckBox x:Name="AutoCenterWindowOnRestoreCheck" Content="Auto-center window on screen when restoring from fullscreen / maximized" ToolTip.Tip="When restoring to a windowed state, position the window in the center of the active display."/>
             <CheckBox x:Name="AutoHideFullscreenChromeCheck" Content="Auto-hide fullscreen title/tab bar"/>
             <CheckBox x:Name="FullscreenKeepTabBarOpenCheck" Content="Keep title/tab bar open in fullscreen (resizes image below it)" ToolTip.Tip="Can also be toggled by right-clicking the tab/title bar while fullscreen."/>
@@ -137,17 +155,61 @@
             <CheckBox x:Name="ContinueSiblingFoldersCheck" Content="Automatically continue into sibling folders" ToolTip.Tip="At image-list boundaries Glide continues browsing into the next eligible folder."/>
             <CheckBox x:Name="HierarchicalFolderTraversalCheck" Content="Continue into nearby parent/grandparent folder branches" ToolTip.Tip="When the current sibling set ends, continue into the next nearby branch. Enabled by default."/>
             <CheckBox x:Name="ConfirmHierarchicalFolderTraversalCheck" Content="Confirm before leaving the current folder branch" ToolTip.Tip="The first ancestor-boundary transition asks before continuing; the prompt can be disabled permanently."/>
+            <Grid ColumnDefinitions="300,220,*" Margin="6,0,0,0">
+              <TextBlock Text="Previous into parent/grandparent branch" VerticalAlignment="Center"/>
+              <ComboBox x:Name="HierarchicalPreviousFolderEntryCombo" Grid.Column="1" Width="210">
+                <ComboBoxItem Content="First image"/>
+                <ComboBoxItem Content="Last image"/>
+              </ComboBox>
+              <TextBlock Grid.Column="2" Classes="phaseNote" Text="Default: first image." VerticalAlignment="Center" Margin="8,0,0,0"/>
+            </Grid>
+            <TextBlock Text="Next / previous navigation rate limit" Classes="settingsSectionLabel" FontWeight="SemiBold" Margin="4,10,0,0"/>
+            <Grid ColumnDefinitions="300,170,*" Margin="6,0,0,0">
+              <TextBlock Text="Minimum interval between actions (ms)" VerticalAlignment="Center"/>
+              <NumericUpDown x:Name="NavigationRateLimitMsBox" Grid.Column="1" Minimum="0" Maximum="600000" Increment="1"/>
+              <TextBlock Grid.Column="2" Classes="phaseNote" Text="0 = unlimited (default). Any millisecond value may be used." VerticalAlignment="Center" Margin="8,0,0,0"/>
+            </Grid>
+            <Grid ColumnDefinitions="300,220,*" Margin="6,0,0,0">
+              <TextBlock Text="Apply limit to" VerticalAlignment="Center"/>
+              <ComboBox x:Name="NavigationRateLimitInputCombo" Grid.Column="1" Width="210">
+                <ComboBoxItem Content="Mouse only"/>
+                <ComboBoxItem Content="Keyboard only"/>
+                <ComboBoxItem Content="Both"/>
+              </ComboBox>
+            </Grid>
+            <CheckBox x:Name="NavigationRateLimitIndicatorCheck" Content="Show rate-limit wait indicator when an action is blocked"/>
+            <Grid ColumnDefinitions="300,220,*" Margin="6,0,0,0">
+              <TextBlock Text="Rate-limit wait indicator position" VerticalAlignment="Center"/>
+              <ComboBox x:Name="NavigationRateLimitIndicatorPositionCombo" Grid.Column="1" Width="210">
+                <ComboBoxItem Content="Top left"/><ComboBoxItem Content="Top right"/><ComboBoxItem Content="Bottom left"/><ComboBoxItem Content="Bottom right"/><ComboBoxItem Content="Centre"/>
+              </ComboBox>
+            </Grid>
+            <StackPanel Orientation="Horizontal" Spacing="16" Margin="6,0,0,0">
+              <TextBlock Text="Limit in:" VerticalAlignment="Center"/>
+              <CheckBox x:Name="NavigationRateLimitWindowedCheck" Content="Windowed"/>
+              <CheckBox x:Name="NavigationRateLimitFullscreenCheck" Content="Fullscreen"/>
+              <CheckBox x:Name="NavigationRateLimitSlideshowCheck" Content="Slideshow"/>
+            </StackPanel>
             <CheckBox x:Name="FolderNavSkipEmptyCheck" Content="Skip sibling folders that contain no supported images"/>
             <CheckBox x:Name="FolderNavIncludeHiddenCheck" Content="Include hidden sibling folders" ToolTip.Tip="Off by default. When disabled, folders marked Hidden (and dot-prefixed folders) are excluded from sibling navigation."/>
             <CheckBox x:Name="FolderNavWrapCheck" Content="Wrap sibling-folder navigation at parent-directory ends"/>
             <CheckBox x:Name="FolderNavFirstImageCheck" Content="Open first image in chosen sibling folder (off = last)"/>
+            <Grid ColumnDefinitions="260,250,*" Margin="6,0,0,0">
+              <TextBlock Text="Sibling-folder order" VerticalAlignment="Center"/>
+              <ComboBox x:Name="FolderNavOrderCombo" Grid.Column="1" Width="240" SelectedIndex="0">
+                <ComboBoxItem Content="Alphabetical"/>
+                <ComboBoxItem Content="Modified date (oldest first)"/>
+                <ComboBoxItem Content="Creation date (oldest first)"/>
+              </ComboBox>
+              <TextBlock Grid.Column="2" Classes="phaseNote" Text="Default: alphabetical. Date modes use oldest first, then a stable name tie-breaker." VerticalAlignment="Center" Margin="8,0,0,0"/>
+            </Grid>
 
             <TextBlock Text="Tabs and navigation chrome" Classes="settingsSectionLabel" FontWeight="SemiBold" Margin="4,10,0,0"/>
-            <CheckBox x:Name="TabsCheck" Content="Enable tabs / Explorer tab bar"/>
+            <CheckBox x:Name="TabsCheck" Content="Enable tabs"/>
             <CheckBox x:Name="FolderNavGroupCheck" Content="Show sibling-folder navigation group on title bar"/>
-            <CheckBox x:Name="TabBarBackButtonCheck" Content="Show Up / return-to-folder button in right-side title navigation"/>
-            <CheckBox x:Name="TabBarForwardButtonCheck" Content="Show Forward button in right-side title navigation"/>
-            <Grid ColumnDefinitions="260,250,*" Margin="6,0,0,0">
+            <CheckBox x:Name="TabBarBackButtonCheck" IsVisible="False" Content="Show Up / return-to-folder button in right-side title navigation"/>
+            <CheckBox x:Name="TabBarForwardButtonCheck" IsVisible="False" Content="Show Forward button in right-side title navigation"/>
+            <Grid IsVisible="False" ColumnDefinitions="260,250,*" Margin="6,0,0,0">
               <TextBlock Text="Navigate to folder button" VerticalAlignment="Center"/>
               <ComboBox x:Name="NavigateToFolderBehaviorCombo" Grid.Column="1" Width="240">
                 <ComboBoxItem Content="Internal browser"/>
@@ -304,14 +366,14 @@
               <TextBlock Text="Home page" VerticalAlignment="Center"/>
               <ComboBox x:Name="HomePageCombo" Grid.Column="1" Width="220">
                 <ComboBoxItem Content="Welcome page"/>
-                <ComboBoxItem Content="Browser page"/>
+                <ComboBoxItem Content="Browser page" IsVisible="False"/>
                 <ComboBoxItem Content="Recent pictures page"/>
               </ComboBox>
             </Grid>
             <TextBlock Text="Sibling-folder title bar buttons" Classes="settingsSectionLabel" Margin="4,8,0,0"/>
             <CheckBox x:Name="FolderNavPreviousCheck" Content="Show Previous Folder button"/>
             <CheckBox x:Name="FolderNavNextCheck" Content="Show Next Folder button"/>
-            <CheckBox x:Name="FolderNavExploreCheck" Content="Show Explore Parent Folders button"/>
+            <CheckBox x:Name="FolderNavExploreCheck" Content="Show Explore Parent Folders button" IsVisible="False"/>
           </StackPanel>
 
           <!-- WINDOW IN WINDOW / OVERLAYS -->
@@ -381,7 +443,7 @@
       <Border Grid.Row="2" Grid.ColumnSpan="2" Background="{DynamicResource BrushFooter}" BorderBrush="{DynamicResource BrushBorder}" BorderThickness="0,1,0,0">
         <Grid ColumnDefinitions="*,Auto" Margin="22,14,38,14">
           <StackPanel Spacing="9" VerticalAlignment="Center">
-            <TextBlock Text="Glide 4.1.5" Foreground="{DynamicResource BrushMuted}" FontSize="13"/>
+            <TextBlock Text="Glide 4.2.3" Foreground="{DynamicResource BrushMuted}" FontSize="13"/>
             <Button Classes="secondaryAction" Content="Restore defaults" Click="RestoreDefaultsClicked" HorizontalAlignment="Left" MinWidth="180"/>
           </StackPanel>
           <StackPanel Grid.Column="1" VerticalAlignment="Center" Orientation="Horizontal" Spacing="10">

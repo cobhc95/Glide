@@ -4,7 +4,7 @@
         xmlns:platform="using:Glide.App.Platform"
         x:Class="Glide.App.MainWindow"
         Width="1064" Height="687" MinWidth="180" MinHeight="360"
-    Title="Glide 4.1.5 — Home"
+    Title="Glide 4.2.3 — Home"
         Icon="/Assets/Glide.ico"
         SystemDecorations="None"
         ExtendClientAreaToDecorationsHint="False"
@@ -37,7 +37,7 @@
         <!-- Browser-like Back/Forward live on the right-side chrome, visually separated from
              user-configurable utility actions. Their history is per tab. -->
         <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center" Margin="0,4,6,4">
-          <StackPanel x:Name="TabNavigationHost" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center" Background="Transparent">
+          <StackPanel x:Name="TabNavigationHost" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center" Background="Transparent" IsVisible="False">
             <Button x:Name="TabNavBackButton" Classes="tabNavUtility back" Width="34" Height="34" Click="TabNavBackClicked" ToolTip.Tip="Up to containing folder">
               <controls:GlideIconView Kind="Up" Width="14" Height="14" IconBrush="{DynamicResource BrushAccent}" StrokeWidth="2"/>
             </Button>
@@ -45,7 +45,7 @@
               <controls:GlideIconView Kind="Next" Width="14" Height="14" IconBrush="{DynamicResource BrushText}" StrokeWidth="2"/>
             </Button>
           </StackPanel>
-          <Border Width="1" Height="22" Background="{DynamicResource BrushBorder}" Margin="3,0,3,0"/>
+          <Border Width="1" Height="22" Background="{DynamicResource BrushBorder}" Margin="3,0,3,0" IsVisible="False"/>
           <!-- User-configurable utility strip. Buttons are rebuilt from stable settings IDs at runtime. -->
           <StackPanel x:Name="TitleActionHost" Orientation="Horizontal" Spacing="1" VerticalAlignment="Center"/>
         </StackPanel>
@@ -114,6 +114,16 @@
           <TextBlock x:Name="NavigationBoundaryNoticeText" Text="End of folder" FontSize="18" FontWeight="SemiBold" Foreground="White"/>
         </Border>
 
+        <Border x:Name="NavigationRateLimitNotice" IsVisible="False" IsHitTestVisible="False"
+                HorizontalAlignment="Left" VerticalAlignment="Top" Margin="14,14,0,0" ZIndex="1460"
+                Background="#B51B1E23" BorderBrush="#7FFFFFFF" BorderThickness="1"
+                CornerRadius="7" Padding="9,6" Opacity="0.82">
+          <StackPanel Orientation="Horizontal" Spacing="6">
+            <TextBlock Text="&#xE823;" FontFamily="Segoe Fluent Icons" FontSize="13" Foreground="White" VerticalAlignment="Center"/>
+            <TextBlock x:Name="NavigationRateLimitNoticeText" Text="Wait 0 ms" FontSize="12.5" FontWeight="SemiBold" Foreground="White" VerticalAlignment="Center"/>
+          </StackPanel>
+        </Border>
+
         <Border x:Name="SlideshowQualityIndicator" IsVisible="False" IsHitTestVisible="False"
                 HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,18,0,0" ZIndex="1500"
                 Width="42" Height="42" Background="#D9181B20" BorderBrush="#D95BB7F5"
@@ -125,7 +135,7 @@
         </Border>
 
 
-        <Border x:Name="ViewerStatusSurface" Classes="statusSurface legacyViewerStatus" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="14,0,14,14">
+        <Border x:Name="ViewerStatusSurface" Classes="statusSurface legacyViewerStatus" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="14,0,14,14" ZIndex="400">
           <Grid ColumnDefinitions="Auto,*" Margin="10,3,4,3" ColumnSpacing="8">
             <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
               <TextBlock x:Name="StatusStatsText" Classes="statusStats" Text="Ready" FontWeight="SemiBold" Foreground="{DynamicResource BrushMuted}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
@@ -170,7 +180,7 @@
       </Grid>
 
       <!-- EXPLORER: toolbar/grid/virtualizer are instantiated only when a Browser tab is activated. -->
-      <ContentControl x:Name="BrowserView" IsVisible="False" Background="{DynamicResource BrushViewport}"/>
+      <ContentControl x:Name="BrowserView" IsVisible="False" IsHitTestVisible="False" Background="{DynamicResource BrushViewport}"/>
 
       <!-- Session-only collapsed status affordance. Close persists hidden; collapse does not. -->
       <Button x:Name="StatusRestoreButton" Classes="statusRestore" IsVisible="False"

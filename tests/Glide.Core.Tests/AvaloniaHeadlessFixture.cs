@@ -48,15 +48,10 @@ public sealed class AvaloniaHeadlessFixture
 
     public static void RunOnUIThread(Action action)
     {
-        EnsureInitialized();
-        if (_session is not null)
-        {
-            _session.Dispatch(action, CancellationToken.None);
-        }
-        else
-        {
-            action();
-        }
+        // Route through the awaitable overload and block. The previous fire-and-forget Dispatch let
+        // callers (and xUnit) continue before the UI action completed, so assertions could silently
+        // no-op and pass without exercising anything.
+        RunOnUIThreadAsync(() => { action(); return Task.CompletedTask; }).GetAwaiter().GetResult();
     }
 
     public static async Task RunOnUIThreadAsync(Func<Task> action)

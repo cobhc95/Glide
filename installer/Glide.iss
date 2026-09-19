@@ -1,6 +1,6 @@
 #define MyAppName "Glide Image Viewer"
 #define MyAppShortName "Glide"
-#define MyAppVersion "4.1.5"
+#define MyAppVersion "4.2.3"
 #define MyAppExeName "Glide.exe"
 
 [Setup]
@@ -23,7 +23,7 @@ UsePreviousAppDir=yes
 CloseApplications=yes
 RestartApplications=no
 UninstallDisplayIcon={app}\{#MyAppExeName}
-VersionInfoVersion=4.1.5.0
+VersionInfoVersion=4.2.3.0
 VersionInfoProductName={#MyAppName}
 VersionInfoDescription=Glide Image Viewer Setup
 
@@ -61,6 +61,28 @@ Root: HKLM; Subkey: "Software\Classes\Glide.Image\shell\open\command"; ValueType
 Filename: "{app}\Glide.exe"; Description: "Launch Glide"; Flags: nowait postinstall skipifsilent
 
 [Code]
+procedure StopAllGlideProcesses;
+var
+  Attempt: Integer;
+  ResultCode: Integer;
+begin
+  { Glide's warm-start host may keep one or more hidden processes alive after every
+    visible window closes. Stop every matching process tree before files are replaced;
+    bounded retries prevent Setup from waiting forever on an unresponsive instance. }
+  for Attempt := 1 to 3 do
+  begin
+    Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /T /IM "Glide.exe"', '',
+      SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Sleep(200);
+  end;
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  StopAllGlideProcesses;
+  Result := '';
+end;
+
 function ExistingAppPath(RootKey: Integer; const SubKey: String): String;
 var
   ExePath: String;
@@ -73,85 +95,65 @@ begin
   end;
 end;
 
-function GetGlideInstallDir(Param: String): String;
+function LegacyAppPath(RootKey: Integer; const SubKey: String): String;
 var
-  Candidate: String;
-begin
-  { Prefer the existing legacy/current Glide location so setup upgrades in place. }
-  Candidate := ExistingAppPath(HKLM64, 'Software\Microsoft\Windows\CurrentVersion\App Paths\Glide.exe');
-  if Candidate = '' then Candidate := ExistingAppPath(HKLM32, 'Software\Microsoft\Windows\CurrentVersion\App Paths\Glide.exe');
-  if Candidate = '' then Candidate := ExistingAppPath(HKCU, 'Software\Microsoft\Windows\CurrentVersion\App Paths\Glide.exe');
-  if Candidate <> '' then
-    Result := Candidate
-  else
-    Result := ExpandConstant('{autopf}\Glide');
-end;
-
-function GlideProcessIsRunning(): Boolean;
-var
-  ResultCode: Integer;
-  Output: TExecOutput;
-  I: Integer;
-begin
-  Result := False;
-  if not ExecAndCaptureOutput(ExpandConstant('{cmd}'),
-    '/C tasklist /FI "IMAGENAME eq Glide.exe" /FO CSV /NH', '', SW_HIDE,
-    ewWaitUntilTerminated, ResultCode, Output) then
-    Exit;
-  if ResultCode <> 0 then
-    Exit;
-  for I := 0 to GetArrayLength(Output.StdOut) - 1 do
-    if Pos('"Glide.exe"', Output.StdOut[I]) > 0 then
-    begin
-      Result := True;
-      Exit;
-    end;
-end;
-
-function CloseRunningGlide(): Boolean;
-var
-  ResultCode: Integer;
-begin
-  Result := Exec(ExpandConstant('{cmd}'),
-    '/C taskkill /IM Glide.exe /T /F', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and
-    (ResultCode = 0);
-end;
-
-function PrepareToInstall(var NeedsRestart: Boolean): String;
-var
-  Choice: Integer;
-  Attempts: Integer;
+  CommandValue: String;
+  P: Integer;
 begin
   Result := '';
-  NeedsRestart := False;
-  Attempts := 0;
-  while GlideProcessIsRunning() do
+  if RegQueryStringValue(RootKey, SubKey, '', CommandValue) then
   begin
-    Choice := MsgBox('Glide is currently running and must be closed before Setup can continue.' + #13#10 + #13#10 +
-      'Would you like Setup to close Glide automatically?', mbConfirmation, MB_YESNOCANCEL);
-    if Choice = IDCANCEL then
+    CommandValue := Trim(CommandValue);
+    if (Length(CommandValue) > 1) and (CommandValue[1] = '"') then
     begin
-      Result := 'Please close Glide before continuing Setup.';
-      Exit;
-    end;
-    if Choice = IDYES then
-    begin
-      CloseRunningGlide();
-      Sleep(250);
-      Inc(Attempts);
-      if Attempts >= 20 then
-      begin
-        Result := 'Setup could not close Glide. Please close it manually and run Setup again.';
-        Exit;
-      end;
+      Delete(CommandValue, 1, 1);
+      P := Pos('"', CommandValue);
+      if P > 0 then
+        CommandValue := Copy(CommandValue, 1, P - 1);
     end
     else
     begin
-      if MsgBox('Please close Glide manually, then choose Yes to retry Setup.', mbInformation, MB_YESNO) <> IDYES then
-      begin
-        Result := 'Please close Glide before continuing Setup.';
-        Exit;
-      end;
+      P := Pos(' ', CommandValue);
+      if P > 0 then
+        CommandValue := Copy(CommandValue, 1, P - 1);
     end;
+
+    if FileExists(CommandValue) then
+      Result := ExtractFileDir(CommandValue);
   end;
+end;
+
+function GetGlideInstallDir(Param: String): String;
+var
+  FoundPath: String;
+begin
+  FoundPath := ExistingAppPath(HKLM, 'Software\Microsoft\Windows\CurrentVersion\App Paths\Glide.exe');
+  if FoundPath <> '' then
+  begin
+    Result := FoundPath;
+    Exit;
+  end;
+
+  FoundPath := ExistingAppPath(HKCU, 'Software\Microsoft\Windows\CurrentVersion\App Paths\Glide.exe');
+  if FoundPath <> '' then
+  begin
+    Result := FoundPath;
+    Exit;
+  end;
+
+  FoundPath := LegacyAppPath(HKLM, 'Software\Classes\Applications\Glide.exe\shell\open\command');
+  if FoundPath <> '' then
+  begin
+    Result := FoundPath;
+    Exit;
+  end;
+
+  FoundPath := LegacyAppPath(HKLM, 'Software\Classes\Glide.Image\shell\open\command');
+  if FoundPath <> '' then
+  begin
+    Result := FoundPath;
+    Exit;
+  end;
+
+  Result := ExpandConstant('{autopf}\Glide');
 end;

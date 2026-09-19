@@ -1,4 +1,4 @@
-using System.Buffers;
+﻿using System.Buffers;
 using System.IO.MemoryMappedFiles;
 using System.Runtime.InteropServices;
 using Avalonia.Media.Imaging;
@@ -96,6 +96,12 @@ public sealed class ImageLoadCoordinator : IDisposable
 
     public ImageLoadCoordinator(IImageDecoderBackend? backend = null) => _backend = backend ?? new AvaloniaImageDecoderBackend();
 
+    /// <summary>
+    /// Callback to determine if a bitmap is currently active in the viewport or mid-transition,
+    /// preventing premature disposal during LRU cache trimming, promotion, or purge.
+    /// </summary>
+    public Func<Bitmap?, bool>? IsBitmapInActiveUse { get; set; }
+
     public ImagePerformancePolicy Policy
     {
         get => _policy;
@@ -183,7 +189,7 @@ public sealed class ImageLoadCoordinator : IDisposable
             {
                 if (preloadedResult.Bitmap is not null)
                 {
-                    AddPrepared(path, preloadedResult.Bitmap, isFull: true, preloadedResult.Dimensions, epoch: -1);
+                    if (cacheResult) AddPrepared(path, preloadedResult.Bitmap, isFull: true, preloadedResult.Dimensions, epoch: -1);
                     preloadedResult.IsConsumed = true;
                     if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("foreground_startup_preload_hit", path);
                     return new ImageLoadResult(path, preloadedResult.Bitmap, System.Diagnostics.Stopwatch.GetElapsedTime(started),
@@ -196,7 +202,7 @@ public sealed class ImageLoadCoordinator : IDisposable
                     if (NativeImageDecoder.TryCreateBitmapFromNative(preloadedResult.NativeImage, preloadedResult.NativeStatus, out var bitmap))
                     {
                         preloadedResult.IsConsumed = true;
-                        AddPrepared(path, bitmap, isFull: true, preloadedResult.Dimensions, epoch: -1);
+                        if (cacheResult) AddPrepared(path, bitmap, isFull: true, preloadedResult.Dimensions, epoch: -1);
                         if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("foreground_startup_preload_hit", path);
                         return new ImageLoadResult(path, bitmap, System.Diagnostics.Stopwatch.GetElapsedTime(started),
                             CacheHit: true, IsPreview: false, SourceWidth: preloadedResult.Dimensions.Width,
@@ -209,7 +215,7 @@ public sealed class ImageLoadCoordinator : IDisposable
                     using var ms = new MemoryStream(preloadedResult.PreloadedBytes, writable: false);
                     var bitmap = _backend.DecodeFull(ms, path);
                     preloadedResult.IsConsumed = true;
-                    AddPrepared(path, bitmap, isFull: true, preloadedResult.Dimensions, epoch: -1);
+                    if (cacheResult) AddPrepared(path, bitmap, isFull: true, preloadedResult.Dimensions, epoch: -1);
                     if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("foreground_startup_preload_hit", path);
                     return new ImageLoadResult(path, bitmap, System.Diagnostics.Stopwatch.GetElapsedTime(started),
                         CacheHit: false, IsPreview: false, SourceWidth: preloadedResult.Dimensions.Width,
@@ -419,9 +425,13 @@ public sealed class ImageLoadCoordinator : IDisposable
             _prepared[refined.Path] = new PreparedEntry(refined.Bitmap, !refined.IsPreview,
                 new ImageDimensions(refined.SourceWidth, refined.SourceHeight), identity, estimate, node);
             _preparedBytes = _preparedBytes - old.EstimatedBytes + estimate;
-            // The old frame is detached by the caller before this method is called, so it is now
-            // safe to release it without disposing a bitmap still owned by the viewport.
-            old.Bitmap.Dispose();
+            // The old frame is detached by the caller before this method is called.
+            // If the viewport is still rendering it (e.g. mid-transition), skip disposal;
+            // it will be disposed by PriorBitmapReleased when finished.
+            if (IsBitmapInActiveUse?.Invoke(old.Bitmap) != true)
+            {
+                old.Bitmap.Dispose();
+            }
             return true;
         }
     }
@@ -615,10 +625,8 @@ public sealed class ImageLoadCoordinator : IDisposable
         }, token);
     }
 
-    private ImageDimensions ProbeDimensions(string path)
+    private ImageDimensions ProbeDimensionsAsyncDirect(string path)
     {
-        // Cheap signature/header probe first. This guarantees common formats never wake the optional
-        // provider runtime merely to learn dimensions. WIC is next; lazy providers are last.
         if (ImageHeaderProbe.TryProbe(path, out var dimensions)) return dimensions;
         if (NativeImageProbe.TryProbe(path, out var native) && native.Width > 0 && native.Height > 0)
             return new ImageDimensions((int)Math.Min(native.Width, (uint)int.MaxValue), (int)Math.Min(native.Height, (uint)int.MaxValue));
@@ -670,7 +678,8 @@ public sealed class ImageLoadCoordinator : IDisposable
             _compressedBytes = 0;
             foreach (var entry in _prepared.Values)
             {
-                if (!string.Equals(entry.Node.Value, _currentActivePath, StringComparison.OrdinalIgnoreCase))
+                if (!string.Equals(entry.Node.Value, _currentActivePath, StringComparison.OrdinalIgnoreCase) &&
+                    IsBitmapInActiveUse?.Invoke(entry.Bitmap) != true)
                     entry.Bitmap.Dispose();
             }
             _prepared.Clear();
@@ -820,7 +829,18 @@ public sealed class ImageLoadCoordinator : IDisposable
         _preparedBytes -= entry.EstimatedBytes;
         _preparedLru.Remove(entry.Node);
         _prepared.Remove(path);
-        if (dispose) entry.Bitmap.Dispose();
+        if (dispose)
+        {
+            if (IsBitmapInActiveUse?.Invoke(entry.Bitmap) == true)
+            {
+                // Active in viewport or mid-transition; skip disposal so we don't cause black flashes.
+                // The viewport will release and dispose via PriorBitmapReleased when done.
+            }
+            else
+            {
+                entry.Bitmap.Dispose();
+            }
+        }
     }
 
     private void TrimCaches()

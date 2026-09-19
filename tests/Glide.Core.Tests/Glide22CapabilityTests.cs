@@ -163,6 +163,8 @@ public sealed class Glide22CapabilityTests
         Assert.Equal(0, state.X); Assert.Equal(0, state.Y);
         Assert.Equal(80, state.Width); Assert.Equal(60, state.Height);
         Assert.Equal(1, state.Opacity); Assert.Equal(.1, state.Zoom);
+        Assert.True(state.PreserveAspectRatio);
+        Assert.False((state with { PreserveAspectRatio = false }).Normalize().PreserveAspectRatio);
     }
 
     [Fact]
@@ -171,10 +173,22 @@ public sealed class Glide22CapabilityTests
         var path = Path.Combine(Path.GetTempPath(), "glide-overlay-" + Guid.NewGuid() + ".json");
         try
         {
-            var original = new OverlayState(Guid.NewGuid(), "x.jpg", 1, 2, 300, 200);
+            var original = new OverlayState(Guid.NewGuid(), "x.jpg", 1, 2, 300, 200,
+                AnimationConfigured: true, AnimationRunning: true, AnimationRegion: "Bottom right quarter",
+                AnimationSpeedDipsPerSecond: 280, AnimationTurnIntervalMs: 1000,
+                AnimationTurnAngleDegrees: 90, AnimationPauseWhileInteracting: false);
             OverlayLayoutStore.Save(path, new[] { original });
             OverlayLayoutStore.Save(path, new[] { original with { X = 7 } });
-            Assert.Equal(original.Id, Assert.Single(OverlayLayoutStore.Load(path)).Id);
+            var restored = Assert.Single(OverlayLayoutStore.Load(path));
+            Assert.Equal(original.Id, restored.Id);
+            Assert.True(restored.AnimationConfigured);
+            Assert.True(restored.AnimationRunning);
+            Assert.Equal("Bottom right quarter", restored.AnimationRegion);
+            Assert.Equal(280, restored.AnimationSpeedDipsPerSecond);
+            Assert.Equal(1000, restored.AnimationTurnIntervalMs);
+            Assert.Equal(90, restored.AnimationTurnAngleDegrees);
+            Assert.False(restored.AnimationPauseWhileInteracting);
+            Assert.True(restored.PreserveAspectRatio);
             File.WriteAllText(path, "{not-json");
             Assert.Equal(original.Id, Assert.Single(OverlayLayoutStore.Load(path)).Id);
         }

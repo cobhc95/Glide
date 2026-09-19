@@ -20,7 +20,7 @@ public static class SettingsStore
     /// complete settings load runs in parallel with Avalonia startup and is adopted non-blockingly.
     /// </summary>
     private const int LaunchPolicySchema = 4;
-    private const int CurrentSettingsSchema = 4;
+    private const int CurrentSettingsSchema = 5;
 
     public readonly record struct LaunchPolicy(bool ReuseSingleInstance, string ExternalOpenBehavior);
 
@@ -355,6 +355,14 @@ public static class SettingsStore
                     loaded.AdaptivePreviewDelayMs = 5;
             }
 
+            // Schema 5 replaces a hard-coded keyboard bounce guard with the user-facing navigation
+            // interval and ships an 80 ms stock default, so a duplicated key event cannot skip an
+            // image. 0 was the only historical stock value for this field, so migrate exactly that
+            // stock value; users who want unlimited navigation can set 0 again explicitly.
+            if (sourceSchema < 5 && loaded.NavigationRateLimitMs == 0)
+                loaded.NavigationRateLimitMs = 80;
+            loaded.NavigationRateLimitMs = Math.Clamp(loaded.NavigationRateLimitMs, 0, 600000);
+
             // 2.9-5 gives new Explorer tabs an independent navigation-memory scope. The historical
             // Boolean reused the main Open location and defaulted off; when the new scope first appears,
             // adopt the new product default without copying another picker's history into it.
@@ -374,6 +382,12 @@ public static class SettingsStore
             if (string.IsNullOrWhiteSpace(loaded.LastTabCloseBehavior) ||
                 (loaded.LastTabCloseBehavior is not ("Open home page" or "Keep last tab open" or "Close program")))
                 loaded.LastTabCloseBehavior = "Open home page";
+            loaded.FolderNavOrder = loaded.FolderNavOrder switch
+            {
+                "Modified date (oldest first)" => "Modified date (oldest first)",
+                "Creation date (oldest first)" => "Creation date (oldest first)",
+                _ => "Alphabetical"
+            };
             loaded.GlowIntensityPercent = Math.Clamp(loaded.GlowIntensityPercent, 0, 100);
             // 2.9-5 makes neighbour-prefetch depth part of the stock performance profile. Older builds
             // shipped 2 as the untouched persisted default and deliberately left it profile-independent.

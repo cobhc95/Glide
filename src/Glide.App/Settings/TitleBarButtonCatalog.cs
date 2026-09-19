@@ -46,9 +46,13 @@ public static class TitleBarButtonCatalog
 
     public static IReadOnlyList<string> Normalize(IEnumerable<string>? ids)
     {
+        var supplied = ids?.ToArray() ?? Array.Empty<string>();
+        // 4.2.0 explorer-removal regression could persist an empty strip. Treat that state as
+        // "restore defaults"; users can still remove/reorder individual buttons normally.
+        if (supplied.Length == 0) supplied = DefaultButtonIds;
         var result = new List<string>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var id in ids ?? Array.Empty<string>())
+        foreach (var id in supplied)
             if (ById.ContainsKey(id) && seen.Add(id)) result.Add(id);
         return result;
     }

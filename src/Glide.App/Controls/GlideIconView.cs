@@ -132,6 +132,10 @@ public sealed class GlideIconView : Control
                 Box(3.5, 4.5, 17, 15); L(3.5, 9, 20.5, 9); Circle(6.5, 6.8, 0.7, true); Circle(9.5, 6.8, 0.7, true); break;
             case "Viewing":
                 Box(4, 5, 16, 11); L(9, 20, 15, 20); L(12, 16, 12, 20); break;
+            case "Animation":
+            case "Transitions":
+            case "Transition":
+                Box(4, 5, 16, 14); L(4, 9, 20, 9); L(4, 15, 20, 15); L(8, 5, 8, 9); L(16, 5, 16, 9); L(8, 15, 8, 19); L(16, 15, 16, 19); break;
             case "Mouse":
                 Box(7, 3, 10, 18); L(12, 3, 12, 9); L(7, 9, 17, 9); break;
             case "Performance":

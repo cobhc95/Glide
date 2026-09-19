@@ -1,10 +1,34 @@
-# Glide Image Viewer 4.2
+# Glide 4.2.3
 
 ## Fast. Lightweight. Multi-tabbed. Multi-window. Highly customizable.
 
 ![Glide main user interface](docs/screenshots/screenshot_1.jpg)
 
-**Glide 4.1.5 is a high-performance Windows image viewer built around instant-feeling image opening, a compact installer, multi-tab and multi-window workflows, transparent overlays, deep mouse/keyboard customization, Launch Speed Boost, and recognition/routing for 196 image and document filename extensions.**
+**Glide 4.2.3 is a high-performance Windows image viewer built around instant-feeling image opening, a compact installer, multi-tab and multi-window workflows, transparent overlays, deep mouse/keyboard customization, Launch Speed Boost, and recognition/routing for 196 image and document filename extensions.**
+
+## What's new in 4.2.3
+
+Glide 4.2.3 is a search, privacy and small-screen fix release:
+
+- **Settings search is genuinely global.** Every control in the Settings window is now declared in
+  the settings catalogue and searchable by the wording you actually see — including previously
+  missing entries such as **Always-on-top strength**, fullscreen exit behaviour, same-image
+  behaviour, left-drag window behaviour, Overlay windowed interactions and the hotkey preset loader.
+  Audit: 188/188 settings searchable.
+- **No automatic diagnostic files in Downloads.** The background crash breadcrumb no longer writes
+  `Glide-Diagnostic-Latest.txt` into your Downloads folder; it is now developer-opt-in only.
+- **Folder-boundary prompt fixed on small screens.** Prompts now size to their content and clamp to
+  the screen's working area, so the Continue/Cancel buttons can never be pushed off a small or
+  scaled laptop panel.
+- **One key press, one image.** The existing **Navigation minimum interval** setting now ships an
+  80 ms default (fully configurable, 0 = unlimited), absorbing duplicated key events from some
+  laptop keyboards.
+
+See [CHANGELOG.md](CHANGELOG.md) and [release-notes-4.2.3.md](release-notes-4.2.3.md) for the full list.
+
+> **Privacy:** Glide writes no diagnostic, telemetry or log files anywhere unless you explicitly ask
+> for an export from Settings → Developer Options. A normal install leaves your Downloads folder
+> untouched.
 
 Glide is designed for users who desire the instantaneous startup and minimal resource footprint of classic lightweight viewers without sacrificing modern multi-tabbed navigation, configurable fullscreen behaviour, non-destructive overlays, extensive hotkey mapping, viewer emulation profiles, prefetch controls, and an exhaustively configurable settings engine.
 
@@ -13,6 +37,8 @@ Glide is designed for users who desire the instantaneous startup and minimal res
 ---
 
 ## Visual Overview & Adaptive Layout
+
+![Glide Home screen](docs/screenshots/home.png)
 
 Glide's interface is engineered with a responsive design system that reflows seamlessly across any window size, aspect ratio, or DPI scale.
 
@@ -24,7 +50,7 @@ Glide's interface is engineered with a responsive design system that reflows sea
 
 ## Core Feature Reference & Settings Gallery
 
-The Glide Settings engine exposes nearly every aspect of the viewer's execution, rendering, input handling, and presentation. The existing screenshots below are retained as the historical UI gallery while Glide 4.1.5 carries forward the warm-engine launch, Windows Snap restore, and warm-process privacy improvements.
+The Glide Settings engine exposes nearly every aspect of the viewer's execution, rendering, input handling, and presentation. The existing screenshots below are retained as the historical UI gallery while Glide 4.2.3 carries forward the warm-engine launch, Windows Snap restore, and warm-process privacy improvements.
 
 ---
 
@@ -55,7 +81,6 @@ Glide provides flexible session management, folder traversal policies, and start
 ### 2. Tabs & Multi-Window Workspace
 
 ![Tabs Settings](docs/screenshots/settings/settings_tabs_settled.png)
-![Tabs Settings Scrolled](docs/screenshots/settings/settings_tabs_scroll2_settled.png)
 
 Glide brings modern browser-grade tab management to image viewing:
 
@@ -76,8 +101,7 @@ Glide brings modern browser-grade tab management to image viewing:
 ### 3. Viewing & Interface Presentation
 
 ![Viewing Settings](docs/screenshots/settings/settings_viewing_settled.png)
-![Viewing Settings Scrolled 1](docs/screenshots/settings/settings_viewing_scroll2_settled.png)
-![Viewing Settings Scrolled 2](docs/screenshots/settings/settings_viewing_scroll3_settled.png)
+![Viewing Settings Scrolled](docs/screenshots/settings/settings_viewing_scroll2_settled.png)
 
 Fine-tune every visual component of the viewing canvas and window chrome:
 
@@ -256,7 +280,7 @@ On Windows:
 * Build the application: run `build.cmd`
 * Build the complete standalone installer: run `build.cmd` (or `build.cmd fast --no-pause`)
 
-Release builds produce four deliverables: `Glide-4.1.5-Portable.zip`, `dist-installer\Glide Setup.exe`, `Glide-4.1.5.exe` for direct testing, and the compact `Glide-Zero-Context-Handover.zip`.
+Release builds produce four deliverables: `Glide-4.2.3-Portable.zip`, `dist-installer\Glide Setup.exe`, `Glide-4.2.3.exe` for direct testing, and the compact `Glide-Zero-Context-Handover.zip`.
 
 ---
 

@@ -30,12 +30,19 @@ public static class ImageMetadataReader
     {
         try
         {
-            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 64 * 1024, FileOptions.SequentialScan);
-            if (stream.Length > 64 * 1024 * 1024) return new ImageMetadata();
-            var data = new byte[checked((int)stream.Length)]; stream.ReadExactly(data);
             token.ThrowIfCancellationRequested();
             var ext = ImageFormatRegistry.GetLongestExtension(path).ToLowerInvariant();
-            if (ext is ".jpg" or ".jpeg" or ".jpe") return ParseJpeg(data);
+            if (ext is ".jpg" or ".jpeg" or ".jpe")
+            {
+                using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 64 * 1024, FileOptions.SequentialScan);
+                return ParseJpegStream(stream, token);
+            }
+
+            using var fallbackStream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 64 * 1024, FileOptions.SequentialScan);
+            if (fallbackStream.Length > 64 * 1024 * 1024) return new ImageMetadata();
+            var data = new byte[checked((int)fallbackStream.Length)];
+            fallbackStream.ReadExactly(data);
+            token.ThrowIfCancellationRequested();
             if (ext == ".png") return ParsePng(data);
             if (ext is ".tif" or ".tiff") return ParseTiff(data, 0, data.Length);
             if (ext == ".gif") return new ImageMetadata(FrameCount: CountGifFrames(data));
@@ -49,16 +56,74 @@ public static class ImageMetadataReader
     private static ImageMetadata ParseJpeg(byte[] data)
     {
         if (data.Length < 4 || data[0] != 0xff || data[1] != 0xd8) return new ImageMetadata();
-        for (var i = 2; i + 4 < data.Length;)
+        using var ms = new MemoryStream(data, writable: false);
+        return ParseJpegStream(ms, CancellationToken.None);
+    }
+
+    private static ImageMetadata ParseJpegStream(Stream stream, CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+        Span<byte> header = stackalloc byte[2];
+        if (stream.Read(header) != 2 || header[0] != 0xff || header[1] != 0xd8) return new ImageMetadata();
+
+        while (true)
         {
-            if (data[i] != 0xff) { i++; continue; }
-            while (i < data.Length && data[i] == 0xff) i++;
-            if (i >= data.Length) break;
-            var marker = data[i++]; if (marker is 0xd8 or 0xd9) continue;
-            if (i + 2 > data.Length) break; var len = (data[i] << 8) | data[i + 1];
-            if (len < 2 || i + len > data.Length) break;
-            if (marker == 0xe1 && len >= 8 && Encoding.ASCII.GetString(data, i + 2, 6) == "Exif\0\0") return ParseTiff(data[(i + 8)..(i + len)], 0, len - 8);
-            i += len;
+            token.ThrowIfCancellationRequested();
+            var b = stream.ReadByte();
+            if (b < 0) break;
+            if (b != 0xff) continue;
+            while (b == 0xff)
+            {
+                b = stream.ReadByte();
+                if (b < 0) break;
+            }
+            if (b < 0) break;
+            var marker = (byte)b;
+            if (marker is 0xd8 or 0x00) continue;
+            if (marker is 0xd9 or 0xda) break; // EOI or SOS: compressed scan data begins here, stop marker scan
+            if (marker is >= 0xd0 and <= 0xd7 or 0x01) continue; // Standalone restart/temp markers
+
+            var lenHigh = stream.ReadByte();
+            var lenLow = stream.ReadByte();
+            if (lenHigh < 0 || lenLow < 0) break;
+            var len = (lenHigh << 8) | lenLow;
+            if (len < 2) break;
+            var payloadLen = len - 2;
+
+            if (marker == 0xe1 && payloadLen >= 8)
+            {
+                token.ThrowIfCancellationRequested();
+                var payload = new byte[payloadLen];
+                var read = 0;
+                while (read < payloadLen)
+                {
+                    var r = stream.Read(payload, read, payloadLen - read);
+                    if (r <= 0) break;
+                    read += r;
+                }
+                if (read == payloadLen && Encoding.ASCII.GetString(payload, 0, 6) == "Exif\0\0")
+                    return ParseTiff(payload, 6, payloadLen - 6);
+            }
+            else
+            {
+                if (stream.CanSeek)
+                {
+                    if (stream.Position + payloadLen > stream.Length) break;
+                    stream.Seek(payloadLen, SeekOrigin.Current);
+                }
+                else
+                {
+                    var skipped = 0;
+                    Span<byte> skipBuf = stackalloc byte[Math.Min(4096, payloadLen)];
+                    while (skipped < payloadLen)
+                    {
+                        var toRead = Math.Min(skipBuf.Length, payloadLen - skipped);
+                        var r = stream.Read(skipBuf[..toRead]);
+                        if (r <= 0) break;
+                        skipped += r;
+                    }
+                }
+            }
         }
         return new ImageMetadata();
     }

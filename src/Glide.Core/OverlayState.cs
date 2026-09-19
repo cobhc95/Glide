@@ -12,7 +12,17 @@ public sealed record OverlayState(
     double Zoom = 1.0,
     double PanX = 0,
     double PanY = 0,
-    int ZIndex = 0)
+    int ZIndex = 0,
+    bool AnimationConfigured = false,
+    bool AnimationRunning = false,
+    string AnimationRegion = "Anywhere",
+    int AnimationSpeedDipsPerSecond = 90,
+    int AnimationTurnIntervalMs = 2500,
+    int AnimationTurnAngleDegrees = 120,
+    bool AnimationPauseWhileInteracting = true,
+    bool AnimationAvoidOverlap = true,
+    bool PreserveAspectRatio = true,
+    double ContentScale = 0)
 {
     public OverlayState Normalize()
     {
@@ -27,16 +37,32 @@ public sealed record OverlayState(
             Opacity = Math.Clamp(double.IsFinite(Opacity) ? Opacity : 1, .1, 1),
             Zoom = Math.Clamp(double.IsFinite(Zoom) ? Zoom : 1, .1, 16),
             PanX = double.IsFinite(PanX) ? PanX : 0,
-            PanY = double.IsFinite(PanY) ? PanY : 0
+            PanY = double.IsFinite(PanY) ? PanY : 0,
+            ContentScale = double.IsFinite(ContentScale) && ContentScale > 0 ? ContentScale : 0,
+            AnimationRegion = NormalizeAnimationRegion(AnimationRegion),
+            AnimationSpeedDipsPerSecond = Math.Clamp(AnimationSpeedDipsPerSecond, 10, 2000),
+            AnimationTurnIntervalMs = Math.Clamp(AnimationTurnIntervalMs, 0, 60000),
+            AnimationTurnAngleDegrees = Math.Clamp(AnimationTurnAngleDegrees, 0, 180)
         };
     }
+
+    private static string NormalizeAnimationRegion(string? value) => value?.Trim().ToLowerInvariant() switch
+    {
+        "top half" => "Top half",
+        "bottom half" => "Bottom half",
+        "top left quarter" => "Top left quarter",
+        "top right quarter" => "Top right quarter",
+        "bottom left quarter" => "Bottom left quarter",
+        "bottom right quarter" => "Bottom right quarter",
+        _ => "Anywhere"
+    };
 }
 
 public static class OverlayLayoutStore
 {
     public static void Save(string path, IEnumerable<OverlayState> overlays)
     {
-        var payload = new { version = 1, overlays = overlays.Select(x => x.Normalize()).ToArray() };
+        var payload = new { version = 2, overlays = overlays.Select(x => x.Normalize()).ToArray() };
         var json = System.Text.Json.JsonSerializer.Serialize(payload, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
         var temp = path + ".tmp"; Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
         File.WriteAllText(temp, json);
@@ -68,7 +94,7 @@ public static class OverlayLayoutStore
     private static IReadOnlyList<OverlayState> Parse(string json)
     {
         using var doc = System.Text.Json.JsonDocument.Parse(json);
-        if (doc.RootElement.TryGetProperty("version", out var version) && version.GetInt32() == 1 && doc.RootElement.TryGetProperty("overlays", out var rows))
+        if (doc.RootElement.TryGetProperty("version", out var version) && version.GetInt32() is 1 or 2 && doc.RootElement.TryGetProperty("overlays", out var rows))
             return System.Text.Json.JsonSerializer.Deserialize<OverlayState[]>(rows.GetRawText())?.Select(x => x.Normalize()).ToArray() ?? Array.Empty<OverlayState>();
         return System.Text.Json.JsonSerializer.Deserialize<OverlayState[]>(doc.RootElement.GetRawText())?.Select(x => x.Normalize()).ToArray() ?? Array.Empty<OverlayState>();
     }

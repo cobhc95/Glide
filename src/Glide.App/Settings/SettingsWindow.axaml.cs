@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using System.Text;
 using System.Text.Json;
 using Avalonia;
 using Avalonia.Controls;
@@ -44,8 +45,16 @@ public partial class SettingsWindow : Window
     private readonly Dictionary<string, (Border Card, TextBlock Shortcut)> _hotkeySearchRows = new(StringComparer.OrdinalIgnoreCase);
     private bool _hotkeyFlashOn;
     private readonly DispatcherTimer _hotkeyCaptureFlashTimer = new() { Interval = TimeSpan.FromMilliseconds(360) };
+    // Rebuilding the editable search cards constructs one live editor per match (up to ~200
+    // controls). Coalesce rapid typing so the UI thread is not blocked once per keystroke.
+    private readonly DispatcherTimer _searchDebounceTimer = new() { Interval = TimeSpan.FromMilliseconds(140) };
+    private string _pendingSearchQuery = string.Empty;
+    private static readonly List<string> EmptyShortcutList = new();
     private string _activeCategory = "General";
     private readonly Dictionary<string, Control> _settingControls = new(StringComparer.OrdinalIgnoreCase);
+    // Global-search index per setting. Built once from catalog metadata plus the on-screen wording
+    // of the mapped control, so users can find settings by the text they actually see in the UI.
+    private readonly Dictionary<string, string> _searchHaystackCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, ComboBox> _gestureEditors = new(StringComparer.OrdinalIgnoreCase);
     private Dictionary<string, string> _workingGestures = GestureCatalog.CreateDefaultMap();
     private List<string> _workingTitleBarButtons = TitleBarButtonCatalog.DefaultButtonIds.ToList();
@@ -56,6 +65,12 @@ public partial class SettingsWindow : Window
     private bool _gestureMatrixBuilt;
     private bool _hotkeyRowsBuilt;
     private const int SettingsTransferSchema = 1;
+
+    // Settings whose editor is legitimately disabled by the current state rather than a defect.
+    private static readonly HashSet<string> ConditionallyDisabledSettingIds = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "escape.resetRememberedClose" // disabled while the remembered Escape close choice is "Ask"
+    };
 
     private sealed class SettingsTransferDocument
     {
@@ -95,6 +110,7 @@ public partial class SettingsWindow : Window
             ["General"] = GeneralPanel,
             ["Appearance"] = AppearancePanel,
             ["Viewing"] = ViewingPanel,
+            ["Animation"] = AnimationPanel,
             ["Interface"] = InterfacePanel,
             ["Mouse"] = MousePanel,
             ["Performance"] = PerformancePanel,
@@ -110,6 +126,11 @@ public partial class SettingsWindow : Window
 
         BuildSettingControlMap();
         _hotkeyCaptureFlashTimer.Tick += (_, _) => ToggleHotkeyCaptureFlash();
+        _searchDebounceTimer.Tick += (_, _) =>
+        {
+            _searchDebounceTimer.Stop();
+            RunSearchRebuild(_pendingSearchQuery);
+        };
         LoadControls(_committed);
         // IMPORTANT: controls can canonicalize legacy/derived settings while loading (for example a
         // compatibility boolean that is now represented by a policy ComboBox). That normalization is
@@ -125,7 +146,7 @@ public partial class SettingsWindow : Window
         Opened += SettingsOpened;
         PopupPlacementStore.Track(this, "settings");
         Closing += SettingsClosing;
-        Closed += (_, _) => _hotkeyCaptureFlashTimer.Stop();
+        Closed += (_, _) => { _hotkeyCaptureFlashTimer.Stop(); _searchDebounceTimer.Stop(); };
     }
 
     private void SettingsSurfacePointerPressed(object? sender, PointerPressedEventArgs e)
@@ -211,6 +232,14 @@ public partial class SettingsWindow : Window
             ContinueSiblingFoldersCheck.IsChecked = s.ContinueSiblingFolders;
             HierarchicalFolderTraversalCheck.IsChecked = s.HierarchicalFolderTraversal;
             ConfirmHierarchicalFolderTraversalCheck.IsChecked = s.ConfirmHierarchicalFolderTraversal;
+            SelectByText(HierarchicalPreviousFolderEntryCombo, string.IsNullOrWhiteSpace(s.HierarchicalPreviousFolderEntry) ? "First image" : s.HierarchicalPreviousFolderEntry);
+            NavigationRateLimitMsBox.Value = Math.Clamp(s.NavigationRateLimitMs, 0, 600000);
+            SelectByText(NavigationRateLimitInputCombo, string.IsNullOrWhiteSpace(s.NavigationRateLimitInput) ? "Both" : s.NavigationRateLimitInput);
+            NavigationRateLimitIndicatorCheck.IsChecked = s.NavigationRateLimitShowIndicator;
+            SelectByText(NavigationRateLimitIndicatorPositionCombo, string.IsNullOrWhiteSpace(s.NavigationRateLimitIndicatorPosition) ? "Top left" : s.NavigationRateLimitIndicatorPosition);
+            NavigationRateLimitWindowedCheck.IsChecked = s.NavigationRateLimitWindowed;
+            NavigationRateLimitFullscreenCheck.IsChecked = s.NavigationRateLimitFullscreen;
+            NavigationRateLimitSlideshowCheck.IsChecked = s.NavigationRateLimitSlideshow;
             RememberLastOpenCheck.IsChecked = s.RememberLastOpenLocation;
             NewExplorerTabLastLocationCheck.IsChecked = s.NewExplorerTabsUseLastLocation;
             NewExplorerTabDefaultDirectoryBox.Text = s.NewExplorerTabDefaultDirectory;
@@ -227,9 +256,9 @@ public partial class SettingsWindow : Window
             HomeTipsCheck.IsChecked = s.ShowHomeTips;
             ShowRecentOnHomeCheck.IsChecked = s.ShowRecentOnHome;
             ConfirmDiscardSettingsCheck.IsChecked = s.ConfirmDiscardSettingsChanges;
-            SelectByText(StartupActionCombo, string.IsNullOrWhiteSpace(s.StartupAction) ? "Welcome tab" : s.StartupAction);
+            SelectByText(StartupActionCombo, string.Equals(s.StartupAction, "Explorer tab", StringComparison.OrdinalIgnoreCase) || string.IsNullOrWhiteSpace(s.StartupAction) ? "Welcome tab" : s.StartupAction);
             StartupCustomPathBox.Text = s.StartupCustomPath ?? string.Empty;
-            SelectByText(NewTabActionCombo, string.IsNullOrWhiteSpace(s.NewTabAction) ? "Explorer tab" : s.NewTabAction);
+            SelectByText(NewTabActionCombo, string.Equals(s.NewTabAction, "Explorer tab", StringComparison.OrdinalIgnoreCase) || string.IsNullOrWhiteSpace(s.NewTabAction) ? "Welcome tab" : s.NewTabAction);
             NewTabCustomPathBox.Text = s.NewTabCustomPath ?? string.Empty;
 
             StatusCheck.IsChecked = s.ShowStatusSurface;
@@ -241,7 +270,7 @@ public partial class SettingsWindow : Window
             HideCursorFullscreenCheck.IsChecked = s.HideCursorFullscreen;
             AutoHideFullscreenChromeCheck.IsChecked = s.AutoHideFullscreenChrome;
             TabsCheck.IsChecked = s.TabsEnabled;
-            SelectByText(NavigateToFolderBehaviorCombo, string.IsNullOrWhiteSpace(s.NavigateToFolderBehavior) ? "Internal browser" : s.NavigateToFolderBehavior);
+            SelectByText(NavigateToFolderBehaviorCombo, "Windows Explorer");
             TabBarBackButtonCheck.IsChecked = s.TabBarShowBackButton;
             TabBarForwardButtonCheck.IsChecked = s.TabBarShowForwardButton;
             SelectByText(ExternalOpenBehaviorCombo, string.IsNullOrWhiteSpace(s.ExternalOpenBehavior) ? "Open in new tab" : s.ExternalOpenBehavior);
@@ -257,6 +286,7 @@ public partial class SettingsWindow : Window
             FullscreenStatusAlwaysCheck.IsChecked = s.FullscreenStatusAlwaysOn;
             FullscreenKeepTabBarOpenCheck.IsChecked = s.FullscreenKeepTabBarOpen;
             AlwaysOnTopCheck.IsChecked = s.AlwaysOnTop;
+            SelectByText(AlwaysOnTopModeCombo, string.Equals(s.AlwaysOnTopMode, "Soft", StringComparison.OrdinalIgnoreCase) ? "Soft" : "Hard");
             AutoCenterWindowOnRestoreCheck.IsChecked = s.AutoCenterWindowOnRestore;
             SelectByText(FullscreenExitBehaviorCombo, string.IsNullOrWhiteSpace(s.FullscreenExitBehavior) ? "Restore size and location" : s.FullscreenExitBehavior);
             SelectByText(DefaultViewCombo, s.DefaultViewMode);
@@ -355,7 +385,7 @@ public partial class SettingsWindow : Window
             DoubleClickTabCloseCheck.IsChecked = s.DoubleClickTabCloses;
             SelectByText(LastTabBehaviorCombo, string.IsNullOrWhiteSpace(s.LastTabCloseBehavior) ? "Open home page" : s.LastTabCloseBehavior);
             ConfirmCloseMultipleTabsCheck.IsChecked = s.ConfirmCloseMultipleTabs;
-            SelectByText(HomePageCombo, s.HomePageMode);
+            SelectByText(HomePageCombo, string.Equals(s.HomePageMode, "Browser page", StringComparison.OrdinalIgnoreCase) ? "Welcome page" : s.HomePageMode);
             FolderNavGroupCheck.IsChecked = s.FolderNavShowGroup;
             FolderNavPreviousCheck.IsChecked = s.FolderNavShowPrevious;
             FolderNavNextCheck.IsChecked = s.FolderNavShowNext;
@@ -364,6 +394,7 @@ public partial class SettingsWindow : Window
             FolderNavIncludeHiddenCheck.IsChecked = s.FolderNavIncludeHidden;
             FolderNavWrapCheck.IsChecked = s.FolderNavWrap;
             FolderNavFirstImageCheck.IsChecked = s.FolderNavOpenFirstImage;
+            SelectByText(FolderNavOrderCombo, string.IsNullOrWhiteSpace(s.FolderNavOrder) ? "Alphabetical" : s.FolderNavOrder);
 
             PictureCounterCheck.IsChecked = s.PictureCounterEnabled;
             PictureTemplateBox.Text = s.PictureCounterTemplate;
@@ -385,6 +416,13 @@ public partial class SettingsWindow : Window
             OverlayRememberZoomCheck.IsChecked = s.OverlayRememberZoom;
             OverlayRightDragCheck.IsChecked = s.OverlayRightDragPan;
             OverlayScaleWithWindowCheck.IsChecked = s.OverlayScaleWithWindow;
+            SelectByText(OverlayAnimationRegionCombo, s.OverlayAnimationRegion ?? "Anywhere");
+            OverlayAnimationSpeedBox.Value = s.OverlayAnimationSpeedDipsPerSecond;
+            OverlayAnimationTurnIntervalBox.Value = s.OverlayAnimationTurnIntervalMs;
+            OverlayAnimationTurnAngleBox.Value = s.OverlayAnimationTurnAngleDegrees;
+            OverlayAnimationPauseCheck.IsChecked = s.OverlayAnimationPauseWhileInteracting;
+            OverlayAnimationAvoidOverlapCheck.IsChecked = s.OverlayAnimationAvoidOverlap;
+            SelectByText(OverlayAnimationRefreshRateCombo, $"{s.OverlayAnimationRefreshRateHz} Hz");
             OpenFileDefaultDirectoryBox.Text = s.OpenFileDefaultDirectory ?? string.Empty;
             OverlayDefaultDirectoryBox.Text = s.OverlayDefaultDirectory ?? string.Empty;
             ProfileDefaultDirectoryBox.Text = s.ProfileDefaultDirectory ?? string.Empty;
@@ -413,6 +451,14 @@ public partial class SettingsWindow : Window
         state.ContinueSiblingFolders = ContinueSiblingFoldersCheck.IsChecked == true;
         state.HierarchicalFolderTraversal = HierarchicalFolderTraversalCheck.IsChecked == true;
         state.ConfirmHierarchicalFolderTraversal = ConfirmHierarchicalFolderTraversalCheck.IsChecked == true;
+        state.HierarchicalPreviousFolderEntry = SelectedText(HierarchicalPreviousFolderEntryCombo, "First image");
+        state.NavigationRateLimitMs = (int)(NavigationRateLimitMsBox.Value ?? 0);
+        state.NavigationRateLimitInput = SelectedText(NavigationRateLimitInputCombo, "Both");
+        state.NavigationRateLimitShowIndicator = NavigationRateLimitIndicatorCheck.IsChecked == true;
+        state.NavigationRateLimitIndicatorPosition = SelectedText(NavigationRateLimitIndicatorPositionCombo, "Top left");
+        state.NavigationRateLimitWindowed = NavigationRateLimitWindowedCheck.IsChecked == true;
+        state.NavigationRateLimitFullscreen = NavigationRateLimitFullscreenCheck.IsChecked == true;
+        state.NavigationRateLimitSlideshow = NavigationRateLimitSlideshowCheck.IsChecked == true;
         state.RememberLastOpenLocation = RememberLastOpenCheck.IsChecked == true;
         state.NewExplorerTabsUseLastLocation = NewExplorerTabLastLocationCheck.IsChecked == true;
         state.NewExplorerTabDefaultDirectory = NewExplorerTabDefaultDirectoryBox.Text?.Trim() ?? string.Empty;
@@ -429,9 +475,9 @@ public partial class SettingsWindow : Window
         state.ShowHomeTips = HomeTipsCheck.IsChecked == true;
         state.ShowRecentOnHome = ShowRecentOnHomeCheck.IsChecked == true;
         state.ConfirmDiscardSettingsChanges = ConfirmDiscardSettingsCheck.IsChecked == true;
-        state.StartupAction = SelectedText(StartupActionCombo, "Welcome tab");
+        state.StartupAction = SelectedText(StartupActionCombo, "Welcome tab") is "Explorer tab" ? "Welcome tab" : SelectedText(StartupActionCombo, "Welcome tab");
         state.StartupCustomPath = StartupCustomPathBox.Text?.Trim() ?? string.Empty;
-        state.NewTabAction = SelectedText(NewTabActionCombo, "Explorer tab");
+        state.NewTabAction = SelectedText(NewTabActionCombo, "Welcome tab") is "Explorer tab" ? "Welcome tab" : SelectedText(NewTabActionCombo, "Welcome tab");
         state.NewTabCustomPath = NewTabCustomPathBox.Text?.Trim() ?? string.Empty;
 
         state.ShowStatusSurface = StatusCheck.IsChecked == true;
@@ -441,7 +487,7 @@ public partial class SettingsWindow : Window
         state.HideCursorFullscreen = HideCursorFullscreenCheck.IsChecked == true;
         state.AutoHideFullscreenChrome = AutoHideFullscreenChromeCheck.IsChecked == true;
         state.TabsEnabled = TabsCheck.IsChecked == true;
-        state.NavigateToFolderBehavior = SelectedText(NavigateToFolderBehaviorCombo, "Internal browser");
+        state.NavigateToFolderBehavior = "Windows Explorer";
         state.TabBarShowBackButton = TabBarBackButtonCheck.IsChecked == true;
         state.TabBarShowForwardButton = TabBarForwardButtonCheck.IsChecked == true;
         state.ExternalOpenBehavior = SelectedText(ExternalOpenBehaviorCombo, "Open in new tab");
@@ -457,6 +503,7 @@ public partial class SettingsWindow : Window
         state.FullscreenStatusAlwaysOn = FullscreenStatusAlwaysCheck.IsChecked == true;
         state.FullscreenKeepTabBarOpen = FullscreenKeepTabBarOpenCheck.IsChecked == true;
         state.AlwaysOnTop = AlwaysOnTopCheck.IsChecked == true;
+        state.AlwaysOnTopMode = SelectedText(AlwaysOnTopModeCombo, "Hard");
         state.AutoCenterWindowOnRestore = AutoCenterWindowOnRestoreCheck.IsChecked == true;
         state.FullscreenExitBehavior = SelectedText(FullscreenExitBehaviorCombo, "Restore size and location");
         state.DefaultViewMode = SelectedText(DefaultViewCombo, "Fit image");
@@ -554,7 +601,7 @@ public partial class SettingsWindow : Window
         state.LastTabCloseBehavior = SelectedText(LastTabBehaviorCombo, "Open home page");
         state.ConfirmCloseMultipleTabs = ConfirmCloseMultipleTabsCheck.IsChecked == true;
         if (state.ConfirmCloseMultipleTabs) state.RememberedMultiTabCloseChoice = "Ask";
-        state.HomePageMode = SelectedText(HomePageCombo, "Welcome page");
+        state.HomePageMode = SelectedText(HomePageCombo, "Welcome page") is "Browser page" ? "Welcome page" : SelectedText(HomePageCombo, "Welcome page");
         state.FolderNavShowGroup = FolderNavGroupCheck.IsChecked == true;
         state.FolderNavShowPrevious = FolderNavPreviousCheck.IsChecked == true;
         state.FolderNavShowNext = FolderNavNextCheck.IsChecked == true;
@@ -563,6 +610,7 @@ public partial class SettingsWindow : Window
         state.FolderNavIncludeHidden = FolderNavIncludeHiddenCheck.IsChecked == true;
         state.FolderNavWrap = FolderNavWrapCheck.IsChecked == true;
         state.FolderNavOpenFirstImage = FolderNavFirstImageCheck.IsChecked == true;
+        state.FolderNavOrder = SelectedText(FolderNavOrderCombo, "Alphabetical");
 
         state.PictureCounterEnabled = PictureCounterCheck.IsChecked == true;
         state.PictureCounterTemplate = string.IsNullOrWhiteSpace(PictureTemplateBox.Text) ? "[{index}/{total}]" : PictureTemplateBox.Text!;
@@ -584,6 +632,13 @@ public partial class SettingsWindow : Window
         state.OverlayRememberZoom = OverlayRememberZoomCheck.IsChecked == true;
         state.OverlayRightDragPan = OverlayRightDragCheck.IsChecked == true;
         state.OverlayScaleWithWindow = OverlayScaleWithWindowCheck.IsChecked == true;
+        state.OverlayAnimationRegion = SelectedText(OverlayAnimationRegionCombo, "Anywhere");
+        state.OverlayAnimationSpeedDipsPerSecond = Math.Clamp((int)(OverlayAnimationSpeedBox.Value ?? 90), 10, 2000);
+        state.OverlayAnimationTurnIntervalMs = Math.Clamp((int)(OverlayAnimationTurnIntervalBox.Value ?? 2500), 0, 60000);
+        state.OverlayAnimationTurnAngleDegrees = Math.Clamp((int)(OverlayAnimationTurnAngleBox.Value ?? 120), 0, 180);
+        state.OverlayAnimationPauseWhileInteracting = OverlayAnimationPauseCheck.IsChecked == true;
+        state.OverlayAnimationAvoidOverlap = OverlayAnimationAvoidOverlapCheck.IsChecked == true;
+        state.OverlayAnimationRefreshRateHz = ParseChoiceNumber(OverlayAnimationRefreshRateCombo, 144);
         state.OpenFileDefaultDirectory = OpenFileDefaultDirectoryBox.Text?.Trim() ?? string.Empty;
         state.OverlayDefaultDirectory = OverlayDefaultDirectoryBox.Text?.Trim() ?? string.Empty;
         state.ProfileDefaultDirectory = ProfileDefaultDirectoryBox.Text?.Trim() ?? string.Empty;
@@ -924,6 +979,7 @@ public partial class SettingsWindow : Window
             "General" => "Application behavior, history, navigation and startup/new-tab preferences",
             "Appearance" => "Themes, colours, sizing and visual styling without changing interaction behavior",
             "Viewing" => "Image presentation, viewport scaling, zoom behavior, scrollbars, text overlay HUD and overlays",
+            "Animation" => "Overlay motion and animation controls",
             "Interface" => "Window behavior, folder traversal, tab layout, caption controls, navigation buttons and window interactions",
             "Mouse" => "Mouse gestures, selection, zoom, panning and fullscreen interaction",
             "Performance" => "Cold-start, decode quality, prefetch, refinement and memory controls",
@@ -945,6 +1001,7 @@ public partial class SettingsWindow : Window
     {
         "Appearance" => "Themes & Colours",
         "Viewing" => "Viewing & Appearance",
+        "Animation" => "Animation",
         "Interface" => "Interface & Behavior",
         "Mouse" => "Mouse & Fullscreen",
         "Performance" => "Performance & Startup",
@@ -971,12 +1028,92 @@ public partial class SettingsWindow : Window
         var query = SearchBox.Text?.Trim() ?? string.Empty;
         if (query.Length == 0)
         {
+            _searchDebounceTimer.Stop();
+            _pendingSearchQuery = string.Empty;
             _hotkeySearchRows.Clear();
             SearchPanel.Children.Clear();
             SearchPanel.IsVisible = false;
             ShowCategory(_activeCategory, clearSearch: false);
             return;
         }
+
+        // Coalesce keystrokes: the rebuild below constructs a live editor per match, so running it
+        // synchronously on every TextChanged stalls typing. The most recent query always wins.
+        _pendingSearchQuery = query;
+        _searchDebounceTimer.Stop();
+        _searchDebounceTimer.Start();
+    }
+
+    /// <summary>
+    /// Forces the pending debounced search to render immediately. Used by the diagnostic capture,
+    /// which sets the search text and then screenshots without waiting for the debounce timer.
+    /// </summary>
+    internal void FlushPendingSearch()
+    {
+        _searchDebounceTimer.Stop();
+        if (!string.IsNullOrEmpty(_pendingSearchQuery)) RunSearchRebuild(_pendingSearchQuery);
+    }
+
+    /// <summary>
+    /// Builds the searchable text for one setting: catalog id/label/category/description/terms plus
+    /// the mapped control's visible content, tooltip and control name. Cached per window because the
+    /// wording never changes while Settings is open. This keeps search global and matches what the
+    /// user actually reads in the UI (a checkbox labelled "Show status bar" is found by "status bar"
+    /// even though the catalog label is "Show status surface").
+    /// </summary>
+    private string SearchHaystackFor(SettingDefinition setting)
+    {
+        if (_searchHaystackCache.TryGetValue(setting.Id, out var cached)) return cached;
+        var sb = new StringBuilder(160);
+        sb.Append(setting.Id).Append(' ')
+          .Append(setting.Label).Append(' ')
+          .Append(setting.Category).Append(' ')
+          .Append(setting.Description);
+        foreach (var term in setting.SearchTerms) sb.Append(' ').Append(term);
+        if (_settingControls.TryGetValue(setting.Id, out var control)) AppendControlSearchText(sb, control);
+        // Visible mirror controls write the same value but carry different on-screen wording.
+        switch (setting.Id)
+        {
+            case "status.visible": AppendControlSearchText(sb, StatusVisibleMirrorCheck); break;
+            case "status.hoverWhenClosed": AppendControlSearchText(sb, StatusHoverMirrorCheck); break;
+        }
+        cached = sb.ToString();
+        _searchHaystackCache[setting.Id] = cached;
+        return cached;
+
+        static void AppendControlSearchText(StringBuilder builder, Control control)
+        {
+            var hasLabelContent = false;
+            if (control is ContentControl { Content: string content } && !string.IsNullOrWhiteSpace(content))
+            {
+                builder.Append(' ').Append(content);
+                hasLabelContent = true;
+            }
+            if (ToolTip.GetTip(control) is string tip && !string.IsNullOrWhiteSpace(tip))
+                builder.Append(' ').Append(tip);
+            if (!string.IsNullOrWhiteSpace(control.Name)) builder.Append(' ').Append(control.Name);
+            // ComboBox / NumericUpDown / TextBox editors carry their label as a sibling TextBlock
+            // rather than Content; index that visible label so search matches what the user reads
+            // (for example "Always-on-top strength").
+            if (!hasLabelContent && control.GetVisualParent() is Panel parent)
+            {
+                var siblings = parent.Children;
+                for (var i = siblings.IndexOf(control) - 1; i >= 0; i--)
+                {
+                    if (siblings[i] is TextBlock label && !string.IsNullOrWhiteSpace(label.Text))
+                    {
+                        builder.Append(' ').Append(label.Text);
+                        break;
+                    }
+                    if (siblings[i] is not TextBlock) break;
+                }
+            }
+        }
+    }
+
+    private void RunSearchRebuild(string query)
+    {
+        if (_loadingControls || string.IsNullOrEmpty(query)) return;
 
         foreach (var panel in _panels.Values) panel.IsVisible = false;
         foreach (var child in NavigationRail.Children.OfType<Button>()) child.Classes.Remove("selected");
@@ -987,11 +1124,7 @@ public partial class SettingsWindow : Window
         var allCategories = string.Equals(categoryFilter, "All categories", StringComparison.OrdinalIgnoreCase);
         var matches = SettingsCatalog.All.Where(setting =>
             (allCategories || string.Equals(setting.Category, categoryFilter, StringComparison.OrdinalIgnoreCase)) &&
-            words.All(word =>
-            setting.Label.Contains(word, StringComparison.OrdinalIgnoreCase) ||
-            setting.Description.Contains(word, StringComparison.OrdinalIgnoreCase) ||
-            setting.Category.Contains(word, StringComparison.OrdinalIgnoreCase) ||
-            setting.SearchTerms.Any(term => term.Contains(word, StringComparison.OrdinalIgnoreCase)))).ToList();
+            words.All(word => SearchHaystackFor(setting).Contains(word, StringComparison.OrdinalIgnoreCase))).ToList();
 
         // Legacy Settings search is not a read-only index: the user can change matching values here.
         foreach (var setting in matches)
@@ -1004,7 +1137,7 @@ public partial class SettingsWindow : Window
             h.Id.Contains(word, StringComparison.OrdinalIgnoreCase) ||
             word.Contains("hotkey", StringComparison.OrdinalIgnoreCase) ||
             word.Contains("shortcut", StringComparison.OrdinalIgnoreCase) ||
-            _workingHotkeys.GetValueOrDefault(h.Id, new()).Any(k => k.Contains(word, StringComparison.OrdinalIgnoreCase)))).ToList() : new List<HotkeyActionDefinition>();
+            _workingHotkeys.GetValueOrDefault(h.Id, EmptyShortcutList).Any(k => k.Contains(word, StringComparison.OrdinalIgnoreCase)))).ToList() : new List<HotkeyActionDefinition>();
         if (hotkeyMatches.Count > 0)
         {
             SearchPanel.Children.Add(new TextBlock
@@ -1114,6 +1247,7 @@ public partial class SettingsWindow : Window
 
         Control editor;
         Control? source = null;
+        var companions = CreateSearchCompanionButtons(setting.Id).ToList();
         if (setting.FuturePhase is not null)
         {
             editor = new TextBlock
@@ -1127,6 +1261,13 @@ public partial class SettingsWindow : Window
         }
         else if (_settingControls.TryGetValue(setting.Id, out source) && source.IsEnabled)
             editor = CreateSearchProxy(source);
+        else if (companions.Count > 0)
+        {
+            // Action settings own labelled companion buttons (Open/Import/Add/...). Do not also add
+            // the generic category "Open" fallback, which produced two identical Open buttons for the
+            // command registry and gesture matrix.
+            editor = new Panel { Width = 0, Height = 1 };
+        }
         else
         {
             var open = new Button { Content = "Open", Tag = CategoryKey(setting.Category), VerticalAlignment = VerticalAlignment.Center };
@@ -1134,7 +1275,7 @@ public partial class SettingsWindow : Window
             open.Click += (_, _) => ShowCategory((string)open.Tag!, clearSearch: true);
             editor = open;
         }
-        var completeEditor = BuildSearchEditorGroup(setting.Id, editor);
+        var completeEditor = BuildSearchEditorGroup(editor, companions);
         Grid.SetColumn(completeEditor, 1);
         grid.Children.Add(completeEditor);
         border.Child = grid;
@@ -1158,9 +1299,8 @@ public partial class SettingsWindow : Window
         return border;
     }
 
-    private Control BuildSearchEditorGroup(string settingId, Control editor)
+    private Control BuildSearchEditorGroup(Control editor, IReadOnlyList<Button> companions)
     {
-        var companions = CreateSearchCompanionButtons(settingId).ToList();
         if (companions.Count == 0) return editor;
         var panel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center };
         panel.Children.Add(editor);
@@ -1206,8 +1346,15 @@ public partial class SettingsWindow : Window
             case "escape.resetRememberedClose": yield return B("Reset", b => ResetEscChoiceClicked(b, new RoutedEventArgs())); break;
             case "profiles.import": yield return B("Import...", b => ImportSettingsClicked(b, new RoutedEventArgs())); break;
             case "profiles.export": yield return B("Export...", b => ExportSettingsClicked(b, new RoutedEventArgs())); break;
-            case "profiles.presets": yield return B("Open", b => ShowCategory("Profiles", clearSearch: true)); break;
+            case "profiles.presets": yield return B("Apply", b => ApplyPresetClicked(b, new RoutedEventArgs())); break;
+            case "hotkeys.preset": yield return B("Load", b => LoadHotkeyPresetClicked(b, new RoutedEventArgs())); break;
+            case "hotkeys.reset": yield return B("Reset", b => ResetHotkeysClicked(b, new RoutedEventArgs())); break;
             case "mouse.gestureMatrix": yield return B("Open", b => ShowCategory("Mouse", clearSearch: true)); break;
+            case "hotkeys.registry": yield return B("Open", b => ShowCategory("Hotkeys", clearSearch: true)); break;
+            case "developer.diagnostics":
+                yield return B("Run", b => RunDiagnosticsClicked(b, new RoutedEventArgs()));
+                yield return B("Export ZIP", b => ExportDiagnosticsClicked(b, new RoutedEventArgs()));
+                break;
         }
     }
 
@@ -1266,6 +1413,7 @@ public partial class SettingsWindow : Window
     {
         "Themes & Colours" => "Appearance",
         "Viewing & Interface" => "Viewing",
+        "Animation" => "Animation",
         "Mouse & Fullscreen" => "Mouse",
         "Performance & Startup" => "Performance",
         "Status Bar" => "Status",
@@ -1373,7 +1521,7 @@ public partial class SettingsWindow : Window
     {
         void M(string id, Control control) => _settingControls[id] = control;
         M("general.recentHistory", RecentHistoryCheck); M("general.historySize", HistorySizeBox); M("windows.rememberPlacement", RememberPlacementCheck); M("general.openFileDefaultDirectory", OpenFileDefaultDirectoryBox);
-        M("general.singleInstance", ReuseSingleInstanceCheck); M("navigation.siblingFolders", ContinueSiblingFoldersCheck); M("navigation.hierarchicalFolders", HierarchicalFolderTraversalCheck); M("navigation.confirmHierarchicalBoundary", ConfirmHierarchicalFolderTraversalCheck); M("general.lastOpenLocation", RememberLastOpenCheck); M("general.newExplorerTabLastLocation", NewExplorerTabLastLocationCheck); M("general.newExplorerTabDefaultDirectory", NewExplorerTabDefaultDirectoryBox);
+        M("general.singleInstance", ReuseSingleInstanceCheck); M("navigation.siblingFolders", ContinueSiblingFoldersCheck); M("navigation.hierarchicalFolders", HierarchicalFolderTraversalCheck); M("navigation.confirmHierarchicalBoundary", ConfirmHierarchicalFolderTraversalCheck); M("navigation.hierarchicalPreviousEntry", HierarchicalPreviousFolderEntryCombo); M("navigation.rateLimitMs", NavigationRateLimitMsBox); M("navigation.rateLimitInput", NavigationRateLimitInputCombo); M("navigation.rateLimitIndicator", NavigationRateLimitIndicatorCheck); M("navigation.rateLimitIndicatorPosition", NavigationRateLimitIndicatorPositionCombo); M("navigation.rateLimitWindowed", NavigationRateLimitWindowedCheck); M("navigation.rateLimitFullscreen", NavigationRateLimitFullscreenCheck); M("navigation.rateLimitSlideshow", NavigationRateLimitSlideshowCheck); M("general.lastOpenLocation", RememberLastOpenCheck); M("general.newExplorerTabLastLocation", NewExplorerTabLastLocationCheck); M("general.newExplorerTabDefaultDirectory", NewExplorerTabDefaultDirectoryBox);
         M("appearance.theme", ThemeCombo); M("appearance.explorerTheme", ExplorerThemeCombo); M("appearance.accent", AccentCombo); M("appearance.glowColor", GlowCombo); M("appearance.background", MainBackgroundCombo); M("appearance.glowIntensity", GlowIntensityBox);
         M("appearance.homeTips", HomeTipsCheck); M("general.showRecentOnHome", ShowRecentOnHomeCheck); M("general.confirmDiscardSettings", ConfirmDiscardSettingsCheck);
         M("general.startupAction", StartupActionCombo); M("general.startupCustomPath", StartupCustomPathBox); M("general.newTabAction", NewTabActionCombo); M("general.newTabCustomPath", NewTabCustomPathBox); M("titlebar.customize", CustomizeTitleBarButton); M("escape.resetRememberedClose", ResetEscChoiceButton);
@@ -1381,8 +1529,9 @@ public partial class SettingsWindow : Window
         M("fullscreen.autoHideChrome", AutoHideFullscreenChromeCheck); M("fullscreen.keepTabBarOpen", FullscreenKeepTabBarOpenCheck); M("tabs.enabled", TabsCheck); M("tabs.navigateToFolderBehavior", NavigateToFolderBehaviorCombo); M("tabs.showBackButton", TabBarBackButtonCheck); M("tabs.showForwardButton", TabBarForwardButtonCheck); M("fullscreen.statusAlways", FullscreenStatusAlwaysCheck);
         M("caption.windowedMinimize", CaptionWindowedMinimizeCombo); M("caption.windowedMaximize", CaptionWindowedMaximizeCombo); M("caption.windowedClose", CaptionWindowedCloseCombo);
         M("caption.fullscreenMinimize", CaptionFullscreenMinimizeCombo); M("caption.fullscreenMaximize", CaptionFullscreenMaximizeCombo); M("caption.fullscreenClose", CaptionFullscreenCloseCombo);
-        M("windows.alwaysOnTop", AlwaysOnTopCheck); M("window.centerOnDisplay", AutoCenterWindowOnRestoreCheck); M("view.defaultMode", DefaultViewCombo); M("view.pointerZoom", PointerZoomCheck); M("view.keepZoom", PreserveZoomCheck);
-        M("view.zoomStep", ViewportZoomStepBox); M("view.upscaleSmallImages", UpscaleSmallImagesCheck); M("view.subpixelRendering", SubpixelRenderingCheck); M("view.showLoadingIndicator", ShowLoadingIndicatorCheck); M("keyboard.tabFocusNavigation", TabFocusNavigationCheck);
+        M("windows.alwaysOnTop", AlwaysOnTopCheck); M("windows.alwaysOnTopMode", AlwaysOnTopModeCombo); M("fullscreen.exitBehavior", FullscreenExitBehaviorCombo); M("windows.sameImageBehavior", SameImageBehaviorCombo); M("window.centerOnDisplay", AutoCenterWindowOnRestoreCheck); M("view.defaultMode", DefaultViewCombo); M("view.pointerZoom", PointerZoomCheck); M("view.keepZoom", PreserveZoomCheck);
+        M("view.zoomStep", ViewportZoomStepBox); M("view.upscaleSmallImages", UpscaleSmallImagesCheck); M("view.subpixelRendering", SubpixelRenderingCheck); M("view.showLoadingIndicator", ShowLoadingIndicatorCheck);
+        M("keyboard.tabFocusNavigation", TabFocusNavigationCheck);
         M("escape.stopSlideshow", EscStopsSlideshowCheck); M("escape.exitFullscreen", EscExitsFullscreenCheck); M("escape.confirmWindowedClose", EscWindowedConfirmCheck);
         M("mouse.doubleClickFullscreen", DoubleClickFullscreenCheck); M("mouse.doubleClickExitFullscreen", DoubleClickExitFullscreenCheck); M("mouse.fullscreenClicks", FullscreenClicksCheck);
         M("mouse.windowedWheelZoom", WindowedWheelZoomCheck); M("mouse.invertWheel", InvertWheelCheck); M("mouse.leftDrag", LeftDragModeCombo); M("mouse.leftWindowDrag", LeftWindowDragBehaviorCombo); M("mouse.rightDragPan", RightDragBehaviorCombo);
@@ -1399,18 +1548,18 @@ public partial class SettingsWindow : Window
         M("status.size", StatusBarSizeCombo); M("status.navigation", StatusNavigationCheck); M("status.zoom", StatusZoomCheck); M("status.slideshow", StatusSlideshowCheck); M("status.fit", StatusFitCheck);
         M("status.info", StatusInfoCheck); M("status.options", StatusOptionsCheck); M("status.close", StatusCloseCheck); M("status.statIndex", StatIndexCheck);
         M("status.statResolution", StatResolutionCheck); M("status.statZoom", StatZoomCheck); M("status.statFileSize", StatFileSizeCheck); M("status.statFormat", StatFormatCheck);
-        M("slideshow.interval", SlideshowIntervalBox); M("slideshow.loop", SlideshowLoopCheck); M("slideshow.crossFolders", SlideshowCrossFoldersCheck); M("slideshow.shuffle", SlideshowShuffleCheck);
+        M("slideshow.interval", SlideshowIntervalBox); M("slideshow.loop", SlideshowLoopCheck); M("slideshow.rightClickStops", SlideshowRightClickStopsCheck); M("slideshow.showQualityIndicator", SlideshowQualityIndicatorCheck); M("slideshow.crossFolders", SlideshowCrossFoldersCheck); M("slideshow.shuffle", SlideshowShuffleCheck);
         M("slideshow.direction", SlideshowDirectionCombo); M("slideshow.startFullscreen", SlideshowStartFullscreenCheck); M("slideshow.pauseInactive", SlideshowPauseInactiveCheck);
-        M("slideshow.rightClickStops", SlideshowRightClickStopsCheck); M("slideshow.showQualityIndicator", SlideshowQualityIndicatorCheck);
         M("tabs.minWidth", TabMinWidthBox); M("tabs.maxWidth", TabMaxWidthBox); M("tabs.overflowArrows", TabOverflowArrowsCheck); M("tabs.detach", TabDetachCheck); M("tabs.attach", TabAttachCheck); M("tabs.closedHistory", ClosedHistoryBox);
         M("tabs.closeEmptyAfterDetach", CloseEmptyAfterDetachCheck); M("tabs.detachedHome", DetachedHomeTabCheck); M("tabs.doubleClickClose", DoubleClickTabCloseCheck);
         M("tabs.lastTabBehavior", LastTabBehaviorCombo); M("tabs.confirmCloseMultiple", ConfirmCloseMultipleTabsCheck); M("tabs.homePage", HomePageCombo); M("folderNav.group", FolderNavGroupCheck); M("folderNav.previous", FolderNavPreviousCheck);
-        M("folderNav.next", FolderNavNextCheck); M("folderNav.explore", FolderNavExploreCheck); M("folderNav.skipEmpty", FolderNavSkipEmptyCheck); M("folderNav.includeHidden", FolderNavIncludeHiddenCheck); M("folderNav.wrap", FolderNavWrapCheck); M("folderNav.openFirst", FolderNavFirstImageCheck);
+        M("folderNav.next", FolderNavNextCheck); M("folderNav.explore", FolderNavExploreCheck); M("folderNav.skipEmpty", FolderNavSkipEmptyCheck); M("folderNav.includeHidden", FolderNavIncludeHiddenCheck); M("folderNav.wrap", FolderNavWrapCheck); M("folderNav.openFirst", FolderNavFirstImageCheck); M("folderNav.order", FolderNavOrderCombo);
         M("overlay.pictureCounter", PictureCounterCheck); M("overlay.pictureTemplate", PictureTemplateBox); M("overlay.pictureFontSize", PictureFontSizeBox);
         M("overlay.pictureBold", PictureBoldCheck); M("overlay.pictureOpacity", PictureOpacityBox); M("overlay.picturePosition", PicturePositionCombo);
         M("overlay.pictureColor", PictureColorCombo); M("overlay.pictureShadow", PictureShadowCheck); M("overlay.defaultOpacity", OverlayOpacityBox); M("overlay.zoomStep", OverlayZoomStepBox);
-        M("overlay.rememberFolder", OverlayRememberFolderCheck); M("overlay.scaleWithWindow", OverlayScaleWithWindowCheck); M("overlay.defaultDirectory", OverlayDefaultDirectoryBox); M("profiles.defaultDirectory", ProfileDefaultDirectoryBox); M("overlay.persistSession", OverlayPersistSessionCheck); M("overlay.keyboardZoom", OverlayKeyboardZoomCheck); M("overlay.wheelZoom", OverlayWheelZoomCheck); M("overlay.highlightSelected", OverlayHighlightCheck); M("overlay.rememberZoom", OverlayRememberZoomCheck); M("overlay.rightDragPan", OverlayRightDragCheck);
+        M("overlay.rememberFolder", OverlayRememberFolderCheck); M("overlay.scaleWithWindow", OverlayScaleWithWindowCheck); M("overlay.animationRegion", OverlayAnimationRegionCombo); M("overlay.animationSpeedDipsPerSecond", OverlayAnimationSpeedBox); M("overlay.animationTurnIntervalMs", OverlayAnimationTurnIntervalBox); M("overlay.animationTurnAngleDegrees", OverlayAnimationTurnAngleBox); M("overlay.animationPauseWhileInteracting", OverlayAnimationPauseCheck); M("overlay.animationAvoidOverlap", OverlayAnimationAvoidOverlapCheck); M("overlay.animationRefreshRateHz", OverlayAnimationRefreshRateCombo); M("overlay.defaultDirectory", OverlayDefaultDirectoryBox); M("profiles.defaultDirectory", ProfileDefaultDirectoryBox); M("overlay.persistSession", OverlayPersistSessionCheck); M("overlay.keyboardZoom", OverlayKeyboardZoomCheck); M("overlay.wheelZoom", OverlayWheelZoomCheck); M("overlay.highlightSelected", OverlayHighlightCheck); M("overlay.rememberZoom", OverlayRememberZoomCheck); M("overlay.rightDragPan", OverlayRightDragCheck);
         M("windows.externalOpenBehavior", ExternalOpenBehaviorCombo); M("windows.external1", External1Box); M("windows.external2", External2Box); M("windows.external3", External3Box);
+        M("hotkeys.preset", HotkeyPresetCombo); M("profiles.presets", PresetCombo);
         M("developer.statusGlobalScale", StatusGlobalScaleBox); M("developer.statusAutoFit", StatusAutoFitCheck); M("developer.statusMaximizedBoost", StatusMaximizedBoostBox); M("developer.overlayAbsoluteCoordinates", OverlayAbsoluteCoordinatesCheck);
     }
 
@@ -1577,14 +1726,23 @@ public partial class SettingsWindow : Window
 
     private void SettingsKeyDown(object? sender, KeyEventArgs e)
     {
-        if (_hotkeyCaptureActionId is null) return;
-        e.Handled = true;
         if (e.Key == Key.Escape)
         {
-            EndHotkeyCapture("Shortcut capture cancelled.");
+            e.Handled = true;
+            if (_hotkeyCaptureActionId is not null)
+            {
+                EndHotkeyCapture("Shortcut capture cancelled.");
+                return;
+            }
+
+            // Escape is the keyboard equivalent of Cancel: it uses the same discard-confirmation
+            // and preview-rollback path instead of bypassing unsaved-settings protection.
+            CancelClicked(this, new RoutedEventArgs());
             return;
         }
 
+        if (_hotkeyCaptureActionId is null) return;
+        e.Handled = true;
         var shortcut = CanonicalShortcut(e);
         if (string.IsNullOrWhiteSpace(shortcut) || IsModifierOnly(e.Key)) return;
         AssignCapturedShortcut(shortcut);
@@ -1939,7 +2097,22 @@ public partial class SettingsWindow : Window
         root.Children.Add(box);
         var actions = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Spacing = 8 };
         actions.Children.Add(cancel); actions.Children.Add(ok); root.Children.Add(actions);
-        var dialog = new Window { Title = "Add Glide profile", Width = 390, Height = 175, CanResize = false, WindowStartupLocation = WindowStartupLocation.CenterOwner, Content = root };
+        var dialog = new Window
+        {
+            Title = "Add Glide profile",
+            CanResize = false,
+            SizeToContent = SizeToContent.WidthAndHeight,
+            MinWidth = 390,
+            MaxWidth = 560,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Content = root
+        };
+        try
+        {
+            if (Screens.ScreenFromWindow(this) is { } screen)
+                dialog.MaxHeight = Math.Max(200, screen.WorkingArea.Height / Math.Max(1.0, RenderScaling) - 80);
+        }
+        catch { }
         PopupPlacementStore.Track(dialog, "profile-add");
         ok.Click += (_, _) => dialog.Close(box.Text?.Trim());
         cancel.Click += (_, _) => dialog.Close((string?)null);
@@ -2655,6 +2828,8 @@ public partial class SettingsWindow : Window
 
         // Permanent search fixture: proves that Search is not merely a textual index.
         SearchBox.Text = "hotkey";
+        // Search rendering is debounced for responsiveness; flush it so the screenshot is not empty.
+        FlushPendingSearch();
         ContentScroll.Offset = new Vector(ContentScroll.Offset.X, 0);
         await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Render);
         await Task.Delay(120);
@@ -2676,7 +2851,8 @@ public partial class SettingsWindow : Window
         }
         else
         {
-            SearchBox.Text = previousSearch; // TextChanged rebuilds the editable search results.
+            SearchBox.Text = previousSearch; // TextChanged schedules the debounced rebuild.
+            FlushPendingSearch();            // Render it now so the window is left in a settled state.
             ContentScroll.Offset = new Vector(previousOffset.X, Math.Min(previousOffset.Y, Math.Max(0, ContentScroll.ScrollBarMaximum.Y)));
         }
 
@@ -2729,7 +2905,8 @@ public partial class SettingsWindow : Window
                 ? $"future phase {definition.FuturePhase}; intentionally disabled/hidden"
                 : control is null
                     ? definition.Kind == SettingKind.Action ? "current semantic/action editor or generated UI" : "current setting without a direct named editor"
-                    : control.IsEnabled ? "current enabled editor; value participates in Settings state/effect path" : "current editor unexpectedly disabled";
+                    : control.IsEnabled ? "current enabled editor; value participates in Settings state/effect path"
+                    : ConditionallyDisabledSettingIds.Contains(definition.Id) ? "current editor disabled by current state" : "current editor unexpectedly disabled";
             lines.Add(string.Join("\t",
                 Sanitize(definition.Id), Sanitize(definition.Category), definition.Kind.ToString(), Sanitize(definition.Label), definition.FuturePhase?.ToString() ?? "",
                 Sanitize(control?.Name ?? ""), control?.GetType().Name ?? "", (control?.IsEnabled ?? false).ToString(), Sanitize(status)));
@@ -2774,6 +2951,13 @@ public partial class SettingsWindow : Window
 
     private static string SelectedText(ComboBox combo, string fallback = "") =>
         (combo.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? fallback;
+
+    private static int ParseChoiceNumber(ComboBox combo, int fallback)
+    {
+        var text = SelectedText(combo);
+        var numeric = text.Replace(" Hz", string.Empty, StringComparison.OrdinalIgnoreCase).Trim();
+        return int.TryParse(numeric, out var value) ? value : fallback;
+    }
 
     private static void SelectByText(ComboBox combo, string value)
     {

@@ -79,7 +79,8 @@ public sealed class Glide23FeatureContractTests
     {
         var state = new GlideSettingsState();
         Assert.Equal("Welcome tab", state.StartupAction);
-        Assert.Equal("Explorer tab", state.NewTabAction);
+        Assert.Equal("Welcome tab", state.NewTabAction);
+        state.StartupAction = "Open file dialog";
         Assert.NotEqual(state.StartupAction, state.NewTabAction);
         Assert.Contains("general.startupAction", SettingsCatalog.All.Select(x => x.Id));
         Assert.Contains("general.newTabAction", SettingsCatalog.All.Select(x => x.Id));
@@ -134,6 +135,21 @@ public sealed class Glide23FeatureContractTests
         Assert.Contains("MainRoot.Background = Brushes.Transparent;", code, StringComparison.Ordinal);
         Assert.Contains("MainRoot.Background = normalWindowBrush;", code, StringComparison.Ordinal);
         Assert.DoesNotContain("Background = normalWindowBrush;", code.Replace("MainRoot.Background = normalWindowBrush;", string.Empty), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void OverlayInputIgnoresViewerControlsBeforeStartingGestures()
+    {
+        var source = Source("src/Glide.App/Controls/WindowInWindowOverlayManager.cs");
+
+        Assert.Contains("private static bool IsViewerControlSource", source, StringComparison.Ordinal);
+        Assert.Contains("if (IsViewerControlSource(e.Source)) return;", source, StringComparison.Ordinal);
+        Assert.Contains("Button or ToggleButton", source, StringComparison.Ordinal);
+        Assert.Contains("GetVisualParent() as Control", source, StringComparison.Ordinal);
+
+        // All new overlay gesture entry points must use the same exclusion.  The
+        // release path intentionally remains independent so active interactions clean up.
+        Assert.Equal(3, source.Split("if (IsViewerControlSource(e.Source)) return;", StringSplitOptions.None).Length - 1);
     }
 
     [Fact]

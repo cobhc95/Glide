@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using Avalonia.Threading;
+using Glide.App.Services;
 using Glide.Core;
 
 namespace Glide.App;
@@ -35,6 +36,11 @@ public partial class App : Application
             Dispatcher.UIThread.Post(EnsureMainWindowForPendingExternalRequest);
             return;
         }
+        // This method can be reached by a delayed standby-close retry.  The original request may
+        // already have been consumed by a receiver which became available in the meantime.  Never
+        // resurrect a Glide window from that stale retry.
+        if (!ExternalLaunchBroker.HasPendingExternalRequests())
+            return;
         if (Current?.ApplicationLifetime is not IClassicDesktopStyleApplicationLifetime desktop)
             return;
         // Speed Boost closes the render window while keeping the process and broker alive. During
@@ -53,7 +59,8 @@ public partial class App : Application
                         finally
                         {
                             Volatile.Write(ref _standbyRetryScheduled, 0);
-                            EnsureMainWindowForPendingExternalRequest();
+                            if (ExternalLaunchBroker.HasPendingExternalRequests())
+                                EnsureMainWindowForPendingExternalRequest();
                         }
                     }, DispatcherPriority.Background);
                 }
@@ -64,6 +71,13 @@ public partial class App : Application
         if (Interlocked.Exchange(ref _pendingWindowCreation, 1) != 0) return;
         try
         {
+            // Re-check after winning the creation gate. A visible receiver may have drained the
+            // queue between the first check and this point.
+            if (!ExternalLaunchBroker.HasPendingExternalRequests())
+            {
+                Volatile.Write(ref _pendingWindowCreation, 0);
+                return;
+            }
             var window = new MainWindow();
             // This window exists only to receive work already accepted by the resident broker.
             // Treat it as an explicit external launch so the normal standalone Home destination

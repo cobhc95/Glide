@@ -33,7 +33,9 @@ public sealed class MainWindowCommandDispatcherCoverageTests
             try
             {
                 var mapped = window.ProductionMappedCommandsForTests();
-                Assert.Equal(67, mapped.Count);
+                // Derive the expectation from the enum so the count can never silently drift again.
+                var expected = Enum.GetValues<GlideCommand>().Count(command => command != GlideCommand.None);
+                Assert.Equal(expected, mapped.Count);
                 Assert.Empty(MainWindowCommandDispatcher.MissingCommands(mapped));
             }
             finally { window.Close(); }

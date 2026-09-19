@@ -1,6 +1,10 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
 cd /d "%~dp0"
+rem Single-source the version from Directory.Build.props (see build.cmd) so the installer banner
+rem and any versioned text cannot drift from the assembly metadata.
+set "GLIDE_VERSION=4.2.2"
+for /f "tokens=3 delims=<>" %%V in ('findstr /r /c:"^ *<Version>" "Directory.Build.props"') do set "GLIDE_VERSION=%%V"
 title Glide Installer Builder
 
 set "GLIDE_FROM_BUILD=0"
@@ -27,14 +31,14 @@ if not "%RC%"=="0" (
 echo.
 echo ============================================================
 echo   INSTALLER READY: dist-installer\Glide Setup.exe
- echo ============================================================
+echo ============================================================
 if "%GLIDE_FROM_BUILD%"=="0" pause
 exit /b 0
 
 :main
 echo ============================================================
-echo   Glide 4.1.5 Installer Builder
- echo ============================================================
+echo   Glide %GLIDE_VERSION% Installer Builder
+echo ============================================================
 echo.
 
 rem Direct invocation is supported. If there is no published app yet, build a

@@ -51,7 +51,7 @@ public sealed record ImagePerformancePolicy
         "Maximum quality" => new ImagePerformancePolicy
         {
             Profile = "Maximum quality",
-            PreviewLongestSide = 1800,
+            PreviewLongestSide = 2400,
             PreviewInterpolation = BitmapInterpolationMode.HighQuality,
             ProgressiveColorFirstPreview = true,
             RefinementDelayMs = 5,

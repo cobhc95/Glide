@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
@@ -19,6 +20,11 @@ public static class LiveDiagnosticTrace
     private static string _version = "unknown";
     private static int _initialized;
 
+    private static readonly ConcurrentQueue<string> _queue = new();
+    private static readonly AutoResetEvent _wake = new(false);
+    private static readonly CancellationTokenSource _cts = new();
+    private static Thread? _workerThread;
+
     public static string? Path => Volatile.Read(ref _path);
 
     public static void Initialize(string version)
@@ -32,7 +38,17 @@ public static class LiveDiagnosticTrace
             Directory.CreateDirectory(downloads);
             _path = System.IO.Path.Combine(downloads, "Glide-Diagnostic-Latest.txt");
             PreservePreviousAbnormalTrace(downloads);
-            OpenWriter(overwrite: true);
+            lock (Gate)
+            {
+                OpenWriter(overwrite: true);
+            }
+            _workerThread = new Thread(WorkerLoop)
+            {
+                IsBackground = true,
+                Name = "Glide live diagnostic writer"
+            };
+            _workerThread.Start();
+
             Write("process", "trace_started", new
             {
                 version = _version,
@@ -49,19 +65,57 @@ public static class LiveDiagnosticTrace
         }
     }
 
-    public static void Write(string subsystem, string name, object? data = null)
+    private static void WorkerLoop()
     {
+        while (!_cts.IsCancellationRequested)
+        {
+            _wake.WaitOne(100);
+            DrainQueue();
+        }
+        DrainQueue();
+    }
+
+    private static void DrainQueue()
+    {
+        if (_queue.IsEmpty) return;
         try
         {
             lock (Gate)
             {
                 if (_writer is null) return;
-                if (_writer.BaseStream.Length >= MaxBytes)
+                var wroteAny = false;
+                while (_queue.TryDequeue(out var line))
                 {
-                    OpenWriter(overwrite: true);
-                    WriteLineUnsafe("process", "trace_rotated", new { maxBytes = MaxBytes });
+                    if (_writer.BaseStream.Length >= MaxBytes)
+                    {
+                        OpenWriter(overwrite: true);
+                        _writer.WriteLine($"{DateTimeOffset.Now:O} | +{Lifetime.Elapsed.TotalMilliseconds:F1}ms | T0 | process.trace_rotated | {{\"maxBytes\":{MaxBytes}}}");
+                    }
+                    _writer.WriteLine(line);
+                    wroteAny = true;
                 }
-                WriteLineUnsafe(subsystem, name, data);
+                if (wroteAny)
+                {
+                    _writer.Flush();
+                }
+            }
+        }
+        catch { }
+    }
+
+    public static void Write(string subsystem, string name, object? data = null)
+    {
+        // Opt-in only: when the owner process never enabled the trace there is no file to write and
+        // no reason to accumulate breadcrumbs in memory.
+        if (Volatile.Read(ref _initialized) == 0) return;
+        try
+        {
+            var payload = data is null ? "" : " | " + SafeSerialize(data);
+            var line = $"{DateTimeOffset.Now:O} | +{Lifetime.Elapsed.TotalMilliseconds:F1}ms | T{Environment.CurrentManagedThreadId} | {subsystem}.{name}{payload}";
+            if (_queue.Count < 20000)
+            {
+                _queue.Enqueue(line);
+                _wake.Set();
             }
         }
         catch
@@ -80,15 +134,23 @@ public static class LiveDiagnosticTrace
             ex.HResult,
             stack = ex.ToString()
         });
+        Flush();
     }
 
     public static void MarkCleanExit(int exitCode = 0)
     {
         Write("process", "clean_exit", new { exitCode });
-        lock (Gate)
+        Flush();
+    }
+
+    public static void Flush()
+    {
+        try
         {
-            try { _writer?.Flush(); } catch { }
+            _wake.Set();
+            DrainQueue();
         }
+        catch { }
     }
 
     private static void PreservePreviousAbnormalTrace(string downloads)

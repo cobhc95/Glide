@@ -113,6 +113,40 @@ public sealed class ImageLoadCoordinatorCachePolicyTests
         }
         finally { try { File.Delete(path); } catch { } }
     }
+
+    [Fact]
+    public async Task MultipleOverlayLoadsDoNotEvictOrDisposeEachOther()
+    {
+        var payload = ImageDiagnosticFixtures.CreatePayloads()[".png"];
+        var path = Path.Combine(Path.GetTempPath(), "glide-overlay-multi-" + Guid.NewGuid() + ".png");
+        try
+        {
+            File.WriteAllBytes(path, payload);
+            using var loader = new ImageLoadCoordinator();
+
+            var res1 = await loader.LoadFullForegroundAsync(path, cacheResult: false);
+            Assert.NotNull(res1);
+            Assert.False(loader.IsBitmapCached(res1!.Bitmap));
+
+            var res2 = await loader.LoadFullForegroundAsync(path, cacheResult: false);
+            Assert.NotNull(res2);
+            Assert.False(loader.IsBitmapCached(res2!.Bitmap));
+            Assert.NotSame(res1.Bitmap, res2.Bitmap);
+
+            // Accessing properties on both instances must succeed without NullReferenceException or ObjectDisposedException
+            Assert.True(res1.Bitmap.PixelSize.Width > 0);
+            Assert.True(res2.Bitmap.PixelSize.Width > 0);
+
+            res1.Bitmap.Dispose();
+            // Disposing res1 must not affect res2
+            Assert.True(res2.Bitmap.PixelSize.Width > 0);
+            res2.Bitmap.Dispose();
+        }
+        finally
+        {
+            try { File.Delete(path); } catch { }
+        }
+    }
 }
 
 // 2.5 regression contracts for aspect-aware first-paint sizing. These deliberately avoid

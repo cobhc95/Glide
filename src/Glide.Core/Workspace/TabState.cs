@@ -22,4 +22,4 @@ public sealed record BrowserTabState(Guid Id, string Folder) : TabState(Id, Syst
 public sealed record ImageTabViewState(string Mode, double Zoom, double PanX, double PanY);
 
 /// <summary>Typed Explorer history that travels with a browser tab.</summary>
-public sealed record BrowserNavigationState(IReadOnlyList<string> History, int Index);
+public sealed record BrowserNavigationState(IReadOnlyList<string> History, int Index, IReadOnlyList<string?>? Highlights = null);

@@ -51,8 +51,13 @@ public partial class MainWindow : Window
     // their configured Home/Explorer destination during startup planning.
     private readonly WorkspaceState _workspace = new(createHome: false);
     private readonly DispatcherTimer _fullscreenCursorTimer = new();
+    private readonly DispatcherTimer _hardTopmostTimer = new() { Interval = TimeSpan.FromMilliseconds(350) };
+    private int _topmostTransientDepth;
+    private IDisposable? _overlayContextTopmostScope;
     private CancellationTokenSource? _resizeInputResetCts;
     private CancellationTokenSource? _navigationBoundaryNoticeCts;
+    private CancellationTokenSource? _navigationRateLimitNoticeCts;
+    private long _lastRateLimitedNavigationTimestamp;
     private readonly DiagnosticsCoordinator _diagnostics = new();
     private readonly FileOperationController _fileOperations = new();
     private WindowInWindowOverlayManager? _overlays;
@@ -208,9 +213,12 @@ public partial class MainWindow : Window
     private LegacyOverlayChrome? _wholeAppOverlayChromeVisual;
     private Slider? _wholeAppOverlayOpacityHitTarget;
     private Thumb? _wholeAppOverlayResizeGrip;
+    private string? _wholeAppOverlayPlacementPath;
+    private bool _applyingWholeAppOverlayPlacement;
 
     private sealed record WholeAppOverlaySnapshot(
         WindowState RestoreState, PixelPoint Position, double Width, double Height,
+        double MinWidth, double MinHeight,
         bool RestoreFullscreen, double SessionOpacity);
 
     private Task? _earlyStartupTask;
@@ -246,6 +254,7 @@ public partial class MainWindow : Window
     {
         GlidePerformanceTrace.Mark("ctor_init_component_start");
         InitializeComponent();
+        _hardTopmostTimer.Tick += (_, _) => ReassertNativeTopmost();
         GlidePerformanceTrace.Mark("ctor_init_component_end");
         _diagnostics.Write("window", "constructed", new { lifetime = _windowLifetimeId, pid = Environment.ProcessId });
         DisableDwmTransitions("ctor");
@@ -303,12 +312,18 @@ public partial class MainWindow : Window
             return provider;
         });
         _loader = new ImageLoadCoordinator(_decoderBackend);
+        _loader.IsBitmapInActiveUse = bitmap => bitmap is not null && ReferenceEquals(Viewport.Bitmap, bitmap);
         _providerFailureHandler = (provider, error) => _diagnostics.WriteCritical("codec", "provider_failure", new { provider, error });
         _decoderBackend.ProviderFailure += _providerFailureHandler;
         _tabAttach = new TabAttachCoordinator(this, (category, name, data) => _diagnostics.Write(category, name, data));
         _physicalAttach = new TabAttachCoordinator(this, (category, name, data) => _diagnostics.Write(category, name, data));
         _tabDrag = new TabDragController(CreateTabDragHost(), _tabAttach);
         Viewport.SelectionOverlayTarget = SelectionOverlay;
+        Viewport.PriorBitmapReleased += bitmap =>
+        {
+            if (bitmap is not null && !_loader.IsBitmapCached(bitmap))
+                bitmap.Dispose();
+        };
         // Window-in-window overlay decoding and slideshow infrastructure are intentionally lazy.
         // A plain cold file-open should construct only the primary image path before first pixels.
         GlidePerformanceTrace.Mark("ctor_create_commands_start");
@@ -319,6 +334,7 @@ public partial class MainWindow : Window
         MainRoot.AddHandler(InputElement.PointerPressedEvent, AutoDismissTransientPanels, RoutingStrategies.Tunnel, true);
         MainRoot.AddHandler(InputElement.PointerPressedEvent, MainPointerShortcutPressed, RoutingStrategies.Tunnel, true);
         MainRoot.AddHandler(InputElement.PointerPressedEvent, WholeAppOverlayBodyPointerPressed, RoutingStrategies.Tunnel, true);
+        MainRoot.AddHandler(InputElement.PointerWheelChangedEvent, WholeAppOverlayPointerWheelChanged, RoutingStrategies.Tunnel, true);
         ChromeBorder.AddHandler(InputElement.PointerPressedEvent, ChromePointerPressed, RoutingStrategies.Tunnel, true);
         ChromeBorder.AddHandler(InputElement.PointerReleasedEvent, ChromeMiddleClickReleased, RoutingStrategies.Tunnel, true);
         ViewerStatusSurface.AddHandler(InputElement.PointerPressedEvent, StatusSurfacePointerPressed, RoutingStrategies.Tunnel, true);
@@ -386,14 +402,16 @@ public partial class MainWindow : Window
             });
 
             TrackNormalWindowPlacement();
+            SaveCurrentWholeAppOverlayPlacement();
             ApplyCompactChromeLayout();
             ApplyStatusBarSize();
+            if (_wholeAppOverlayMode) Dispatcher.UIThread.Post(AlignWholeAppOverlayChromeToPixels, DispatcherPriority.Render);
             if (_tabDrag.IsActive || _physicalDraggedTabId is not null) return;
             if (Math.Abs(Bounds.Width - _lastTabLayoutWidth) < 24) return;
             _lastTabLayoutWidth = Bounds.Width;
             RebuildTabStrip();
         };
-        PositionChanged += (_, _) => TrackNormalWindowPlacement();
+        PositionChanged += (_, _) => { TrackNormalWindowPlacement(); SaveCurrentWholeAppOverlayPlacement(); };
         PropertyChanged += (_, args) =>
         {
             if (args.Property != WindowStateProperty) return;
@@ -549,6 +567,7 @@ public partial class MainWindow : Window
             _decoderBackend.ProviderFailure -= _providerFailureHandler;
             _decoderBackend.Dispose();
             _loadCts?.Cancel(); _loadCts?.Dispose(); _loadCts = null;
+            _hardTopmostTimer.Stop();
             _folderIndexCts?.Cancel(); _folderIndexCts?.Dispose(); _folderIndexCts = null;
             _metadataCts?.Cancel(); _metadataCts?.Dispose(); _metadataCts = null;
             CancelPreviewQualityRecovery();
@@ -573,6 +592,7 @@ public partial class MainWindow : Window
         Activated += (_, _) =>
         {
             ExternalLaunchBroker.MarkActive(this);
+            ReassertNativeTopmost();
             if (_settings.SlideshowPauseWhenInactive) _slideshow?.ResumeFromInactivity();
             // Overlay glow/chrome is an active-window affordance. Do not leave a luminous frame
             // floating over another application while Glide is not the foreground window.
@@ -589,6 +609,12 @@ public partial class MainWindow : Window
             if (_wholeAppOverlayMode && _wholeAppOverlayControlsHost is { } overlayControls)
                 overlayControls.IsVisible = false;
             EndManualWindowDrag();
+            // A missed KeyUp while activation is lost must not leave the held-navigation producer
+            // skipping images in the background (reported on laptop keyboards).
+            if (_heldNavigationKeyIsDown && _heldNavigationDirection != 0)
+                _suppressedHeldNavigationDirection = _heldNavigationDirection;
+            StopHeldNavigation(settle: false, reason: "window_deactivated");
+            _homeKeyDown = false;
             // Losing activation must never strand an ordinary tab/viewport pointer capture.
             // A detached tab inside the native Windows move loop is intentionally exempt: the OS
             // owns that physical drag until the real button is released.
@@ -615,7 +641,14 @@ public partial class MainWindow : Window
                 return;
             }
 
-            if (!_closeConfirmed && !_closeConfirmationInProgress && _settings.ConfirmCloseMultipleTabs && _workspace.Tabs.OfType<ImageTabState>().Count() > 1)
+            // Speed Boost standby hides this HWND and then posts Close(); a manual caption close can
+            // also arrive while the window is hidden. Showing the modal multi-tab confirmation against
+            // a non-visible owner throws in Avalonia and, because this handler is async void, the
+            // escaped exception terminates the process (the 2026-09-17 startup-crash.log regression).
+            // Confirmation is only meaningful for a visible, user-initiated close, so skip it during
+            // standby and for any hidden-owner teardown.
+            if (!_closeConfirmed && !_closeConfirmationInProgress && IsVisible && !_closeForSpeedBoostStandby &&
+                _settings.ConfirmCloseMultipleTabs && _workspace.Tabs.OfType<ImageTabState>().Count() > 1)
             {
                 e.Cancel = true;
                 _closeConfirmationInProgress = true;
@@ -632,6 +665,12 @@ public partial class MainWindow : Window
                     if (!string.Equals(choice, "Close all", StringComparison.OrdinalIgnoreCase)) return;
                     _closeConfirmed = true;
                     Dispatcher.UIThread.Post(Close);
+                }
+                catch (Exception ex)
+                {
+                    // Never let a confirmation failure escape an async void handler. Keep the window
+                    // open and log instead of crashing the process.
+                    _diagnostics.Write("window", "multi_tab_close_confirmation_failed", new { error = ex.GetType().Name, ex.Message });
                 }
                 finally { _closeConfirmationInProgress = false; }
                 return;
@@ -797,14 +836,19 @@ public partial class MainWindow : Window
     {
         if (_overlays is { } existing) return existing;
         _overlayLoader ??= new ImageLoadCoordinator(_decoderBackend);
-        var overlays = new WindowInWindowOverlayManager(OverlayCanvas, ImageView, _overlayLoader)
+        var overlays = new WindowInWindowOverlayManager(OverlayCanvas, ImageView, _overlayLoader, this)
         {
             ImageRectForSize = size => Viewport.GetPresentationRectForViewportSize(size),
             IsFullscreen = () => WindowState == WindowState.FullScreen,
-            FullscreenNavigationRequested = () => _ = NavigateAsync(1)
+            FullscreenNavigationRequested = direction => _ = NavigateMouseAsync(direction)
         };
         overlays.Diagnostic += (name, data) => _diagnostics.Write("overlay", name, data);
         overlays.OverlayCountChanged += UpdateOverlayStatusButtons;
+        overlays.ContextMenuVisibilityChanged += open =>
+        {
+            if (open) _overlayContextTopmostScope ??= EnterTopmostTransient();
+            else { _overlayContextTopmostScope?.Dispose(); _overlayContextTopmostScope = null; }
+        };
         overlays.OpenFileLocationRequested = path => RevealInWindowsExplorer(path, directory: false);
         overlays.OpenInNewTabRequested = path => Dispatcher.UIThread.Post(async () => await OpenAsImageTabAsync(path, openInNewTab: true));
         overlays.OpenWithRequested = path => WindowsOpenWith.Show(path);
@@ -824,9 +868,25 @@ public partial class MainWindow : Window
         overlays.ZoomStepPercent = Math.Clamp(_settings.OverlayZoomStepPercent, 1, 100);
         overlays.AdaptivePositioningEnabled = !_settings.OverlayAbsoluteCoordinatesOnResize;
         overlays.ScaleWithHostResize = _settings.OverlayScaleWithWindow;
+        // Keep this bridge resilient while older manager builds are present in a fork. Newer
+        // managers expose these exact properties; older ones simply retain their existing behavior.
+        SetOverlayAnimationManagerProperty(overlays, "AnimationRegion", _settings.OverlayAnimationRegion ?? "Anywhere");
+        SetOverlayAnimationManagerProperty(overlays, "AnimationSpeedDipsPerSecond", Math.Clamp(_settings.OverlayAnimationSpeedDipsPerSecond, 10, 2000));
+        SetOverlayAnimationManagerProperty(overlays, "AnimationTurnIntervalMs", Math.Clamp(_settings.OverlayAnimationTurnIntervalMs, 0, 60000));
+        SetOverlayAnimationManagerProperty(overlays, "AnimationTurnAngleDegrees", Math.Clamp(_settings.OverlayAnimationTurnAngleDegrees, 0, 180));
+        SetOverlayAnimationManagerProperty(overlays, "AnimationPauseWhileInteracting", _settings.OverlayAnimationPauseWhileInteracting);
+        SetOverlayAnimationManagerProperty(overlays, "AnimationAvoidOverlap", _settings.OverlayAnimationAvoidOverlap);
+        SetOverlayAnimationManagerProperty(overlays, "AnimationRefreshRateHz", Math.Clamp(_settings.OverlayAnimationRefreshRateHz, 60, 360));
         overlays.AccentBrush = new SolidColorBrush(Color.Parse(CurrentAccentHex()));
         overlays.ResolveGesture = slot => _inputRouter.ResolveGesture(slot, _settings.Gestures);
         overlays.RefreshTheme();
+    }
+
+    private static void SetOverlayAnimationManagerProperty(object manager, string propertyName, object value)
+    {
+        var property = manager.GetType().GetProperty(propertyName, System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public);
+        if (property is { CanWrite: true } && property.PropertyType.IsInstanceOfType(value))
+            property.SetValue(manager, value);
     }
 
     private SlideshowSessionController EnsureSlideshow()
@@ -1262,7 +1322,7 @@ public partial class MainWindow : Window
     {
         if (!File.Exists(path) || !ImageNavigator.IsSupported(path))
         {
-            Title = "Glide 4.1.5 — Unsupported or missing image";
+            Title = "Glide 4.2.3 — Unsupported or missing image";
             return;
         }
         if (openInNewTab || !_workspace.ReplaceActiveWithImage(path)) _workspace.AddImage(path);
@@ -1428,7 +1488,7 @@ public partial class MainWindow : Window
                 delta, slideshowActive = _slideshow?.IsActive == true, slideshowRunning = _slideshow?.IsRunning == true,
                 fullscreen = WindowState == WindowState.FullScreen, index = _navigator.Index, count = _navigator.Count
             });
-            await NavigateAsync(delta);
+            await NavigateMouseAsync(delta);
         }
         catch (OperationCanceledException)
         {
@@ -1446,7 +1506,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private async Task<PresentationOutcome> PresentCurrentAsync(bool rapidPreviewOnly = false, bool forceFull = false)
+    private async Task<PresentationOutcome> PresentCurrentAsync(bool rapidPreviewOnly = false, bool forceFull = false, bool? skipTransition = null)
     {
         var path = _navigator.Current;
         if (path is null)
@@ -1454,6 +1514,8 @@ public partial class MainWindow : Window
         if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("present_request", ImageFormatRegistry.GetLongestExtension(path));
 
         var request = BeginImageRequest(path);
+        if (_wholeAppOverlayMode && !string.Equals(_wholeAppOverlayPlacementPath, path, StringComparison.OrdinalIgnoreCase))
+            SaveCurrentWholeAppOverlayPlacement(_wholeAppOverlayPlacementPath);
         _currentPath = path;
         _metadataCts?.Cancel();
         _metadataCts?.Dispose();
@@ -1470,10 +1532,10 @@ public partial class MainWindow : Window
                 string.Equals(_presentedPath, path, StringComparison.OrdinalIgnoreCase))
                 _loader.DetachPreparedPreview(path, displayed);
 
+            var presentationPolicy = rapidPreviewOnly ? BuildRapidBrowsePolicy() : BuildPerformancePolicy();
             var result = forceFull
                 ? await _loader.LoadFullForegroundAsync(path, request.Token)
-                : await _loader.LoadForegroundAsync(path,
-                    rapidPreviewOnly ? BuildRapidBrowsePolicy() : BuildPerformancePolicy(), request.Token,
+                : await _loader.LoadForegroundAsync(path, presentationPolicy, request.Token,
                     cachePreview: !rapidPreviewOnly);
             if (result is null || !IsRequestCurrent(request))
             {
@@ -1500,12 +1562,28 @@ public partial class MainWindow : Window
             Viewport.PreserveManualZoomOnBitmapChange = _settings.PreserveManualZoomOnNavigate;
             var sourceWidth = result.SourceWidth > 0 ? result.SourceWidth : result.Bitmap.PixelSize.Width;
             var sourceHeight = result.SourceHeight > 0 ? result.SourceHeight : result.Bitmap.PixelSize.Height;
-            Viewport.SwapPresentedFrame(result.Bitmap, sourceWidth, sourceHeight, request.ImageRequestId, path);
+            bool isRefinementOnly = forceFull && hadBitmap && string.Equals(_presentedPath, path, StringComparison.OrdinalIgnoreCase);
+            if (isRefinementOnly)
+            {
+                Viewport.ReplaceBitmapPreservingView(result.Bitmap);
+            }
+            else
+            {
+                Viewport.SwapPresentedFrame(result.Bitmap, sourceWidth, sourceHeight, request.ImageRequestId, path);
+            }
             _presentedPath = path;
+            OverlayNavigationTrace.Mark(OverlayNavigationTrace.Kind.ImagePresented,
+                a: request.ImageRequestId, b: result.IsPreview ? 1 : 0,
+                x: sourceWidth, y: sourceHeight, detail: Path.GetExtension(path));
             _loader.SetActivePath(path);
-            if (!hadBitmap || !_settings.PreserveManualZoomOnNavigate)
+            if (!isRefinementOnly && (!hadBitmap || !_settings.PreserveManualZoomOnNavigate))
                 Viewport.ApplyViewMode(_settings.DefaultViewMode);
             ShowImageSurface();
+
+            // A newer click may have arrived while this frame was being attached. Do not let an
+            // older continuation perform workspace/status work after it has become obsolete.
+            if (!IsRequestCurrent(request, requirePresented: true))
+                return new PresentationOutcome(PresentationStatus.Cancelled, request);
 
             if (old is not null && !ReferenceEquals(old, result.Bitmap))
             {
@@ -1514,17 +1592,27 @@ public partial class MainWindow : Window
                     request = request.ImageRequestId, path, oldWidth = previousFrame.SourceSize.Width, oldHeight = previousFrame.SourceSize.Height,
                     newWidth = sourceWidth, newHeight = sourceHeight, rapidPreviewOnly
                 });
-                var safeToRetire = await renderedTask.ConfigureAwait(true);
-                _diagnostics.Write("render", "bitmap_retire_fence", new { request = request.ImageRequestId, path, safeToRetire });
-                if (!safeToRetire || !IsRequestCurrent(request, requirePresented: true))
-                    return new PresentationOutcome(PresentationStatus.Cancelled, request);
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        var safeToRetire = await renderedTask.ConfigureAwait(false);
+                        _diagnostics.Write("render", "bitmap_retire_fence", new { request = request.ImageRequestId, path, safeToRetire });
+                        if (safeToRetire)
+                        {
+                            Dispatcher.UIThread.Post(() =>
+                            {
+                                if (old is not null && !ReferenceEquals(old, Viewport.Bitmap) && !_loader.IsBitmapCached(old))
+                                    old.Dispose();
+                                if (retiredInteraction is not null && !ReferenceEquals(retiredInteraction, old) &&
+                                    !ReferenceEquals(retiredInteraction, Viewport.Bitmap) && !_loader.IsBitmapCached(retiredInteraction))
+                                    retiredInteraction.Dispose();
+                            }, DispatcherPriority.Background);
+                        }
+                    }
+                    catch { }
+                });
             }
-
-            if (old is not null && !ReferenceEquals(old, result.Bitmap) && !_loader.IsBitmapCached(old))
-                old.Dispose();
-            if (retiredInteraction is not null && !ReferenceEquals(retiredInteraction, old) &&
-                !ReferenceEquals(retiredInteraction, result.Bitmap) && !_loader.IsBitmapCached(retiredInteraction))
-                retiredInteraction.Dispose();
 
             if (GlidePerformanceTrace.Enabled)
             {
@@ -1548,6 +1636,8 @@ public partial class MainWindow : Window
                     return new PresentationOutcome(PresentationStatus.Cancelled, request);
                 }
 
+                _startupFirstImageTimingWritten = true;
+
                 if (GlidePerformanceTrace.Enabled)
                     GlidePerformanceTrace.Mark("composition_batch_rendered", $"request={request.ImageRequestId};path={Path.GetFileName(path)}");
 
@@ -1568,6 +1658,8 @@ public partial class MainWindow : Window
                     await ReleaseWarmPresentationGateAsync(safeFrameReady: true);
             }
 
+            _startupFirstImageTimingWritten = true;
+
             // Everything below is nonessential for the first correct frame and is intentionally gated
             // behind the render fence for this exact request.
             _diagnostics.Enable();
@@ -1576,6 +1668,8 @@ public partial class MainWindow : Window
             PublishViewportDemand();
             _currentPixelWidth = result.SourceWidth > 0 ? result.SourceWidth : result.Bitmap.PixelSize.Width;
             _currentPixelHeight = result.SourceHeight > 0 ? result.SourceHeight : result.Bitmap.PixelSize.Height;
+            if (_wholeAppOverlayMode && !string.Equals(_wholeAppOverlayPlacementPath, path, StringComparison.OrdinalIgnoreCase))
+                ApplyWholeAppOverlayPlacementForCurrentImage(preferRemembered: true);
             _currentDecodeMs = result.DecodeTime.TotalMilliseconds;
             _currentFirstFrameDecodeMs = result.DecodeTime.TotalMilliseconds;
             _currentFirstFrameWidth = result.Bitmap.PixelSize.Width;
@@ -1594,14 +1688,6 @@ public partial class MainWindow : Window
             UpdateWindowTitle();
             if (ImageInfoOverlay.IsVisible) UpdateImageInfoOverlayText();
             if (!rapidPreviewOnly && _settings.TabsEnabled && _workspace.Tabs.Count > 1) RebuildTabStrip();
-            _diagnostics.Write("decode", "foreground_presented",    new { path, request = request.ImageRequestId, width = _currentPixelWidth, height = _currentPixelHeight,
-                    decodeMs = _currentDecodeMs, cacheHit = result.CacheHit, preparedHit = result.PreparedFrameHit,
-                    preview = result.IsPreview, route = result.DecodeRoute, index = _navigator.Index, count = _navigator.Count });
-            if (_settings.StartupDiagnostics && !_startupFirstImageTimingWritten)
-            {
-                _startupFirstImageTimingWritten = true;
-                WriteStartupDiagnostics("first_image_presented");
-            }
             if (!rapidPreviewOnly) ScheduleNavigationNeighbours();
             if (!rapidPreviewOnly && result.IsPreview && _settings.BackgroundRefinement &&
                 IsRequestCurrent(request, requirePresented: true))
@@ -1623,7 +1709,7 @@ public partial class MainWindow : Window
             if (IsRequestCurrent(request))
             {
                 _diagnostics.Write("decode", "foreground_failed", new { path, request = request.ImageRequestId, error = ex.GetType().Name, ex.Message });
-                Title = $"Glide 4.1.5 — Open failed: {ex.GetType().Name}";
+                Title = $"Glide 4.2.3 — Open failed: {ex.GetType().Name}";
             }
             if (_warmPresentationGateActive)
                 await ReleaseWarmPresentationGateAsync(safeFrameReady: false);
@@ -1635,7 +1721,13 @@ public partial class MainWindow : Window
     {
         if (!_folderIndexReady) return;
         if (_navigator.Count >= 2)
+        {
+            OverlayNavigationTrace.Mark(OverlayNavigationTrace.Kind.PrefetchStart,
+                a: _navigator.Index, b: _lastNavigationDirection, x: _navigator.Count);
             _loader.SchedulePrefetch(_navigator.Paths, _navigator.Index, _lastNavigationDirection);
+            OverlayNavigationTrace.Mark(OverlayNavigationTrace.Kind.PrefetchEnd,
+                a: _navigator.Index, b: _lastNavigationDirection, x: _navigator.Count);
+        }
 
         if (_settings.PredictivePrefetch && _settings.PrefetchSiblingFolders && _navigator.Current is { } current)
         {
@@ -1656,7 +1748,9 @@ public partial class MainWindow : Window
             _settings.FolderNavWrap,
             _settings.FolderNavSkipEmpty,
             _settings.FolderNavOpenFirstImage,
-            _settings.HierarchicalFolderTraversal);
+            _settings.HierarchicalFolderTraversal,
+            _settings.FolderNavOrder,
+            string.Equals(_settings.HierarchicalPreviousFolderEntry, "First image", StringComparison.OrdinalIgnoreCase));
         var warmed = new List<string>();
         try
         {
@@ -1685,9 +1779,14 @@ public partial class MainWindow : Window
 
     private async Task RefinePresentedAsync(ImageLoadResult firstFrame, ImageRequestContext request)
     {
+        OverlayNavigationTrace.Mark(OverlayNavigationTrace.Kind.RefinementStart,
+            a: request.ImageRequestId, detail: Path.GetExtension(firstFrame.Path));
         try
         {
             var refined = await _loader.RefineForegroundAsync(firstFrame, request.Token);
+            OverlayNavigationTrace.Mark(OverlayNavigationTrace.Kind.RefinementEnd,
+                a: request.ImageRequestId, b: refined is null ? 0 : 1,
+                x: refined?.DecodeTime.TotalMilliseconds ?? 0, detail: Path.GetExtension(firstFrame.Path));
             if (refined is null || !IsRequestCurrent(request, requirePresented: true))
             {
                 DisposeRejectedRefinement(refined);
@@ -1710,6 +1809,9 @@ public partial class MainWindow : Window
                     return;
                 }
 
+                Bitmap? detachedPreview = null;
+                var retiredInteraction = _interactionPreviewBitmap;
+                var fence = _presentationFence.ArmAsync(Viewport, request.ImageRequestId, request.Token);
                 await _navigationSerializationGate.WaitAsync(request.Token).ConfigureAwait(true);
                 try
                 {
@@ -1721,41 +1823,50 @@ public partial class MainWindow : Window
 
                     _diagnostics.Write("render", "refinement_gate_enter", new
                     { request = request.ImageRequestId, path = firstFrame.Path, mode = "full_after_bounded" });
-                    var fence = _presentationFence.ArmAsync(Viewport, request.ImageRequestId, request.Token);
-                    var retiredInteraction = _interactionPreviewBitmap;
                     Viewport.SetInteractionBitmap(null);
                     _interactionPreviewBitmap = null;
-                    var detachedPreview = Viewport.ReplaceBitmapPreservingView(full.Bitmap);
-
-                    var rendered = await fence.ConfigureAwait(true);
-                    _diagnostics.Write("render", "refinement_fence", new
-                    { request = request.ImageRequestId, path = firstFrame.Path, rendered, mode = "full_after_bounded" });
-                    if (!rendered || !IsRequestCurrent(request, requirePresented: true))
-                        return; // Keep attached frames alive; the next accepted request owns replacement.
-
-                    // Promotion may dispose the detached cached preview. It is now safe because the
-                    // replacement frame has crossed the compositor boundary.
-                    var fullPromoted = _loader.PromoteRefinement(firstFrame, full);
-                    if (retiredInteraction is not null && !ReferenceEquals(retiredInteraction, detachedPreview) &&
-                        !ReferenceEquals(retiredInteraction, full.Bitmap) && !_loader.IsBitmapCached(retiredInteraction))
-                        retiredInteraction.Dispose();
-
-                    _interactionPreviewBitmap = fullPromoted ? null : detachedPreview;
-                    Viewport.SetInteractionBitmap(_interactionPreviewBitmap);
-                    _currentFrameIsPreview = false;
-                    CancelPreviewQualityRecovery();
-                    UpdateStatusStats();
-                    if (ImageInfoOverlay.IsVisible) UpdateImageInfoOverlayText();
-                    _diagnostics.Write("decode", "foreground_refined_full",
-                        new { path = firstFrame.Path, request = request.ImageRequestId, cacheHit = full.CacheHit, preparedHit = full.PreparedFrameHit, promoted = fullPromoted });
-                    return;
+                    detachedPreview = Viewport.ReplaceBitmapPreservingView(full.Bitmap);
                 }
                 finally
                 {
                     _navigationSerializationGate.Release();
                 }
+
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        var rendered = await fence.ConfigureAwait(false);
+                        _diagnostics.Write("render", "refinement_fence", new
+                        { request = request.ImageRequestId, path = firstFrame.Path, rendered, mode = "full_after_bounded" });
+                        if (!rendered || !IsRequestCurrent(request, requirePresented: true)) return;
+
+                        Dispatcher.UIThread.Post(() =>
+                        {
+                            if (!IsRequestCurrent(request, requirePresented: true)) return;
+                            var fullPromoted = _loader.PromoteRefinement(firstFrame, full);
+                            if (retiredInteraction is not null && !ReferenceEquals(retiredInteraction, detachedPreview) &&
+                                !ReferenceEquals(retiredInteraction, full.Bitmap) && !_loader.IsBitmapCached(retiredInteraction))
+                                retiredInteraction.Dispose();
+
+                            _interactionPreviewBitmap = fullPromoted ? null : detachedPreview;
+                            Viewport.SetInteractionBitmap(_interactionPreviewBitmap);
+                            _currentFrameIsPreview = false;
+                            CancelPreviewQualityRecovery();
+                            UpdateStatusStats();
+                            if (ImageInfoOverlay.IsVisible) UpdateImageInfoOverlayText();
+                            _diagnostics.Write("decode", "foreground_refined_full",
+                                new { path = firstFrame.Path, request = request.ImageRequestId, cacheHit = full.CacheHit, preparedHit = full.PreparedFrameHit, promoted = fullPromoted });
+                        }, DispatcherPriority.Background);
+                    }
+                    catch { }
+                });
+                return;
             }
 
+            Bitmap? oldBitmap = null;
+            var retiredInteractionDirect = _interactionPreviewBitmap;
+            var directFence = _presentationFence.ArmAsync(Viewport, request.ImageRequestId, request.Token);
             await _navigationSerializationGate.WaitAsync(request.Token).ConfigureAwait(true);
             try
             {
@@ -1767,40 +1878,46 @@ public partial class MainWindow : Window
 
                 _diagnostics.Write("render", "refinement_gate_enter", new
                 { request = request.ImageRequestId, path = firstFrame.Path, mode = "direct" });
-                var fence = _presentationFence.ArmAsync(Viewport, request.ImageRequestId, request.Token);
-                var retiredInteraction = _interactionPreviewBitmap;
                 Viewport.SetInteractionBitmap(null);
                 _interactionPreviewBitmap = null;
-                var old = Viewport.ReplaceBitmapPreservingView(refined.Bitmap);
-
-                var rendered = await fence.ConfigureAwait(true);
-                _diagnostics.Write("render", "refinement_fence", new
-                { request = request.ImageRequestId, path = firstFrame.Path, rendered, mode = "direct" });
-                if (!rendered || !IsRequestCurrent(request, requirePresented: true))
-                    return; // Do not dispose either side of an uncertain compositor hand-off.
-
-                // Promotion can release the detached cached preview only after the new frame is known
-                // to have rendered. This closes the remaining Skia use-after-dispose window.
-                var promoted = _loader.PromoteRefinement(firstFrame, refined);
-                if (retiredInteraction is not null && !ReferenceEquals(retiredInteraction, old) &&
-                    !ReferenceEquals(retiredInteraction, refined.Bitmap) && !_loader.IsBitmapCached(retiredInteraction))
-                    retiredInteraction.Dispose();
-
-                _interactionPreviewBitmap = promoted ? null : old;
-                Viewport.SetInteractionBitmap(_interactionPreviewBitmap);
-                _currentFrameIsPreview = refined.IsPreview;
-                if (!refined.IsPreview) CancelPreviewQualityRecovery();
-                _currentDecodeMs += refined.DecodeTime.TotalMilliseconds;
-                UpdateStatusStats();
-                if (ImageInfoOverlay.IsVisible) UpdateImageInfoOverlayText();
-                _diagnostics.Write("decode", "foreground_refined",
-                    new { path = firstFrame.Path, request = request.ImageRequestId, refineMs = refined.DecodeTime.TotalMilliseconds,
-                        cacheHit = refined.CacheHit, preparedHit = refined.PreparedFrameHit, promoted });
+                oldBitmap = Viewport.ReplaceBitmapPreservingView(refined.Bitmap);
             }
             finally
             {
                 _navigationSerializationGate.Release();
             }
+
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    var rendered = await directFence.ConfigureAwait(false);
+                    _diagnostics.Write("render", "refinement_fence", new
+                    { request = request.ImageRequestId, path = firstFrame.Path, rendered, mode = "direct" });
+                    if (!rendered || !IsRequestCurrent(request, requirePresented: true)) return;
+
+                    Dispatcher.UIThread.Post(() =>
+                    {
+                        if (!IsRequestCurrent(request, requirePresented: true)) return;
+                        var promoted = _loader.PromoteRefinement(firstFrame, refined);
+                        if (retiredInteractionDirect is not null && !ReferenceEquals(retiredInteractionDirect, oldBitmap) &&
+                            !ReferenceEquals(retiredInteractionDirect, refined.Bitmap) && !_loader.IsBitmapCached(retiredInteractionDirect))
+                            retiredInteractionDirect.Dispose();
+
+                        _interactionPreviewBitmap = promoted ? null : oldBitmap;
+                        Viewport.SetInteractionBitmap(_interactionPreviewBitmap);
+                        _currentFrameIsPreview = refined.IsPreview;
+                        if (!refined.IsPreview) CancelPreviewQualityRecovery();
+                        _currentDecodeMs += refined.DecodeTime.TotalMilliseconds;
+                        UpdateStatusStats();
+                        if (ImageInfoOverlay.IsVisible) UpdateImageInfoOverlayText();
+                        _diagnostics.Write("decode", "foreground_refined",
+                            new { path = firstFrame.Path, request = request.ImageRequestId, refineMs = refined.DecodeTime.TotalMilliseconds,
+                                cacheHit = refined.CacheHit, preparedHit = refined.PreparedFrameHit, promoted });
+                    }, DispatcherPriority.Background);
+                }
+                catch { }
+            });
         }
         catch (OperationCanceledException)
         {
@@ -1844,7 +1961,124 @@ public partial class MainWindow : Window
         });
     }
 
-    private Task NavigateAsync(int delta) => RunSerializedNavigationAsync(() => NavigateCoreAsync(delta));
+    // Do not hold the navigation gate across foreground decoding. A previous image request can take
+    // seconds on a cold codec path; waiting for it here makes a fresh click appear to be ignored and
+    // prevents BeginImageRequest from cancelling the obsolete decode. NavigateCoreAsync serializes
+    // only the short navigator/workspace mutation, then lets the request pipeline own cancellation.
+    private enum NavigationRateInput { Mouse, Keyboard }
+
+    private Task NavigateMouseAsync(int delta) =>
+        TryAcceptNavigationRateLimit(NavigationRateInput.Mouse) ? NavigateAsync(delta) : Task.CompletedTask;
+
+    private Task NavigateKeyboardAsync(int delta) =>
+        TryAcceptNavigationRateLimit(NavigationRateInput.Keyboard) ? NavigateAsync(delta) : Task.CompletedTask;
+
+    private bool TryAcceptNavigationRateLimit(NavigationRateInput input, bool showIndicator = true)
+    {
+        var intervalMs = Math.Clamp(_settings.NavigationRateLimitMs, 0, 600000);
+        if (intervalMs <= 0 || !NavigationRateLimitAppliesTo(input) || !NavigationRateLimitAppliesInCurrentMode())
+        {
+            HideNavigationRateLimitNotice();
+            return true;
+        }
+
+        var now = Stopwatch.GetTimestamp();
+        if (_lastRateLimitedNavigationTimestamp == 0 ||
+            Stopwatch.GetElapsedTime(_lastRateLimitedNavigationTimestamp, now) >= TimeSpan.FromMilliseconds(intervalMs))
+        {
+            _lastRateLimitedNavigationTimestamp = now;
+            HideNavigationRateLimitNotice();
+            return true;
+        }
+
+        // The interval indicator is feedback for a blocked user action. The held-browse producer
+        // deliberately polls faster than the interval, so it suppresses the indicator to avoid
+        // flashing "wait" for its own pacing.
+        if (showIndicator && _settings.NavigationRateLimitShowIndicator)
+            ShowNavigationRateLimitNotice();
+        return false;
+    }
+
+    private bool NavigationRateLimitAppliesTo(NavigationRateInput input)
+    {
+        var choice = _settings.NavigationRateLimitInput?.Trim();
+        if (string.Equals(choice, "Both", StringComparison.OrdinalIgnoreCase)) return true;
+        return input == NavigationRateInput.Mouse
+            ? string.Equals(choice, "Mouse only", StringComparison.OrdinalIgnoreCase)
+            : string.Equals(choice, "Keyboard only", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private bool NavigationRateLimitAppliesInCurrentMode()
+    {
+        if (_slideshow?.IsActive == true) return _settings.NavigationRateLimitSlideshow;
+        if (WindowState == WindowState.FullScreen) return _settings.NavigationRateLimitFullscreen;
+        return _settings.NavigationRateLimitWindowed;
+    }
+
+    private void HideNavigationRateLimitNotice()
+    {
+        _navigationRateLimitNoticeCts?.Cancel();
+        _navigationRateLimitNoticeCts?.Dispose();
+        _navigationRateLimitNoticeCts = null;
+        if (NavigationRateLimitNotice.IsVisible)
+            NavigationRateLimitNotice.IsVisible = false;
+    }
+
+    private void ShowNavigationRateLimitNotice()
+    {
+        _navigationRateLimitNoticeCts?.Cancel();
+        _navigationRateLimitNoticeCts?.Dispose();
+        _navigationRateLimitNoticeCts = new CancellationTokenSource();
+        var token = _navigationRateLimitNoticeCts.Token;
+        ApplyNavigationRateLimitNoticePosition();
+        NavigationRateLimitNotice.IsVisible = true;
+        _ = UpdateNavigationRateLimitNoticeAsync(token);
+    }
+
+    private void ApplyNavigationRateLimitNoticePosition()
+    {
+        var position = _settings.NavigationRateLimitIndicatorPosition?.Trim().ToLowerInvariant();
+        NavigationRateLimitNotice.HorizontalAlignment = position is "top right" or "bottom right" ? Avalonia.Layout.HorizontalAlignment.Right : position == "centre" ? Avalonia.Layout.HorizontalAlignment.Center : Avalonia.Layout.HorizontalAlignment.Left;
+        NavigationRateLimitNotice.VerticalAlignment = position is "bottom left" or "bottom right" ? Avalonia.Layout.VerticalAlignment.Bottom : position == "centre" ? Avalonia.Layout.VerticalAlignment.Center : Avalonia.Layout.VerticalAlignment.Top;
+        NavigationRateLimitNotice.Margin = position switch
+        {
+            "top right" => new Thickness(0, 14, 14, 0),
+            "bottom left" => new Thickness(14, 0, 0, 14),
+            "bottom right" => new Thickness(0, 0, 14, 14),
+            "centre" => new Thickness(0),
+            _ => new Thickness(14, 14, 0, 0)
+        };
+    }
+
+    private async Task UpdateNavigationRateLimitNoticeAsync(CancellationToken token)
+    {
+        try
+        {
+            while (!token.IsCancellationRequested)
+            {
+                var intervalMs = Math.Clamp(_settings.NavigationRateLimitMs, 0, 600000);
+                if (intervalMs <= 0 || _lastRateLimitedNavigationTimestamp == 0)
+                    break;
+
+                var elapsed = Stopwatch.GetElapsedTime(_lastRateLimitedNavigationTimestamp).TotalMilliseconds;
+                var remaining = Math.Max(0, intervalMs - elapsed);
+                if (remaining <= 0)
+                    break;
+
+                NavigationRateLimitNoticeText.Text = $"Wait {Math.Ceiling(remaining):0} ms";
+                NavigationRateLimitNotice.IsVisible = _settings.NavigationRateLimitShowIndicator;
+                await Task.Delay(25, token);
+            }
+        }
+        catch (OperationCanceledException) { }
+        finally
+        {
+            if (!token.IsCancellationRequested)
+                NavigationRateLimitNotice.IsVisible = false;
+        }
+    }
+
+    private Task NavigateAsync(int delta) => NavigateCoreAsync(delta);
 
     private async Task RunSerializedNavigationAsync(Func<Task> action)
     {
@@ -1856,7 +2090,6 @@ public partial class MainWindow : Window
     private async Task NavigateCoreAsync(int delta)
     {
         if (_navigator.Count == 0 || delta == 0 || _navigationBoundaryPromptActive) return;
-        var navigationEpoch = _navigationCommandEpoch;
         _selectionZoomDemandPath = null;
         _lastNavigationDirection = Math.Sign(delta);
 
@@ -1866,33 +2099,122 @@ public partial class MainWindow : Window
         _lastNavigationRequestTimestamp = now;
         _loader.ReportNavigationActivity(rapid ? ImageNavigationActivity.RapidBrowse : ImageNavigationActivity.NormalBrowse);
         _diagnostics.Write("navigation", "requested", new { delta, rapid, index = _navigator.Index, count = _navigator.Count, folderIndexReady = _folderIndexReady, folderIndexCanonicalReady = _folderIndexCanonicalReady });
+        OverlayNavigationTrace.Mark(OverlayNavigationTrace.Kind.NavigationRequest,
+            a: delta, b: rapid ? 1 : 0, x: _navigator.Index, y: _navigator.Count);
 
         if (!_folderIndexReady)
         {
-            _pendingNavigationDelta = Math.Clamp(_pendingNavigationDelta + delta, -MaxBufferedNavigationCommands, MaxBufferedNavigationCommands);
+            await _navigationSerializationGate.WaitAsync().ConfigureAwait(true);
+            try { _pendingNavigationDelta = Math.Clamp(_pendingNavigationDelta + delta, -MaxBufferedNavigationCommands, MaxBufferedNavigationCommands); }
+            finally { _navigationSerializationGate.Release(); }
             return;
         }
 
         var atBoundary = delta > 0 ? _navigator.Index >= _navigator.Count - 1 : _navigator.Index <= 0;
         if (atBoundary && !_folderIndexCanonicalReady)
         {
-            _pendingNavigationDelta = Math.Clamp(_pendingNavigationDelta + delta, -MaxBufferedNavigationCommands, MaxBufferedNavigationCommands);
+            await _navigationSerializationGate.WaitAsync().ConfigureAwait(true);
+            try { _pendingNavigationDelta = Math.Clamp(_pendingNavigationDelta + delta, -MaxBufferedNavigationCommands, MaxBufferedNavigationCommands); }
+            finally { _navigationSerializationGate.Release(); }
             return;
         }
+
         if (atBoundary && _settings.ContinueSiblingFolders)
         {
-            if (await TryNavigateSiblingFolderAsync(Math.Sign(delta))) return;
-            ShowNavigationBoundaryNotice(delta);
-            // A modal boundary barrier invalidates every other command that was already in flight.
-            // Never let an old click/key continuation move inside the newly accepted destination.
-            if (navigationEpoch != _navigationCommandEpoch) return;
+            // The folder index may still be a stale single-item fallback after a transient
+            // enumeration failure or a late folder refresh. Before declaring a branch boundary,
+            // re-read the current folder canonically once. This is boundary-only work, so ordinary
+            // image-to-image navigation keeps its fast path.
+            if (await RefreshCurrentFolderIndexAtBoundaryAsync())
+            {
+                atBoundary = delta > 0 ? _navigator.Index >= _navigator.Count - 1 : _navigator.Index <= 0;
+                if (!atBoundary)
+                {
+                    await _navigationSerializationGate.WaitAsync().ConfigureAwait(true);
+                    try
+                    {
+                        if (_navigator.Count == 0 || _navigationBoundaryPromptActive) return;
+                        atBoundary = delta > 0 ? _navigator.Index >= _navigator.Count - 1 : _navigator.Index <= 0;
+                        if (atBoundary) return;
+                        _navigator.Move(delta);
+                    }
+                    finally
+                    {
+                        _navigationSerializationGate.Release();
+                    }
+                    await PresentCurrentAsync(rapidPreviewOnly: rapid, skipTransition: false);
+                    if (rapid) ScheduleRapidNavigationSettle();
+                    return;
+                }
+            }
+            // Sibling lookup/presentation is itself serialized by this gate, but it is deliberately
+            // entered only after the caller has reached this branch; ordinary in-folder clicks never
+            // queue behind a previous image decode.
+            await RunSerializedNavigationResultAsync(() => TryNavigateSiblingFolderAsync(Math.Sign(delta)));
+            return;
         }
 
-        if (atBoundary && !_settings.ContinueSiblingFolders)
-            ShowNavigationBoundaryNotice(delta);
-        _navigator.Move(delta);
-        await PresentCurrentAsync(rapidPreviewOnly: rapid);
+        await _navigationSerializationGate.WaitAsync().ConfigureAwait(true);
+        try
+        {
+            // Re-check after the short gate wait because another command may have moved the index.
+            if (_navigator.Count == 0 || _navigationBoundaryPromptActive) return;
+            atBoundary = delta > 0 ? _navigator.Index >= _navigator.Count - 1 : _navigator.Index <= 0;
+            if (atBoundary)
+            {
+                ShowNavigationBoundaryNotice(delta);
+                return;
+            }
+            _navigator.Move(delta);
+        }
+        finally
+        {
+            _navigationSerializationGate.Release();
+        }
+
+        await PresentCurrentAsync(rapidPreviewOnly: rapid, skipTransition: false);
         if (rapid) ScheduleRapidNavigationSettle();
+    }
+
+    private async Task<bool> RefreshCurrentFolderIndexAtBoundaryAsync()
+    {
+        var expectedPath = _navigator.Current;
+        if (expectedPath is null) return false;
+        string[] paths;
+        try
+        {
+            paths = await Task.Run(() => ImageNavigator.EnumerateSupportedFolder(expectedPath), _windowLifetimeCts.Token);
+        }
+        catch (OperationCanceledException) { return false; }
+        catch (Exception ex)
+        {
+            _diagnostics.Write("navigation", "boundary_folder_refresh_failed", new { path = expectedPath, error = ex.GetType().Name });
+            return false;
+        }
+
+        await _navigationSerializationGate.WaitAsync().ConfigureAwait(true);
+        try
+        {
+            if (_navigationBoundaryPromptActive || !string.Equals(_navigator.Current, expectedPath, StringComparison.OrdinalIgnoreCase))
+                return false;
+            _navigator.ReplaceFolderIndex(paths, expectedPath);
+            _folderIndexReady = true;
+            _folderIndexCanonicalReady = true;
+            UpdatePictureCounter();
+            UpdateStatusStats();
+            _diagnostics.Write("navigation", "boundary_folder_refreshed", new
+            {
+                path = expectedPath,
+                count = _navigator.Count,
+                index = _navigator.Index
+            });
+            ScheduleNavigationNeighbours();
+            return true;
+        }
+        finally
+        {
+            _navigationSerializationGate.Release();
+        }
     }
 
     private void ScheduleRapidNavigationSettle()
@@ -1905,7 +2227,7 @@ public partial class MainWindow : Window
         {
             try
             {
-                await Task.Delay(170, token).ConfigureAwait(false);
+                await Task.Delay(220, token).ConfigureAwait(false);
                 Dispatcher.UIThread.Post(async () =>
                 {
                     try
@@ -1914,7 +2236,7 @@ public partial class MainWindow : Window
                         {
                             if (token.IsCancellationRequested || _navigator.Current is null) return;
                             _loader.ReportNavigationActivity(ImageNavigationActivity.NormalBrowse);
-                            await PresentCurrentAsync(rapidPreviewOnly: false, forceFull: true);
+                            await PresentCurrentAsync(rapidPreviewOnly: false, forceFull: true, skipTransition: false);
                         });
                     }
                     catch (OperationCanceledException) { }
@@ -1951,7 +2273,7 @@ public partial class MainWindow : Window
                             if (token.IsCancellationRequested || !_currentFrameIsPreview ||
                                 !string.Equals(_navigator.Current, path, StringComparison.OrdinalIgnoreCase)) return;
                             _loader.ReportNavigationActivity(ImageNavigationActivity.NormalBrowse);
-                            await PresentCurrentAsync(rapidPreviewOnly: false, forceFull: true);
+                            await PresentCurrentAsync(rapidPreviewOnly: false, forceFull: true, skipTransition: false);
                         });
                     }
                     catch (OperationCanceledException) { }
@@ -2000,7 +2322,9 @@ public partial class MainWindow : Window
                     _settings.FolderNavWrap,
                     _settings.FolderNavSkipEmpty,
                     forceDirectionalEdge ? direction > 0 : _settings.FolderNavOpenFirstImage,
-                    _settings.HierarchicalFolderTraversal),
+                    _settings.HierarchicalFolderTraversal,
+                    _settings.FolderNavOrder,
+                    string.Equals(_settings.HierarchicalPreviousFolderEntry, "First image", StringComparison.OrdinalIgnoreCase)),
                 forceFirstImage,
                 ImageNavigator.IsSupported);
         }
@@ -2010,7 +2334,8 @@ public partial class MainWindow : Window
             _diagnostics.Write("navigation", "sibling_folder_failed", new { path = current, error = ex.GetType().Name });
             return false;
         }
-        if (result is null || navigationEpoch != _navigationCommandEpoch) return false;
+        if (result is null || navigationEpoch != _navigationCommandEpoch ||
+            !string.Equals(_navigator.Current, current, StringComparison.OrdinalIgnoreCase)) return false;
         if (result.CrossedAncestorBoundary && _settings.ConfirmHierarchicalFolderTraversal)
         {
             // A blocking boundary prompt is a hard navigation barrier. Do not allow a second
@@ -2056,7 +2381,7 @@ public partial class MainWindow : Window
         var remember = new CheckBox { Content = "Don't remind me again" };
         var proceed = new Button { Content = "Continue", MinWidth = 96 };
         var cancel = new Button { Content = "Cancel", MinWidth = 96 };
-        var dialog = new Window { Width = 500, Height = 245, Title = "Continue to nearby folder?", Icon = Icon, CanResize = false };
+        var dialog = CreateContentSizedDialog("Continue to nearby folder?", 460, 640);
         PopupPlacementStore.Track(dialog, "folder-boundary-confirm");
         proceed.Click += (_, _) => { accepted = true; decided = true; dialog.Close(); };
         cancel.Click += (_, _) => { accepted = false; decided = true; dialog.Close(); };
@@ -2074,14 +2399,21 @@ public partial class MainWindow : Window
             Children =
             {
                 new TextBlock { Text = "End of this folder branch", FontSize = 19, FontWeight = FontWeight.SemiBold },
-                new TextBlock { Text = $"Glide has reached the end of {from}. Continue into the nearby folder branch:\n{to}", TextWrapping = TextWrapping.Wrap },
+                // Long folder paths can wrap to many lines; scroll the message instead of pushing
+                // the decision buttons out of the dialog on small screens.
+                new ScrollViewer
+                {
+                    MaxHeight = 300,
+                    VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                    Content = new TextBlock { Text = $"Glide has reached the end of {from}. Continue into the nearby folder branch:\n{to}", TextWrapping = TextWrapping.Wrap }
+                },
                 remember,
                 new StackPanel { Orientation = Avalonia.Layout.Orientation.Horizontal, Spacing = 10, HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right, Children = { cancel, proceed } }
             }
         };
         try
         {
-            await dialog.ShowDialog(this);
+            await ShowOwnedDialogAsync(dialog);
             return decided ? (accepted, accepted && remember.IsChecked == true) : (false, false);
         }
         finally
@@ -2217,7 +2549,7 @@ public partial class MainWindow : Window
             : "Fast browsing, precise zooming, and familiar Windows controls.";
         home.TipsGrid.IsVisible = !recentLanding && _settings.ShowHomeTips;
         ApplyWelcomeLayout();
-        Title = recentLanding ? "Glide 4.1.5 — Recent pictures" : "Glide 4.1.5 — Home";
+        Title = recentLanding ? "Glide 4.2.3 — Recent pictures" : "Glide 4.2.3 — Home";
         RefreshRecentHistoryHome();
         ApplyStatusVisibility();
     }
@@ -2374,10 +2706,14 @@ public partial class MainWindow : Window
                     Viewport.RestoreViewState(new ViewerViewSnapshot(view.Mode, view.Zoom, new Vector(view.PanX, view.PanY)));
                 break;
             case BrowserTabState browser:
-                ShowBrowserSurface();
-                RestoreBrowserNavigationState(browser);
-                NavigateBrowserTo(browser.Folder, addHistory: false);
-                Title = $"Glide 4.1.5 — Explorer — {browser.Folder}";
+                // Compatibility migration only: the built-in Explorer no longer exists.
+                _browserSessions.Remove(browser.Id);
+                _browserHighlightTargets.Remove(browser.Id);
+                _tabForwardFolderTargets.Remove(browser.Id);
+                _tabForwardImageTargets.Remove(browser.Id);
+                _workspace.ReplaceTab(new HomeTabState(browser.Id));
+                ShowHomeSurface();
+                _diagnostics.Write("browser", "legacy_browser_tab_migrated_to_home", new { browser.Id });
                 break;
         }
         RebuildTabStrip();
@@ -2412,7 +2748,7 @@ public partial class MainWindow : Window
             case BrowserTabState browser when _browserSessions.TryGetValue(id, out var session):
                 _workspace.ReplaceTab(browser with
                 {
-                    Navigation = new BrowserNavigationState(session.History.ToArray(), session.Index)
+                    Navigation = new BrowserNavigationState(session.History.ToArray(), session.Index, session.Highlights.ToArray())
                 });
                 break;
         }
@@ -2422,7 +2758,14 @@ public partial class MainWindow : Window
     {
         if (browser.Navigation is not { } navigation || _browserSessions.ContainsKey(browser.Id)) return;
         var session = new BrowserSession();
-        session.History.AddRange(navigation.History.Where(Directory.Exists));
+        for (var i = 0; i < navigation.History.Count; i++)
+        {
+            var folder = navigation.History[i];
+            if (!Directory.Exists(folder)) continue;
+            session.History.Add(Path.GetFullPath(folder));
+            var highlight = navigation.Highlights is { } highlights && i < highlights.Count ? highlights[i] : null;
+            session.Highlights.Add(!string.IsNullOrWhiteSpace(highlight) ? highlight : null);
+        }
         session.Index = session.History.Count == 0
             ? -1
             : Math.Clamp(navigation.Index, 0, session.History.Count - 1);
@@ -2436,7 +2779,7 @@ public partial class MainWindow : Window
         // Consume blank/title utility space before sacrificing tabs. The close button remains the
         // last permanent control; utility actions, nav and nonessential caption buttons yield first.
         TitleActionHost.IsVisible = width >= 720;
-        TabNavigationHost.IsVisible = width >= 560;
+        TabNavigationHost.IsVisible = false;
         // Caption controls are protected as one Windows-standard unit. At narrow widths tabs keep
         // compressing instead of sacrificing Minimize/Maximize/Close individually.
         CaptionMinimizeButton.IsVisible = true;
@@ -2961,6 +3304,11 @@ public partial class MainWindow : Window
     private const int ScClose = 0xF060;
     private const int ScRestore = 0xF120;
     private const int HtCaption = 2;
+    private const uint SwpNoSize = 0x0001;
+    private const uint SwpNoMove = 0x0002;
+    private const uint SwpNoActivate = 0x0010;
+    private const uint SwpNoOwnerZOrder = 0x0200;
+    private const uint SwpNoSendChanging = 0x0400;
 
     [StructLayout(LayoutKind.Sequential)]
     private struct NativePoint
@@ -2985,6 +3333,10 @@ public partial class MainWindow : Window
 
     [DllImport("user32.dll", EntryPoint = "SendMessageW")]
     private static extern IntPtr SendMessageW(IntPtr hWnd, uint message, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
 
 
     private static (bool Left, bool Right, bool Middle) PhysicalMouseButtons(PointerPoint point)
@@ -3134,9 +3486,7 @@ public partial class MainWindow : Window
         }
         items.Add(Item($"Duplicate tab\t{ShortcutFor(GlideCommand.DuplicateTab)}", () => _ = DuplicateTabByIdAsync(tab.Id)));
         items.Add(Item("Move tab to new window", () => _ = DetachTabAsync(tab.Id, this.PointToScreen(new Point(Bounds.Width / 2, 42))), _settings.TabDetachEnabled));
-        if (tab is ImageTabState image)
-            items.Add(Item("Open containing folder in Explorer tab", () => OpenBrowserTab(Path.GetDirectoryName(image.Path) ?? "")));
-        else if (tab is BrowserTabState browser)
+        if (tab is BrowserTabState browser)
             items.Add(Item("Open first image in folder", () => _ = OpenFirstImageInFolderAsync(browser.Folder)));
         items.Add(new MenuItem { Header = "-" });
         items.Add(Item($"Reopen closed tab\t{ShortcutFor(GlideCommand.RestoreClosedTab)}", () => _ = RestoreClosedTabAsync(), _workspace.ClosedCount > 0));
@@ -3144,7 +3494,7 @@ public partial class MainWindow : Window
         items.Add(new MenuItem { Header = "-" });
         AppendWholeAppOverlayMenuItems(items);
         menu.ItemsSource = items;
-        return menu;
+        return PrepareOwnedContextMenu(menu);
     }
 
     private async Task DuplicateTabByIdAsync(Guid id)
@@ -3185,8 +3535,8 @@ public partial class MainWindow : Window
 
     private TabState CreateConfiguredHomeDestination()
     {
-        if (string.Equals(_settings.HomePageMode, "Browser page", StringComparison.OrdinalIgnoreCase))
-            return _workspace.AddBrowser(ResolveHomeBrowserFolder());
+        // Built-in Explorer was removed from the product. Legacy "Browser page" settings
+        // are treated as Welcome/Home.
         return _workspace.AddHome();
     }
 
@@ -3198,8 +3548,11 @@ public partial class MainWindow : Window
             var restored = WorkspaceSessionStore.Load();
             if (restored is { } session)
             {
-                _workspace.Reset(session.Tabs, session.ActiveIndex);
-                _diagnostics.Write("workspace", "startup_session_restored", new { tabs = session.Tabs.Count, session.ActiveIndex });
+                var sanitizedTabs = session.Tabs
+                    .Select<TabState, TabState>(tab => tab is BrowserTabState ? new HomeTabState(tab.Id) : tab)
+                    .ToArray();
+                _workspace.Reset(sanitizedTabs, Math.Clamp(session.ActiveIndex, 0, Math.Max(0, sanitizedTabs.Length - 1)));
+                _diagnostics.Write("workspace", "startup_session_restored", new { tabs = sanitizedTabs.Length, session.ActiveIndex, browserTabsRemoved = true });
                 return;
             }
             action = "Welcome tab";
@@ -3207,7 +3560,6 @@ public partial class MainWindow : Window
 
         TabState initial = action switch
         {
-            "Explorer tab" => new BrowserTabState(Guid.NewGuid(), ResolveHomeBrowserFolder()),
             "Custom" => CreateStandaloneCustomDestination(_settings.StartupCustomPath) ?? new HomeTabState(Guid.NewGuid()),
             _ => new HomeTabState(Guid.NewGuid())
         };
@@ -3216,16 +3568,13 @@ public partial class MainWindow : Window
 
     private TabState CreateConfiguredNewTabDestination()
     {
-        var action = string.IsNullOrWhiteSpace(_settings.NewTabAction) ? "Explorer tab" : _settings.NewTabAction;
-        if (string.Equals(action, "Welcome tab", StringComparison.OrdinalIgnoreCase)) return _workspace.AddHome();
+        var action = string.IsNullOrWhiteSpace(_settings.NewTabAction) ? "Welcome tab" : _settings.NewTabAction;
         if (string.Equals(action, "Custom", StringComparison.OrdinalIgnoreCase))
         {
             var path = _settings.NewTabCustomPath;
-            if (Directory.Exists(path)) return _workspace.AddBrowser(path);
             if (File.Exists(path) && ImageNavigator.IsSupported(path)) return _workspace.AddImage(path);
-            return _workspace.AddHome();
         }
-        return _workspace.AddBrowser(ResolveFreshExplorerFolder());
+        return _workspace.AddHome();
     }
 
     private string ResolveFreshExplorerFolder()
@@ -3243,7 +3592,6 @@ public partial class MainWindow : Window
     private static TabState? CreateStandaloneCustomDestination(string? path)
     {
         if (string.IsNullOrWhiteSpace(path)) return null;
-        if (Directory.Exists(path)) return new BrowserTabState(Guid.NewGuid(), Path.GetFullPath(path));
         if (File.Exists(path) && ImageNavigator.IsSupported(path)) return new ImageTabState(Guid.NewGuid(), Path.GetFullPath(path));
         return null;
     }
@@ -3259,9 +3607,8 @@ public partial class MainWindow : Window
 
     private void OpenBrowserTab(string folder)
     {
-        if (string.IsNullOrWhiteSpace(folder) || !Directory.Exists(folder)) return;
-        _workspace.AddBrowser(folder);
-        _ = ActivateWorkspaceAsync();
+        // Built-in Explorer removed. Kept as an inert compatibility shim for old call sites.
+        _diagnostics.Write("browser", "internal_explorer_removed", new { folder });
     }
 
     private async Task OpenFirstImageInFolderAsync(string folder)
@@ -3307,11 +3654,12 @@ public partial class MainWindow : Window
 
             var browserSession = new BrowserSession();
             browserSession.History.Add(folder);
+            browserSession.Highlights.Add(imagePath);
             browserSession.Index = 0;
             _browserSessions[id] = browserSession;
             var browserState = new BrowserTabState(id, folder)
             {
-                Navigation = new BrowserNavigationState(browserSession.History.ToArray(), browserSession.Index)
+                Navigation = new BrowserNavigationState(browserSession.History.ToArray(), browserSession.Index, browserSession.Highlights.ToArray())
             };
             if (!_workspace.ReplaceTab(browserState))
             {
@@ -3340,7 +3688,7 @@ public partial class MainWindow : Window
             if (!_tabForwardFolderTargets.TryGetValue(browser.Id, out var forwardFolders))
                 _tabForwardFolderTargets[browser.Id] = forwardFolders = new Stack<string>();
             forwardFolders.Push(browser.Folder);
-            NavigateBrowserTo(parent, addHistory: false);
+            NavigateBrowserTo(parent, addHistory: false, highlightPath: browser.Folder);
             UpdateTabNavigationButtons();
             _diagnostics.Write("navigation", "title_up_parent", new { from = browser.Folder, parent, tab = browser.Id });
         }
@@ -3378,10 +3726,12 @@ public partial class MainWindow : Window
 
     private void ApplyTabUtilityButtonVisibility()
     {
-        TabNavBackButton.IsVisible = _settings.TabBarShowBackButton;
-        TabNavForwardButton.IsVisible = _settings.TabBarShowForwardButton;
-        TabNavBackButton.ContextMenu = BuildTabUtilityContextMenu("Up", () => { _settings.TabBarShowBackButton = false; SaveSettingsAndPublish(); ApplyTabUtilityButtonVisibility(); });
-        TabNavForwardButton.ContextMenu = BuildTabUtilityContextMenu("Forward", () => { _settings.TabBarShowForwardButton = false; SaveSettingsAndPublish(); ApplyTabUtilityButtonVisibility(); });
+        // Built-in Explorer/title navigation was removed.
+        TabNavigationHost.IsVisible = false;
+        TabNavBackButton.IsVisible = false;
+        TabNavForwardButton.IsVisible = false;
+        TabNavBackButton.ContextMenu = null;
+        TabNavForwardButton.ContextMenu = null;
         UpdateTabNavigationButtons();
     }
 
@@ -3409,13 +3759,21 @@ public partial class MainWindow : Window
         TabNavForwardButton.Classes.Set("inactive", !canForward);
         TabNavBackButton.Opacity = canBack ? 1.0 : 0.34;
         TabNavForwardButton.Opacity = canForward ? 1.0 : 0.34;
-        TabNavBackButton.IsEnabled = true;
-        TabNavForwardButton.IsEnabled = true;
+        TabNavBackButton.IsEnabled = false;
+        TabNavForwardButton.IsEnabled = false;
+        TabNavBackButton.IsVisible = false;
+        TabNavForwardButton.IsVisible = false;
+        TabNavigationHost.IsVisible = false;
     }
 
     private void SelectBrowserHighlight(Guid tabId)
     {
-        if (!_browserHighlightTargets.TryGetValue(tabId, out var target) || string.IsNullOrWhiteSpace(target)) return;
+        string? target = null;
+        if (_browserSessions.TryGetValue(tabId, out var session))
+            target = CurrentBrowserHistoryHighlight(session);
+        if (string.IsNullOrWhiteSpace(target))
+            _browserHighlightTargets.TryGetValue(tabId, out target);
+        if (string.IsNullOrWhiteSpace(target)) return;
         var index = _browserEntries.FindIndex(entry => string.Equals(entry.Path, target, StringComparison.OrdinalIgnoreCase));
         if (index < 0) return;
         _browserSelection.Clear();
@@ -3449,7 +3807,7 @@ public partial class MainWindow : Window
         items.Add(new MenuItem { Header = "-" });
         AppendWholeAppOverlayMenuItems(items);
         menu.ItemsSource = items;
-        return menu;
+        return PrepareOwnedContextMenu(menu);
     }
 
     private async void ChromeMiddleClickReleased(object? sender, PointerReleasedEventArgs e)
@@ -3779,8 +4137,8 @@ public partial class MainWindow : Window
         await OpenAsImageTabAsync(path);
     }
 
-    private void PreviousFolderTopClicked(object? sender, RoutedEventArgs e) => _ = RunSerializedNavigationResultAsync(() => TryNavigateSiblingFolderAsync(-1, forceFirstImage: true));
-    private void NextFolderTopClicked(object? sender, RoutedEventArgs e) => _ = RunSerializedNavigationResultAsync(() => TryNavigateSiblingFolderAsync(1, forceFirstImage: true));
+    private void PreviousFolderTopClicked(object? sender, RoutedEventArgs e) => _ = RunSerializedNavigationResultAsync(() => TryNavigateSiblingFolderAsync(-1));
+    private void NextFolderTopClicked(object? sender, RoutedEventArgs e) => _ = RunSerializedNavigationResultAsync(() => TryNavigateSiblingFolderAsync(1));
     private void PreviousFolderClicked(object? sender, RoutedEventArgs e) => _ = RunSerializedNavigationResultAsync(() => TryNavigateSiblingFolderAsync(-1));
     private void NextFolderClicked(object? sender, RoutedEventArgs e) => _ = RunSerializedNavigationResultAsync(() => TryNavigateSiblingFolderAsync(1));
 
@@ -3793,39 +4151,60 @@ public partial class MainWindow : Window
         await ActivateWorkspaceAsync();
     }
 
-    private void NavigateBrowserTo(string folder, bool addHistory)
+    private void NavigateBrowserTo(string folder, bool addHistory, string? highlightPath = null)
     {
         if (_workspace.Active is not BrowserTabState browser || !Directory.Exists(folder)) return;
         folder = Path.GetFullPath(folder);
         _settings.LastNewExplorerTabDirectory = folder;
         SaveSettingsAndPublish();
-        _workspace.ReplaceActiveBrowserFolder(folder);
         var id = browser.Id;
         if (!_browserSessions.TryGetValue(id, out var session)) _browserSessions[id] = session = new BrowserSession();
+
         if (addHistory)
         {
-            // A new explicit browser navigation creates a new branch, just like a browser: discard
-            // the transient Up/Forward chain created by the title-bar navigation controls.
+            // Preserve the item the user was on before leaving this folder. Going Back therefore
+            // restores the correct child/file instead of carrying a stale selection from another
+            // directory.
+            CaptureCurrentBrowserSelection(session);
+
             _tabForwardFolderTargets.Remove(id);
             _tabForwardImageTargets.Remove(id);
             if (session.Index >= 0 && session.Index < session.History.Count - 1)
-                session.History.RemoveRange(session.Index + 1, session.History.Count - session.Index - 1);
+            {
+                var remove = session.History.Count - session.Index - 1;
+                EnsureBrowserHighlightSlots(session);
+                session.History.RemoveRange(session.Index + 1, remove);
+                session.Highlights.RemoveRange(session.Index + 1, remove);
+            }
+
             if (session.History.Count == 0 || !string.Equals(session.History[^1], folder, StringComparison.OrdinalIgnoreCase))
             {
                 session.History.Add(folder);
+                session.Highlights.Add(NormalizeBrowserHighlight(folder, highlightPath));
                 session.Index = session.History.Count - 1;
+            }
+            else
+            {
+                session.Index = session.History.Count - 1;
+                SetBrowserHistoryHighlight(session, session.Index, folder, highlightPath);
             }
         }
         else if (session.History.Count == 0)
         {
             session.History.Add(folder);
+            session.Highlights.Add(NormalizeBrowserHighlight(folder, highlightPath));
             session.Index = 0;
         }
+        else if (!string.IsNullOrWhiteSpace(highlightPath))
+        {
+            SetBrowserHistoryHighlight(session, session.Index, folder, highlightPath);
+        }
 
+        _workspace.ReplaceActiveBrowserFolder(folder);
         if (_workspace.Active is BrowserTabState activeBrowser)
             _workspace.ReplaceTab(activeBrowser with
             {
-                Navigation = new BrowserNavigationState(session.History.ToArray(), session.Index)
+                Navigation = new BrowserNavigationState(session.History.ToArray(), session.Index, session.Highlights.ToArray())
             });
 
         BrowserAddressBox.Text = folder;
@@ -3833,11 +4212,57 @@ public partial class MainWindow : Window
         BrowserBackButton.IsEnabled = session.Index > 0 || (_tabForwardImageTargets.TryGetValue(id, out var backTarget) && File.Exists(backTarget));
         BrowserForwardButton.IsEnabled = session.Index >= 0 && session.Index < session.History.Count - 1;
         BrowserUpButton.IsEnabled = Directory.GetParent(folder) is not null;
-        Title = $"Glide 4.1.5 — Explorer — {folder}";
+        Title = $"Glide 4.2.3 — Explorer — {folder}";
         RebuildTabStrip();
         SelectBrowserHighlight(id);
         UpdateTabNavigationButtons();
-        _diagnostics.Write("browser", "navigate", new { folder, addHistory, historyIndex = session.Index, historyCount = session.History.Count });
+        _diagnostics.Write("browser", "navigate", new
+        {
+            folder, addHistory, historyIndex = session.Index, historyCount = session.History.Count,
+            highlight = CurrentBrowserHistoryHighlight(session)
+        });
+    }
+
+    private static string? NormalizeBrowserHighlight(string folder, string? target)
+    {
+        if (string.IsNullOrWhiteSpace(target)) return null;
+        try
+        {
+            var full = Path.GetFullPath(target);
+            var parent = Directory.Exists(full) ? Directory.GetParent(full)?.FullName : Path.GetDirectoryName(full);
+            return string.Equals(parent, folder, StringComparison.OrdinalIgnoreCase) ? full : null;
+        }
+        catch { return null; }
+    }
+
+    private static void EnsureBrowserHighlightSlots(BrowserSession session)
+    {
+        while (session.Highlights.Count < session.History.Count) session.Highlights.Add(null);
+        if (session.Highlights.Count > session.History.Count)
+            session.Highlights.RemoveRange(session.History.Count, session.Highlights.Count - session.History.Count);
+    }
+
+    private static string? CurrentBrowserHistoryHighlight(BrowserSession session)
+    {
+        EnsureBrowserHighlightSlots(session);
+        return session.Index >= 0 && session.Index < session.Highlights.Count ? session.Highlights[session.Index] : null;
+    }
+
+    private static void SetBrowserHistoryHighlight(BrowserSession session, int index, string folder, string? target)
+    {
+        EnsureBrowserHighlightSlots(session);
+        if (index < 0 || index >= session.History.Count) return;
+        session.Highlights[index] = NormalizeBrowserHighlight(folder, target);
+    }
+
+    private void CaptureCurrentBrowserSelection(BrowserSession session)
+    {
+        if (_workspace.Active is not BrowserTabState browser || session.Index < 0 || session.Index >= session.History.Count) return;
+        var selected = _browserCurrentIndex >= 0 && _browserCurrentIndex < _browserEntries.Count
+            ? _browserEntries[_browserCurrentIndex].Path
+            : _browserSelection.FirstOrDefault();
+        if (!string.IsNullOrWhiteSpace(selected))
+            SetBrowserHistoryHighlight(session, session.Index, browser.Folder, selected);
     }
 
     private void NativeExplorerFolderNavigated(string folder)
@@ -3853,25 +4278,32 @@ public partial class MainWindow : Window
 
         _workspace.ReplaceActiveBrowserFolder(folder);
         if (!_browserSessions.TryGetValue(browser.Id, out var session)) _browserSessions[browser.Id] = session = new BrowserSession();
+        CaptureCurrentBrowserSelection(session);
         if (session.Index >= 0 && session.Index < session.History.Count - 1)
-            session.History.RemoveRange(session.Index + 1, session.History.Count - session.Index - 1);
+        {
+            var remove = session.History.Count - session.Index - 1;
+            EnsureBrowserHighlightSlots(session);
+            session.History.RemoveRange(session.Index + 1, remove);
+            session.Highlights.RemoveRange(session.Index + 1, remove);
+        }
         if (session.History.Count == 0 || !string.Equals(session.History[^1], folder, StringComparison.OrdinalIgnoreCase))
         {
             session.History.Add(folder);
+            session.Highlights.Add(null);
             session.Index = session.History.Count - 1;
         }
 
         if (_workspace.Active is BrowserTabState activeBrowser)
             _workspace.ReplaceTab(activeBrowser with
             {
-                Navigation = new BrowserNavigationState(session.History.ToArray(), session.Index)
+                Navigation = new BrowserNavigationState(session.History.ToArray(), session.Index, session.Highlights.ToArray())
             });
 
         BrowserAddressBox.Text = folder;
         BrowserBackButton.IsEnabled = session.Index > 0 || (_tabForwardImageTargets.TryGetValue(browser.Id, out var nativeBackTarget) && File.Exists(nativeBackTarget));
         BrowserForwardButton.IsEnabled = session.Index >= 0 && session.Index < session.History.Count - 1;
         BrowserUpButton.IsEnabled = Directory.GetParent(folder) is not null;
-        Title = $"Glide 4.1.5 — Explorer — {folder}";
+        Title = $"Glide 4.2.3 — Explorer — {folder}";
         RebuildTabStrip();
         SelectBrowserHighlight(browser.Id);
         UpdateTabNavigationButtons();
@@ -4065,7 +4497,7 @@ public partial class MainWindow : Window
             Content = content,
             Width = tileWidth,
             Height = tileHeight,
-            Margin = new Thickness(3),
+            Margin = new Thickness(0),
             Padding = compact ? new Thickness(7, 4) : new Thickness(7),
             VerticalContentAlignment = Avalonia.Layout.VerticalAlignment.Center,
             HorizontalContentAlignment = compact ? Avalonia.Layout.HorizontalAlignment.Stretch : Avalonia.Layout.HorizontalAlignment.Center
@@ -4088,8 +4520,14 @@ public partial class MainWindow : Window
     private void ConfigureBrowserRepeaterLayout()
     {
         var compact = _browserViewMode == 2;
-        BrowserRepeaterLayout.MinItemWidth = compact ? 250 : _browserViewMode == 1 ? 126 : 176;
-        BrowserRepeaterLayout.MinItemHeight = compact ? 42 : _browserViewMode == 1 ? 146 : 188;
+        BrowserRepeater.Layout = new UniformGridLayout
+        {
+            Orientation = Orientation.Horizontal,
+            MinItemWidth = compact ? 250 : _browserViewMode == 1 ? 126 : 176,
+            MinItemHeight = compact ? 42 : _browserViewMode == 1 ? 146 : 188,
+            MinColumnSpacing = 6,
+            MinRowSpacing = 6
+        };
     }
 
     private double BrowserItemStrideWidth() => (_browserViewMode == 2 ? 250d : _browserViewMode == 1 ? 126d : 176d) + 6d;
@@ -4243,7 +4681,7 @@ public partial class MainWindow : Window
         items.Add(new MenuItem { Header = "-" });
         AppendWholeAppOverlayMenuItems(items);
         menu.ItemsSource = items;
-        return menu;
+        return PrepareOwnedContextMenu(menu);
     }
 
     private static void OpenWithWindowsShell(string path)
@@ -4284,16 +4722,37 @@ public partial class MainWindow : Window
 
     private async void BrowserViewModeChanged(object? sender, SelectionChangedEventArgs e)
     {
-        // Avalonia may raise SelectionChanged while InitializeComponent is still assigning x:Name
-        // fields. Returning here prevents a startup-time NullReferenceException before the window can
-        // ever be shown. Once construction completes, subsequent user changes run normally.
         if (!_browserUiReady || sender is not ComboBox combo || combo.SelectedIndex < 0) return;
-        _browserViewMode = combo.SelectedIndex;
-        ConfigureBrowserRepeaterLayout();
+
+        var requestedMode = combo.SelectedIndex;
+        var selectedPath = _browserCurrentIndex >= 0 && _browserCurrentIndex < _browserEntries.Count
+            ? _browserEntries[_browserCurrentIndex].Path
+            : _browserSelection.FirstOrDefault();
+
+        // Retire the complete old visual generation before changing geometry. Reusing a measured
+        // ItemsRepeater tree across Large/Medium/Compact was the source of overlapping/"melted"
+        // icons after repeated mode changes.
+        // Do not advance _browserGeneration here: that generation owns folder-population races.
+        // Realization cancellation is sufficient for view-mode work and avoids cancelling an
+        // in-flight population of the current folder.
+        CancelAllBrowserRealizations();
         BrowserRepeater.ItemsSource = null;
         await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Render);
-        if (!_browserUiReady || !ReferenceEquals(sender, BrowserViewModeCombo)) return;
+        await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Render);
+
+        if (!_browserUiReady || !ReferenceEquals(sender, BrowserViewModeCombo) || combo.SelectedIndex != requestedMode) return;
+        _browserViewMode = requestedMode;
+        BrowserRepeater.ItemTemplate = new FuncDataTemplate<BrowserEntry>((entry, _) => CreateBrowserItem(entry), supportsRecycling: false);
+        ConfigureBrowserRepeaterLayout();
         BrowserRepeater.ItemsSource = _browserEntries;
+
+        if (!string.IsNullOrWhiteSpace(selectedPath))
+        {
+            var index = _browserEntries.FindIndex(entry => string.Equals(entry.Path, selectedPath, StringComparison.OrdinalIgnoreCase));
+            if (index >= 0) SelectBrowserIndex(index, extend: false, toggle: false, bringIntoView: true);
+        }
+
+        _diagnostics.Write("browser", "view_mode_rebuilt", new { mode = _browserViewMode, count = _browserEntries.Count });
     }
 
     private void BrowserWindowsExplorerClicked(object? sender, RoutedEventArgs e)
@@ -4365,6 +4824,7 @@ public partial class MainWindow : Window
         if (_workspace.Active is not BrowserTabState browser || !_browserSessions.TryGetValue(browser.Id, out var session)) return;
         if (session.Index > 0)
         {
+            CaptureCurrentBrowserSelection(session);
             session.Index--;
             NavigateBrowserTo(session.History[session.Index], addHistory: false);
             return;
@@ -4387,6 +4847,7 @@ public partial class MainWindow : Window
     private void BrowserForwardClicked(object? sender, RoutedEventArgs e)
     {
         if (_workspace.Active is not BrowserTabState browser || !_browserSessions.TryGetValue(browser.Id, out var session) || session.Index >= session.History.Count - 1) return;
+        CaptureCurrentBrowserSelection(session);
         session.Index++;
         NavigateBrowserTo(session.History[session.Index], addHistory: false);
     }
@@ -4394,8 +4855,9 @@ public partial class MainWindow : Window
     private void BrowserUpClicked(object? sender, RoutedEventArgs e)
     {
         if (_workspace.Active is not BrowserTabState browser) return;
-        var parent = Directory.GetParent(browser.Folder)?.FullName;
-        if (parent is not null) NavigateBrowserTo(parent, addHistory: true);
+        var child = browser.Folder;
+        var parent = Directory.GetParent(child)?.FullName;
+        if (parent is not null) NavigateBrowserTo(parent, addHistory: true, highlightPath: child);
     }
 
     private void BrowserRefreshClicked(object? sender, RoutedEventArgs e)
@@ -4411,8 +4873,8 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
-    private async void PreviousClicked(object? sender, RoutedEventArgs e) => await ExecuteCommandAsync(GlideCommand.PreviousImage);
-    private async void NextClicked(object? sender, RoutedEventArgs e) => await ExecuteCommandAsync(GlideCommand.NextImage);
+    private async void PreviousClicked(object? sender, RoutedEventArgs e) => await NavigateMouseAsync(-1);
+    private async void NextClicked(object? sender, RoutedEventArgs e) => await NavigateMouseAsync(1);
     private async void FirstClicked(object? sender, RoutedEventArgs e) => await ExecuteCommandAsync(GlideCommand.FirstImage);
     private async void LastClicked(object? sender, RoutedEventArgs e) => await ExecuteCommandAsync(GlideCommand.LastImage);
 
@@ -4614,6 +5076,214 @@ public partial class MainWindow : Window
         _diagnostics.Write("window", "transparency_reset", new { percent = 100 });
     }
 
+    private bool ActiveAlwaysOnTop => _wholeAppOverlayMode ? _settings.OverlayAlwaysOnTop : _settings.AlwaysOnTop;
+    private bool HardAlwaysOnTop => !string.Equals(_settings.AlwaysOnTopMode, "Soft", StringComparison.OrdinalIgnoreCase);
+
+    private static string NormalizeOverlayPlacementKey(string path)
+    {
+        try { return Path.GetFullPath(path); }
+        catch { return path; }
+    }
+
+    private void SaveCurrentWholeAppOverlayPlacement(string? path = null)
+    {
+        if (!_wholeAppOverlayMode || _applyingWholeAppOverlayPlacement || WindowState != WindowState.Normal || Bounds.Width < 80 || Bounds.Height < 80) return;
+        path ??= _wholeAppOverlayPlacementPath ?? _currentPath;
+        if (string.IsNullOrWhiteSpace(path)) return;
+        var key = NormalizeOverlayPlacementKey(path);
+        _settings.OverlayWindowPlacements ??= new Dictionary<string, OverlayWindowPlacementState>(StringComparer.OrdinalIgnoreCase);
+        _settings.OverlayWindowPlacements[key] = new OverlayWindowPlacementState
+        {
+            X = Position.X,
+            Y = Position.Y,
+            Width = Bounds.Width,
+            Height = Bounds.Height,
+            LastUsedUtcTicks = DateTime.UtcNow.Ticks
+        };
+        // Prevent a long browsing history from turning the settings file into a file index.
+        if (_settings.OverlayWindowPlacements.Count > 128)
+        {
+            foreach (var stale in _settings.OverlayWindowPlacements.OrderBy(kv => kv.Value.LastUsedUtcTicks).Take(_settings.OverlayWindowPlacements.Count - 128).Select(kv => kv.Key).ToArray())
+                _settings.OverlayWindowPlacements.Remove(stale);
+        }
+    }
+
+    private void ApplyWholeAppOverlayPlacementForCurrentImage(bool preferRemembered = true)
+    {
+        if (!_wholeAppOverlayMode || string.IsNullOrWhiteSpace(_currentPath)) return;
+        var path = _currentPath;
+        var key = NormalizeOverlayPlacementKey(path);
+        var scale = TopLevel.GetTopLevel(this)?.RenderScaling ?? 1.0;
+        if (scale <= 0) scale = 1.0;
+        var screens = Screens.All;
+        var remembered = preferRemembered && _settings.OverlayWindowPlacements is not null && _settings.OverlayWindowPlacements.TryGetValue(key, out var placement)
+            ? placement : null;
+
+        double width;
+        double height;
+        PixelPoint position;
+        if (remembered is not null && remembered.Width >= 80 && remembered.Height >= 80 &&
+            IsSafeSavedWindowPosition(new PixelPoint(remembered.X, remembered.Y), remembered.Width, remembered.Height, scale))
+        {
+            width = remembered.Width;
+            height = remembered.Height;
+            position = new PixelPoint(remembered.X, remembered.Y);
+        }
+        else
+        {
+            var screen = screens.FirstOrDefault(x => Position.X >= x.WorkingArea.X && Position.X < x.WorkingArea.Right && Position.Y >= x.WorkingArea.Y && Position.Y < x.WorkingArea.Bottom) ?? Screens.Primary ?? screens.FirstOrDefault();
+            if (screen is null) return;
+            var area = screen.WorkingArea;
+            var sourceW = Math.Max(1, _currentPixelWidth > 0 ? _currentPixelWidth : Viewport.Bitmap?.PixelSize.Width ?? 1);
+            var sourceH = Math.Max(1, _currentPixelHeight > 0 ? _currentPixelHeight : Viewport.Bitmap?.PixelSize.Height ?? 1);
+            var aspect = sourceW / (double)sourceH;
+            // Medium/small by default, while guaranteeing that the transparent window itself has the image aspect ratio.
+            var maxWidthDip = Math.Max(240.0, area.Width / scale * 0.55);
+            var maxHeightDip = Math.Max(180.0, area.Height / scale * 0.55);
+            width = Math.Min(maxWidthDip, maxHeightDip * aspect);
+            height = width / aspect;
+            if (height > maxHeightDip) { height = maxHeightDip; width = height * aspect; }
+            // Never create an unusably tiny portrait/panorama overlay.
+            if (width < 240) { width = 240; height = width / aspect; }
+            if (height < 160) { height = 160; width = height * aspect; }
+            if (width > area.Width / scale * 0.85) { width = area.Width / scale * 0.85; height = width / aspect; }
+            if (height > area.Height / scale * 0.85) { height = area.Height / scale * 0.85; width = height * aspect; }
+            var widthPx = Math.Max(1, (int)Math.Round(width * scale));
+            var heightPx = Math.Max(1, (int)Math.Round(height * scale));
+            position = new PixelPoint(area.X + (area.Width - widthPx) / 2, area.Y + (area.Height - heightPx) / 2);
+        }
+
+        _applyingWholeAppOverlayPlacement = true;
+        try
+        {
+            if (WindowState != WindowState.Normal) WindowState = WindowState.Normal;
+            Width = Math.Max(80, width);
+            Height = Math.Max(80, height);
+            Position = position;
+            _wholeAppOverlayPlacementPath = path;
+            Viewport.Fit();
+            Dispatcher.UIThread.Post(AlignWholeAppOverlayChromeToPixels, DispatcherPriority.Render);
+        }
+        finally { _applyingWholeAppOverlayPlacement = false; }
+    }
+
+    private void ApplyTopmostState(bool forceNative = false)
+    {
+        var active = ActiveAlwaysOnTop;
+        Topmost = active;
+        _overlays?.SetTopmost(active);
+        if (_wholeAppOverlayChromeVisual is { } overlayChrome)
+        {
+            overlayChrome.TopmostActive = active;
+            overlayChrome.InvalidateVisual();
+        }
+        if (active && HardAlwaysOnTop && _topmostTransientDepth == 0)
+        {
+            if (!_hardTopmostTimer.IsEnabled) _hardTopmostTimer.Start();
+            if (forceNative) ReassertNativeTopmost();
+        }
+        else if (_hardTopmostTimer.IsEnabled)
+            _hardTopmostTimer.Stop();
+    }
+
+    private void ReassertNativeTopmost()
+    {
+        if (!OperatingSystem.IsWindows() || !ActiveAlwaysOnTop || !HardAlwaysOnTop || _topmostTransientDepth > 0 || !IsVisible || WindowState == WindowState.Minimized) return;
+        var hwnd = TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
+        if (hwnd == IntPtr.Zero) return;
+        try
+        {
+            SetWindowPos(hwnd, new IntPtr(-1), 0, 0, 0, 0,
+                SwpNoMove | SwpNoSize | SwpNoActivate | SwpNoOwnerZOrder | SwpNoSendChanging);
+        }
+        catch { }
+    }
+
+
+    private IDisposable EnterTopmostTransient()
+    {
+        _topmostTransientDepth++;
+        if (_hardTopmostTimer.IsEnabled) _hardTopmostTimer.Stop();
+        return new TopmostTransientScope(this);
+    }
+
+    private void LeaveTopmostTransient()
+    {
+        if (_topmostTransientDepth > 0) _topmostTransientDepth--;
+        if (_topmostTransientDepth == 0) ApplyTopmostState(forceNative: true);
+    }
+
+    private sealed class TopmostTransientScope : IDisposable
+    {
+        private MainWindow? _owner;
+        public TopmostTransientScope(MainWindow owner) => _owner = owner;
+        public void Dispose() { var owner = Interlocked.Exchange(ref _owner, null); owner?.LeaveTopmostTransient(); }
+    }
+
+    private ContextMenu PrepareOwnedContextMenu(ContextMenu menu)
+    {
+        IDisposable? scope = null;
+        menu.Opened += (_, _) => { scope ??= EnterTopmostTransient(); };
+        menu.Closed += (_, _) => { scope?.Dispose(); scope = null; };
+        return menu;
+    }
+
+    /// <summary>
+    /// Builds a small modal whose height follows its content and can never exceed the owner's
+    /// working area. The previous fixed-height prompts clipped their buttons on small or
+    /// high-scaling laptop panels (the folder-boundary prompt was the reported case) even though
+    /// screen space existed.
+    /// </summary>
+    private Window CreateContentSizedDialog(string title, double minWidth, double maxWidth)
+    {
+        var dialog = new Window
+        {
+            Title = title,
+            Icon = Icon,
+            CanResize = false,
+            SizeToContent = SizeToContent.WidthAndHeight,
+            MinWidth = minWidth,
+            MaxWidth = maxWidth,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner
+        };
+        try
+        {
+            if (Screens.ScreenFromWindow(this) is { } screen)
+            {
+                var scaling = Math.Max(1.0, RenderScaling);
+                dialog.MaxHeight = Math.Max(220, screen.WorkingArea.Height / scaling - 80);
+            }
+        }
+        catch { }
+        return dialog;
+    }
+
+    private async Task ShowOwnedDialogAsync(Window dialog)
+    {
+        // Avalonia refuses ShowDialog with a non-visible owner. Treat that as a safe no-op rather
+        // than letting the InvalidOperationException escape an async void caller.
+        if (!IsVisible)
+        {
+            try { dialog.Close(); } catch { }
+            return;
+        }
+        using var scope = EnterTopmostTransient();
+        dialog.Topmost = ActiveAlwaysOnTop;
+        await dialog.ShowDialog(this);
+    }
+
+    private async Task<T> ShowOwnedDialogAsync<T>(Window dialog)
+    {
+        if (!IsVisible)
+        {
+            try { dialog.Close(); } catch { }
+            return default!;
+        }
+        using var scope = EnterTopmostTransient();
+        dialog.Topmost = ActiveAlwaysOnTop;
+        return await dialog.ShowDialog<T>(this);
+    }
+
     private void ApplyStartupWholeAppOverlayPreference()
     {
         // This exact flag is part of the compact first-frame policy, so startup Overlay can be
@@ -4714,10 +5384,8 @@ public partial class MainWindow : Window
         ToolTip.SetTip(topmostHit, "Always on top");
         topmostHit.Click += (_, _) =>
         {
-            _settings.AlwaysOnTop = !_settings.AlwaysOnTop;
-            Topmost = _settings.AlwaysOnTop;
-            chrome.TopmostActive = _settings.AlwaysOnTop;
-            chrome.InvalidateVisual();
+            _settings.OverlayAlwaysOnTop = !_settings.OverlayAlwaysOnTop;
+            ApplyTopmostState(forceNative: true);
             SaveSettingsAndPublish();
         };
 
@@ -4761,7 +5429,7 @@ public partial class MainWindow : Window
         };
         WorkspaceLayer.Children.Add(host);
 
-        chrome.TopmostActive = _settings.AlwaysOnTop;
+        chrome.TopmostActive = _settings.OverlayAlwaysOnTop;
         _wholeAppOverlayChromeVisual = chrome;
         _wholeAppOverlayOpacityHitTarget = opacityHit;
         _wholeAppOverlayResizeGrip = null;
@@ -4769,11 +5437,62 @@ public partial class MainWindow : Window
         return host;
     }
 
+    private bool TryGetWholeAppOverlayPixelRect(out Rect rect)
+    {
+        rect = default;
+        if (!_wholeAppOverlayMode || Viewport.Bitmap is null || Viewport.Bounds.Width <= 0 || Viewport.Bounds.Height <= 0) return false;
+        var presentation = Viewport.GetPresentationRectForViewportSize(Viewport.Bounds.Size);
+        if (presentation is null || presentation.Value.Width <= 0 || presentation.Value.Height <= 0) return false;
+        var origin = Viewport.TranslatePoint(new Point(presentation.Value.X, presentation.Value.Y), WorkspaceLayer);
+        if (origin is null) return false;
+        var candidate = new Rect(origin.Value, presentation.Value.Size);
+        var viewportOrigin = Viewport.TranslatePoint(new Point(0, 0), WorkspaceLayer);
+        if (viewportOrigin is null) return false;
+        var viewportRect = new Rect(viewportOrigin.Value, Viewport.Bounds.Size);
+        var left = Math.Max(candidate.Left, viewportRect.Left);
+        var top = Math.Max(candidate.Top, viewportRect.Top);
+        var right = Math.Min(candidate.Right, viewportRect.Right);
+        var bottom = Math.Min(candidate.Bottom, viewportRect.Bottom);
+        if (right <= left || bottom <= top) return false;
+        rect = new Rect(left, top, right - left, bottom - top);
+        return true;
+    }
+
+    private void AlignWholeAppOverlayChromeToPixels()
+    {
+        if (_wholeAppOverlayControlsHost is not { } controls || !TryGetWholeAppOverlayPixelRect(out var rect)) return;
+        controls.HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Left;
+        controls.VerticalAlignment = Avalonia.Layout.VerticalAlignment.Top;
+        controls.Width = rect.Width;
+        controls.Height = rect.Height;
+        controls.Margin = new Thickness(rect.X, rect.Y, 0, 0);
+    }
+
+    private bool IsPointerOverWholeAppOverlayPixels(Point windowPoint)
+    {
+        if (!TryGetWholeAppOverlayPixelRect(out var rect)) return false;
+        var workspacePoint = this.TranslatePoint(windowPoint, WorkspaceLayer);
+        return workspacePoint is { } p && rect.Contains(p);
+    }
+
+    private void WholeAppOverlayPointerWheelChanged(object? sender, PointerWheelEventArgs e)
+    {
+        if (!_wholeAppOverlayMode || _settings.WholeAppOverlayUseWindowedInteractions || Viewport.Bitmap is null || IsInteractiveSource(e.Source)) return;
+        var windowPoint = e.GetPosition(this);
+        if (!IsPointerOverWholeAppOverlayPixels(windowPoint)) return;
+        var viewportPoint = e.GetPosition(Viewport);
+        var zoomIn = e.Delta.Y > 0;
+        if (_settings.InvertWheelDirection) zoomIn = !zoomIn;
+        Viewport.ZoomBy(zoomIn ? 1.12 : 1.0 / 1.12, viewportPoint);
+        AlignWholeAppOverlayChromeToPixels();
+        e.Handled = true;
+    }
+
     private void WholeAppOverlayBodyPointerPressed(object? sender, PointerPressedEventArgs e)
     {
         var physicalButtons = PhysicalMouseButtons(e.GetCurrentPoint(this));
         if (!_wholeAppOverlayMode || _nativeSizeMoveActive || _settings.WholeAppOverlayUseWindowedInteractions) return;
-        if (!physicalButtons.Left || IsInteractiveSource(e.Source)) return;
+        if (!physicalButtons.Left || IsInteractiveSource(e.Source) || !IsPointerOverWholeAppOverlayPixels(e.GetPosition(this))) return;
         BeginNativeWindowDrag(e);
         e.Handled = true;
     }
@@ -4807,9 +5526,14 @@ public partial class MainWindow : Window
         }
 
         _wholeAppOverlaySnapshot = new WholeAppOverlaySnapshot(
-            restoreState, restorePosition, restoreWidth, restoreHeight, restoreFullscreen, _sessionOpacity);
+            restoreState, restorePosition, restoreWidth, restoreHeight, MinWidth, MinHeight, restoreFullscreen, _sessionOpacity);
         _wholeAppOverlayPreviousTransparencyFallback = TransparencyBackgroundFallback;
+        _applyingWholeAppOverlayPlacement = true; // suppress transient restore/maximize events during the mode handoff
         _wholeAppOverlayMode = true;
+        // Overlay geometry must be allowed to follow the image even when normal Glide has a tall
+        // minimum height for its tab/status UI. Overlay chrome is floating, so smaller dimensions are safe.
+        MinWidth = 80;
+        MinHeight = 80;
 
         // Window-in-window mode should be a movable/resizable floating surface even if Glide had
         // previously been maximized. The previous state is restored exactly when the mode exits.
@@ -4836,13 +5560,15 @@ public partial class MainWindow : Window
         WorkspaceLayer.Background = Brushes.Transparent;
         ImageView.Background = Brushes.Transparent;
         Viewport.SetBackgroundFillSuppressed(true);
-        Topmost = _settings.AlwaysOnTop;
+        ApplyTopmostState(forceNative: true);
         ImageInfoOverlay.IsVisible = false;
         CornerCounterHost.IsVisible = false;
         var overlayControls = EnsureWholeAppOverlayControls();
         overlayControls.IsVisible = true;
         overlayControls.ContextMenu = BuildWholeAppOverlayOnlyContextMenu();
         TransparencyPanel.IsVisible = false;
+        _applyingWholeAppOverlayPlacement = false;
+        ApplyWholeAppOverlayPlacementForCurrentImage(preferRemembered: true);
 
         ApplyChromeLayoutForWindowState();
         ApplyStatusVisibility();
@@ -4859,7 +5585,9 @@ public partial class MainWindow : Window
     {
         if (!_wholeAppOverlayMode) return;
         var snapshot = _wholeAppOverlaySnapshot;
+        SaveCurrentWholeAppOverlayPlacement();
         _wholeAppOverlayMode = false;
+        _wholeAppOverlayPlacementPath = null;
         _wholeAppOverlaySnapshot = null;
 
         if (_wholeAppOverlayControlsHost is { } overlayControls)
@@ -4889,6 +5617,8 @@ public partial class MainWindow : Window
         if (snapshot is not null)
         {
             _sessionOpacity = OverlayChromePolicy.ClampWholeWindowOpacity(snapshot.SessionOpacity);
+            MinWidth = snapshot.MinWidth;
+            MinHeight = snapshot.MinHeight;
             Opacity = _sessionOpacity;
             TransparencySlider.Value = _sessionOpacity * 100.0;
             WindowState = WindowState.Normal;
@@ -4916,16 +5646,13 @@ public partial class MainWindow : Window
     private void UpdateWholeAppOverlayChromeHover(Point pointer)
     {
         if (!_wholeAppOverlayMode || !IsActive || _nativeSizeMoveActive) return;
-        var revealEdge = OverlayChromePolicy.RevealEdge(RenderScaling);
         var controls = _wholeAppOverlayControlsHost;
         if (controls is null) return;
-        if (!controls.IsVisible)
-        {
-            if (OverlayChromePolicy.IsNearFrameEdge(pointer, Bounds.Size, revealEdge)) controls.IsVisible = true;
-            return;
-        }
-        if (OverlayChromePolicy.ShouldDismissChrome(pointer, Bounds.Size) &&
-            !OverlayChromePolicy.IsNearFrameEdge(pointer, Bounds.Size, revealEdge)) controls.IsVisible = false;
+        AlignWholeAppOverlayChromeToPixels();
+        var overPixels = IsPointerOverWholeAppOverlayPixels(pointer);
+        // Overlay chrome/glow belongs to the rendered pixels, not the transparent top-level window.
+        // It appears only while the pointer is actually over visible image pixels.
+        controls.IsVisible = overPixels;
     }
 
     private void ToggleAlwaysStartWholeAppOverlayMode()
@@ -4979,6 +5706,10 @@ public partial class MainWindow : Window
         always.Click += (_, _) => ToggleAlwaysStartWholeAppOverlayMode();
         items.Add(always);
 
+        var topmost = new MenuItem { Header = _settings.OverlayAlwaysOnTop ? "Always on top  ✓" : "Always on top" };
+        topmost.Click += (_, _) => AlwaysOnTopClicked(null, new RoutedEventArgs());
+        items.Add(topmost);
+
         var exit = new MenuItem { Header = "Exit Overlay mode" };
         exit.Click += (_, _) => ExitWholeAppOverlayMode();
         items.Add(exit);
@@ -4987,12 +5718,8 @@ public partial class MainWindow : Window
     private ContextMenu BuildWholeAppOverlayOnlyContextMenu()
     {
         var items = new List<MenuItem>();
-        var topmost = new MenuItem { Header = _settings.AlwaysOnTop ? "Always on top  ✓" : "Always on top" };
-        topmost.Click += (_, _) => AlwaysOnTopClicked(null, new RoutedEventArgs());
-        items.Add(topmost);
-        items.Add(new MenuItem { Header = "—", IsEnabled = false });
         AppendWholeAppOverlayMenuItems(items);
-        return new ContextMenu { ItemsSource = items };
+        return PrepareOwnedContextMenu(new ContextMenu { ItemsSource = items });
     }
 
     private void WholeAppOverlayContextPointerReleased(object? sender, PointerReleasedEventArgs e)
@@ -5011,14 +5738,13 @@ public partial class MainWindow : Window
 
     private void AlwaysOnTopClicked(object? sender, RoutedEventArgs e)
     {
-        _settings.AlwaysOnTop = !_settings.AlwaysOnTop;
+        if (_wholeAppOverlayMode) _settings.OverlayAlwaysOnTop = !_settings.OverlayAlwaysOnTop;
+        else _settings.AlwaysOnTop = !_settings.AlwaysOnTop;
         SaveSettingsAndPublish();
-        ApplySettingsVisuals();
-        if (_wholeAppOverlayChromeVisual is { } overlayChrome)
-        {
-            overlayChrome.TopmostActive = _settings.AlwaysOnTop;
-            overlayChrome.InvalidateVisual();
-        }
+        ApplyTopmostState(forceNative: true);
+        if (_wholeAppOverlayControlsHost is { } controls && _wholeAppOverlayMode)
+            controls.ContextMenu = BuildWholeAppOverlayOnlyContextMenu();
+        RebuildTitleActionStrip();
     }
 
     private void RebuildTitleActionStrip()
@@ -5090,6 +5816,24 @@ public partial class MainWindow : Window
                     await ExecuteCommandAsync(GlideCommand.Home);
                 };
             }
+            else if (id is "folder.previous" or "folder.next")
+            {
+                // Title-bar folder arrows must win before custom-caption hit testing. Register on the
+                // tunnel route with handledEventsToo so the vector child/native chrome cannot consume
+                // the gesture first. The captured direction is local to this button instance.
+                icon.IsHitTestVisible = false;
+                var folderDirection = id == "folder.next" ? 1 : -1;
+                button.AddHandler(InputElement.PointerPressedEvent, async (_, e) =>
+                {
+                    var point = e.GetCurrentPoint(button);
+                    if (!point.Properties.IsLeftButtonPressed) return;
+                    e.Handled = true;
+                    Volatile.Write(ref _suppressCloseUntilTick, Environment.TickCount64 + 500);
+                    _diagnostics.Write("input", "title_folder_pressed", new { id, folderDirection });
+                    await RunSerializedNavigationResultAsync(
+                        () => TryNavigateSiblingFolderAsync(folderDirection));
+                }, RoutingStrategies.Tunnel, true);
+            }
             else
             {
                 button.Click += async (_, _) => await ExecuteTitleActionAsync(id, definition.Command);
@@ -5099,7 +5843,7 @@ public partial class MainWindow : Window
         }
 
         if (_titleBarButtons.TryGetValue("window.alwaysOnTop", out var topmostButton))
-            SetActiveClass(topmostButton, _settings.AlwaysOnTop);
+            SetActiveClass(topmostButton, ActiveAlwaysOnTop);
         RefreshTitleActionTooltips();
     }
 
@@ -5107,8 +5851,10 @@ public partial class MainWindow : Window
     {
         // The title-bar folder arrows intentionally retain their legacy "open first image" contract;
         // status-bar/keyboard folder navigation can continue to use the ordinary sibling-folder policy.
-        if (id == "folder.previous") await TryNavigateSiblingFolderAsync(-1, forceFirstImage: true);
-        else if (id == "folder.next") await TryNavigateSiblingFolderAsync(1, forceFirstImage: true);
+        if (id == "folder.previous") await TryNavigateSiblingFolderAsync(-1);
+        else if (id == "folder.next") await TryNavigateSiblingFolderAsync(1);
+        else if (command == GlideCommand.PreviousImage || command == GlideCommand.NextImage)
+            await NavigateMouseAsync(command == GlideCommand.NextImage ? 1 : -1);
         else await ExecuteCommandAsync(command);
     }
 
@@ -5146,7 +5892,7 @@ public partial class MainWindow : Window
         items.Add(new MenuItem { Header = "-" });
         AppendWholeAppOverlayMenuItems(items);
         menu.ItemsSource = items;
-        return menu;
+        return PrepareOwnedContextMenu(menu);
     }
 
     private void MoveTitleAction(string id, int delta)
@@ -5177,7 +5923,7 @@ public partial class MainWindow : Window
             Icon = Icon,
             Topmost = Topmost
         };
-        var result = await dialog.ShowDialog<IReadOnlyList<string>?>(this);
+        var result = await ShowOwnedDialogAsync<IReadOnlyList<string>?>(dialog);
         if (result is null) return;
         _settings.TitleBarButtons = TitleBarButtonCatalog.Normalize(result).ToList();
         SaveSettingsAndPublish();
@@ -5194,7 +5940,15 @@ public partial class MainWindow : Window
                 // Otherwise Windows can bury Settings/confirmation dialogs behind the owner.
                 Topmost = Topmost
             };
-            await window.ShowDialog(this);
+            _overlays?.SetModalSuppressed(true);
+            try
+            {
+                await ShowOwnedDialogAsync(window);
+            }
+            finally
+            {
+                _overlays?.SetModalSuppressed(false);
+            }
         }
         catch (Exception ex)
         {
@@ -5376,7 +6130,7 @@ public partial class MainWindow : Window
     private void ApplySettingsVisuals(bool deferSecondaryChrome = false)
     {
         ApplyPalette(_settings.ThemeChoice, _settings.AccentChoice, _settings.GlowChoice, _settings.GlowIntensityPercent, _settings.CustomAccentHex, _settings.CustomGlowHex, _settings.MainBackgroundChoice, _settings.CustomMainBackgroundHex);
-        Topmost = _settings.AlwaysOnTop;
+        ApplyTopmostState(forceNative: true);
         KeyboardNavigation.SetTabNavigation(this, _settings.EnableTabFocusNavigation ? KeyboardNavigationMode.Continue : KeyboardNavigationMode.None);
         // Window.Background is a compositor contract, not the normal theme surface. Keep the
         // top-level transparent for the lifetime of the HWND and paint the ordinary application
@@ -5463,7 +6217,7 @@ public partial class MainWindow : Window
                 if (_windowLifetimeCts.IsCancellationRequested) return;
                 RebuildTitleActionStrip();
                 ApplyTabUtilityButtonVisibility();
-                if (_titleBarButtons.TryGetValue("window.alwaysOnTop", out var topmostButton)) SetActiveClass(topmostButton, _settings.AlwaysOnTop);
+                if (_titleBarButtons.TryGetValue("window.alwaysOnTop", out var topmostButton)) SetActiveClass(topmostButton, ActiveAlwaysOnTop);
                 ApplyStatusVisibility();
                 UpdateViewportScrollbars();
                 RebuildTabStrip();
@@ -5476,7 +6230,7 @@ public partial class MainWindow : Window
 
         RebuildTitleActionStrip();
         ApplyTabUtilityButtonVisibility();
-        if (_titleBarButtons.TryGetValue("window.alwaysOnTop", out var topmostButton)) SetActiveClass(topmostButton, _settings.AlwaysOnTop);
+        if (_titleBarButtons.TryGetValue("window.alwaysOnTop", out var topmostButton)) SetActiveClass(topmostButton, ActiveAlwaysOnTop);
         ApplyStatusVisibility();
         UpdateViewportScrollbars();
         RebuildTabStrip();
@@ -5867,7 +6621,7 @@ public partial class MainWindow : Window
         var items = new List<MenuItem> { pin, new() { Header = "-" } };
         AppendWholeAppOverlayMenuItems(items);
         menu.ItemsSource = items;
-        menu.Open(ChromeBorder);
+        PrepareOwnedContextMenu(menu).Open(ChromeBorder);
     }
 
     private bool IsLeftWindowMoveAllowedForCurrentState()
@@ -6143,7 +6897,8 @@ public partial class MainWindow : Window
         var dialog = new Window
         {
             Title = "Start slideshow", Icon = Icon, Width = 470, SizeToContent = SizeToContent.Height, MinWidth = 420,
-            CanResize = false, WindowStartupLocation = WindowStartupLocation.CenterOwner, Content = root
+            CanResize = false, WindowStartupLocation = WindowStartupLocation.CenterOwner, Content = root,
+            Topmost = Topmost
         };
         PopupPlacementStore.Track(dialog, "slideshow-start");
         start.Click += (_, _) => dialog.Close(true);
@@ -6154,7 +6909,16 @@ public partial class MainWindow : Window
             dialog.Close(true);
             e.Handled = true;
         };
-        var accepted = await dialog.ShowDialog<bool>(this);
+        _overlays?.SetModalSuppressed(true);
+        bool accepted;
+        try
+        {
+            accepted = await ShowOwnedDialogAsync<bool>(dialog);
+        }
+        finally
+        {
+            _overlays?.SetModalSuppressed(false);
+        }
         if (!accepted) return false;
         _settings.SlideshowIntervalMs = (int)(interval.Value ?? 3000);
         _settings.SlideshowLoop = loop.IsChecked == true;
@@ -6435,7 +7199,7 @@ public partial class MainWindow : Window
     {
         var closeRequested = false;
         var decided = false;
-        var dialog = new Window { Width = 420, Height = 215, Title = "Close Glide?", Icon = Icon, CanResize = false };
+        var dialog = CreateContentSizedDialog("Close Glide?", 380, 520);
         PopupPlacementStore.Track(dialog, "escape-close-confirm");
         var remember = new CheckBox { Content = "Remember my choice" };
         var yes = new Button { Content = "Close", MinWidth = 90 };
@@ -6454,7 +7218,7 @@ public partial class MainWindow : Window
                 new StackPanel { Orientation = Avalonia.Layout.Orientation.Horizontal, Spacing = 10, HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right, Children = { no, yes } }
             }
         };
-        await dialog.ShowDialog(this);
+        await ShowOwnedDialogAsync(dialog);
         return decided ? (closeRequested, remember.IsChecked == true) : (false, false);
     }
 
@@ -6591,14 +7355,14 @@ public partial class MainWindow : Window
     {
         if (string.IsNullOrWhiteSpace(_currentPath) || !ImageView.IsVisible)
         {
-            if (HomeHost.IsVisible) Title = "Glide 4.1.5 — Home";
+            if (HomeHost.IsVisible) Title = "Glide 4.2.3 — Home";
             return;
         }
         var display = _settings.FullPathInTitle ? _currentPath : Path.GetFileName(_currentPath);
         var index = _navigator.Count > 0 ? $"[{_navigator.Index + 1}/{_navigator.Count}]" : string.Empty;
         Title = prefix is null
-            ? $"Glide 4.1.5 — {display}  {index}  {Viewport.ZoomPercent}%"
-            : $"Glide 4.1.5 — {prefix} — {display}";
+            ? $"Glide 4.2.3 — {display}  {index}  {Viewport.ZoomPercent}%"
+            : $"Glide 4.2.3 — {prefix} — {display}";
     }
 
     private static string FormatFileSize(long bytes)
@@ -6796,6 +7560,11 @@ public partial class MainWindow : Window
         if (command == GlideCommand.None) return;
         _diagnostics.Write("input", "mouse_hotkey_command", new { command = command.ToString(), shortcut });
         e.Handled = true;
+        if (command == GlideCommand.PreviousImage || command == GlideCommand.NextImage)
+        {
+            await NavigateMouseAsync(command == GlideCommand.NextImage ? 1 : -1);
+            return;
+        }
         await ExecuteCommandAsync(command);
     }
 
@@ -6894,6 +7663,13 @@ public partial class MainWindow : Window
                 _suppressedHeldNavigationDirection = 0;
             if (!_heldNavigationKeyIsDown || _heldNavigationDirection != direction)
                 StartHeldNavigation(direction);
+            e.Handled = true;
+            return;
+        }
+
+        if (command == GlideCommand.PreviousImage || command == GlideCommand.NextImage)
+        {
+            await NavigateKeyboardAsync(command == GlideCommand.NextImage ? 1 : -1);
             e.Handled = true;
             return;
         }
@@ -7049,7 +7825,7 @@ public partial class MainWindow : Window
         var minimumFrameTime = TimeSpan.FromSeconds(1.0 / 120.0);
         try
         {
-            await NavigateAsync(direction);
+            await NavigateKeyboardAsync(direction);
             if (token.IsCancellationRequested) return;
 
             await Task.Delay(holdActivationMs, token);
@@ -7059,7 +7835,10 @@ public partial class MainWindow : Window
             while (!token.IsCancellationRequested)
             {
                 var started = Stopwatch.GetTimestamp();
-                if (!await NavigateRapidStepAsync(direction, token)) break;
+                if (TryAcceptNavigationRateLimit(NavigationRateInput.Keyboard, showIndicator: false))
+                {
+                    if (!await NavigateRapidStepAsync(direction, token)) break;
+                }
 
                 var elapsed = Stopwatch.GetElapsedTime(started);
                 var remaining = minimumFrameTime - elapsed;
@@ -7144,7 +7923,10 @@ public partial class MainWindow : Window
             return;
         }
         var command = GestureCatalog.CommandForAction(actionId);
-        if (command != GlideCommand.None) await ExecuteCommandAsync(command);
+        if (command == GlideCommand.PreviousImage || command == GlideCommand.NextImage)
+            await NavigateMouseAsync(command == GlideCommand.NextImage ? 1 : -1);
+        else if (command != GlideCommand.None)
+            await ExecuteCommandAsync(command);
     }
 
     private Task NavigateHomeAsync() => RunSerializedNavigationAsync(NavigateHomeCoreAsync);
@@ -7222,7 +8004,7 @@ public partial class MainWindow : Window
             [GlideCommand.PreviousImage] = () => NavigateAsync(-1), [GlideCommand.NextImage] = () => NavigateAsync(1),
             [GlideCommand.FirstImage] = () => NavigateEdgeAsync(-1), [GlideCommand.LastImage] = () => NavigateEdgeAsync(1),
             [GlideCommand.PreviousFolder] = () => RunSerializedNavigationResultAsync(() => TryNavigateSiblingFolderAsync(-1)), [GlideCommand.NextFolder] = () => RunSerializedNavigationResultAsync(() => TryNavigateSiblingFolderAsync(1)),
-            [GlideCommand.ExploreParentFolder] = () => { if (_currentPath is not null) OpenBrowserTab(Path.GetDirectoryName(_currentPath) ?? ""); return Task.CompletedTask; },
+            [GlideCommand.ExploreParentFolder] = () => Task.CompletedTask,
             [GlideCommand.FitImage] = () => { Viewport.Fit(); return Task.CompletedTask; }, [GlideCommand.FitWidth] = () => { Viewport.FitWidth(); return Task.CompletedTask; }, [GlideCommand.FitHeight] = () => { Viewport.FitHeight(); return Task.CompletedTask; }, [GlideCommand.ActualSize] = () => { Viewport.ActualSize(); return Task.CompletedTask; },
             [GlideCommand.ToggleFitActual] = () => { if (Viewport.ZoomPercent == 100) Viewport.Fit(); else Viewport.ActualSize(); return Task.CompletedTask; }, [GlideCommand.ZoomIn] = () => { Viewport.ZoomBy(1.15); return Task.CompletedTask; }, [GlideCommand.ZoomOut] = () => { Viewport.ZoomBy(1 / 1.15); return Task.CompletedTask; },
             [GlideCommand.RotateLeft] = () => { Viewport.RotateLeft(); return Task.CompletedTask; }, [GlideCommand.RotateRight] = () => { Viewport.RotateRight(); return Task.CompletedTask; }, [GlideCommand.FlipHorizontal] = () => { Viewport.FlipHorizontal(); return Task.CompletedTask; }, [GlideCommand.FlipVertical] = () => { Viewport.FlipVertical(); return Task.CompletedTask; },
@@ -7230,7 +8012,7 @@ public partial class MainWindow : Window
             [GlideCommand.NextTab] = () => CycleTabAsync(1), [GlideCommand.PreviousTab] = () => CycleTabAsync(-1),
             [GlideCommand.SelectTab1] = () => SelectTabIndexAsync(0), [GlideCommand.SelectTab2] = () => SelectTabIndexAsync(1), [GlideCommand.SelectTab3] = () => SelectTabIndexAsync(2), [GlideCommand.SelectTab4] = () => SelectTabIndexAsync(3), [GlideCommand.SelectTab5] = () => SelectTabIndexAsync(4), [GlideCommand.SelectTab6] = () => SelectTabIndexAsync(5), [GlideCommand.SelectTab7] = () => SelectTabIndexAsync(6), [GlideCommand.SelectTab8] = () => SelectTabIndexAsync(7), [GlideCommand.SelectLastTab] = () => SelectTabIndexAsync(Math.Max(0, _workspace.Tabs.Count - 1)),
             [GlideCommand.DetachTab] = async () => { if (_workspace.Active is { } a) await DetachTabAsync(a.Id, this.PointToScreen(new Point(Bounds.Width / 2, 48))); }, [GlideCommand.CloseWindow] = () => { Close(); return Task.CompletedTask; }, [GlideCommand.ToggleFullscreen] = () => { ToggleFullscreen(); return Task.CompletedTask; }, [GlideCommand.StartPauseSlideshow] = ToggleSlideshowAsync, [GlideCommand.StopSlideshow] = () => { StopSlideshow(true); return Task.CompletedTask; },
-            [GlideCommand.ToggleImageInfo] = () => Event(InfoClicked), [GlideCommand.ClearSelection] = HandleEscapeAsync, [GlideCommand.Settings] = () => Event(SettingsClicked), [GlideCommand.AddOverlay] = () => Event(OverlayAddClicked), [GlideCommand.ResetSelectedOverlayZoom] = () => { EnsureOverlays().ResetSelectedZoom(); return Task.CompletedTask; }, [GlideCommand.BringSelectedOverlayFront] = () => { EnsureOverlays().BringSelectedToFront(); return Task.CompletedTask; },
+            [GlideCommand.ToggleImageInfo] = () => Event(InfoClicked), [GlideCommand.ClearSelection] = HandleEscapeAsync, [GlideCommand.Settings] = () => Event(SettingsClicked), [GlideCommand.AddOverlay] = () => Event(OverlayAddClicked), [GlideCommand.SaveOverlayLayout] = () => Event(OverlaySaveClicked), [GlideCommand.LoadOverlayLayout] = () => Event(OverlayLoadClicked), [GlideCommand.ResetSelectedOverlayZoom] = () => { EnsureOverlays().ResetSelectedZoom(); return Task.CompletedTask; }, [GlideCommand.BringSelectedOverlayFront] = () => { EnsureOverlays().BringSelectedToFront(); return Task.CompletedTask; },
             [GlideCommand.ToggleAlwaysOnTop] = () => Event(AlwaysOnTopClicked), [GlideCommand.ToggleTransparency] = () => Event(TransparencyClicked), [GlideCommand.ShowContextMenu] = () => { ShowViewerContextMenu(); return Task.CompletedTask; }, [GlideCommand.BrowserBack] = () => Event(BrowserBackClicked), [GlideCommand.BrowserForward] = () => Event(BrowserForwardClicked), [GlideCommand.BrowserUp] = () => Event(BrowserUpClicked),
             [GlideCommand.CopyImage] = () => { CopyImagePixels(); return Task.CompletedTask; }, [GlideCommand.ExportSelection] = ExportSelectionAsync, [GlideCommand.CopyFile] = () => { CopyImageFile(); return Task.CompletedTask; }, [GlideCommand.CopyFileName] = () => CopyTextAsync(_currentPath is null ? null : Path.GetFileName(_currentPath)), [GlideCommand.CopyFolderPath] = () => CopyTextAsync(_currentPath is null ? null : Path.GetDirectoryName(_currentPath)), [GlideCommand.CopyFullPath] = () => CopyTextAsync(_currentPath), [GlideCommand.RenameFile] = RenameCurrentFileAsync, [GlideCommand.DeleteFile] = DeleteCurrentFileAsync, [GlideCommand.OpenContainingFolder] = () => { OpenContainingFolder(); return Task.CompletedTask; }, [GlideCommand.ExternalProgram1] = () => { LaunchExternal(1); return Task.CompletedTask; }, [GlideCommand.ExternalProgram2] = () => { LaunchExternal(2); return Task.CompletedTask; }, [GlideCommand.ExternalProgram3] = () => { LaunchExternal(3); return Task.CompletedTask; }
         };
@@ -7751,22 +8533,17 @@ public partial class MainWindow : Window
         string result = "Cancel";
         closeCurrent.Click += (_, _) => { result = "Close current tab"; dialog.Close(); };
         closeAll.Click += (_, _) => { result = "Close all"; dialog.Close(); };
-        await dialog.ShowDialog(this);
+        await ShowOwnedDialogAsync(dialog);
         if (remember.IsChecked == true && result != "Cancel") { _settings.RememberedMultiTabCloseChoice = result; _settings.ConfirmCloseMultipleTabs = false; SaveSettingsAndPublish(); }
         return result;
     }
 
     private void OpenContainingFolder()
     {
+        // The embedded Explorer remains removed. This title-bar action opens the real Windows
+        // Explorer only, selecting the current image.
         if (string.IsNullOrWhiteSpace(_currentPath)) return;
         var path = _currentPath;
-        var folder = Path.GetDirectoryName(path);
-        if (string.Equals(_settings.NavigateToFolderBehavior, "Internal browser", StringComparison.OrdinalIgnoreCase) &&
-            !string.IsNullOrWhiteSpace(folder) && Directory.Exists(folder) && _workspace.Active is { } active)
-        {
-            _ = OpenContainingFolderInCurrentTabAsync(active.Id, path, folder);
-            return;
-        }
         var opened = _fileOperations.TryOpenContainingFolder(path);
         _diagnostics.Write("file", opened ? "open_containing_folder_external" : "open_containing_folder_failed", new { path });
     }
@@ -7779,12 +8556,13 @@ public partial class MainWindow : Window
 
         var session = new BrowserSession();
         session.History.Add(folder);
+        session.Highlights.Add(imagePath);
         session.Index = 0;
         _browserSessions[tabId] = session;
 
         _workspace.ReplaceTab(new BrowserTabState(tabId, folder)
         {
-            Navigation = new BrowserNavigationState(session.History.ToArray(), session.Index)
+            Navigation = new BrowserNavigationState(session.History.ToArray(), session.Index, session.Highlights.ToArray())
         });
         await ActivateWorkspaceAsync();
         SelectBrowserHighlight(tabId);
@@ -7796,7 +8574,7 @@ public partial class MainWindow : Window
         if (string.IsNullOrWhiteSpace(_currentPath) || !File.Exists(_currentPath)) return;
         var oldPath = _currentPath;
         var box = new TextBox { Text = Path.GetFileName(oldPath), MinWidth = 330 };
-        var dialog = new Window { Width = 470, Height = 180, Title = "Rename image", Icon = Icon, CanResize = false };
+        var dialog = CreateContentSizedDialog("Rename image", 430, 620);
         PopupPlacementStore.Track(dialog, "rename-image");
         var cancel = new Button { Content = "Cancel", MinWidth = 88 };
         var rename = new Button { Content = "Rename", MinWidth = 88 };
@@ -7812,7 +8590,7 @@ public partial class MainWindow : Window
                 new StackPanel { Orientation = Avalonia.Layout.Orientation.Horizontal, HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right, Spacing = 8, Children = { cancel, rename } }
             }
         };
-        await dialog.ShowDialog(this);
+        await ShowOwnedDialogAsync(dialog);
         if (!accepted || string.IsNullOrWhiteSpace(box.Text)) return;
         var newPath = _fileOperations.ValidateRename(oldPath, box.Text.Trim());
         if (newPath is null) { _diagnostics.Write("file", "rename_rejected", new { path = oldPath }); return; }
@@ -7914,7 +8692,6 @@ public partial class MainWindow : Window
         items.Add(copyOther);
 
         // File operations
-        items.Add(Item("Open containing folder", GlideCommand.OpenContainingFolder, _currentPath is not null));
         items.Add(Item("Rename…", GlideCommand.RenameFile, _currentPath is not null));
         items.Add(Item("Delete to Recycle Bin", GlideCommand.DeleteFile, _currentPath is not null));
         items.Add(new MenuItem { Header = "-" });
@@ -7927,7 +8704,6 @@ public partial class MainWindow : Window
             Item("First image", GlideCommand.FirstImage, _navigator.Count > 1),
             Item("Last image", GlideCommand.LastImage, _navigator.Count > 1),
             new MenuItem { Header = "-" },
-            Item("Up to containing folder", GlideCommand.ExploreParentFolder, _currentPath is not null)
         };
         items.Add(navigation);
 
@@ -7941,6 +8717,7 @@ public partial class MainWindow : Window
             SaveSettingsAndPublish();
             ApplyStatusVisibility();
         };
+
         view.ItemsSource = new object[]
         {
             showStatus,
@@ -7949,13 +8726,16 @@ public partial class MainWindow : Window
         items.Add(view);
 
         var presentation = new MenuItem { Header = "Presentation" };
-        presentation.ItemsSource = new object[]
+        var presentationItems = new List<object>
         {
             Item(WindowState == WindowState.FullScreen ? "Exit fullscreen" : "Fullscreen", GlideCommand.ToggleFullscreen),
             Item(_slideshow?.IsRunning == true ? "Pause slideshow" : "Start slideshow", GlideCommand.StartPauseSlideshow, _navigator.Count > 0),
-            Item("Stop slideshow", GlideCommand.StopSlideshow, _slideshow?.IsActive == true),
-            Item((_settings.AlwaysOnTop || _wholeAppOverlayMode) ? "Always on top  ✓" : "Always on top", GlideCommand.ToggleAlwaysOnTop)
+            Item("Stop slideshow", GlideCommand.StopSlideshow, _slideshow?.IsActive == true)
         };
+        // In Overlay mode Always-on-top is intentionally exposed directly in the main menu,
+        // immediately beneath the persistent Overlay-mode preference. Do not duplicate it here.
+        if (!_wholeAppOverlayMode) presentationItems.Add(Item(ActiveAlwaysOnTop ? "Always on top  ✓" : "Always on top", GlideCommand.ToggleAlwaysOnTop));
+        presentation.ItemsSource = presentationItems;
         items.Add(presentation);
 
         if (!string.IsNullOrWhiteSpace(_settings.ExternalProgram1) || !string.IsNullOrWhiteSpace(_settings.ExternalProgram2) || !string.IsNullOrWhiteSpace(_settings.ExternalProgram3))
@@ -7975,7 +8755,7 @@ public partial class MainWindow : Window
         items.Add(Item("Settings", GlideCommand.Settings));
         items.Add(Item("Exit program", GlideCommand.CloseWindow));
         menu.ItemsSource = items;
-        return menu;
+        return PrepareOwnedContextMenu(menu);
     }
 
     private void LaunchExternal(int slot)
@@ -8125,6 +8905,7 @@ public partial class MainWindow : Window
     private sealed class BrowserSession
     {
         public List<string> History { get; } = new();
+        public List<string?> Highlights { get; } = new();
         public int Index { get; set; } = -1;
     }
 }

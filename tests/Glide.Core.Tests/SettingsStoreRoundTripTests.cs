@@ -67,7 +67,7 @@ public sealed class SettingsStoreRoundTripTests
 
             var loaded = SettingsStore.Load();
             Assert.Equal(new[] { "Ctrl+H", "1" }, loaded.Hotkeys["view.actual"]);
-            Assert.Equal(4, loaded.SettingsSchemaVersion);
+            Assert.Equal(5, loaded.SettingsSchemaVersion);
         });
     }
 
@@ -309,7 +309,36 @@ public sealed class SettingsStoreRoundTripTests
             Assert.Equal(new[] { "F11", "Enter" }, loaded.Hotkeys["view.fullscreen"]);
             Assert.Equal(new[] { "F", "Shift+W" }, loaded.Hotkeys["view.fit"]);
             Assert.Equal(new[] { "Ctrl+H", "1" }, loaded.Hotkeys["view.actual"]);
-            Assert.Equal(4, loaded.SettingsSchemaVersion);
+            Assert.Equal(5, loaded.SettingsSchemaVersion);
+        });
+    }
+
+    [Fact]
+    public void Schema5_migrates_stock_unlimited_navigation_interval_to_eighty_ms()
+    {
+        WithIsolatedStore(() =>
+        {
+            var state = new GlideSettingsState { SettingsSchemaVersion = 4, NavigationRateLimitMs = 0 };
+            File.WriteAllText(SettingsStore.GetSettingsPath(), JsonSerializer.Serialize(state));
+            var loaded = SettingsStore.Load();
+            Assert.Equal(80, loaded.NavigationRateLimitMs);
+            Assert.Equal(5, loaded.SettingsSchemaVersion);
+        });
+    }
+
+    [Fact]
+    public void Schema5_preserves_explicit_navigation_interval_and_current_schema_zero()
+    {
+        WithIsolatedStore(() =>
+        {
+            var custom = new GlideSettingsState { SettingsSchemaVersion = 4, NavigationRateLimitMs = 250 };
+            File.WriteAllText(SettingsStore.GetSettingsPath(), JsonSerializer.Serialize(custom));
+            Assert.Equal(250, SettingsStore.Load().NavigationRateLimitMs);
+
+            // Once the profile is at the current schema, an explicit 0 (unlimited) is authoritative.
+            var unlimited = new GlideSettingsState { SettingsSchemaVersion = 5, NavigationRateLimitMs = 0 };
+            File.WriteAllText(SettingsStore.GetSettingsPath(), JsonSerializer.Serialize(unlimited));
+            Assert.Equal(0, SettingsStore.Load().NavigationRateLimitMs);
         });
     }
 

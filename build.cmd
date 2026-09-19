@@ -44,7 +44,11 @@ exit /b %GLIDE_WRAPPER_RC%
 :captured_entry
 setlocal EnableExtensions EnableDelayedExpansion
 cd /d "%~dp0"
-title Glide 4.1.5
+rem Single-source the product version from Directory.Build.props so build banners, deliverable
+rem names and fixture identities can never drift from the assembly metadata again.
+set "GLIDE_VERSION=4.2.2"
+for /f "tokens=3 delims=<>" %%V in ('findstr /r /c:"^ *<Version>" "Directory.Build.props"') do set "GLIDE_VERSION=%%V"
+title Glide %GLIDE_VERSION%
 
 set "GLIDE_AOT=0"
 if /I "%GLIDE_FORCE_FAST%"=="1" (set "GLIDE_FAST=1") else (set "GLIDE_FAST=0")
@@ -74,7 +78,7 @@ rem This avoids argument-forwarding quirks through the PowerShell live-log wrapp
 if /I "%GLIDE_FORCE_FAST%"=="1" set "GLIDE_FAST=1"
 echo.
 echo ============================================================
-echo   Glide 4.1.5
+echo   Glide %GLIDE_VERSION%
 echo ============================================================
 echo.
 if "%GLIDE_AOT%"=="1" (
@@ -87,11 +91,20 @@ if "%GLIDE_AOT%"=="1" (
 if "%GLIDE_FAST%"=="1" echo   FAST DEV MODE: compile + publish; tests/fixture regeneration skipped when safe.
 echo   Incremental caches: native\Glide.Native\build + managed bin/obj + NuGet global cache
 echo.
-call :clean_generated
-if errorlevel 1 (
-  set "GLIDE_BUILD_RC=1"
-  goto :fail
+echo Cleaning generated build outputs and caches...
+for %%D in (".artifacts" "artifacts\diagnostic-fixtures" "native\Glide.Native\build" "dist" "dist-fixed" "dist-installer") do (
+  if exist "%%~D" rmdir /s /q "%%~D"
+  if exist "%%~D" (
+    echo ERROR: Could not remove generated directory %%~D. Close any running Glide/build process and retry.
+    set "GLIDE_BUILD_RC=1"
+    goto :fail
+  )
 )
+if exist "codecs\codecs.index.json" del /q "codecs\codecs.index.json"
+rem Remove every prior portable deliverable (any version) so stale, mislabeled archives can
+rem never accumulate next to the current release.
+del /q "Glide-*.exe" >nul 2>nul
+del /q "Glide-*-Portable.zip" >nul 2>nul
 call :progress 2 "Preflight"
 
 where dotnet >nul 2>nul
@@ -266,10 +279,10 @@ if not exist "dist\Glide.Native.dll" (
 )
 
 rem Release deliverables: a clean portable archive and a directly testable EXE.
-if exist "Glide-4.1.5-Portable.zip" del /q "Glide-4.1.5-Portable.zip"
-if exist "Glide-4.1.5.exe" del /q "Glide-4.1.5.exe"
-copy /y "dist\Glide.exe" "Glide-4.1.5.exe" >nul
-powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "Compress-Archive -Path 'dist\*' -DestinationPath 'Glide-4.1.5-Portable.zip' -CompressionLevel Optimal"
+if exist "Glide-%GLIDE_VERSION%-Portable.zip" del /q "Glide-%GLIDE_VERSION%-Portable.zip"
+if exist "Glide-%GLIDE_VERSION%.exe" del /q "Glide-%GLIDE_VERSION%.exe"
+copy /y "dist\Glide.exe" "Glide-%GLIDE_VERSION%.exe" >nul
+powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "Compress-Archive -Path 'dist\*' -DestinationPath 'Glide-%GLIDE_VERSION%-Portable.zip' -CompressionLevel Optimal"
 if errorlevel 1 (
   echo ERROR: Portable ZIP creation failed.
   set "GLIDE_BUILD_RC=!errorlevel!"
@@ -277,7 +290,7 @@ if errorlevel 1 (
 )
 call :progress 90 "Diagnostic fixtures"
 if "%GLIDE_FAST%"=="1" (
-  powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File "tools\fixture-manifest.ps1" -Mode Validate -Directory "artifacts\diagnostic-fixtures" -Generator "dist\Glide.exe" -SourceIdentity "Glide-4.1.5" >nul 2>&1
+  powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File "tools\fixture-manifest.ps1" -Mode Validate -Directory "artifacts\diagnostic-fixtures" -Generator "dist\Glide.exe" -SourceIdentity "Glide-%GLIDE_VERSION%" >nul 2>&1
   if errorlevel 1 (
     echo [8/8] Fast fixture cache is absent/stale/partial; regenerating...
     call :generate_diagnostic_fixtures
@@ -319,8 +332,8 @@ call :progress 100 "Complete"
 echo.
 echo ============================================================
 echo   BUILD COMPLETE - portable: dist\
-echo   PORTABLE ZIP: Glide-4.1.5-Portable.zip
-echo   EXE:          Glide-4.1.5.exe
+echo   PORTABLE ZIP: Glide-%GLIDE_VERSION%-Portable.zip
+echo   EXE:          Glide-%GLIDE_VERSION%.exe
 if /I "%GLIDE_SKIP_INSTALLER%"=="1" (
   echo   INSTALLER: skipped by caller
 ) else (
@@ -344,13 +357,13 @@ if not exist "artifacts\diagnostic-fixtures" (
   set "GLIDE_BUILD_RC=1"
   exit /b 1
 )
-powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File "tools\fixture-manifest.ps1" -Mode Write -Directory "artifacts\diagnostic-fixtures" -Generator "dist\Glide.exe" -SourceIdentity "Glide-4.1.5"
+powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File "tools\fixture-manifest.ps1" -Mode Write -Directory "artifacts\diagnostic-fixtures" -Generator "dist\Glide.exe" -SourceIdentity "Glide-%GLIDE_VERSION%"
 if errorlevel 1 (
   echo ERROR: Diagnostic fixture identity manifest creation/validation failed.
   set "GLIDE_BUILD_RC=!errorlevel!"
   exit /b !GLIDE_BUILD_RC!
 )
-powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File "tools\fixture-manifest.ps1" -Mode Validate -Directory "artifacts\diagnostic-fixtures" -Generator "dist\Glide.exe" -SourceIdentity "Glide-4.1.5"
+powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File "tools\fixture-manifest.ps1" -Mode Validate -Directory "artifacts\diagnostic-fixtures" -Generator "dist\Glide.exe" -SourceIdentity "Glide-%GLIDE_VERSION%"
 if errorlevel 1 (
   echo ERROR: Generated diagnostic fixtures did not pass identity validation.
   set "GLIDE_BUILD_RC=!errorlevel!"
@@ -361,7 +374,7 @@ exit /b 0
 :progress
 set "GLIDE_PROGRESS=%~1"
 set "GLIDE_PROGRESS_LABEL=%~2"
-title Glide 4.1.5 Build - %GLIDE_PROGRESS%%% - %GLIDE_PROGRESS_LABEL%
+title Glide %GLIDE_VERSION% Build - %GLIDE_PROGRESS%%% - %GLIDE_PROGRESS_LABEL%
 echo [ %GLIDE_PROGRESS%%% ] %GLIDE_PROGRESS_LABEL%
 exit /b 0
 
@@ -375,8 +388,10 @@ for %%D in (".artifacts" "artifacts\diagnostic-fixtures" "native\Glide.Native\bu
   )
 )
 if exist "codecs\codecs.index.json" del /q "codecs\codecs.index.json"
-if exist "Glide-4.1.5.exe" del /q "Glide-4.1.5.exe"
-if exist "Glide-4.1.5-Portable.zip" del /q "Glide-4.1.5-Portable.zip"
+rem Remove every prior portable deliverable (any version) so stale, mislabeled archives can
+rem never accumulate next to the current release.
+del /q "Glide-*.exe" >nul 2>nul
+del /q "Glide-*-Portable.zip" >nul 2>nul
 exit /b 0
 
 :fail
