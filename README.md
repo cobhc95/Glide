@@ -1,4 +1,4 @@
-# Glide 4.2.3
+# Glide 4.2.4
 
 ## Fast. Lightweight. Multi-tabbed. Multi-window. Highly customizable.
 
