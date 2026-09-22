@@ -310,11 +310,16 @@ Glide includes a dedicated non-destructive overlay system for image comparison, 
 
 ### 13. Image Printing
 
-![Glide Print window](docs/screenshots/print-research/glide-print-dialog.png)
+![Glide Print window — a 1280×720 landscape photo in Best fit, shown at its true 16:9 proportions](docs/screenshots/print-research/glide-print-dialog.png)
 
 Glide prints the **original decoded image at full resolution**, not a capture of the viewport, through a
 Glide-native window with a live WYSIWYG preview. Open it with `Ctrl+P`, the viewer right-click menu, or
 the browser item menu.
+
+Above: a **1280 × 720** landscape photo in **Best fit** renders at **184.7 mm × 103.9 mm** — exactly
+16:9, with the aspect ratio preserved and no page space wasted. With **Automatically rotate for best
+fit** enabled the same photo is rotated 90° onto portrait paper instead
+([portrait-rotated capture](docs/screenshots/print-research/glide-print-dialog-autorotate.png)).
 
 * **Reference-faithful layout:** printer + native Properties, paper size/source, portrait/landscape,
   copies, colour/grayscale, and a live preview that updates on every change.

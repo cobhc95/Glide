@@ -153,7 +153,16 @@ embed the full image.
 **Screenshots:**
 - `docs/screenshots/print-research/faststone-85-browser.png` — verified FastStone 8.5 build.
 - `docs/screenshots/print-research/glide-print-dialog.png` — Glide's Print window with the live preview
-  (Microsoft Print to PDF / A4, Best fit, auto-rotate, info line + Cancel/Print).
+  (Microsoft Print to PDF / A4, Best fit, auto-rotate off). A 1280×720 landscape photo measured
+  **184.7 mm × 103.9 mm** — exactly 16:9, no distortion, no wasted page space.
+- `docs/screenshots/print-research/glide-print-dialog-autorotate.png` — the same photo with
+  **Automatically rotate for best fit** on: correctly rotated 90° onto portrait paper
+  (152.7 mm × 271.5 mm), which is the fix for the former auto-rotate stretch defect.
+
+> **Superseded capture note (2026-09-22):** the original `glide-print-dialog.png` showed the
+> auto-rotate **stretch** defect — a 16:9 landscape photo drawn as a tall, narrow portrait crop. That
+> screenshot was captured before the 4.2.6 fix (auto-rotate now performs a real rotation in both the
+> preview and the spool path). Both files above are regenerated from the fixed 4.3.0 build.
 
 **Deferred:** multi-image / contact-sheet printing (see §5).
 
