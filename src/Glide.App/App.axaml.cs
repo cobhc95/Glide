@@ -214,6 +214,13 @@ public partial class App : Application
         TrayIconInstance.IsVisible = settings.SpeedBoostEnabled && settings.ShowTrayIcon;
     }
 
+    /// <summary>
+    /// True when a tray icon is actually registered. Speed Boost standby removes the render window
+    /// from the taskbar and relies on the tray icon as the user's only way back, so standby must not
+    /// hide the last window when no tray icon is present.
+    /// </summary>
+    internal static bool IsTrayIconAvailable => TrayIconInstance?.IsVisible == true;
+
     public static void ShowMainWindow()
     {
         if (Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)

@@ -19,12 +19,12 @@ namespace Glide.Diagnostics;
 /// </summary>
 public static class DiagnosticRunner
 {
-    public const string BuildVersion = "4.2.3";
+    public const string BuildVersion = "4.2.4";
 
     public static DiagnosticSnapshot Capture() => new(
         Product: "Glide",
         Version: BuildVersion,
-        Release: "Glide 4.2.3 (Search Coverage & Small-Screen Fixes)",
+        Release: "Glide 4.2.4 (Restore Fidelity & Fit Scope)",
         Architecture: "C# + Avalonia retained-mode UI + semantic core + small native C++ bridge; NativeAOT blocked pending COM isolation",
         TimestampUtc: DateTimeOffset.UtcNow,
         Framework: RuntimeInformation.FrameworkDescription,
@@ -59,8 +59,8 @@ public static class DiagnosticRunner
             $"{snapshot.SettingsSchemaCount} declarative settings registered"));
         var currentSettings = SettingsCatalog.All.Count(x => x.FuturePhase is null);
         var futureSettings = SettingsCatalog.All.Count(x => x.FuturePhase is not null);
-        checks.Add(Check("settings_schema_glide30_contract", snapshot.SettingsSchemaCount == 188 && currentSettings == 188 && futureSettings == 0,
-            $"Glide catalogue contract: total={snapshot.SettingsSchemaCount}, current={currentSettings}, future={futureSettings}; expected 188/188/0."));
+        checks.Add(Check("settings_schema_glide30_contract", snapshot.SettingsSchemaCount == 189 && currentSettings == 189 && futureSettings == 0,
+            $"Glide catalogue contract: total={snapshot.SettingsSchemaCount}, current={currentSettings}, future={futureSettings}; expected 189/189/0."));
         var overlayAvoidOverlap = SettingsCatalog.All.FirstOrDefault(x => string.Equals(x.Id, "overlay.animationAvoidOverlap", StringComparison.OrdinalIgnoreCase));
         checks.Add(Check("overlay_animation_avoid_overlap_contract",
             overlayAvoidOverlap is not null && overlayAvoidOverlap.FuturePhase is null && overlayAvoidOverlap.DefaultValue is bool avoidOverlapEnabled && avoidOverlapEnabled,
@@ -138,7 +138,7 @@ public static class DiagnosticRunner
             SettingsCatalog.All.Any(x => x.Id == "slideshow.startFullscreen") &&
             SettingsCatalog.All.Any(x => x.Id == "slideshow.pauseInactive") &&
             SettingsCatalog.All.Any(x => x.Id == "developer.statusGlobalScale") &&
-            SettingsCatalog.All.Any(x => x.Id == "developer.statusAutoFit") &&
+            SettingsCatalog.All.Any(x => x.Id == "status.autoResize") &&
             SettingsCatalog.All.Any(x => x.Id == "developer.statusMaximizedBoost") &&
             SettingsCatalog.All.Any(x => x.Id == "developer.overlayAbsoluteCoordinates") &&
             SettingsCatalog.All.Any(x => x.Id == "general.startupAction") &&
@@ -279,7 +279,7 @@ public static class DiagnosticRunner
                 ? CodecProviderRuntime.Shared.Artifacts
                 : Array.Empty<CodecProviderArtifact>(), jsonOptions));
         File.WriteAllText(Path.Combine(folder, "README.txt"),
-            "Glide 4.2.3 evidence bundle. PASS means a named assertion actually ran. SKIP means the owning subsystem is absent or the check requires a live UI. codec_capabilities.json separates recognised/routed suffixes from guaranteed decode; codec_providers.json reports only providers already indexed/verified in this process and never wakes optional providers during export. When exported from Settings > Developer Options, Glide.App appends immediate/settled screenshots, logical-control geometry/layout audit, settings-effect coverage, current settings, capability/provider inventory and a live behaviour event trace. Do not infer UI parity from headless structural PASS.\n");
+            "Glide 4.2.4 evidence bundle. PASS means a named assertion actually ran. SKIP means the owning subsystem is absent or the check requires a live UI. codec_capabilities.json separates recognised/routed suffixes from guaranteed decode; codec_providers.json reports only providers already indexed/verified in this process and never wakes optional providers during export. When exported from Settings > Developer Options, Glide.App appends immediate/settled screenshots, logical-control geometry/layout audit, settings-effect coverage, current settings, capability/provider inventory and a live behaviour event trace. Do not infer UI parity from headless structural PASS.\n");
         output.WriteLine($"Diagnostics exported to: {Path.GetFullPath(folder)}");
         return checks.Any(x => x.Status == "FAIL") ? 1 : 0;
     }

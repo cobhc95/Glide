@@ -101,8 +101,8 @@ public sealed record GlideSettingsState
     public bool AlwaysOnTop { get; set; }
     // Overlay mode owns an independent topmost preference; normal-window topmost must not leak into it.
     public bool OverlayAlwaysOnTop { get; set; }
-    // Soft uses the ordinary OS topmost band; Hard periodically reasserts native HWND_TOPMOST.
-    public string AlwaysOnTopMode { get; set; } = "Hard";
+    // Soft uses the ordinary OS topmost band (default); Hard periodically reasserts native HWND_TOPMOST.
+    public string AlwaysOnTopMode { get; set; } = "Soft";
     // Per-image Overlay geometry. Keys are normalized full image paths. Kept bounded by MainWindow.
     public Dictionary<string, OverlayWindowPlacementState> OverlayWindowPlacements { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public bool AutoCenterWindowOnRestore { get; set; }
@@ -110,6 +110,9 @@ public sealed record GlideSettingsState
     // Default restores the exact pre-fullscreen normal placement/state captured on entry.
     public string FullscreenExitBehavior { get; set; } = "Restore size and location";
     public string DefaultViewMode { get; set; } = "Fit image";
+    // How the status bar Fit Width/Fit Height controls propagate the chosen fit mode: only the
+    // current image, every image in this session, or this session plus future launches (default).
+    public string StatusFitScope { get; set; } = "This session and future sessions";
     public bool PointerZoom { get; set; } = true;
     public bool PreserveManualZoomOnNavigate { get; set; }
     public int ViewportZoomStepPercent { get; set; } = 10;

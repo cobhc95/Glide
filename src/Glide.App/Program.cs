@@ -195,7 +195,7 @@ internal static class Program
             // This process is now the elected UI/broker owner. Start the crash breadcrumb file only
             // here so short-lived forwarding helper processes cannot overwrite the live owner trace.
             if (diagnosticTraceRequested)
-                LiveDiagnosticTrace.Initialize("4.2.3-diagnostic");
+                LiveDiagnosticTrace.Initialize("4.2.4-diagnostic");
             AppDomain.CurrentDomain.UnhandledException += (_, eventArgs) =>
             {
                 if (eventArgs.ExceptionObject is Exception fatal)

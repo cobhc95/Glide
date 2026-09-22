@@ -19,7 +19,7 @@
         <Grid ColumnDefinitions="*,220" ColumnSpacing="10" Margin="20,23,48,0" VerticalAlignment="Top">
           <TextBox x:Name="SearchBox" Classes="settingsSearch" Watermark="Search settings..." TextChanged="SearchChanged"/>
           <ComboBox x:Name="SearchCategoryCombo" Grid.Column="1" Width="220" SelectedIndex="0" SelectionChanged="SearchCategoryChanged" ToolTip.Tip="Limit Settings search to one category. All categories is the default.">
-            <ComboBoxItem Content="All categories"/><ComboBoxItem Content="General"/><ComboBoxItem Content="Themes &amp; Colours"/><ComboBoxItem Content="Viewing &amp; Appearance"/><ComboBoxItem Content="Animation"/><ComboBoxItem Content="Interface &amp; Behavior"/><ComboBoxItem Content="Mouse &amp; Fullscreen"/><ComboBoxItem Content="Performance &amp; Startup"/><ComboBoxItem Content="Status Bar"/><ComboBoxItem Content="Slideshow"/><ComboBoxItem Content="Hotkeys"/><ComboBoxItem Content="Tabs &amp; Workspace"/><ComboBoxItem Content="Window in Window"/><ComboBoxItem Content="Profiles &amp; Presets"/><ComboBoxItem Content="Windows Integration"/><ComboBoxItem Content="Developer Options"/>
+            <ComboBoxItem Content="All categories"/><ComboBoxItem Content="General"/><ComboBoxItem Content="Themes &amp; Colours"/><ComboBoxItem Content="Viewing &amp; Appearance"/><ComboBoxItem Content="Interface &amp; Behavior"/><ComboBoxItem Content="Mouse &amp; Fullscreen"/><ComboBoxItem Content="Performance &amp; Startup"/><ComboBoxItem Content="Status Bar"/><ComboBoxItem Content="Slideshow"/><ComboBoxItem Content="Hotkeys"/><ComboBoxItem Content="Tabs &amp; Workspace"/><ComboBoxItem Content="Window in Window"/><ComboBoxItem Content="Profiles &amp; Presets"/><ComboBoxItem Content="Windows Integration"/><ComboBoxItem Content="Developer Options"/>
           </ComboBox>
         </Grid>
       </Border>
@@ -31,7 +31,6 @@
             <Button Classes="settingsNav selected" Tag="General" Click="CategoryClicked"><Grid ColumnDefinitions="28,*"><controls:GlideIconView Kind="General" Classes="navGlyph" HorizontalAlignment="Center" VerticalAlignment="Center"/><TextBlock Grid.Column="1" Text="General" VerticalAlignment="Center" Margin="8,0,0,0"/></Grid></Button>
             <Button Classes="settingsNav" Tag="Appearance" Click="CategoryClicked"><Grid ColumnDefinitions="28,*"><controls:GlideIconView Kind="Appearance" Classes="navGlyph" HorizontalAlignment="Center" VerticalAlignment="Center"/><TextBlock Grid.Column="1" Text="Themes &amp; Colours" VerticalAlignment="Center" Margin="8,0,0,0"/></Grid></Button>
             <Button Classes="settingsNav" Tag="Viewing" Click="CategoryClicked"><Grid ColumnDefinitions="28,*"><controls:GlideIconView Kind="Viewing" Classes="navGlyph" HorizontalAlignment="Center" VerticalAlignment="Center"/><TextBlock Grid.Column="1" Text="Viewing &amp; Appearance" VerticalAlignment="Center" Margin="8,0,0,0"/></Grid></Button>
-            <Button Classes="settingsNav" Tag="Animation" Click="CategoryClicked"><Grid ColumnDefinitions="28,*"><controls:GlideIconView Kind="Animation" Classes="navGlyph" HorizontalAlignment="Center" VerticalAlignment="Center"/><TextBlock Grid.Column="1" Text="Animation" VerticalAlignment="Center" Margin="8,0,0,0"/></Grid></Button>
             <Button Classes="settingsNav" Tag="Interface" Click="CategoryClicked"><Grid ColumnDefinitions="28,*"><controls:GlideIconView Kind="Interface" Classes="navGlyph" HorizontalAlignment="Center" VerticalAlignment="Center"/><TextBlock Grid.Column="1" Text="Interface &amp; Behavior" VerticalAlignment="Center" Margin="8,0,0,0"/></Grid></Button>
             <Button Classes="settingsNav" Tag="Mouse" Click="CategoryClicked"><Grid ColumnDefinitions="28,*"><controls:GlideIconView Kind="Mouse" Classes="navGlyph" HorizontalAlignment="Center" VerticalAlignment="Center"/><TextBlock Grid.Column="1" Text="Mouse &amp; Fullscreen" VerticalAlignment="Center" Margin="8,0,0,0"/></Grid></Button>
             <Button Classes="settingsNav" Tag="Performance" Click="CategoryClicked"><Grid ColumnDefinitions="28,*"><controls:GlideIconView Kind="Performance" Classes="navGlyph" HorizontalAlignment="Center" VerticalAlignment="Center"/><TextBlock Grid.Column="1" Text="Performance &amp; Startup" VerticalAlignment="Center" Margin="8,0,0,0"/></Grid></Button>
@@ -124,22 +123,9 @@
             <TextBlock Classes="phaseNote" Margin="6,-2,8,2" TextWrapping="Wrap" Text="Tokens: {index}, {total}, {file}, {filename}, {stem}, {extension}, {format}, {folder}, {folderpath}, {path}, {width}, {height}, {dimensions}, {megapixels}, {filesize}, {filesizebytes}, {zoom}. Example: {stem}  •  {dimensions}  •  {filesize}  •  {index}/{total}"/>
           </StackPanel>
 
-          <!-- TRANSITIONS & ANIMATION -->
-          <StackPanel x:Name="AnimationPanel" IsVisible="False" Spacing="10">
-            <TextBlock Text="Image navigation transitions" Classes="settingsSectionLabel" FontWeight="SemiBold"/>
+          <!-- Animation controls live in the Window in Window section (they only affect overlays). -->
 
-            
-            <TextBlock Text="Window-in-Window overlay animation" Classes="settingsSectionLabel" FontWeight="SemiBold" Margin="4,10,0,0"/>
-            <TextBlock Text="Animated overlays move smoothly within the selected region. Right-click an overlay and choose Animate to start or stop movement." Classes="phaseNote" TextWrapping="Wrap"/>
-            <Grid ColumnDefinitions="205,250,*" Margin="6,0,0,0"><TextBlock Text="Animation region" VerticalAlignment="Center"/><ComboBox x:Name="OverlayAnimationRegionCombo" Grid.Column="1"><ComboBoxItem Content="Anywhere"/><ComboBoxItem Content="Top half"/><ComboBoxItem Content="Bottom half"/><ComboBoxItem Content="Top left quarter"/><ComboBoxItem Content="Top right quarter"/><ComboBoxItem Content="Bottom left quarter"/><ComboBoxItem Content="Bottom right quarter"/></ComboBox></Grid>
-            <Grid ColumnDefinitions="205,150,*" Margin="6,0,0,0"><TextBlock Text="Speed (DIPs per second)" VerticalAlignment="Center"/><NumericUpDown x:Name="OverlayAnimationSpeedBox" Grid.Column="1" Minimum="10" Maximum="2000" Increment="10"/></Grid>
-            <Grid ColumnDefinitions="205,150,*" Margin="6,0,0,0"><TextBlock Text="Turn interval (ms)" VerticalAlignment="Center"/><NumericUpDown x:Name="OverlayAnimationTurnIntervalBox" Grid.Column="1" Minimum="0" Maximum="60000" Increment="100"/></Grid>
-            <Grid ColumnDefinitions="205,150,*" Margin="6,0,0,0"><TextBlock Text="Turn angle (degrees)" VerticalAlignment="Center"/><NumericUpDown x:Name="OverlayAnimationTurnAngleBox" Grid.Column="1" Minimum="0" Maximum="180" Increment="5"/></Grid>
-            <CheckBox x:Name="OverlayAnimationPauseCheck" Content="Pause overlay animation while interacting" IsChecked="True"/>
-            <CheckBox x:Name="OverlayAnimationAvoidOverlapCheck" Content="Animated overlays avoid overlapping" IsChecked="True"/>
-            <Grid ColumnDefinitions="205,250,*" Margin="6,0,0,0"><TextBlock Text="Animation refresh target" VerticalAlignment="Center"/><ComboBox x:Name="OverlayAnimationRefreshRateCombo" Grid.Column="1"><ComboBoxItem Content="60 Hz" Tag="60"/><ComboBoxItem Content="120 Hz" Tag="120"/><ComboBoxItem Content="144 Hz" Tag="144"/><ComboBoxItem Content="160 Hz" Tag="160"/><ComboBoxItem Content="240 Hz" Tag="240"/><ComboBoxItem Content="360 Hz" Tag="360"/></ComboBox></Grid>
-          </StackPanel>
-
+          <!-- INTERFACE & BEHAVIOR -->
           <!-- INTERFACE & BEHAVIOR -->
           <StackPanel x:Name="InterfacePanel" IsVisible="False" Spacing="10">
             <TextBlock Text="Window and title bar behavior" Classes="settingsSectionLabel" FontWeight="SemiBold"/>
@@ -304,7 +290,9 @@
             <CheckBox x:Name="StatusNavigationCheck" Content="Show navigation controls"/>
             <CheckBox x:Name="StatusZoomCheck" Content="Show zoom controls"/>
             <CheckBox x:Name="StatusSlideshowCheck" Content="Show slideshow control"/>
-            <CheckBox x:Name="StatusFitCheck" Content="Show Fit Width / Fit Height controls"/>
+            <CheckBox x:Name="StatusFitCheck" Content="Show Fit image / Fit width / Fit height controls"/>
+            <Grid ColumnDefinitions="245,290,*" Margin="6,0,0,0"><TextBlock Text="Fit control scope" VerticalAlignment="Center"/><ComboBox x:Name="StatusFitScopeCombo" Grid.Column="1" Width="280" ToolTip.Tip="Choose what the status bar Fit Width / Fit Height controls change: only the current image, every image this session, or this session and future launches (default)."><ComboBoxItem Content="Only the current image"/><ComboBoxItem Content="This session"/><ComboBoxItem Content="This session and future sessions"/></ComboBox></Grid>
+            <CheckBox x:Name="StatusAutoFitCheck" Content="Auto-resize status bar (shrink buttons to fit narrow windows)"/>
             <CheckBox x:Name="StatusInfoCheck" Content="Show image information control"/>
             <CheckBox x:Name="StatusOptionsCheck" Content="Show options menu"/>
             <CheckBox x:Name="StatusCloseCheck" Content="Show close control"/>
@@ -394,6 +382,15 @@
             <CheckBox x:Name="OverlayRightDragCheck" Content="Right-click and hold pans cropped / zoomed overlay content" IsChecked="True"/>
             <CheckBox x:Name="OverlayScaleWithWindowCheck" Content="Scale overlay size proportionally when the Glide window is resized"/>
             <Grid ColumnDefinitions="205,*,Auto" ColumnSpacing="7" Margin="6,0,0,0"><TextBlock Text="Default overlay directory" VerticalAlignment="Center"/><TextBox x:Name="OverlayDefaultDirectoryBox" Grid.Column="1"/><Button Grid.Column="2" Classes="secondaryAction" Content="Browse..." Click="BrowseOverlayDefaultDirectoryClicked"/></Grid>
+            <TextBlock Text="Window-in-Window overlay animation" Classes="settingsSectionLabel" FontWeight="SemiBold" Margin="4,12,0,0"/>
+            <TextBlock Text="Animated overlays move smoothly within the selected region. Right-click an overlay and choose Animate to start or stop movement." Classes="phaseNote" TextWrapping="Wrap"/>
+            <Grid ColumnDefinitions="205,250,*" Margin="6,0,0,0"><TextBlock Text="Animation region" VerticalAlignment="Center"/><ComboBox x:Name="OverlayAnimationRegionCombo" Grid.Column="1"><ComboBoxItem Content="Anywhere"/><ComboBoxItem Content="Top half"/><ComboBoxItem Content="Bottom half"/><ComboBoxItem Content="Top left quarter"/><ComboBoxItem Content="Top right quarter"/><ComboBoxItem Content="Bottom left quarter"/><ComboBoxItem Content="Bottom right quarter"/></ComboBox></Grid>
+            <Grid ColumnDefinitions="205,150,*" Margin="6,0,0,0"><TextBlock Text="Speed (DIPs per second)" VerticalAlignment="Center"/><NumericUpDown x:Name="OverlayAnimationSpeedBox" Grid.Column="1" Minimum="10" Maximum="2000" Increment="10"/></Grid>
+            <Grid ColumnDefinitions="205,150,*" Margin="6,0,0,0"><TextBlock Text="Turn interval (ms)" VerticalAlignment="Center"/><NumericUpDown x:Name="OverlayAnimationTurnIntervalBox" Grid.Column="1" Minimum="0" Maximum="60000" Increment="100"/></Grid>
+            <Grid ColumnDefinitions="205,150,*" Margin="6,0,0,0"><TextBlock Text="Turn angle (degrees)" VerticalAlignment="Center"/><NumericUpDown x:Name="OverlayAnimationTurnAngleBox" Grid.Column="1" Minimum="0" Maximum="180" Increment="5"/></Grid>
+            <CheckBox x:Name="OverlayAnimationPauseCheck" Content="Pause overlay animation while interacting" IsChecked="True"/>
+            <CheckBox x:Name="OverlayAnimationAvoidOverlapCheck" Content="Animated overlays avoid overlapping" IsChecked="True"/>
+            <Grid ColumnDefinitions="205,250,*" Margin="6,0,0,0"><TextBlock Text="Animation refresh target" VerticalAlignment="Center"/><ComboBox x:Name="OverlayAnimationRefreshRateCombo" Grid.Column="1"><ComboBoxItem Content="60 Hz" Tag="60"/><ComboBoxItem Content="120 Hz" Tag="120"/><ComboBoxItem Content="144 Hz" Tag="144"/><ComboBoxItem Content="160 Hz" Tag="160"/><ComboBoxItem Content="240 Hz" Tag="240"/><ComboBoxItem Content="360 Hz" Tag="360"/></ComboBox></Grid>
           </StackPanel>
 
           <!-- PROFILES -->
@@ -427,7 +424,6 @@
           <StackPanel x:Name="DeveloperPanel" IsVisible="False" Spacing="10">
             <TextBlock Text="Advanced interaction" Classes="settingsSectionLabel" FontWeight="SemiBold"/>
             <CheckBox x:Name="ReverseSelectionZoomOutScaleCheck" Content="Reverse selection-to-zoom-out scale (smaller selection = larger zoom out)" ToolTip.Tip="Default is on: smaller selections zoom farther out. Disable to restore the direct selection-size mapping."/>
-            <CheckBox x:Name="StatusAutoFitCheck" Content="Automatically shrink status bar to fit narrow windows"/>
             <TextBlock Text="Window-in-Window overlay coordinates" Classes="settingsSectionLabel" FontWeight="SemiBold" Margin="4,10,0,0"/>
             <CheckBox x:Name="OverlayAbsoluteCoordinatesCheck" Content="Keep overlay coordinates absolute during window/maximize/fullscreen resizing" ToolTip.Tip="Developer override. When enabled, Glide does not reposition overlays to keep them visible after the viewer changes size; this can intentionally leave an overlay clipped or off-screen."/>
             <TextBlock Text="Diagnostics are permanent product infrastructure. Export always writes the ZIP to Downloads and now includes UI screenshots, geometry, settings state/effect coverage and structural tests." Classes="phaseNote" Margin="0,8,0,0"/>

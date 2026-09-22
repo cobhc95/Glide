@@ -110,7 +110,6 @@ public partial class SettingsWindow : Window
             ["General"] = GeneralPanel,
             ["Appearance"] = AppearancePanel,
             ["Viewing"] = ViewingPanel,
-            ["Animation"] = AnimationPanel,
             ["Interface"] = InterfacePanel,
             ["Mouse"] = MousePanel,
             ["Performance"] = PerformancePanel,
@@ -355,6 +354,7 @@ public partial class SettingsWindow : Window
             StatusZoomCheck.IsChecked = s.StatusShowZoom;
             StatusSlideshowCheck.IsChecked = s.StatusShowSlideshow;
             StatusFitCheck.IsChecked = s.StatusShowFit;
+            SelectByText(StatusFitScopeCombo, string.IsNullOrWhiteSpace(s.StatusFitScope) ? "This session and future sessions" : s.StatusFitScope);
             StatusInfoCheck.IsChecked = s.StatusShowInfo;
             StatusOptionsCheck.IsChecked = s.StatusShowOptions;
             StatusCloseCheck.IsChecked = s.StatusShowClose;
@@ -503,7 +503,7 @@ public partial class SettingsWindow : Window
         state.FullscreenStatusAlwaysOn = FullscreenStatusAlwaysCheck.IsChecked == true;
         state.FullscreenKeepTabBarOpen = FullscreenKeepTabBarOpenCheck.IsChecked == true;
         state.AlwaysOnTop = AlwaysOnTopCheck.IsChecked == true;
-        state.AlwaysOnTopMode = SelectedText(AlwaysOnTopModeCombo, "Hard");
+        state.AlwaysOnTopMode = SelectedText(AlwaysOnTopModeCombo, "Soft");
         state.AutoCenterWindowOnRestore = AutoCenterWindowOnRestoreCheck.IsChecked == true;
         state.FullscreenExitBehavior = SelectedText(FullscreenExitBehaviorCombo, "Restore size and location");
         state.DefaultViewMode = SelectedText(DefaultViewCombo, "Fit image");
@@ -570,6 +570,7 @@ public partial class SettingsWindow : Window
         state.StatusShowZoom = StatusZoomCheck.IsChecked == true;
         state.StatusShowSlideshow = StatusSlideshowCheck.IsChecked == true;
         state.StatusShowFit = StatusFitCheck.IsChecked == true;
+        state.StatusFitScope = SelectedText(StatusFitScopeCombo, "This session and future sessions");
         state.StatusShowInfo = StatusInfoCheck.IsChecked == true;
         state.StatusShowOptions = StatusOptionsCheck.IsChecked == true;
         state.StatusShowClose = StatusCloseCheck.IsChecked == true;
@@ -979,7 +980,6 @@ public partial class SettingsWindow : Window
             "General" => "Application behavior, history, navigation and startup/new-tab preferences",
             "Appearance" => "Themes, colours, sizing and visual styling without changing interaction behavior",
             "Viewing" => "Image presentation, viewport scaling, zoom behavior, scrollbars, text overlay HUD and overlays",
-            "Animation" => "Overlay motion and animation controls",
             "Interface" => "Window behavior, folder traversal, tab layout, caption controls, navigation buttons and window interactions",
             "Mouse" => "Mouse gestures, selection, zoom, panning and fullscreen interaction",
             "Performance" => "Cold-start, decode quality, prefetch, refinement and memory controls",
@@ -1001,7 +1001,6 @@ public partial class SettingsWindow : Window
     {
         "Appearance" => "Themes & Colours",
         "Viewing" => "Viewing & Appearance",
-        "Animation" => "Animation",
         "Interface" => "Interface & Behavior",
         "Mouse" => "Mouse & Fullscreen",
         "Performance" => "Performance & Startup",
@@ -1413,7 +1412,6 @@ public partial class SettingsWindow : Window
     {
         "Themes & Colours" => "Appearance",
         "Viewing & Interface" => "Viewing",
-        "Animation" => "Animation",
         "Mouse & Fullscreen" => "Mouse",
         "Performance & Startup" => "Performance",
         "Status Bar" => "Status",
@@ -1546,6 +1544,8 @@ public partial class SettingsWindow : Window
         M("performance.cacheItems", CacheItemsBox); M("performance.compressedCacheMb", CompressedCacheMbBox); M("performance.decodedCacheMb", DecodedCacheMbBox); M("performance.rapidPreviewSize", RapidPreviewBox); M("performance.rapidBrowsePreviewSize", RapidBrowsePreviewBox); M("performance.progressiveColor", ProgressiveColorCheck);
         M("overlay.wholeAppAlwaysStart", WholeAppOverlayAlwaysStartCheck); M("overlay.wholeAppWindowedInteractions", WholeAppOverlayWindowedInteractionsCheck);
         M("status.size", StatusBarSizeCombo); M("status.navigation", StatusNavigationCheck); M("status.zoom", StatusZoomCheck); M("status.slideshow", StatusSlideshowCheck); M("status.fit", StatusFitCheck);
+        M("status.fitScope", StatusFitScopeCombo);
+        M("status.autoResize", StatusAutoFitCheck);
         M("status.info", StatusInfoCheck); M("status.options", StatusOptionsCheck); M("status.close", StatusCloseCheck); M("status.statIndex", StatIndexCheck);
         M("status.statResolution", StatResolutionCheck); M("status.statZoom", StatZoomCheck); M("status.statFileSize", StatFileSizeCheck); M("status.statFormat", StatFormatCheck);
         M("slideshow.interval", SlideshowIntervalBox); M("slideshow.loop", SlideshowLoopCheck); M("slideshow.rightClickStops", SlideshowRightClickStopsCheck); M("slideshow.showQualityIndicator", SlideshowQualityIndicatorCheck); M("slideshow.crossFolders", SlideshowCrossFoldersCheck); M("slideshow.shuffle", SlideshowShuffleCheck);
@@ -1560,7 +1560,7 @@ public partial class SettingsWindow : Window
         M("overlay.rememberFolder", OverlayRememberFolderCheck); M("overlay.scaleWithWindow", OverlayScaleWithWindowCheck); M("overlay.animationRegion", OverlayAnimationRegionCombo); M("overlay.animationSpeedDipsPerSecond", OverlayAnimationSpeedBox); M("overlay.animationTurnIntervalMs", OverlayAnimationTurnIntervalBox); M("overlay.animationTurnAngleDegrees", OverlayAnimationTurnAngleBox); M("overlay.animationPauseWhileInteracting", OverlayAnimationPauseCheck); M("overlay.animationAvoidOverlap", OverlayAnimationAvoidOverlapCheck); M("overlay.animationRefreshRateHz", OverlayAnimationRefreshRateCombo); M("overlay.defaultDirectory", OverlayDefaultDirectoryBox); M("profiles.defaultDirectory", ProfileDefaultDirectoryBox); M("overlay.persistSession", OverlayPersistSessionCheck); M("overlay.keyboardZoom", OverlayKeyboardZoomCheck); M("overlay.wheelZoom", OverlayWheelZoomCheck); M("overlay.highlightSelected", OverlayHighlightCheck); M("overlay.rememberZoom", OverlayRememberZoomCheck); M("overlay.rightDragPan", OverlayRightDragCheck);
         M("windows.externalOpenBehavior", ExternalOpenBehaviorCombo); M("windows.external1", External1Box); M("windows.external2", External2Box); M("windows.external3", External3Box);
         M("hotkeys.preset", HotkeyPresetCombo); M("profiles.presets", PresetCombo);
-        M("developer.statusGlobalScale", StatusGlobalScaleBox); M("developer.statusAutoFit", StatusAutoFitCheck); M("developer.statusMaximizedBoost", StatusMaximizedBoostBox); M("developer.overlayAbsoluteCoordinates", OverlayAbsoluteCoordinatesCheck);
+        M("developer.statusGlobalScale", StatusGlobalScaleBox); M("developer.statusMaximizedBoost", StatusMaximizedBoostBox); M("developer.overlayAbsoluteCoordinates", OverlayAbsoluteCoordinatesCheck);
     }
 
     private void ApplySettingsTooltips()

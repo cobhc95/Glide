@@ -4,6 +4,94 @@ All notable changes to Glide Image Viewer are documented here. The format is bas
 [Keep a Changelog](https://keepachangelog.com/), and the project uses dotted feature releases with
 hyphenated follow-up corrections (for example `4.2.0-1`).
 
+## [4.2.4] - 2026-09-22
+
+Polish and correctness release. See the GitHub release notes for the same list.
+
+### Fixed
+
+- 🪟 **Minimizing no longer makes the window vanish.** With Speed Boost on, minimizing the last window
+  also entered the hidden standby path, so it disappeared from the taskbar leaving only the tray icon.
+  Minimize is a real Windows minimize again; standby stays reserved for closing the last window.
+- 🖼️ **Aspect ratio is preserved for EXIF-rotated photos.** Pictures with an EXIF orientation tag
+  (portrait phone/camera shots, orientation 5–8) were stretched because the reported source size
+  ignored the rotation the decoder applied. Source orientation is now aligned to the decoded bitmap
+  on every decode route, so these images fit correctly.
+- 🖱️ **Fullscreen right-click (backwards) now tolerates small pointer movement.** Left-click forward
+  fired on press, but backwards navigation required a near-motionless pointer; both now share a
+  forgiving click-versus-drag tolerance.
+- 🧰 **Title bar and status bar resizing.** Title-bar icons now yield one at a time as the window
+  narrows instead of all vanishing at once. The status bar now sizes to its real wrapped content — a
+  single line hugs its buttons (no reserved phantom second row or extra width) and it only grows when
+  a row is genuinely added.
+
+### Added
+
+- 📐 **Fit image button + Fit control scope.** The status bar has a new **Fit image** control beside
+  Fit width / Fit height (same Shift+W behavior), and all three follow the new **Fit control scope**
+  setting (`status.fitScope`, default **This session and future sessions**): Only the current image /
+  This session / This session and future sessions.
+- 🧲 **Auto-resize status bar** (`status.autoResize`, default on): shrink the buttons only when the
+  window is too narrow to fit them within two rows, restoring the configured size when it grows.
+  Toggle in Settings → Status or the status bar right-click menu.
+- 📌 **Always on top in the context menus** — a tickable toggle is directly visible in the windowed
+  viewer menu and the fullscreen chrome menu.
+
+### Changed
+
+- **Always-on-top strength now defaults to Soft** (Settings → Interface & Behavior). The choice remains
+  Soft / Hard; Hard still reasserts topmost after competing Z-order changes.
+- **Settings: the Animation tab is folded into Window in Window.** Overlay animation controls (region,
+  speed, turn interval/angle, pause, avoid-overlap, refresh target) now sit with the other overlay
+  settings, since animation only applies to Window-in-Window overlays.
+
+## [4.2.3-3] - 2026-09-21
+
+### Fixed
+
+- **Some photos were stretched/distorted (EXIF-rotated images).** Glide's lightweight header probe
+  reports the raw stored pixel dimensions of a JPEG (e.g. 6016×4016), but the native WIC decoder
+  honours the EXIF orientation tag and returns the rotated bitmap (e.g. 4016×6016). The viewport sized
+  its destination rectangle from the reported source size and stretched the bitmap into it, so any
+  photo with EXIF orientation 5–8 (portrait phone/camera shots, the reported `0089.jpg`) was drawn at
+  the wrong aspect ratio. The loader now aligns the reported source orientation with the bitmap the
+  decoder actually produced, for every decode route (startup preload, path preview, full/preview
+  decode and neighbour prefetch), so rotation is respected without distortion for JPEG and any other
+  eXIf-carrying format. Raw/native decode of `0089.jpg` was confirmed as 6016×4016 in and
+  4016×6016 out.
+
+## [4.2.3-2] - 2026-09-21
+
+### Added
+
+- **Fit control scope (`status.fitScope`, default "This session and future sessions").** The status bar
+  Fit Width / Fit Height controls now carry the chosen fit mode forward instead of snapping back on the
+  next image. The new Settings → Status option chooses the scope: **Only the current image** (previous
+  behavior), **This session** (every image until Glide closes), or **This session and future sessions**
+  (also becomes the persisted Default view for new images).
+- **Direct "Always on top" toggle in the viewer context menus.** Right-clicking the image in the
+  ordinary window now shows a tickable **Always on top** item at the top level, and the fullscreen
+  chrome context menu exposes the same item, so topmost can be toggled without leaving fullscreen or
+  opening Settings. The tick reflects the active state (ordinary window or Overlay mode).
+
+### Changed
+
+- Settings search coverage is now **189/189** catalogued settings searchable (178 editable + 11
+  actionable) after adding the Fit control scope entry.
+
+## [4.2.3-1] - 2026-09-19
+
+### Fixed
+
+- **Minimizing could make the window disappear.** With Speed Boost enabled (the default), minimizing
+  the last Glide window also entered the Speed Boost *standby* path, which removed the window from the
+  taskbar and hid it, leaving only the tray icon. A minimized window therefore looked like it had
+  closed, and the behavior depended on how many Glide windows were open (only the last window entered
+  standby) — matching the intermittent "I minimized it and the window vanished" report. Minimize is
+  now a genuine Windows minimize that keeps the window in the taskbar and restorable; Speed Boost
+  standby stays reserved for *closing* the last window. Standby additionally requires an
+  actually-visible tray icon, so it can never hide the last window with no way back.
+
 ## [4.2.3] - 2026-09-19
 
 Search-coverage, small-screen and keyboard-input release.

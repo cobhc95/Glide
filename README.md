@@ -4,27 +4,35 @@
 
 ![Glide main user interface](docs/screenshots/screenshot_1.jpg)
 
-**Glide 4.2.3 is a high-performance Windows image viewer built around instant-feeling image opening, a compact installer, multi-tab and multi-window workflows, transparent overlays, deep mouse/keyboard customization, Launch Speed Boost, and recognition/routing for 196 image and document filename extensions.**
+**Glide 4.2.4 is a high-performance Windows image viewer built around instant-feeling image opening, a compact installer, multi-tab and multi-window workflows, transparent overlays, deep mouse/keyboard customization, Launch Speed Boost, and recognition/routing for 196 image and document filename extensions.**
 
-## What's new in 4.2.3
+## What's new in 4.2.4
 
-Glide 4.2.3 is a search, privacy and small-screen fix release:
+Glide 4.2.4 is a display-correctness, input and window-behaviour release:
 
-- **Settings search is genuinely global.** Every control in the Settings window is now declared in
-  the settings catalogue and searchable by the wording you actually see — including previously
-  missing entries such as **Always-on-top strength**, fullscreen exit behaviour, same-image
-  behaviour, left-drag window behaviour, Overlay windowed interactions and the hotkey preset loader.
-  Audit: 188/188 settings searchable.
-- **No automatic diagnostic files in Downloads.** The background crash breadcrumb no longer writes
-  `Glide-Diagnostic-Latest.txt` into your Downloads folder; it is now developer-opt-in only.
-- **Folder-boundary prompt fixed on small screens.** Prompts now size to their content and clamp to
-  the screen's working area, so the Continue/Cancel buttons can never be pushed off a small or
-  scaled laptop panel.
-- **One key press, one image.** The existing **Navigation minimum interval** setting now ships an
-  80 ms default (fully configurable, 0 = unlimited), absorbing duplicated key events from some
-  laptop keyboards.
+- **No more stretched photos.** Pictures carrying an EXIF orientation tag (typical portrait phone or
+  camera shots) were drawn at the wrong aspect ratio. The decoded image is now kept in sync with the
+  reported source size on every decode route, so Fit image / Fit width / Fit height all preserve the
+  true aspect ratio.
+- **Fullscreen right-click (backwards) works with a natural hand movement.** Left click advanced on
+  press, but backwards navigation required a near-motionless pointer; both now share a forgiving
+  click-versus-drag tolerance. A deliberate right-drag still pans zoomed content.
+- **New Fit image button + sticky fit scope.** The status bar gains a **Fit image** control beside
+  Fit width / Fit height. All three follow the new **Fit control scope** setting (Only the current
+  image / This session / This session and future sessions, the default).
+- **Always on top from the context menu.** A tickable **Always on top** item is now directly visible
+  in the right-click menu for the windowed viewer and the fullscreen chrome. Always-on-top strength
+  now defaults to **Soft** (Soft / Hard remain selectable).
+- **Minimize keeps your window.** With Speed Boost on, minimizing the last window could hide it from
+  the taskbar; minimize is a real Windows minimize again, and standby stays reserved for closing the
+  last window.
+- **Smarter window and status-bar resizing.** Title-bar icons now yield one at a time as the window
+  narrows; the status bar sizes to its real wrapped content; and the new **Auto-resize** option
+  (on by default) shrinks the status buttons only when space runs out, restoring your configured size.
+- **Settings tidy-up.** The standalone Animation tab is folded into **Window in Window**, and settings
+  search now covers **189 / 189** catalogued settings.
 
-See [CHANGELOG.md](CHANGELOG.md) and [release-notes-4.2.3.md](release-notes-4.2.3.md) for the full list.
+See [CHANGELOG.md](CHANGELOG.md) and the GitHub release notes for the full list.
 
 > **Privacy:** Glide writes no diagnostic, telemetry or log files anywhere unless you explicitly ask
 > for an export from Settings → Developer Options. A normal install leaves your Downloads folder
@@ -50,7 +58,7 @@ Glide's interface is engineered with a responsive design system that reflows sea
 
 ## Core Feature Reference & Settings Gallery
 
-The Glide Settings engine exposes nearly every aspect of the viewer's execution, rendering, input handling, and presentation. The existing screenshots below are retained as the historical UI gallery while Glide 4.2.3 carries forward the warm-engine launch, Windows Snap restore, and warm-process privacy improvements.
+The Glide Settings engine exposes nearly every aspect of the viewer's execution, rendering, input handling, and presentation. The existing screenshots below are retained as the historical UI gallery while Glide 4.2.4 carries forward the warm-engine launch, Windows Snap restore, and warm-process privacy improvements.
 
 ---
 
@@ -166,14 +174,16 @@ Launch Speed Boost keeps Glide's window, decoder, and external-open broker initi
 
 Completely customize the information and action buttons visible in the status bar:
 
-* **Modular Element Toggles:** Individually show or hide Navigation Arrows, Zoom Controls, Slideshow Button, Fit-Width / Fit-Height toggles, Metadata Info popover, Context Menu button, and Window Close icon.
+* **Modular Element Toggles:** Individually show or hide Navigation Arrows, Zoom Controls, Slideshow Button, Fit image / Fit width / Fit height controls, Metadata Info popover, Context Menu button, and Window Close icon.
+* **Fit control scope:** Choose whether the status bar Fit controls apply to only the current image, every image this session, or this session and future sessions (the default, which also updates the default view for new images).
+* **Auto-resize:** On by default. Shrinks the status buttons only when the window is too narrow to fit them, then restores your configured status-bar size when the window grows again. Also toggleable from the status bar right-click menu.
 * **Metadata Statistics Selector:** Select which details appear in real time:
   * *Image index in folder (e.g., 14 / 320)*
   * *Dimensions & Megapixels (e.g., 3840 × 2160 • 8.3 MP)*
   * *Current Zoom Percentage (e.g., 100%)*
   * *File Size (e.g., 2.4 MB)*
   * *Image Codec / Format (e.g., PNG, AVIF)*
-* **Adaptive Multi-Row Reflow:** When resizing to narrow windows, controls gracefully wrap into multi-line layouts without clipping.
+* **Adaptive Multi-Row Reflow:** When resizing to narrow windows, controls gracefully wrap into multi-line layouts without clipping. The bar is only as wide and tall as its real wrapped content — a single line hugs its buttons instead of reserving a phantom second row.
 
 ---
 
@@ -225,6 +235,7 @@ Glide includes a dedicated non-destructive overlay system for image comparison, 
   * Keyboard + / - and mouse wheel direct zoom on hovered or selected overlays.
   * Automatic state restoration on next launch (retaining coordinates, scale, and opacity).
   * Proportional scaling when the parent window resizes.
+* **Overlay animation:** Motion controls — animation region, movement speed, turn interval and angle, pause-while-interacting, avoid-overlap steering and refresh target — now live in this section (the former standalone Animation tab was folded in).
 
 ---
 
@@ -280,7 +291,7 @@ On Windows:
 * Build the application: run `build.cmd`
 * Build the complete standalone installer: run `build.cmd` (or `build.cmd fast --no-pause`)
 
-Release builds produce four deliverables: `Glide-4.2.3-Portable.zip`, `dist-installer\Glide Setup.exe`, `Glide-4.2.3.exe` for direct testing, and the compact `Glide-Zero-Context-Handover.zip`.
+Release builds produce four deliverables: `Glide-4.2.4-Portable.zip`, `dist-installer\Glide Setup.exe`, `Glide-4.2.4.exe` for direct testing, and the compact `Glide-Zero-Context-Handover.zip`.
 
 ---
 

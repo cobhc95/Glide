@@ -149,6 +149,7 @@
                 <Button x:Name="StatusZoomInButton" Classes="statusIcon legacyStatusIcon" Click="ZoomInClicked" ToolTip.Tip="Zoom in"><controls:GlideIconView Kind="ZoomIn" Classes="statusGlyph"/></Button>
               </StackPanel></Border>
               <Border Classes="statusGroup viewGroup"><StackPanel x:Name="FitGroup" Orientation="Horizontal" Spacing="2">
+                <Button x:Name="StatusFitImageButton" Classes="statusIcon legacyStatusIcon" Click="FitImageClicked" ToolTip.Tip="Fit image"><controls:GlideIconView Kind="Fit" Classes="statusGlyph"/></Button>
                 <Button x:Name="StatusFitWidthButton" Classes="statusIcon legacyStatusIcon" Click="FitWidthClicked" ToolTip.Tip="Fit width"><controls:GlideIconView Kind="FitWidth" Classes="statusGlyph"/></Button>
                 <Button x:Name="StatusFitHeightButton" Classes="statusIcon legacyStatusIcon" Click="FitHeightClicked" ToolTip.Tip="Fit height"><controls:GlideIconView Kind="FitHeight" Classes="statusGlyph"/></Button>
               </StackPanel></Border>

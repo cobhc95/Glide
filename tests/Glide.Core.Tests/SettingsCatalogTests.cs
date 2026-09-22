@@ -27,10 +27,10 @@ public sealed class SettingsCatalogTests
     }
 
     [Fact]
-    public void Glide_catalog_has_188_current_and_no_future_entries()
+    public void Glide_catalog_has_189_current_and_no_future_entries()
     {
-        Assert.Equal(188, SettingsCatalog.All.Count);
-        Assert.Equal(188, SettingsCatalog.All.Count(x => x.FuturePhase is null));
+        Assert.Equal(189, SettingsCatalog.All.Count);
+        Assert.Equal(189, SettingsCatalog.All.Count(x => x.FuturePhase is null));
         Assert.Empty(SettingsCatalog.All.Where(x => x.FuturePhase is not null));
         Assert.Contains(SettingsCatalog.All, x => x.Id == "performance.speedBoost" && x.FuturePhase is null && (bool)x.DefaultValue);
         Assert.Contains(SettingsCatalog.All, x => x.Id == "performance.startWithWindowsInBackground" && x.FuturePhase is null && !(bool)x.DefaultValue);
@@ -53,6 +53,14 @@ public sealed class SettingsCatalogTests
         Assert.Contains(SettingsCatalog.All, x => x.Id == "navigation.hierarchicalPreviousEntry" && x.FuturePhase is null && Equals(x.DefaultValue, "First image"));
         Assert.Contains(SettingsCatalog.All, x => x.Id == "navigation.rateLimitMs" && x.FuturePhase is null && Equals(x.DefaultValue, 80));
         Assert.Contains(SettingsCatalog.All, x => x.Id == "navigation.rateLimitInput" && x.FuturePhase is null && Equals(x.DefaultValue, "Both"));
+        Assert.Contains(SettingsCatalog.All, x => x.Id == "status.fitScope" && x.FuturePhase is null && Equals(x.DefaultValue, "This session and future sessions"));
+    }
+
+    [Fact]
+    public void Always_on_top_strength_defaults_to_soft()
+    {
+        Assert.Equal("Soft", new GlideSettingsState().AlwaysOnTopMode);
+        Assert.Contains(SettingsCatalog.All, x => x.Id == "windows.alwaysOnTopMode" && x.FuturePhase is null && Equals(x.DefaultValue, "Soft"));
     }
 
     [Fact]

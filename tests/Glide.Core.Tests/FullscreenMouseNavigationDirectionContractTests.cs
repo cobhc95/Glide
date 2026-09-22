@@ -18,6 +18,22 @@ public sealed class FullscreenMouseNavigationDirectionContractTests
         Assert.Contains("OpenContextMenu();", manager, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Fullscreen_right_click_navigation_tolerates_small_pointer_movement()
+    {
+        var viewport = ReadSource("src", "Glide.App", "Controls", "ImageViewport.cs").Replace("\r\n", "\n");
+
+        Assert.Contains("private const double ClickMovementTolerance = 8;", viewport, StringComparison.Ordinal);
+        // The click-vs-drag flag, the right-drag promotion and both release checks share the tolerance.
+        Assert.Contains("Math.Abs(pointer.X - _panStartPointer.X) > ClickMovementTolerance", viewport, StringComparison.Ordinal);
+        Assert.Contains("Math.Abs(pointer.X - _pressPoint.X) > ClickMovementTolerance", viewport, StringComparison.Ordinal);
+        Assert.Contains("Math.Abs(release.X - _pressPoint.X) <= ClickMovementTolerance", viewport, StringComparison.Ordinal);
+        // The old 3 px hard-coded click threshold must not return for the right-button paths.
+        Assert.DoesNotContain("_pressPoint.X) <= 3", viewport, StringComparison.Ordinal);
+        Assert.DoesNotContain("_pressPoint.X) > 3", viewport, StringComparison.Ordinal);
+        Assert.DoesNotContain("_panStartPointer.X) > 3", viewport, StringComparison.Ordinal);
+    }
+
     private static string ReadSource(params string[] segments)
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);

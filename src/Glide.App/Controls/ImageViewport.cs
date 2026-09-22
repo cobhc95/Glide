@@ -134,6 +134,10 @@ public sealed class ImageViewport : Control
     // otherwise move a normal window and do nothing when maximized/fullscreen.
     public RightImageDragMode RightDragMode { get; set; } = RightImageDragMode.Smart;
     public bool RightDragWindowMoveAllowed { get; set; } = true;
+    // Pointer travel (in DIP) still treated as a click rather than a drag/pan. Fullscreen left-click
+    // navigation fires on press, so right-click must share an equally forgiving tolerance or a tiny
+    // hand movement would silently cancel backward navigation.
+    private const double ClickMovementTolerance = 8;
     public bool MiddleDragPanEnabled { get; set; }
     public bool WindowedWheelZoom { get; set; }
     public bool CtrlWheelZoomEnabled { get; set; } = true;
@@ -1231,7 +1235,7 @@ public sealed class ImageViewport : Control
         // the menu on release. Cropped images enter the dedicated pan path earlier in OnPressed.
         if (_rightPressOnImage && !_rightPressOnSelection && !_panning &&
             e.GetCurrentPoint(this).Properties.IsRightButtonPressed &&
-            (Math.Abs(pointer.X - _pressPoint.X) > 3 || Math.Abs(pointer.Y - _pressPoint.Y) > 3))
+            (Math.Abs(pointer.X - _pressPoint.X) > ClickMovementTolerance || Math.Abs(pointer.Y - _pressPoint.Y) > ClickMovementTolerance))
         {
             ReleaseCapture();
             _rightPressOnImage = false;
@@ -1247,7 +1251,7 @@ public sealed class ImageViewport : Control
         // stationary release means one-shot zoom-out; a real hold+drag means move the native
         // window. Defer ownership until the pointer crosses the same 3 px click threshold.
         if (_rightPressOnSelection && !_panning && e.GetCurrentPoint(this).Properties.IsRightButtonPressed &&
-            (Math.Abs(pointer.X - _pressPoint.X) > 3 || Math.Abs(pointer.Y - _pressPoint.Y) > 3))
+            (Math.Abs(pointer.X - _pressPoint.X) > ClickMovementTolerance || Math.Abs(pointer.Y - _pressPoint.Y) > ClickMovementTolerance))
         {
             if (ShouldPanOnRightDrag())
             {
@@ -1297,7 +1301,7 @@ public sealed class ImageViewport : Control
 
         if (_panning)
         {
-            if (!_panMoved && (Math.Abs(pointer.X - _panStartPointer.X) > 3 || Math.Abs(pointer.Y - _panStartPointer.Y) > 3)) _panMoved = true;
+            if (!_panMoved && (Math.Abs(pointer.X - _panStartPointer.X) > ClickMovementTolerance || Math.Abs(pointer.Y - _panStartPointer.Y) > ClickMovementTolerance)) _panMoved = true;
             if (_panMoved)
             {
                 var delta = pointer - _lastPointer;
@@ -1408,7 +1412,7 @@ public sealed class ImageViewport : Control
         if (!completedPanInteraction && _rightPressOnSelection && SelectionRightClickZoomOutEnabled && _selectionImage is { } clickSelection)
         {
             var release = e.GetPosition(this);
-            var stationary = Math.Abs(release.X - _pressPoint.X) <= 3 && Math.Abs(release.Y - _pressPoint.Y) <= 3;
+            var stationary = Math.Abs(release.X - _pressPoint.X) <= ClickMovementTolerance && Math.Abs(release.Y - _pressPoint.Y) <= ClickMovementTolerance;
             var stillInside = Bitmap is not null && IsPointInsideSelection(release);
             ReleaseCapture();
             if (stationary && stillInside)
@@ -1434,7 +1438,7 @@ public sealed class ImageViewport : Control
         if (!completedPanInteraction && _rightPressOnImage && !_rightPressOnSelection)
         {
             var release = e.GetPosition(this);
-            var stationary = Math.Abs(release.X - _pressPoint.X) <= 3 && Math.Abs(release.Y - _pressPoint.Y) <= 3;
+            var stationary = Math.Abs(release.X - _pressPoint.X) <= ClickMovementTolerance && Math.Abs(release.Y - _pressPoint.Y) <= ClickMovementTolerance;
             ReleaseCapture();
             if (stationary)
             {

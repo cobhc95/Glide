@@ -433,6 +433,23 @@ public sealed class SettingsStoreRoundTripTests
         });
     }
 
+    [Fact]
+    public void StatusFitScope_roundtrips_and_defaults_to_session_and_future()
+    {
+        Assert.Equal("This session and future sessions", new GlideSettingsState().StatusFitScope);
+
+        WithIsolatedStore(() =>
+        {
+            var initial = new GlideSettingsState { StatusFitScope = "This session" };
+            SettingsStore.Save(initial);
+            Assert.Equal("This session", SettingsStore.Load().StatusFitScope);
+
+            initial.StatusFitScope = "Only the current image";
+            SettingsStore.Save(initial);
+            Assert.Equal("Only the current image", SettingsStore.Load().StatusFitScope);
+        });
+    }
+
     private static Dictionary<string, List<string>> CloneMap(Dictionary<string, List<string>> map) =>
         map.ToDictionary(x => x.Key, x => x.Value.ToList(), StringComparer.OrdinalIgnoreCase);
 

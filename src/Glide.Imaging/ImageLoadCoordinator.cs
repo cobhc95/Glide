@@ -189,12 +189,13 @@ public sealed class ImageLoadCoordinator : IDisposable
             {
                 if (preloadedResult.Bitmap is not null)
                 {
-                    if (cacheResult) AddPrepared(path, preloadedResult.Bitmap, isFull: true, preloadedResult.Dimensions, epoch: -1);
+                    var preloadedSource = NormalizeSourceOrientation(preloadedResult.Dimensions, preloadedResult.Bitmap);
+                    if (cacheResult) AddPrepared(path, preloadedResult.Bitmap, isFull: true, preloadedSource, epoch: -1);
                     preloadedResult.IsConsumed = true;
                     if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("foreground_startup_preload_hit", path);
                     return new ImageLoadResult(path, preloadedResult.Bitmap, System.Diagnostics.Stopwatch.GetElapsedTime(started),
-                        CacheHit: true, IsPreview: false, SourceWidth: preloadedResult.Dimensions.Width,
-                        SourceHeight: preloadedResult.Dimensions.Height, Generation: generation, PreparedFrameHit: true,
+                        CacheHit: true, IsPreview: false, SourceWidth: preloadedSource.Width,
+                        SourceHeight: preloadedSource.Height, Generation: generation, PreparedFrameHit: true,
                         DecodeRoute: "startup-preloaded");
                 }
                 if (preloadedResult.NativeImage.Data != IntPtr.Zero && preloadedResult.NativeStatus == 1)
@@ -202,11 +203,12 @@ public sealed class ImageLoadCoordinator : IDisposable
                     if (NativeImageDecoder.TryCreateBitmapFromNative(preloadedResult.NativeImage, preloadedResult.NativeStatus, out var bitmap))
                     {
                         preloadedResult.IsConsumed = true;
-                        if (cacheResult) AddPrepared(path, bitmap, isFull: true, preloadedResult.Dimensions, epoch: -1);
+                        var preloadedSource = NormalizeSourceOrientation(preloadedResult.Dimensions, bitmap);
+                        if (cacheResult) AddPrepared(path, bitmap, isFull: true, preloadedSource, epoch: -1);
                         if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("foreground_startup_preload_hit", path);
                         return new ImageLoadResult(path, bitmap, System.Diagnostics.Stopwatch.GetElapsedTime(started),
-                            CacheHit: true, IsPreview: false, SourceWidth: preloadedResult.Dimensions.Width,
-                            SourceHeight: preloadedResult.Dimensions.Height, Generation: generation, PreparedFrameHit: true,
+                            CacheHit: true, IsPreview: false, SourceWidth: preloadedSource.Width,
+                            SourceHeight: preloadedSource.Height, Generation: generation, PreparedFrameHit: true,
                             DecodeRoute: "startup-native-preloaded");
                     }
                 }
@@ -215,11 +217,12 @@ public sealed class ImageLoadCoordinator : IDisposable
                     using var ms = new MemoryStream(preloadedResult.PreloadedBytes, writable: false);
                     var bitmap = _backend.DecodeFull(ms, path);
                     preloadedResult.IsConsumed = true;
-                    if (cacheResult) AddPrepared(path, bitmap, isFull: true, preloadedResult.Dimensions, epoch: -1);
+                    var preloadedSource = NormalizeSourceOrientation(preloadedResult.Dimensions, bitmap);
+                    if (cacheResult) AddPrepared(path, bitmap, isFull: true, preloadedSource, epoch: -1);
                     if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("foreground_startup_preload_hit", path);
                     return new ImageLoadResult(path, bitmap, System.Diagnostics.Stopwatch.GetElapsedTime(started),
-                        CacheHit: false, IsPreview: false, SourceWidth: preloadedResult.Dimensions.Width,
-                        SourceHeight: preloadedResult.Dimensions.Height, Generation: generation, PreparedFrameHit: true,
+                        CacheHit: false, IsPreview: false, SourceWidth: preloadedSource.Width,
+                        SourceHeight: preloadedSource.Height, Generation: generation, PreparedFrameHit: true,
                         DecodeRoute: "startup-memory-preloaded");
                 }
             }
@@ -267,6 +270,7 @@ public sealed class ImageLoadCoordinator : IDisposable
                             if (GlidePerformanceTrace.Enabled)
                                 GlidePerformanceTrace.Mark("foreground_path_preview_ready",
                                     $"route={pathPreview.Route};output={pathPreview.Bitmap.PixelSize.Width}x{pathPreview.Bitmap.PixelSize.Height};elapsed={System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds:F3}ms");
+                            source = NormalizeSourceOrientation(source, pathPreview.Bitmap);
                             if (cacheResult && (!pathPreview.IsPreview || cachePreview))
                                 AddPrepared(path, pathPreview.Bitmap, isFull: !pathPreview.IsPreview, source, epoch: -1);
                             return new ImageLoadResult(path, pathPreview.Bitmap, System.Diagnostics.Stopwatch.GetElapsedTime(started),
@@ -305,6 +309,7 @@ public sealed class ImageLoadCoordinator : IDisposable
                         return null;
                     }
                     if (!source.IsValid) source = new ImageDimensions(bitmap.PixelSize.Width, bitmap.PixelSize.Height);
+                    source = NormalizeSourceOrientation(source, bitmap);
                     if (cacheResult && (!isPreview || cachePreview))
                         AddPrepared(path, bitmap, isFull: !isPreview, source, epoch: -1);
                     if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("foreground_load_end", $"elapsed={System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds:F3}ms");
@@ -530,6 +535,7 @@ public sealed class ImageLoadCoordinator : IDisposable
                     bitmap = await _backend.DecodePreviewAsync(stream, source, RequiredPreviewLongestSide(source, policy), policy.PreviewInterpolation, path, token).ConfigureAwait(false);
                 }
                 if (epoch != Volatile.Read(ref _cacheEpoch)) { bitmap.Dispose(); return false; }
+                source = NormalizeSourceOrientation(source, bitmap);
                 AddPrepared(path, bitmap, isFull, source, epoch);
                 return wantFull && isFull;
             }
@@ -897,6 +903,30 @@ public sealed class ImageLoadCoordinator : IDisposable
             return true;
         var pixels = (long)dimensions.Width * dimensions.Height;
         return pixels > ImageHeaderProbe.MaxTotalPixels;
+    }
+
+    /// <summary>
+    /// The lightweight header probe reports the raw stored pixel dimensions for JPEG/TIFF/WebP eXIf
+    /// files, while the codec may apply the EXIF orientation and return a 90°-rotated bitmap. The
+    /// viewport sizes its destination rectangle from the reported source size and maps the bitmap
+    /// onto it, so a transposed source stretches the picture. Align the source orientation with the
+    /// bitmap the decoder actually produced by comparing the bitmap aspect ratio against both the
+    /// direct and transposed source aspect ratios. Square sources are never ambiguous.
+    /// </summary>
+    internal static ImageDimensions NormalizeSourceOrientation(ImageDimensions source, Bitmap bitmap)
+        => NormalizeSourceOrientation(source, bitmap.PixelSize.Width, bitmap.PixelSize.Height);
+
+    internal static ImageDimensions NormalizeSourceOrientation(ImageDimensions source, int bitmapWidth, int bitmapHeight)
+    {
+        if (!source.IsValid || bitmapWidth <= 0 || bitmapHeight <= 0) return source;
+        if (source.Width == source.Height) return source;
+
+        var sourceAspect = (double)source.Width / source.Height;
+        var bitmapAspect = (double)bitmapWidth / bitmapHeight;
+        var directError = Math.Abs(Math.Log(bitmapAspect / sourceAspect));
+        var transposedAspect = (double)source.Height / source.Width;
+        var transposeError = Math.Abs(Math.Log(bitmapAspect / transposedAspect));
+        return transposeError < directError ? new ImageDimensions(source.Height, source.Width) : source;
     }
 
     private static long EstimatedDecodedBytes(int width, int height)

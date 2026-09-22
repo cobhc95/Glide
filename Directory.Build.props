@@ -2,10 +2,10 @@
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <!-- Glide 4.1 release: warm-engine Launch Speed Boost, background standby, and the current image-opening pipeline. -->
-    <Version>4.2.3</Version>
-    <AssemblyVersion>4.2.3.0</AssemblyVersion>
-    <FileVersion>4.2.3.0</FileVersion>
-    <InformationalVersion>4.2.3</InformationalVersion>
+    <Version>4.2.4</Version>
+    <AssemblyVersion>4.2.4.0</AssemblyVersion>
+    <FileVersion>4.2.4.0</FileVersion>
+    <InformationalVersion>4.2.4</InformationalVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>

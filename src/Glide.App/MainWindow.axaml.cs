@@ -45,6 +45,10 @@ public partial class MainWindow : Window
     private readonly ImageLoadCoordinator _loader;
     private ImageLoadCoordinator? _overlayLoader;
     private string? _selectionZoomDemandPath;
+    // Session-scoped default view mode set by the status bar Fit controls when their scope is
+    // "This session" or "This session and future sessions". Null falls back to the persisted
+    // DefaultViewMode setting.
+    private string? _sessionDefaultViewMode;
     private readonly InputRouter _inputRouter = new();
     // Do not create a placeholder Home tab before startup arguments are classified. An explicit
     // Explorer image launch must begin with the requested image only; standalone launches create
@@ -434,12 +438,13 @@ public partial class MainWindow : Window
                 SaveWindowPlacement();
                 if (_settings.PurgeCacheOnMinimize)
                     _loader.PurgeCaches();
-                if (IsVisible && !_closeForSpeedBoostStandby && _settings.SpeedBoostEnabled && GlideWindowRegistry.Snapshot().Count <= 1)
-                    Dispatcher.UIThread.Post(() =>
-                    {
-                        if (WindowState == WindowState.Minimized && !_closeForSpeedBoostStandby)
-                            EnterSpeedBoostStandby();
-                    }, DispatcherPriority.Background);
+                // Minimize is a genuine Windows minimize: the window stays in the taskbar and can be
+                // restored exactly as the user expects. Speed Boost standby is reserved for *closing*
+                // the last window (see ShouldEnterSpeedBoostStandby / the Closing handler), so
+                // minimizing must never hide the render window and leave only the tray icon. Entering
+                // standby here also depended on the live window count, which made minimize behave
+                // differently ("the window sometimes just disappeared") depending on how many Glide
+                // windows were open.
             }
         };
         ApplyChromeLayoutForWindowState();
@@ -1322,7 +1327,7 @@ public partial class MainWindow : Window
     {
         if (!File.Exists(path) || !ImageNavigator.IsSupported(path))
         {
-            Title = "Glide 4.2.3 — Unsupported or missing image";
+            Title = "Glide 4.2.4 — Unsupported or missing image";
             return;
         }
         if (openInNewTab || !_workspace.ReplaceActiveWithImage(path)) _workspace.AddImage(path);
@@ -1577,7 +1582,7 @@ public partial class MainWindow : Window
                 x: sourceWidth, y: sourceHeight, detail: Path.GetExtension(path));
             _loader.SetActivePath(path);
             if (!isRefinementOnly && (!hadBitmap || !_settings.PreserveManualZoomOnNavigate))
-                Viewport.ApplyViewMode(_settings.DefaultViewMode);
+                Viewport.ApplyViewMode(EffectiveDefaultViewMode());
             ShowImageSurface();
 
             // A newer click may have arrived while this frame was being attached. Do not let an
@@ -1709,7 +1714,7 @@ public partial class MainWindow : Window
             if (IsRequestCurrent(request))
             {
                 _diagnostics.Write("decode", "foreground_failed", new { path, request = request.ImageRequestId, error = ex.GetType().Name, ex.Message });
-                Title = $"Glide 4.2.3 — Open failed: {ex.GetType().Name}";
+                Title = $"Glide 4.2.4 — Open failed: {ex.GetType().Name}";
             }
             if (_warmPresentationGateActive)
                 await ReleaseWarmPresentationGateAsync(safeFrameReady: false);
@@ -2549,7 +2554,7 @@ public partial class MainWindow : Window
             : "Fast browsing, precise zooming, and familiar Windows controls.";
         home.TipsGrid.IsVisible = !recentLanding && _settings.ShowHomeTips;
         ApplyWelcomeLayout();
-        Title = recentLanding ? "Glide 4.2.3 — Recent pictures" : "Glide 4.2.3 — Home";
+        Title = recentLanding ? "Glide 4.2.4 — Recent pictures" : "Glide 4.2.4 — Home";
         RefreshRecentHistoryHome();
         ApplyStatusVisibility();
     }
@@ -2776,9 +2781,24 @@ public partial class MainWindow : Window
     {
         if (ChromeLayout is null || _wholeAppOverlayMode) return;
         var width = Bounds.Width > 0 ? Bounds.Width : Width;
-        // Consume blank/title utility space before sacrificing tabs. The close button remains the
-        // last permanent control; utility actions, nav and nonessential caption buttons yield first.
-        TitleActionHost.IsVisible = width >= 720;
+        // Title-bar utility actions yield one icon at a time as the window narrows (starting from
+        // the last configured position) and return one at a time as it widens, instead of the whole
+        // strip disappearing at a single threshold. Tabs keep the remaining space; the Windows
+        // caption buttons stay protected as one unit.
+        var order = _settings.TitleBarButtons;
+        var actionCount = order.Count;
+        const double captionWidth = 3 * 46;  // Minimize + Maximize + Close
+        const double chromeMargins = 8 + 6;  // ChromeLayout left margin + right group margin
+        const double minimumTabSpace = 170;  // Keeps the active tab and new-tab button usable
+        const double perActionButton = 37;   // 36 px button + 1 px spacing
+        var availableForActions = width - captionWidth - chromeMargins - minimumTabSpace;
+        var visibleActions = actionCount == 0
+            ? 0
+            : Math.Clamp((int)Math.Floor((availableForActions + 1) / perActionButton), 0, actionCount);
+        for (var i = 0; i < actionCount; i++)
+            if (_titleBarButtons.TryGetValue(order[i], out var button))
+                button.IsVisible = i < visibleActions;
+        TitleActionHost.IsVisible = visibleActions > 0;
         TabNavigationHost.IsVisible = false;
         // Caption controls are protected as one Windows-standard unit. At narrow widths tabs keep
         // compressing instead of sacrificing Minimize/Maximize/Close individually.
@@ -4212,7 +4232,7 @@ public partial class MainWindow : Window
         BrowserBackButton.IsEnabled = session.Index > 0 || (_tabForwardImageTargets.TryGetValue(id, out var backTarget) && File.Exists(backTarget));
         BrowserForwardButton.IsEnabled = session.Index >= 0 && session.Index < session.History.Count - 1;
         BrowserUpButton.IsEnabled = Directory.GetParent(folder) is not null;
-        Title = $"Glide 4.2.3 — Explorer — {folder}";
+        Title = $"Glide 4.2.4 — Explorer — {folder}";
         RebuildTabStrip();
         SelectBrowserHighlight(id);
         UpdateTabNavigationButtons();
@@ -4303,7 +4323,7 @@ public partial class MainWindow : Window
         BrowserBackButton.IsEnabled = session.Index > 0 || (_tabForwardImageTargets.TryGetValue(browser.Id, out var nativeBackTarget) && File.Exists(nativeBackTarget));
         BrowserForwardButton.IsEnabled = session.Index >= 0 && session.Index < session.History.Count - 1;
         BrowserUpButton.IsEnabled = Directory.GetParent(folder) is not null;
-        Title = $"Glide 4.2.3 — Explorer — {folder}";
+        Title = $"Glide 4.2.4 — Explorer — {folder}";
         RebuildTabStrip();
         SelectBrowserHighlight(browser.Id);
         UpdateTabNavigationButtons();
@@ -4926,9 +4946,39 @@ public partial class MainWindow : Window
         });
     });
     private void FitClicked(object? sender, RoutedEventArgs e) { _selectionZoomDemandPath = null; Viewport.Fit(); }
-    private void FitWidthClicked(object? sender, RoutedEventArgs e) { _selectionZoomDemandPath = null; Viewport.FitWidth(); }
-    private void FitHeightClicked(object? sender, RoutedEventArgs e) { _selectionZoomDemandPath = null; Viewport.FitHeight(); }
+    private void FitImageClicked(object? sender, RoutedEventArgs e) => ApplyStatusBarFit("Fit image", Viewport.Fit);
+    private void FitWidthClicked(object? sender, RoutedEventArgs e) => ApplyStatusBarFit("Fit width", Viewport.FitWidth);
+    private void FitHeightClicked(object? sender, RoutedEventArgs e) => ApplyStatusBarFit("Fit height", Viewport.FitHeight);
     private void ActualSizeClicked(object? sender, RoutedEventArgs e) { _selectionZoomDemandPath = null; Viewport.ActualSize(); }
+
+    /// <summary>
+    /// Applies a status bar Fit command to the current image and then, according to the configured
+    /// <see cref="GlideSettingsState.StatusFitScope"/>, carries the chosen mode forward so the rest
+    /// of the pictures follow it. "Only the current image" leaves the persisted default untouched;
+    /// "This session" updates a live session default; "This session and future sessions" also
+    /// persists the mode as the new DefaultViewMode so future launches adopt it.
+    /// </summary>
+    private void ApplyStatusBarFit(string viewMode, Action applyToViewport)
+    {
+        _selectionZoomDemandPath = null;
+        applyToViewport();
+
+        var scope = _settings.StatusFitScope;
+        if (string.Equals(scope, "Only the current image", StringComparison.OrdinalIgnoreCase))
+            return;
+
+        _sessionDefaultViewMode = viewMode;
+        if (!string.Equals(scope, "This session and future sessions", StringComparison.OrdinalIgnoreCase))
+            return;
+
+        if (string.Equals(_settings.DefaultViewMode, viewMode, StringComparison.OrdinalIgnoreCase)) return;
+        _settings.DefaultViewMode = viewMode;
+        SaveSettingsAndPublish();
+    }
+
+    private string EffectiveDefaultViewMode() =>
+        string.IsNullOrWhiteSpace(_sessionDefaultViewMode) ? _settings.DefaultViewMode : _sessionDefaultViewMode;
+
     private void ZoomInClicked(object? sender, RoutedEventArgs e) => Viewport.ZoomBy(1.15);
     private void ZoomOutClicked(object? sender, RoutedEventArgs e) => Viewport.ZoomBy(1 / 1.15);
     private async void SlideshowClicked(object? sender, RoutedEventArgs e) => await ToggleSlideshowAsync();
@@ -4952,8 +5002,9 @@ public partial class MainWindow : Window
         else if (ReferenceEquals(button, SlideshowStopButton)) SlideshowStopClicked(button, new RoutedEventArgs());
         else if (ReferenceEquals(button, StatusZoomOutButton)) Viewport.ZoomBy(1 / 1.15);
         else if (ReferenceEquals(button, StatusZoomInButton)) Viewport.ZoomBy(1.15);
-        else if (ReferenceEquals(button, StatusFitWidthButton)) Viewport.FitWidth();
-        else if (ReferenceEquals(button, StatusFitHeightButton)) Viewport.FitHeight();
+        else if (ReferenceEquals(button, StatusFitImageButton)) ApplyStatusBarFit("Fit image", Viewport.Fit);
+        else if (ReferenceEquals(button, StatusFitWidthButton)) ApplyStatusBarFit("Fit width", Viewport.FitWidth);
+        else if (ReferenceEquals(button, StatusFitHeightButton)) ApplyStatusBarFit("Fit height", Viewport.FitHeight);
         else if (ReferenceEquals(button, StatusInfoButton)) InfoClicked(button, new RoutedEventArgs());
         else if (ReferenceEquals(button, StatusOptionsButton) || (_homeSurface is not null && ReferenceEquals(button, _homeSurface.OptionsButton))) SettingsClicked(button, new RoutedEventArgs());
         else if (ReferenceEquals(button, StatusCollapseButton) || (_homeSurface is not null && ReferenceEquals(button, _homeSurface.StatusCollapseButton))) CollapseStatusClicked(button, new RoutedEventArgs());
@@ -5747,6 +5798,17 @@ public partial class MainWindow : Window
         RebuildTitleActionStrip();
     }
 
+    /// <summary>
+    /// Builds a checkable top-level "Always on top" item for context menus. The tick reflects the
+    /// active topmost state for the current mode (ordinary window vs whole-app Overlay mode).
+    /// </summary>
+    private MenuItem BuildAlwaysOnTopMenuItem()
+    {
+        var item = new MenuItem { Header = ActiveAlwaysOnTop ? "Always on top  ✓" : "Always on top" };
+        item.Click += (_, _) => AlwaysOnTopClicked(null, new RoutedEventArgs());
+        return item;
+    }
+
     private void RebuildTitleActionStrip()
     {
         if (TitleActionHost is null) return;
@@ -5845,6 +5907,8 @@ public partial class MainWindow : Window
         if (_titleBarButtons.TryGetValue("window.alwaysOnTop", out var topmostButton))
             SetActiveClass(topmostButton, ActiveAlwaysOnTop);
         RefreshTitleActionTooltips();
+        // Rebuilding resets every button to visible; reapply the width-based one-at-a-time reveal.
+        ApplyCompactChromeLayout();
     }
 
     private async Task ExecuteTitleActionAsync(string id, GlideCommand command)
@@ -6264,23 +6328,16 @@ public partial class MainWindow : Window
         var scale = Math.Clamp(_settings.StatusBarGlobalScalePercent, 60, 160) / 100.0;
         if (WindowState is WindowState.Maximized or WindowState.FullScreen)
             scale *= 1.0 + Math.Clamp(_settings.StatusBarMaximizedBoostPercent, 0, 30) / 100.0;
-
-        if (_settings.StatusBarAutoFit && Bounds.Width >= 720)
-        {
-            // Shrink before clipping rather than letting the legacy single-row surface disappear.
-            // The configured size remains authoritative; this is a temporary layout factor only.
-            var available = Math.Max(96d, Bounds.Width - 20d);
-            var desired = metrics.MaxWidth * scale;
-            if (desired > available) scale *= available / desired;
-        }
         scale = Math.Clamp(scale, 0.08, 2.0);
 
-        // Narrow-window contract: remain horizontal and WRAP into two/three rows. Never turn the
-        // status controls into a vertical tower. The XAML uses small independent groups so WrapPanel
-        // can break naturally without one large group imposing a hidden minimum width.
-        var narrowStatus = Bounds.Width > 0 && Bounds.Width < 720;
+        // Controls always flow left-to-right and wrap onto a second/third horizontal row. Never
+        // rotate them into a vertical tower. The surface sizes to the controls' real wrapped content
+        // so it is exactly as wide/tall as needed: one line hugs, and it only grows when the wrap
+        // actually adds a row. Using an estimated row count here previously reserved a second row's
+        // space even when everything fitted on one line.
+        var showStats = Bounds.Width >= 560;
         StatusControlsPanel.Orientation = Avalonia.Layout.Orientation.Horizontal;
-        StatusStatsText.IsVisible = !narrowStatus || Bounds.Width >= 560;
+        StatusStatsText.IsVisible = showStats;
 
         foreach (var cls in new[] { "statusVerySmall", "statusSmall", "statusMedium", "statusLarge", "statusExtraLarge" })
             ViewerStatusSurface.Classes.Remove(cls);
@@ -6293,23 +6350,58 @@ public partial class MainWindow : Window
             _ => "statusMedium"
         });
 
-                var availableWidth = Math.Max(120d, Bounds.Width - 28d);
-        var nominalRowHeight = Math.Max(24d, metrics.Icon * scale + 10d);
-        var estimatedDesiredWidth = Math.Max(1d, metrics.MaxWidth * scale);
-        var rows = narrowStatus ? Math.Clamp((int)Math.Ceiling(estimatedDesiredWidth / availableWidth), 2, 3) : 1;
-        ViewerStatusSurface.Height = Math.Max(metrics.Height * scale, nominalRowHeight * rows + 8d);
-        ViewerStatusSurface.MaxWidth = narrowStatus ? availableWidth : metrics.MaxWidth * scale;
-        // The two widest logical groups are themselves wrap-capable so they cannot establish a
-        // hidden minimum width at very small window sizes. Their buttons still run horizontally
-        // left-to-right; they simply continue on the next status row when needed.
-        NavigationGroup.MaxWidth = narrowStatus ? Math.Max(metrics.Icon * scale * 2.15, 72) : double.PositiveInfinity;
-        OverlayGroup.MaxWidth = narrowStatus ? Math.Max(metrics.Icon * scale * 2.15, 72) : double.PositiveInfinity;
+        var availableWidth = Math.Max(120d, Bounds.Width - 28d);
+        var surfaceWidth = Math.Min(metrics.MaxWidth * scale, availableWidth);
+        var baseIconSize = metrics.Icon * scale;
+        // The stats column is Auto, so the controls see the surface width minus the stats text's
+        // actual width. Prefer the measured width from the previous layout pass.
+        var measuredStatsWidth = StatusStatsText.Bounds.Width;
+        var statsReserve = showStats
+            ? (measuredStatsWidth > 1 ? measuredStatsWidth : metrics.StatsWidth * scale)
+            : 0d;
+        var controlsAvailable = Math.Max(baseIconSize * 2 + 8, surfaceWidth - statsReserve - 24);
+
+        var visibleButtonCount = 0;
+        if (_settings.StatusShowZoom) visibleButtonCount += 2;
+        if (_settings.StatusShowFit) visibleButtonCount += 3;
+        if (_settings.StatusShowInfo) visibleButtonCount += 1;
+        if (_settings.StatusShowOptions) visibleButtonCount += 1;
+        visibleButtonCount += _overlays?.HasOverlays == true ? 4 : 2; // save/clear only exist with overlays
+        if (_settings.StatusShowSlideshow) visibleButtonCount += 1;
+        if (_settings.StatusShowNavigation) visibleButtonCount += 4;
+        visibleButtonCount += 1; // collapse
+        if (_settings.StatusShowClose) visibleButtonCount += 1;
+
+        double NaturalControlsWidth(double icon) => visibleButtonCount * (icon + 3) + 48;
+        var rowsAtConfiguredSize = (int)Math.Ceiling(NaturalControlsWidth(baseIconSize) / Math.Max(1d, controlsAvailable));
+        var iconSize = baseIconSize;
+        if (_settings.StatusBarAutoFit && rowsAtConfiguredSize > 2)
+        {
+            // Auto-resize: shrink only the buttons, and only enough to keep the controls within two
+            // rows. The configured size stays authoritative and is restored automatically when the
+            // window grows again. Never shrink below 60% of the configured button size.
+            var targetIcon = (2d * controlsAvailable - 48d) / Math.Max(1, visibleButtonCount) - 3d;
+            iconSize = Math.Max(baseIconSize * 0.6, Math.Min(baseIconSize, targetIcon));
+        }
+        iconSize = Math.Max(20d, iconSize);
+
+        ViewerStatusSurface.MaxWidth = surfaceWidth;
+        // Auto height: the Border sizes to its wrapped content, so one line is exactly one line tall
+        // and the surface only grows when an extra row is genuinely used. The configured status size
+        // remains the minimum height.
+        ViewerStatusSurface.MinHeight = metrics.Height * scale;
+        ViewerStatusSurface.Height = double.NaN;
+        // The two widest groups may continue on a following row, but only when the whole group truly
+        // cannot fit a full row. They must never wrap early and leave a partial extra line while the
+        // current row still has room.
+        NavigationGroup.MaxWidth = controlsAvailable;
+        OverlayGroup.MaxWidth = controlsAvailable;
         StatusStatsText.MaxWidth = metrics.StatsWidth * scale;
         StatusStatsText.FontSize = metrics.Font * scale;
         foreach (var button in ViewerStatusSurface.GetVisualDescendants().OfType<Button>().Where(x => x.Classes.Contains("legacyStatusIcon")))
         {
-            button.Width = metrics.Icon * scale;
-            button.Height = metrics.Icon * scale;
+            button.Width = iconSize;
+            button.Height = iconSize;
         }
 
         if (_homeSurface is not null)
@@ -6318,8 +6410,8 @@ public partial class MainWindow : Window
             _homeSurface.StatusSurface.MaxWidth = metrics.MaxWidth * scale;
             foreach (var button in _homeSurface.StatusSurface.GetVisualDescendants().OfType<Button>().Where(x => x.Classes.Contains("legacyStatusIcon")))
             {
-                button.Width = metrics.Icon * scale;
-                button.Height = metrics.Icon * scale;
+                button.Width = iconSize;
+                button.Height = iconSize;
             }
         }
     }
@@ -6350,6 +6442,15 @@ public partial class MainWindow : Window
         var hoverReveal = new MenuItem { Header = _settings.StatusShowOnHoverWhenClosed ? "Reveal collapsed bar on bottom-edge hover  ✓" : "Reveal collapsed bar on bottom-edge hover" };
         hoverReveal.Click += (_, _) => { _settings.StatusShowOnHoverWhenClosed = !_settings.StatusShowOnHoverWhenClosed; SaveSettingsAndPublish(); ApplyStatusVisibility(); };
         items.Add(hoverReveal);
+        items.Add(new MenuItem { Header = "—", IsEnabled = false });
+        var autoResize = new MenuItem { Header = _settings.StatusBarAutoFit ? "Auto-resize  ✓" : "Auto-resize" };
+        autoResize.Click += (_, _) =>
+        {
+            _settings.StatusBarAutoFit = !_settings.StatusBarAutoFit;
+            SaveSettingsAndPublish();
+            ApplyStatusBarSize();
+        };
+        items.Add(autoResize);
         items.Add(new MenuItem { Header = "—", IsEnabled = false });
         foreach (var size in new[] { "Very small", "Small", "Medium", "Large", "Extra large" })
         {
@@ -6618,7 +6719,11 @@ public partial class MainWindow : Window
             ApplyChromeLayoutForWindowState();
             ApplyStatusBarSize();
         };
-        var items = new List<MenuItem> { pin, new() { Header = "-" } };
+        var items = new List<MenuItem> { pin };
+        // A directly visible, tickable Always-on-top toggle so fullscreen users do not have to leave
+        // fullscreen (or hunt through a submenu) to pin Glide above other windows.
+        if (!_wholeAppOverlayMode) items.Add(BuildAlwaysOnTopMenuItem());
+        items.Add(new MenuItem { Header = "-" });
         AppendWholeAppOverlayMenuItems(items);
         menu.ItemsSource = items;
         PrepareOwnedContextMenu(menu).Open(ChromeBorder);
@@ -7355,14 +7460,14 @@ public partial class MainWindow : Window
     {
         if (string.IsNullOrWhiteSpace(_currentPath) || !ImageView.IsVisible)
         {
-            if (HomeHost.IsVisible) Title = "Glide 4.2.3 — Home";
+            if (HomeHost.IsVisible) Title = "Glide 4.2.4 — Home";
             return;
         }
         var display = _settings.FullPathInTitle ? _currentPath : Path.GetFileName(_currentPath);
         var index = _navigator.Count > 0 ? $"[{_navigator.Index + 1}/{_navigator.Count}]" : string.Empty;
         Title = prefix is null
-            ? $"Glide 4.2.3 — {display}  {index}  {Viewport.ZoomPercent}%"
-            : $"Glide 4.2.3 — {prefix} — {display}";
+            ? $"Glide 4.2.4 — {display}  {index}  {Viewport.ZoomPercent}%"
+            : $"Glide 4.2.4 — {prefix} — {display}";
     }
 
     private static string FormatFileSize(long bytes)
@@ -8070,8 +8175,9 @@ public partial class MainWindow : Window
         if (_homeSurface is not null) Tip(_homeSurface.OptionsButton, "Settings", GlideCommand.Settings);
         Tip(StatusZoomOutButton, "Zoom out", GlideCommand.ZoomOut);
         Tip(StatusZoomInButton, "Zoom in", GlideCommand.ZoomIn);
-        Tip(StatusFitWidthButton, "Fit width", GlideCommand.FitWidth);
-        Tip(StatusFitHeightButton, "Fit height", GlideCommand.FitHeight);
+        Tip(StatusFitImageButton, $"Fit image (applies to: {_settings.StatusFitScope})", GlideCommand.FitImage);
+        Tip(StatusFitWidthButton, $"Fit width (applies to: {_settings.StatusFitScope})", GlideCommand.FitWidth);
+        Tip(StatusFitHeightButton, $"Fit height (applies to: {_settings.StatusFitScope})", GlideCommand.FitHeight);
         Tip(SlideshowButton, _slideshow?.IsActive != true ? "Start slideshow" : _slideshow.IsRunning ? "Pause slideshow" : "Resume slideshow", GlideCommand.StartPauseSlideshow);
         Tip(SlideshowStopButton, "Stop slideshow session", GlideCommand.StopSlideshow);
         Tip(StatusInfoButton, "Image information", GlideCommand.ToggleImageInfo);
@@ -8243,7 +8349,8 @@ public partial class MainWindow : Window
 
     private bool ShouldEnterSpeedBoostStandby()
         => !_forceProcessExit && !_closeForSpeedBoostStandby && !_speedBoostStandbyActive &&
-           _settings.SpeedBoostEnabled && GlideWindowRegistry.Snapshot().Count <= 1;
+           _settings.SpeedBoostEnabled && App.IsTrayIconAvailable &&
+           GlideWindowRegistry.Snapshot().Count <= 1;
 
     internal void EnterSpeedBoostStandby()
     {
@@ -8732,11 +8839,13 @@ public partial class MainWindow : Window
             Item(_slideshow?.IsRunning == true ? "Pause slideshow" : "Start slideshow", GlideCommand.StartPauseSlideshow, _navigator.Count > 0),
             Item("Stop slideshow", GlideCommand.StopSlideshow, _slideshow?.IsActive == true)
         };
-        // In Overlay mode Always-on-top is intentionally exposed directly in the main menu,
-        // immediately beneath the persistent Overlay-mode preference. Do not duplicate it here.
-        if (!_wholeAppOverlayMode) presentationItems.Add(Item(ActiveAlwaysOnTop ? "Always on top  ✓" : "Always on top", GlideCommand.ToggleAlwaysOnTop));
         presentation.ItemsSource = presentationItems;
         items.Add(presentation);
+
+        // Directly visible, tickable Always-on-top toggle for the ordinary windowed viewer. In
+        // Overlay mode the whole-app Overlay menu already exposes the equivalent Overlay-topmost
+        // item, so avoid a duplicate here.
+        if (!_wholeAppOverlayMode) items.Add(BuildAlwaysOnTopMenuItem());
 
         if (!string.IsNullOrWhiteSpace(_settings.ExternalProgram1) || !string.IsNullOrWhiteSpace(_settings.ExternalProgram2) || !string.IsNullOrWhiteSpace(_settings.ExternalProgram3))
         {
