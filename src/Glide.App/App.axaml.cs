@@ -152,9 +152,30 @@ public partial class App : Application
                     window.EnterSpeedBoostStandby();
                 };
             }
+
+            // Automatically make Glide available in Windows' Open With list for every recognised
+            // extension, without the user having to configure it. Deferred to background priority so
+            // it can never delay first paint, and best-effort so a locked-down registry cannot fail
+            // startup.
+            ScheduleFileAssociationRegistration();
         }
         base.OnFrameworkInitializationCompleted();
         GlidePerformanceTrace.Mark("framework_init_end");
+    }
+
+    private static void ScheduleFileAssociationRegistration()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        // Diagnostic/benchmark harnesses must never mutate the user's real Open With registration.
+        if (CapturePrintDialogImage is not null ||
+            BenchmarkExitAfterFirstFrame ||
+            NotifyFirstFrameEventName is not null ||
+            AutoExportDiagnostics ||
+            !string.IsNullOrWhiteSpace(AutoExportDiagnosticsFolder))
+            return;
+        Dispatcher.UIThread.Post(
+            () => _ = Task.Run(Platform.WindowsFileAssociationRegistration.EnsureRegisteredQuietly),
+            DispatcherPriority.Background);
     }
 
     public static void InitializeTrayIcon()

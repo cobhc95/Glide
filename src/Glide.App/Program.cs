@@ -16,6 +16,21 @@ internal static class Program
         // Pre-warm thread pool to eliminate cold-launch worker thread dispatch delays
         ThreadPool.SetMinThreads(Math.Max(8, Environment.ProcessorCount), 8);
 
+        // Machine-wide Windows Open With integration, invoked by the installer so a fresh install is
+        // immediately associated with every recognised extension. Runs before Avalonia; no window.
+        if (args.Length >= 1 && args[0].Equals("--register-file-associations", StringComparison.OrdinalIgnoreCase))
+        {
+            var ok = Platform.WindowsFileAssociationRegistration.RegisterMachineWide(out var message);
+            Console.WriteLine(message);
+            return ok ? 0 : 1;
+        }
+        if (args.Length >= 1 && args[0].Equals("--unregister-file-associations", StringComparison.OrdinalIgnoreCase))
+        {
+            var ok = Platform.WindowsFileAssociationRegistration.UnregisterMachineWide(out var message);
+            Console.WriteLine(message);
+            return ok ? 0 : 1;
+        }
+
         // Build-time fixture generation also runs before Avalonia initialization.
         if (args.Length >= 2 && args[0].Equals("--write-diagnostic-fixtures", StringComparison.OrdinalIgnoreCase))
         {
@@ -237,7 +252,7 @@ internal static class Program
             // This process is now the elected UI/broker owner. Start the crash breadcrumb file only
             // here so short-lived forwarding helper processes cannot overwrite the live owner trace.
             if (diagnosticTraceRequested)
-                LiveDiagnosticTrace.Initialize("4.2.6-diagnostic");
+                LiveDiagnosticTrace.Initialize("4.2.7-diagnostic");
             AppDomain.CurrentDomain.UnhandledException += (_, eventArgs) =>
             {
                 if (eventArgs.ExceptionObject is Exception fatal)

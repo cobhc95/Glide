@@ -1,6 +1,6 @@
 #define MyAppName "Glide Image Viewer"
 #define MyAppShortName "Glide"
-#define MyAppVersion "4.2.6"
+#define MyAppVersion "4.2.7"
 #define MyAppExeName "Glide.exe"
 
 [Setup]
@@ -23,7 +23,7 @@ UsePreviousAppDir=yes
 CloseApplications=yes
 RestartApplications=no
 UninstallDisplayIcon={app}\{#MyAppExeName}
-VersionInfoVersion=4.2.6.0
+VersionInfoVersion=4.2.7.0
 VersionInfoProductName={#MyAppName}
 VersionInfoDescription=Glide Image Viewer Setup
 
@@ -35,27 +35,15 @@ Source: "installed.flag"; DestDir: "{app}"; Flags: ignoreversion
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
 
 [Registry]
-; Normal Windows application registration. Single registered default named "Glide Image Viewer".
-Root: HKLM; Subkey: "Software\RegisteredApplications"; ValueType: string; ValueName: "Glide Image Viewer"; ValueData: "Software\Glide Image Viewer\Capabilities"; Flags: uninsdeletevalue
-Root: HKLM; Subkey: "Software\Glide Image Viewer\Capabilities"; ValueType: string; ValueName: "ApplicationName"; ValueData: "Glide Image Viewer"; Flags: uninsdeletekey
-Root: HKLM; Subkey: "Software\Glide Image Viewer\Capabilities"; ValueType: string; ValueName: "ApplicationDescription"; ValueData: "Fast lightweight image viewer"; Flags: uninsdeletevalue
-Root: HKLM; Subkey: "Software\Classes\Applications\Glide.exe\shell\open\command"; ValueType: string; ValueData: """{app}\Glide.exe"" ""%1"""; Flags: uninsdeletekey
+; App Paths is the only association-adjacent key the installer writes directly (it is also how
+; GetGlideInstallDir locates an existing install). Every Open With / Capabilities entry for all
+; recognised extensions is written machine-wide by Glide itself (see CurStepChanged below), so the
+; list can never drift from ImageFormatRegistry and uninstall removes exactly what was added.
 Root: HKLM; Subkey: "Software\Microsoft\Windows\CurrentVersion\App Paths\Glide.exe"; ValueType: string; ValueData: "{app}\Glide.exe"; Flags: uninsdeletekey
 Root: HKLM; Subkey: "Software\Microsoft\Windows\CurrentVersion\App Paths\Glide.exe"; ValueType: string; ValueName: "Path"; ValueData: "{app}"; Flags: uninsdeletevalue
-; Clean up legacy registry keys if present from earlier versions
-Root: HKLM; Subkey: "Software\RegisteredApplications"; ValueType: none; ValueName: "Glide"; Flags: uninsdeletevalue
-; Common formats are advertised through Capabilities. The application remains able to open its wider runtime registry.
-Root: HKLM; Subkey: "Software\Glide Image Viewer\Capabilities\FileAssociations"; ValueType: string; ValueName: ".jpg"; ValueData: "Glide.Image"; Flags: uninsdeletekey
-Root: HKLM; Subkey: "Software\Glide Image Viewer\Capabilities\FileAssociations"; ValueType: string; ValueName: ".jpeg"; ValueData: "Glide.Image"
-Root: HKLM; Subkey: "Software\Glide Image Viewer\Capabilities\FileAssociations"; ValueType: string; ValueName: ".png"; ValueData: "Glide.Image"
-Root: HKLM; Subkey: "Software\Glide Image Viewer\Capabilities\FileAssociations"; ValueType: string; ValueName: ".webp"; ValueData: "Glide.Image"
-Root: HKLM; Subkey: "Software\Glide Image Viewer\Capabilities\FileAssociations"; ValueType: string; ValueName: ".gif"; ValueData: "Glide.Image"
-Root: HKLM; Subkey: "Software\Glide Image Viewer\Capabilities\FileAssociations"; ValueType: string; ValueName: ".bmp"; ValueData: "Glide.Image"
-Root: HKLM; Subkey: "Software\Glide Image Viewer\Capabilities\FileAssociations"; ValueType: string; ValueName: ".tif"; ValueData: "Glide.Image"
-Root: HKLM; Subkey: "Software\Glide Image Viewer\Capabilities\FileAssociations"; ValueType: string; ValueName: ".tiff"; ValueData: "Glide.Image"
-Root: HKLM; Subkey: "Software\Classes\Glide.Image"; ValueType: string; ValueData: "Image file"; Flags: uninsdeletekey
-Root: HKLM; Subkey: "Software\Classes\Glide.Image\DefaultIcon"; ValueType: string; ValueData: "{app}\Glide.exe,0"
-Root: HKLM; Subkey: "Software\Classes\Glide.Image\shell\open\command"; ValueType: string; ValueData: """{app}\Glide.exe"" ""%1"""
+; Remove the pre-4.2.7 "Glide Image Viewer" application identity if an earlier version registered it.
+Root: HKLM; Subkey: "Software\RegisteredApplications"; ValueType: none; ValueName: "Glide Image Viewer"; Flags: uninsdeletevalue
+Root: HKLM; Subkey: "Software\Glide Image Viewer"; Flags: deletekey
 
 [Run]
 Filename: "{app}\Glide.exe"; Description: "Launch Glide"; Flags: nowait postinstall skipifsilent
@@ -156,4 +144,43 @@ begin
   end;
 
   Result := ExpandConstant('{autopf}\Glide');
+end;
+
+procedure RegisterGlideAssociations;
+var
+  ResultCode: Integer;
+  ExePath: String;
+begin
+  { Machine-wide Open With / Capabilities for every recognised extension. Glide writes these itself
+    so the set is always exactly ImageFormatRegistry; the installer only guarantees it runs once the
+    files are in place, which makes a fresh install immediately integrated with no user action. }
+  ExePath := ExpandConstant('{app}\Glide.exe');
+  if FileExists(ExePath) then
+    Exec(ExePath, '--register-file-associations', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
+procedure UnregisterGlideAssociations;
+var
+  ResultCode: Integer;
+  ExePath: String;
+begin
+  ExePath := ExpandConstant('{app}\Glide.exe');
+  if FileExists(ExePath) then
+    Exec(ExePath, '--unregister-file-associations', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then
+    RegisterGlideAssociations;
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if CurUninstallStep = usUninstall then
+  begin
+    { Stop the warm host so Glide.exe is runnable and not locked while we remove its registration. }
+    StopAllGlideProcesses;
+    UnregisterGlideAssociations;
+  end;
 end;

@@ -4,6 +4,34 @@ All notable changes to Glide Image Viewer are documented here. The format is bas
 [Keep a Changelog](https://keepachangelog.com/), and the project uses dotted feature releases with
 hyphenated follow-up corrections (for example `4.2.0-1`).
 
+## [4.2.7] - 2026-09-22
+
+Automatic Windows integration release. Glide now associates itself with every supported format when
+it is installed, with no trip to Options.
+
+### Added
+
+- 🔗 **Automatic Open With integration.** Glide adds itself to Windows' **Open With** menu for all
+  **196** supported extensions without the user having to configure anything:
+  - The **installer** registers it **machine-wide** (`HKLM`) for every user of the PC, immediately
+    after the files are copied — including in silent installs.
+  - A **portable** copy (and any first launch) registers it **per-user** (`HKCU`) automatically.
+  - Registration is idempotent, runs at most once per version, is deferred to background priority so
+    it can never affect first paint, and never touches Windows' protected default-app (`UserChoice`)
+    selection.
+- 🚫 **Opt-out is respected.** Removing Glide from Open With in **Settings → Windows Integration**
+  records the choice, so automatic integration does not silently re-add it. Re-adding clears it.
+- 🧹 **Clean uninstall.** The uninstaller removes the machine-wide registration it created.
+
+### Changed
+
+- The **File associations / Open With** setting now describes the automatic behaviour and is used to
+  re-add or remove the per-user registration rather than to enable integration in the first place.
+- The installer no longer hard-codes a short list of common formats; it invokes Glide's own
+  registration so the set can never drift from `ImageFormatRegistry`.
+- Diagnostic and benchmark harnesses (`--capture-print-dialog`, benchmark/first-frame flags and
+  diagnostics export) never mutate the real Open With registration.
+
 ## [4.2.6] - 2026-09-22
 
 Print correctness release plus the first major expansion of native format decoding. Every recognized

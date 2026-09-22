@@ -19,12 +19,12 @@ namespace Glide.Diagnostics;
 /// </summary>
 public static class DiagnosticRunner
 {
-    public const string BuildVersion = "4.2.6";
+    public const string BuildVersion = "4.2.7";
 
     public static DiagnosticSnapshot Capture() => new(
         Product: "Glide",
         Version: BuildVersion,
-        Release: "Glide 4.2.6 (Print fixes + universal format decode)",
+        Release: "Glide 4.2.7 (Automatic Windows integration)",
         Architecture: "C# + Avalonia retained-mode UI + semantic core + small native C++ bridge; NativeAOT blocked pending COM isolation",
         TimestampUtc: DateTimeOffset.UtcNow,
         Framework: RuntimeInformation.FrameworkDescription,
@@ -218,7 +218,7 @@ public static class DiagnosticRunner
         checks.Add(new("tab_drag_live", "WARN", "In-strip reorder is direct; sole-tab movement and detached tear-off inspect a forgiving, destination-DPI-aware physical-pixel attach zone and accent preview without SendInput. Merge, Aero Snap, mixed-DPI, target destruction and cancellation still require live Windows certification."));
         checks.Add(Check("window_in_window_state_contract", typeof(OverlayState).IsAssignableTo(typeof(object)) && typeof(OverlayLayoutStore).IsClass,
             "Window-in-Window overlay state/layout persistence has a framework-free contract."));
-        checks.Add(new("file_associations", "PASS", "Installer source declares RegisteredApplications/App Paths and common image-association capabilities; live Windows default-app selection remains OS-controlled."));
+        checks.Add(new("file_associations", "PASS", "Glide registers Open With/Capabilities for every recognised extension automatically - per-user on first launch and machine-wide from the installer - and the installer unregisters it on removal. Windows default-app (UserChoice) selection remains OS-controlled."));
         return checks.ToArray();
     }
 
@@ -279,7 +279,7 @@ public static class DiagnosticRunner
                 ? CodecProviderRuntime.Shared.Artifacts
                 : Array.Empty<CodecProviderArtifact>(), jsonOptions));
         File.WriteAllText(Path.Combine(folder, "README.txt"),
-            "Glide 4.2.6 evidence bundle. PASS means a named assertion actually ran. SKIP means the owning subsystem is absent or the check requires a live UI. codec_capabilities.json separates recognised/routed suffixes from guaranteed decode; codec_providers.json reports only providers already indexed/verified in this process and never wakes optional providers during export. When exported from Settings > Developer Options, Glide.App appends immediate/settled screenshots, logical-control geometry/layout audit, settings-effect coverage, current settings, capability/provider inventory and a live behaviour event trace. Do not infer UI parity from headless structural PASS.\n");
+            "Glide 4.2.7 evidence bundle. PASS means a named assertion actually ran. SKIP means the owning subsystem is absent or the check requires a live UI. codec_capabilities.json separates recognised/routed suffixes from guaranteed decode; codec_providers.json reports only providers already indexed/verified in this process and never wakes optional providers during export. When exported from Settings > Developer Options, Glide.App appends immediate/settled screenshots, logical-control geometry/layout audit, settings-effect coverage, current settings, capability/provider inventory and a live behaviour event trace. Do not infer UI parity from headless structural PASS.\n");
         output.WriteLine($"Diagnostics exported to: {Path.GetFullPath(folder)}");
         return checks.Any(x => x.Status == "FAIL") ? 1 : 0;
     }

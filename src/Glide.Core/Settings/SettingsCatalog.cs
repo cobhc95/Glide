@@ -209,7 +209,7 @@ public static class SettingsCatalog
         new("windows.external1", "Windows Integration", "External program 1", "Launch the current image in a configured EXE using its programmable hotkey.", SettingKind.Text, "", ["external", "open with", "hotkey", "shortcut"]),
         new("windows.external2", "Windows Integration", "External program 2", "Launch the current image in a configured EXE using its programmable hotkey.", SettingKind.Text, "", ["external", "open with", "hotkey", "shortcut"]),
         new("windows.external3", "Windows Integration", "External program 3", "Launch the current image in a configured EXE using its programmable hotkey.", SettingKind.Text, "", ["external", "open with", "hotkey", "shortcut"]),
-        new("windows.fileAssociations", "Windows Integration", "File associations / Open With", "Add or remove Glide's per-user Windows Open With registration without changing the Windows default app.", SettingKind.Action, "Configure", ["file association", "open with", "windows", "registry"]),
+        new("windows.fileAssociations", "Windows Integration", "File associations / Open With", "Glide adds itself to Windows Open With for every supported format automatically. Use this to re-add or remove the per-user registration; Windows default-app choices are never changed.", SettingKind.Action, "Configure", ["file association", "open with", "windows", "registry"]),
 
         // Developer
         new("developer.statusGlobalScale", "Themes & Colours", "Status bar global scale", "Developer override for all status-bar size presets. 100 percent is the product default.", SettingKind.Number, 100, ["status", "bar", "scale", "global", "developer", "100"]),

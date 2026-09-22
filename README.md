@@ -1,14 +1,25 @@
-# Glide 4.2.6
+# Glide 4.2.7
 
 ## Fast. Lightweight. Multi-tabbed. Multi-window. Highly customizable.
 
 ![Glide main user interface](docs/screenshots/screenshot_1.jpg)
 
-**Glide 4.2.6 is a high-performance Windows image viewer built around instant-feeling image opening, a compact installer, multi-tab and multi-window workflows, transparent overlays, deep mouse/keyboard customization, Launch Speed Boost, complete image printing, native SVG/vector support, and recognition/routing for 196 image and document filename extensions.**
+**Glide 4.2.7 is a high-performance Windows image viewer built around instant-feeling image opening, a compact installer, multi-tab and multi-window workflows, transparent overlays, deep mouse/keyboard customization, Launch Speed Boost, complete image printing, native SVG/vector support, automatic Windows Open With integration, and recognition/routing for 196 image and document filename extensions.**
 
-## What's new in 4.2.6
+## What's new in 4.2.7
 
-Glide 4.2.6 expands what opens natively and gives every recognized suffix a safe, defined route:
+Glide 4.2.7 makes Windows integration automatic:
+
+- **Open With, set up for you.** On install (and on first launch for portable copies) Glide adds
+  itself to Windows' **Open With** menu for **every supported format** — no trip to Options required.
+  The installer registers it machine-wide; a portable copy registers it for the current user.
+- **Respects your choice.** Windows still owns the *default* app decision. Removing Glide from
+  Open With in Settings sticks (Glide will not silently re-add it), and uninstalling removes exactly
+  what the installer added.
+
+### Previously in 4.2.6
+
+Glide 4.2.6 expanded what opens natively and gave every recognized suffix a safe, defined route:
 
 - **Native SVG / vector support.** `.svg` and gzip-compressed `.svgz` render in-process at exactly the
   resolution needed — crisp at any zoom in the viewer and full quality in the print preview.
@@ -336,7 +347,7 @@ On Windows:
 * Build the application: run `build.cmd`
 * Build the complete standalone installer: run `build.cmd` (or `build.cmd fast --no-pause`)
 
-Release builds produce four deliverables: `Glide-4.2.6-Portable.zip`, `dist-installer\Glide Setup.exe`, `Glide-4.2.6.exe` for direct testing, and the compact `Glide-Zero-Context-Handover.zip`.
+Release builds produce four deliverables: `Glide-4.2.7-Portable.zip`, `dist-installer\Glide Setup.exe`, `Glide-4.2.7.exe` for direct testing, and the compact `Glide-Zero-Context-Handover.zip`.
 
 ---
 
