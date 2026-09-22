@@ -2,6 +2,7 @@
   <PropertyGroup><AllowUnsafeBlocks>true</AllowUnsafeBlocks></PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Avalonia" Version="11.3.20" />
+    <PackageReference Include="Svg.Skia" Version="1.0.0.18" />
     <ProjectReference Include="..\Glide.Core\Glide.Core.csproj" />
   </ItemGroup>
   <ItemGroup>

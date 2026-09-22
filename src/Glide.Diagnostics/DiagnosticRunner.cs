@@ -19,12 +19,12 @@ namespace Glide.Diagnostics;
 /// </summary>
 public static class DiagnosticRunner
 {
-    public const string BuildVersion = "4.2.5";
+    public const string BuildVersion = "4.2.6";
 
     public static DiagnosticSnapshot Capture() => new(
         Product: "Glide",
         Version: BuildVersion,
-        Release: "Glide 4.2.5 (Image Printing)",
+        Release: "Glide 4.2.6 (Print fixes + universal format decode)",
         Architecture: "C# + Avalonia retained-mode UI + semantic core + small native C++ bridge; NativeAOT blocked pending COM isolation",
         TimestampUtc: DateTimeOffset.UtcNow,
         Framework: RuntimeInformation.FrameworkDescription,
@@ -190,8 +190,8 @@ public static class DiagnosticRunner
             ImageFormatRegistry.CoreFastPathExtensions.Count == 10 &&
             CodecCapabilityRegistry.DecodeEnabledExtensions.Count >= 10 &&
             CodecCapabilityRegistry.All.Where(x => !ImageFormatRegistry.IsCoreFastPath(x.Extension) && x.DecodeEnabled)
-                .All(x => x.Tier == CodecTier.ExternalProvider),
-            "Recognised/routed breadth, protected core fixtures and guaranteed decode remain distinct; extra guaranteed rows require a verified provider."));
+                .All(x => x.Tier is CodecTier.ExternalProvider or CodecTier.BuiltIn),
+            "Recognised/routed breadth, protected core fixtures and guaranteed decode remain distinct; extra guaranteed rows require a verified provider or a bundled built-in decoder."));
         checks.Add(Check("codec_capability_tiers", CodecCapabilityRegistry.All.Any(x => x.Tier == CodecTier.NativeOs && x.DecodeEnabled) &&
             CodecCapabilityRegistry.All.Any(x => x.Tier == CodecTier.ModularNative && !x.DecodeEnabled) &&
             CodecCapabilityRegistry.All.Any(x => x.Tier == CodecTier.RoutedOnDemand && !x.DecodeEnabled) &&
@@ -279,7 +279,7 @@ public static class DiagnosticRunner
                 ? CodecProviderRuntime.Shared.Artifacts
                 : Array.Empty<CodecProviderArtifact>(), jsonOptions));
         File.WriteAllText(Path.Combine(folder, "README.txt"),
-            "Glide 4.2.5 evidence bundle. PASS means a named assertion actually ran. SKIP means the owning subsystem is absent or the check requires a live UI. codec_capabilities.json separates recognised/routed suffixes from guaranteed decode; codec_providers.json reports only providers already indexed/verified in this process and never wakes optional providers during export. When exported from Settings > Developer Options, Glide.App appends immediate/settled screenshots, logical-control geometry/layout audit, settings-effect coverage, current settings, capability/provider inventory and a live behaviour event trace. Do not infer UI parity from headless structural PASS.\n");
+            "Glide 4.2.6 evidence bundle. PASS means a named assertion actually ran. SKIP means the owning subsystem is absent or the check requires a live UI. codec_capabilities.json separates recognised/routed suffixes from guaranteed decode; codec_providers.json reports only providers already indexed/verified in this process and never wakes optional providers during export. When exported from Settings > Developer Options, Glide.App appends immediate/settled screenshots, logical-control geometry/layout audit, settings-effect coverage, current settings, capability/provider inventory and a live behaviour event trace. Do not infer UI parity from headless structural PASS.\n");
         output.WriteLine($"Diagnostics exported to: {Path.GetFullPath(folder)}");
         return checks.Any(x => x.Status == "FAIL") ? 1 : 0;
     }

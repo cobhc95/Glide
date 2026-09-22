@@ -115,8 +115,11 @@ public static class ImageHeaderProbe
             var h = Math.Abs(BinaryPrimitives.ReadInt32LittleEndian(data.Slice(22,4)));
             return Set(w, h, out d);
         }
-        // ICO/CUR
-        if (data.Length >= 8 && data[0] == 0 && data[1] == 0 && (data[2] == 1 || data[2] == 2) && data[3] == 0)
+        // ICO/CUR. The directory count (bytes 4-5) must be >= 1: without it, any header-less format
+        // whose first bytes happen to be 00 00 01/02 00 (notably an uncompressed true-colour TGA,
+        // which starts 00 00 02 00) would be mis-identified as a 256x256 cursor.
+        if (data.Length >= 8 && data[0] == 0 && data[1] == 0 && (data[2] == 1 || data[2] == 2) && data[3] == 0 &&
+            BinaryPrimitives.ReadUInt16LittleEndian(data.Slice(4, 2)) >= 1)
             return Set(data[6] == 0 ? 256 : data[6], data[7] == 0 ? 256 : data[7], out d);
         // JPEG SOF markers
         if (data[0] == 0xFF && data[1] == 0xD8)

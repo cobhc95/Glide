@@ -1,5 +1,6 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
@@ -64,6 +65,9 @@ public sealed class PrintWindow : Window
     private readonly Button _printButton = new() { Content = "Print" };
     private readonly Button _cancelButton = new() { Content = "Cancel" };
     private readonly Button _propertiesButton = new() { Content = "Properties…" };
+    private Control? _sourceRow;
+    private Bitmap? _grayscalePreview;
+    private Bitmap? _grayscaleSource;
 
     public PrintWindow(PrintWindowArgs args)
     {
@@ -103,7 +107,8 @@ public sealed class PrintWindow : Window
         form.Children.Add(printerRow);
         form.Children.Add(SectionLabel("Paper"));
         form.Children.Add(LabeledRow("Size", _paperCombo));
-        form.Children.Add(LabeledRow("Source", _sourceCombo));
+        _sourceRow = LabeledRow("Source", _sourceCombo);
+        form.Children.Add(_sourceRow);
         var orientRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
         orientRow.Children.Add(_portraitRadio);
         orientRow.Children.Add(_landscapeRadio);
@@ -123,9 +128,17 @@ public sealed class PrintWindow : Window
         form.Children.Add(LabeledRow("Right", _marginRight));
         form.Children.Add(LabeledRow("Bottom", _marginBottom));
 
-        var left = new StackPanel { Spacing = 10 };
+        // A vertical StackPanel gives a ScrollViewer unbounded height, so the options never
+        // scrolled and were cut off. Use a Grid so the ScrollViewer owns the remaining height.
+        var left = new Grid { RowDefinitions = new RowDefinitions("Auto,*"), RowSpacing = 10 };
         left.Children.Add(heading);
-        var scroll = new ScrollViewer { Content = form };
+        var scroll = new ScrollViewer
+        {
+            Content = form,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled
+        };
+        Grid.SetRow(scroll, 1);
         left.Children.Add(scroll);
 
         var right = new Grid { RowDefinitions = new RowDefinitions("*,Auto,Auto"), RowSpacing = 8 };
@@ -157,7 +170,7 @@ public sealed class PrintWindow : Window
         Content = main;
         PopupPlacementStore.Track(this, "print");
         Opened += (_, _) => _ = RefreshPrintersAsync();
-        Closing += (_, _) => { _lifetime.Cancel(); _printCts?.Cancel(); };
+        Closing += (_, _) => { _lifetime.Cancel(); _printCts?.Cancel(); _grayscalePreview?.Dispose(); _grayscalePreview = null; };
     }
 
     private static TextBlock SectionLabel(string text) =>
@@ -176,7 +189,7 @@ public sealed class PrintWindow : Window
         _scalingCombo.SelectedItem = _settings.ScalingMode;
         _hAlignCombo.SelectedItem = _settings.HAlign;
         _vAlignCombo.SelectedItem = _settings.VAlign;
-        _colorCombo.SelectedItem = "Colour";
+        _colorCombo.SelectedItem = string.Equals(_settings.ColorMode, "Grayscale", StringComparison.OrdinalIgnoreCase) ? "Grayscale" : "Colour";
         _keepAspectCheck.IsChecked = _settings.KeepAspectRatio;
         _autoRotateCheck.IsChecked = _settings.AutoRotate;
         if (_settings.IsLandscape) _landscapeRadio.IsChecked = true; else _portraitRadio.IsChecked = true;
@@ -232,6 +245,7 @@ public sealed class PrintWindow : Window
         _settings.KeepAspectRatio = _keepAspectCheck.IsChecked == true;
         _settings.AutoRotate = _autoRotateCheck.IsChecked == true;
         _settings.Orientation = _landscapeRadio.IsChecked == true ? "Landscape" : "Portrait";
+        _settings.ColorMode = string.Equals(_colorCombo.SelectedItem as string, "Grayscale", StringComparison.OrdinalIgnoreCase) ? "Grayscale" : "Colour";
         _settings.Copies = (int)(_copiesBox.Value ?? 1);
         _settings.CustomScalePercent = (double)(_customScaleBox.Value ?? 100m);
         _settings.MarginLeft = PrintUnits.FromDisplay((double)(_marginLeft.Value ?? 0m));
@@ -289,9 +303,12 @@ public sealed class PrintWindow : Window
                 _sourceCombo.ItemsSource = caps.Sources.Select(s => s.Name).ToArray();
                 _paperCombo.SelectedItem = caps.Papers.Any(p => p.Name == paperWant) ? paperWant : caps.DefaultPaperName;
                 _sourceCombo.SelectedItem = caps.Sources.Any(s => s.Name == sourceWant) ? sourceWant : caps.DefaultSourceName;
+                // Some drivers (notably Microsoft Print to PDF) expose no paper trays; hide the
+                // row instead of showing an empty, unselectable combo.
+                if (_sourceRow is not null) _sourceRow.IsVisible = caps.Sources.Count > 0;
                 _colorCombo.IsEnabled = caps.SupportsColor;
                 if (!caps.SupportsColor) _colorCombo.SelectedItem = "Grayscale";
-                else if (_colorCombo.SelectedItem is null) _colorCombo.SelectedItem = "Colour";
+                else if (_colorCombo.SelectedItem is null) _colorCombo.SelectedItem = string.Equals(_settings.ColorMode, "Grayscale", StringComparison.OrdinalIgnoreCase) ? "Grayscale" : "Colour";
             }
             finally { _loadingPrinters = false; }
             var paper = _paperCombo.SelectedItem as string ?? caps.DefaultPaperName;
@@ -339,7 +356,7 @@ public sealed class PrintWindow : Window
             _preview.Paper = paper;
             _preview.Landscape = _settings.IsLandscape;
             _preview.Layout = layout;
-            _preview.PreviewBitmap = _args.PreviewBitmap;
+            ApplyPreviewBitmap();
             _preview.MarginLeft = _settings.MarginLeft;
             _preview.MarginTop = _settings.MarginTop;
             _preview.MarginRight = _settings.MarginRight;
@@ -360,17 +377,62 @@ public sealed class PrintWindow : Window
         }
     }
 
+    /// <summary>
+    /// Selects the bitmap the preview draws: the colour source, or a cached luminance-grayscale
+    /// copy when Grayscale is chosen. Conversion happens off the UI thread.
+    /// </summary>
+    private void ApplyPreviewBitmap()
+    {
+        var grayscale = string.Equals(_colorCombo.SelectedItem as string, "Grayscale", StringComparison.OrdinalIgnoreCase);
+        if (!grayscale)
+        {
+            _preview.PreviewBitmap = _args.PreviewBitmap;
+            return;
+        }
+        if (_grayscalePreview is not null && ReferenceEquals(_grayscaleSource, _args.PreviewBitmap))
+        {
+            _preview.PreviewBitmap = _grayscalePreview;
+            return;
+        }
+        _preview.PreviewBitmap = _args.PreviewBitmap;
+        var source = _args.PreviewBitmap;
+        _ = Task.Run(() =>
+        {
+            var gray = PrintPreviewControl.CreateGrayscale(source);
+            if (gray is null) return;
+            Dispatcher.UIThread.Post(() =>
+            {
+                if (string.Equals(_colorCombo.SelectedItem as string, "Grayscale", StringComparison.OrdinalIgnoreCase))
+                {
+                    _grayscalePreview?.Dispose();
+                    _grayscalePreview = gray;
+                    _grayscaleSource = source;
+                    _preview.PreviewBitmap = gray;
+                }
+                else gray.Dispose();
+            });
+        });
+    }
+
     private void ShowDriverProperties()
     {
         try
         {
             var printer = _printerCombo.SelectedItem as string;
             if (string.IsNullOrWhiteSpace(printer)) return;
-            using var doc = new System.Drawing.Printing.PrintDocument();
-            doc.PrinterSettings.PrinterName = printer;
             var handle = TopLevel.GetTopLevel(this)?.TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
-            if (PrintDriverProperties.Show(handle, doc))
-                _ = RefreshCapabilitiesAsync();
+            if (!PrintDriverProperties.Show(handle, printer, out var landscape)) return;
+            // The native sheet may have switched orientation (or paper). Reflect it in Glide's own
+            // radio buttons first so the geometry re-read below uses the new orientation, then
+            // refresh paper/source/geometry and the live preview.
+            _loadingPrinters = true;
+            try
+            {
+                _landscapeRadio.IsChecked = landscape;
+                _portraitRadio.IsChecked = !landscape;
+            }
+            finally { _loadingPrinters = false; }
+            _ = RefreshCapabilitiesAsync();
         }
         catch { }
     }

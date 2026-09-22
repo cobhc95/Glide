@@ -633,6 +633,11 @@ public sealed class ImageLoadCoordinator : IDisposable
 
     private ImageDimensions ProbeDimensionsAsyncDirect(string path)
     {
+        // Dedicated built-in decoders know their own container. Probe them before the generic content
+        // sniffer, which is unreliable for header-less formats (an uncompressed true-colour TGA, for
+        // example, starts 00 00 02 00 and can otherwise resemble an ICO/CUR directory).
+        if (SvgDecoder.TryProbeDimensions(path, out var svg) && svg.IsValid) return svg;
+        if (BuiltInRasterDecoder.TryProbeDimensions(path, out var raster) && raster.IsValid) return raster;
         if (ImageHeaderProbe.TryProbe(path, out var dimensions)) return dimensions;
         if (NativeImageProbe.TryProbe(path, out var native) && native.Width > 0 && native.Height > 0)
             return new ImageDimensions((int)Math.Min(native.Width, (uint)int.MaxValue), (int)Math.Min(native.Height, (uint)int.MaxValue));
@@ -659,8 +664,13 @@ public sealed class ImageLoadCoordinator : IDisposable
 
     private async Task<ImageDimensions> ProbeDimensionsAsync(string path, Stream alreadyOpenStream, CancellationToken cancellationToken)
     {
-        // First probe from the exact stream that will be decoded, restoring its position afterwards.
-        // This removes Glide 2.1's normal second file-open/header-read pass.
+        // Dedicated built-in decoders first (see ProbeDimensionsAsyncDirect for why).
+        if (SvgDecoder.TryProbeDimensions(path, out var svg) && svg.IsValid) return svg;
+
+        if (BuiltInRasterDecoder.TryProbeDimensions(path, out var raster) && raster.IsValid) return raster;
+
+        // Otherwise probe from the exact stream that will be decoded, restoring its position
+        // afterwards. This removes Glide 2.1's normal second file-open/header-read pass.
         var header = await ImageHeaderProbe.TryProbeAsync(alreadyOpenStream, cancellationToken).ConfigureAwait(false);
         if (header is { IsValid: true }) return header.Value;
 

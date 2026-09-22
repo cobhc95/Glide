@@ -4,6 +4,54 @@ All notable changes to Glide Image Viewer are documented here. The format is bas
 [Keep a Changelog](https://keepachangelog.com/), and the project uses dotted feature releases with
 hyphenated follow-up corrections (for example `4.2.0-1`).
 
+## [4.2.6] - 2026-09-22
+
+Print correctness release plus the first major expansion of native format decoding. Every recognized
+suffix now has a defined, non-crashing route, and a new family of bundled decoders removes the
+optional-codec dependency for vector and legacy raster formats. See `docs/format-coverage.md` for the
+full route map and the IrfanView comparison.
+
+### Added
+
+- 🖼️ **Native SVG / SVGZ (vector) support.** `.svg` and gzip-compressed `.svgz` are now rasterised
+  in-process with Svg.Skia at exactly the resolution needed — a bounded render for browse previews
+  (so vectors stay crisp at any zoom) and an intrinsic-size render, capped at 4096 px, for the full
+  1:1 and print source. Transparency is preserved.
+- 🧩 **Bundled built-in raster decoders** for the long tail of simple formats that neither Skia nor
+  Windows WIC can be relied on for, so they work on a clean PC with no optional codec installed:
+  **TGA/TARGA/ICB/VDA/VST**, **PCX**, **PNM (PBM/PGM/PPM/PAM)**, **QOI**, **Radiance HDR/RGBE**,
+  **WBMP**, **XBM**, **XPM**, and **SGI/RGB/RGBA/BW**. All entry points are total: malformed or
+  hostile input returns "cannot decode" instead of throwing, with strict allocation caps.
+- 🪟 **Windows Shell last-resort decode.** When Skia, WIC and the built-in decoders all decline a
+  recognized suffix, Glide now accepts a genuine Windows thumbnail/preview handler for *any*
+  recognized format (never a generic file icon), so PDF, EPS/AI, Office, CAD and camera-RAW files
+  render whenever the platform has a handler. Alpha may be flattened on this route.
+- 📊 **Format coverage documentation** (`docs/format-coverage.md`): the full decode chain, a
+  per-group coverage matrix, and a side-by-side comparison with IrfanView's format/plug-in list.
+
+### Fixed
+
+- 🔄 **Auto-rotate now rotates instead of stretching.** "Automatically rotate for best fit" performs a
+  real 90° rotation in both the live preview and the spooled output.
+- 🖥️ **Actual-size / Fill-page no longer overflow the window.** Oversized renders are clipped to the
+  content box, so the preview keeps its buttons and margins and gains a scrollbar instead of pushing
+  the controls off-screen.
+- 🖨️ **Changing printer settings to landscape no longer crashes** and is now reflected in the preview
+  and orientation radios. The driver DEVMODE is seeded/read through `DocumentProperties` instead of a
+  fragile handle copy.
+- ⬛ **Grayscale is truthful.** Colour/grayscale now changes the preview and is forced onto the spooled
+  bitmap with a Rec.601 colour matrix, so drivers that ignore `PageSettings.Color` (such as Microsoft
+  Print to PDF) still print grayscale.
+- 📄 **Paper Source is populated** from the driver's real trays and the row is hidden (rather than
+  shown empty) when the driver reports none.
+- 📜 **The Print window scrolls** instead of cutting options off on short screens; the left options
+  panel is a scrollable grid.
+
+### Changed
+
+- The decode failure message now names the suffix and points at the optional-codec requirement
+  (e.g. `No decoder for .cr2 (optional codec required)`) instead of a generic error.
+
 ## [4.2.5] - 2026-09-22
 
 Image-printing release. Glide now has a complete, WYSIWYG image print workflow modelled on the mature

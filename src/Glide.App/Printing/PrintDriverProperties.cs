@@ -1,65 +1,54 @@
-using System.Drawing.Printing;
 using System.Runtime.InteropServices;
-
-#pragma warning disable CA1416 // PrintDriverProperties is Windows-only by design; Show() requires Windows first.
 
 namespace Glide.App.Printing;
 
 /// <summary>
 /// Opens the printer driver's native Properties/Preferences sheet (the same sheet every
-/// mature viewer exposes) and writes the result back into the live PrintDocument settings.
-/// P/Invoke only; no WinForms dependency. Used exclusively from the Print dialog.
+/// mature viewer exposes) and reports the resulting orientation so Glide's own radio +
+/// preview stay in sync. P/Invoke only; no WinForms dependency. Used exclusively from the
+/// Print dialog.
+///
+/// The DEVMODE is seeded by the driver with DM_OUT_BUFFER, edited with DM_IN_PROMPT, then
+/// read back directly — the previous GetHdevmode/SetHdevmode copy was size-fragile and could
+/// corrupt the heap (observed as a crash when the sheet changed orientation).
 /// </summary>
 public static class PrintDriverProperties
 {
     private const int DM_IN_PROMPT = 0x0004;
     private const int DM_OUT_BUFFER = 0x0002;
     private const int IDOK = 1;
+    // DEVMODE field offsets (Unicode): dmDeviceName[32] then 4 WORDs then dmFields DWORD.
+    private const int OffsetDmOrientation = 76; // union begins after dmFields
+    private const short DmOrientationLandscape = 2;
 
-    public static bool Show(nint ownerHwnd, PrintDocument document)
+    public static bool Show(nint ownerHwnd, string printerName, out bool landscape)
     {
-        if (!OperatingSystem.IsWindows() || document is null) return false;
-        var printerName = document.PrinterSettings.PrinterName;
-        if (string.IsNullOrWhiteSpace(printerName)) return false;
+        landscape = false;
+        if (!OperatingSystem.IsWindows() || string.IsNullOrWhiteSpace(printerName)) return false;
+        nint hPrinter = IntPtr.Zero;
+        nint devMode = IntPtr.Zero;
         try
         {
-            if (!OpenPrinter(printerName, out var hPrinter, IntPtr.Zero)) return false;
-            try
-            {
-                // Query required DEVMODE size, then show the driver modal.
-                var needed = DocumentProperties(ownerHwnd, hPrinter, printerName, IntPtr.Zero, IntPtr.Zero, 0);
-                if (needed <= 0) return false;
-                var devMode = Marshal.AllocHGlobal(needed);
-                try
-                {
-                    // Seed with the current settings so the sheet opens on the live values.
-                    var seed = document.PrinterSettings.GetHdevmode();
-                    try { CopyDevMode(seed, devMode, needed); }
-                    finally { document.PrinterSettings.SetHdevmode(seed); }
-                    var result = DocumentProperties(ownerHwnd, hPrinter, printerName, devMode, devMode,
-                        DM_IN_PROMPT | DM_OUT_BUFFER);
-                    if (result != IDOK) return false;
-                    // Adopt the driver's result back into the live settings.
-                    var target = document.PrinterSettings.GetHdevmode();
-                    try { CopyDevMode(devMode, target, needed); }
-                    finally { document.PrinterSettings.SetHdevmode(target); }
-                    return true;
-                }
-                finally { Marshal.FreeHGlobal(devMode); }
-            }
-            finally { ClosePrinter(hPrinter); }
+            if (!OpenPrinter(printerName, out hPrinter, IntPtr.Zero) || hPrinter == IntPtr.Zero) return false;
+            var needed = DocumentProperties(ownerHwnd, hPrinter, printerName, IntPtr.Zero, IntPtr.Zero, 0);
+            if (needed <= 0) return false;
+            devMode = Marshal.AllocHGlobal(needed);
+            // Seed with the driver's current settings so the sheet opens on live values.
+            if (DocumentProperties(ownerHwnd, hPrinter, printerName, devMode, IntPtr.Zero, DM_OUT_BUFFER) < 0)
+                return false;
+            // Show the modal sheet and write the accepted values back into devMode.
+            var result = DocumentProperties(ownerHwnd, hPrinter, printerName, devMode, devMode, DM_IN_PROMPT | DM_OUT_BUFFER);
+            if (result != IDOK) return false;
+            var orientation = Marshal.ReadInt16(devMode, OffsetDmOrientation);
+            landscape = orientation == DmOrientationLandscape;
+            return true;
         }
         catch { return false; }
-    }
-
-    private static void CopyDevMode(nint source, nint destination, int capacity)
-    {
-        var extra = Marshal.ReadInt16(source, 70); // dmDriverExtra
-        var total = Math.Min(capacity, 72 + Math.Max(0, (int)extra));
-        if (total <= 0) return;
-        var bytes = new byte[total];
-        Marshal.Copy(source, bytes, 0, total);
-        Marshal.Copy(bytes, 0, destination, total);
+        finally
+        {
+            if (devMode != IntPtr.Zero) Marshal.FreeHGlobal(devMode);
+            if (hPrinter != IntPtr.Zero) ClosePrinter(hPrinter);
+        }
     }
 
     [DllImport("winspool.drv", CharSet = CharSet.Auto, SetLastError = true)]

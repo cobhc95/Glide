@@ -17,6 +17,7 @@ public sealed record PrintDocumentSettings
     public string HAlign { get; set; } = "Centre";
     public string VAlign { get; set; } = "Centre";
     public string Orientation { get; set; } = "Portrait";
+    public string ColorMode { get; set; } = "Colour";
     // Hundredths of an inch (Win32 print unit). Default 0.5 in / 12.7 mm all round.
     public double MarginLeft { get; set; } = 50;
     public double MarginTop { get; set; } = 50;
@@ -58,6 +59,7 @@ public sealed record PrintDocumentSettings
         if (copy.HAlign is not ("Left" or "Centre" or "Right")) copy.HAlign = "Centre";
         if (copy.VAlign is not ("Top" or "Centre" or "Bottom")) copy.VAlign = "Centre";
         if (copy.Orientation is not ("Portrait" or "Landscape")) copy.Orientation = "Portrait";
+        if (copy.ColorMode is not ("Colour" or "Grayscale")) copy.ColorMode = "Colour";
         copy.MarginLeft = Math.Clamp(copy.MarginLeft, 0, 300);
         copy.MarginTop = Math.Clamp(copy.MarginTop, 0, 300);
         copy.MarginRight = Math.Clamp(copy.MarginRight, 0, 300);

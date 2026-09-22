@@ -1,5 +1,6 @@
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
 using System.Drawing.Printing;
 
 #pragma warning disable CA1416 // PrintService is Windows-only by design; every entry point requires Windows first.
@@ -182,6 +183,7 @@ public static class PrintService
         using var registration = cancellationToken.Register(() => cancelled = true);
         var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         Exception? failure = null;
+        var grayscale = !request.PrintColor;
 
         doc.PrintPage += (_, e) =>
         {
@@ -189,7 +191,7 @@ public static class PrintService
             {
                 if (cancelled || cancellationToken.IsCancellationRequested) { e.Cancel = true; e.HasMorePages = false; return; }
                 if (e.Graphics is null) { e.Cancel = true; e.HasMorePages = false; return; }
-                RenderPage(e.Graphics, gdi, layout);
+                RenderPage(e.Graphics, gdi, layout, grayscale);
                 e.HasMorePages = false;
             }
             catch (Exception ex) { failure = ex; e.Cancel = true; e.HasMorePages = false; }
@@ -209,13 +211,32 @@ public static class PrintService
         progress?.Report("Done.");
     }
 
-    internal static void RenderPage(System.Drawing.Graphics g, Image image, PrintPageLayout layout)
+    // Standard luminance grayscale matrix (Rec. 601) applied to the spooled image.
+    private static readonly ColorMatrix GrayscaleColorMatrix = new(new[]
+    {
+        new[] { 0.299f, 0.299f, 0.299f, 0f, 0f },
+        new[] { 0.587f, 0.587f, 0.587f, 0f, 0f },
+        new[] { 0.114f, 0.114f, 0.114f, 0f, 0f },
+        new[] { 0f, 0f, 0f, 1f, 0f },
+        new[] { 0f, 0f, 0f, 0f, 1f }
+    });
+
+    internal static void RenderPage(System.Drawing.Graphics g, Image image, PrintPageLayout layout, bool grayscale = false)
     {
         g.InterpolationMode = InterpolationMode.HighQualityBicubic;
         g.SmoothingMode = SmoothingMode.HighQuality;
         g.PixelOffsetMode = PixelOffsetMode.HighQuality;
         g.CompositingMode = System.Drawing.Drawing2D.CompositingMode.SourceOver;
         g.CompositingQuality = CompositingQuality.HighQuality;
+
+        // Force true grayscale output regardless of driver support: some drivers (notably
+        // Microsoft Print to PDF) ignore PageSettings.Color, so tint the image ourselves.
+        ImageAttributes? attributes = null;
+        if (grayscale)
+        {
+            attributes = new ImageAttributes();
+            attributes.SetColorMatrix(GrayscaleColorMatrix);
+        }
 
         float UnitScale() => g.PageUnit switch
         {
@@ -232,26 +253,41 @@ public static class PrintService
         float V(double hundredths) => (float)(hundredths * unit);
 
         var dest = new RectangleF(H(layout.DestX), V(layout.DestY), H(layout.DestWidth), V(layout.DestHeight));
+        // The image may only paint inside the content box (margins ∩ printable), never over the
+        // margins even when Actual/Custom size makes the image larger than the page.
+        var box = new RectangleF(H(layout.BoxX), V(layout.BoxY), H(layout.BoxWidth), V(layout.BoxHeight));
         if (string.Equals(Environment.GetEnvironmentVariable("GLIDE_PRINT_DEBUG"), "1", StringComparison.Ordinal))
-            Console.WriteLine($"  render dest=({dest.X:F0},{dest.Y:F0},{dest.Width:F0},{dest.Height:F0}) pageUnit={g.PageUnit} clip={g.VisibleClipBounds}");
-        // Alpha has nowhere to go on paper: composite against white (the dest-sized white
-        // fill doubles as the page background behind the image).
+            Console.WriteLine($"  render dest=({dest.X:F0},{dest.Y:F0},{dest.Width:F0},{dest.Height:F0}) box=({box.X:F0},{box.Y:F0},{box.Width:F0},{box.Height:F0}) pageUnit={g.PageUnit} clip={g.VisibleClipBounds}");
+        // Alpha has nowhere to go on paper: composite against white (the box-sized white fill
+        // doubles as the page background behind the image).
         using (var white = new SolidBrush(Color.White))
-            g.FillRectangle(white, dest);
+            g.FillRectangle(white, box);
 
         var sx = (float)(layout.SrcX * image.Width);
         var sy = (float)(layout.SrcY * image.Height);
         var sw = Math.Max(1f, (float)(layout.SrcWidth * image.Width));
         var sh = Math.Max(1f, (float)(layout.SrcHeight * image.Height));
-        var src = new RectangleF(sx, sy, sw, sh);
-        // Clip to the destination so an Actual/Custom-size overflow cannot paint the margins.
-        var clip = g.Clip.Clone();
+        // Clip to the content box so an Actual/Custom-size overflow cannot paint the margins.
+        // Auto-rotate must actually rotate the image, not stretch it.
+        var state = g.Save();
         try
         {
-            g.SetClip(dest);
-            g.DrawImage(image, dest, src, GraphicsUnit.Pixel);
+            g.SetClip(box);
+            if (layout.Rotated)
+            {
+                var cx = dest.X + dest.Width / 2;
+                var cy = dest.Y + dest.Height / 2;
+                g.TranslateTransform(cx, cy);
+                g.RotateTransform(90);
+                var rotated = Rectangle.Round(new RectangleF(-dest.Height / 2, -dest.Width / 2, dest.Height, dest.Width));
+                g.DrawImage(image, rotated, (int)sx, (int)sy, (int)sw, (int)sh, GraphicsUnit.Pixel, attributes);
+            }
+            else
+            {
+                g.DrawImage(image, Rectangle.Round(dest), (int)sx, (int)sy, (int)sw, (int)sh, GraphicsUnit.Pixel, attributes);
+            }
         }
-        finally { g.Clip = clip; clip.Dispose(); }
+        finally { g.Restore(state); attributes?.Dispose(); }
     }
 
     private static void ApplyPaperSelection(PrintDocument doc, string paperName, string sourceName)

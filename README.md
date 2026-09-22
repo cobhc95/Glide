@@ -1,14 +1,33 @@
-# Glide 4.2.5
+# Glide 4.2.6
 
 ## Fast. Lightweight. Multi-tabbed. Multi-window. Highly customizable.
 
 ![Glide main user interface](docs/screenshots/screenshot_1.jpg)
 
-**Glide 4.2.5 is a high-performance Windows image viewer built around instant-feeling image opening, a compact installer, multi-tab and multi-window workflows, transparent overlays, deep mouse/keyboard customization, Launch Speed Boost, complete image printing, and recognition/routing for 196 image and document filename extensions.**
+**Glide 4.2.6 is a high-performance Windows image viewer built around instant-feeling image opening, a compact installer, multi-tab and multi-window workflows, transparent overlays, deep mouse/keyboard customization, Launch Speed Boost, complete image printing, native SVG/vector support, and recognition/routing for 196 image and document filename extensions.**
 
-## What's new in 4.2.5
+## What's new in 4.2.6
 
-Glide 4.2.5 adds a complete, reference-faithful image printing workflow:
+Glide 4.2.6 expands what opens natively and gives every recognized suffix a safe, defined route:
+
+- **Native SVG / vector support.** `.svg` and gzip-compressed `.svgz` render in-process at exactly the
+  resolution needed — crisp at any zoom in the viewer and full quality in the print preview.
+- **Bundled built-in decoders** for TGA/TARGA/ICB/VDA/VST, PCX, PNM (PBM/PGM/PPM/PAM), QOI, Radiance
+  HDR/RGBE, WBMP, XBM, XPM and SGI/RGB/RGBA/BW — no optional codec or plug-in required on a clean PC.
+- **A defined, non-crashing route for every recognized extension:** built-in decoders → Windows WIC →
+  Skia → a genuine Windows Shell thumbnail/preview → optional codec provider. When nothing can decode
+  a file, Glide names the suffix and states that an optional codec is required instead of failing
+  silently.
+- **Print fixes:** auto-rotate now truly rotates, Actual-size/Fill-page stay inside the window,
+  printer Properties (landscape) no longer crashes and updates the preview, grayscale is real in the
+  preview *and* the spool, Paper Source is populated, and the Print window scrolls.
+
+See [`docs/format-coverage.md`](docs/format-coverage.md) for the full format route map and a
+side-by-side comparison with IrfanView.
+
+### Complete image printing
+
+Glide 4.2.5 added a complete, reference-faithful image printing workflow:
 
 - **Print the current image** with `Ctrl+P`, the viewer right-click menu, or the browser item menu.
   Glide prints the **original full-resolution decoded image** — never a screenshot of the viewport,
@@ -38,7 +57,7 @@ See [CHANGELOG.md](CHANGELOG.md) and the GitHub release notes for the full list.
 
 Glide is designed for users who desire the instantaneous startup and minimal resource footprint of classic lightweight viewers without sacrificing modern multi-tabbed navigation, configurable fullscreen behaviour, non-destructive overlays, extensive hotkey mapping, viewer emulation profiles, prefetch controls, and an exhaustively configurable settings engine.
 
-> **Format Breadth:** Glide recognizes and routes **196 suffixes**. The protected built-in fast path covers JPEG/JPG, PNG, BMP, GIF, TIFF, WebP, and ICO essentials. Additional formats are handled seamlessly via Windows WIC, verified optional codec providers, or Windows Shell preview/rasterization pipelines depending on installed platform capabilities.
+> **Format Breadth:** Glide recognizes and routes **196 suffixes**. The protected built-in fast path covers JPEG/JPG, PNG, BMP, GIF, TIFF, WebP, and ICO essentials, and bundled built-in decoders cover **SVG/SVGZ** plus the legacy raster family (**TGA, PCX, PNM/PAM, QOI, HDR, WBMP, XBM, XPM, SGI**). Everything else is handled via Windows WIC, a genuine Windows Shell preview, or a verified optional codec provider depending on installed platform capabilities.
 
 ---
 
@@ -306,6 +325,9 @@ Glide recognizes and routes **196 filename extensions**:
 ### Protected Core Fast-Path Suffixes
 .jpg, .jpeg, .jpe, .png, .bmp, .gif, .tif, .tiff, .webp, .ico
 
+### Bundled Built-in Decoder Suffixes (no optional codec required)
+.svg, .svgz, .tga, .targa, .icb, .vda, .vst, .pcx, .pnm, .ppm, .pgm, .pbm, .pam, .qoi, .hdr, .rgbe, .wbmp, .xbm, .xpm, .sgi, .rgb, .rgba, .bw
+
 ---
 
 ## Building from Source
@@ -314,7 +336,7 @@ On Windows:
 * Build the application: run `build.cmd`
 * Build the complete standalone installer: run `build.cmd` (or `build.cmd fast --no-pause`)
 
-Release builds produce four deliverables: `Glide-4.2.5-Portable.zip`, `dist-installer\Glide Setup.exe`, `Glide-4.2.5.exe` for direct testing, and the compact `Glide-Zero-Context-Handover.zip`.
+Release builds produce four deliverables: `Glide-4.2.6-Portable.zip`, `dist-installer\Glide Setup.exe`, `Glide-4.2.6.exe` for direct testing, and the compact `Glide-Zero-Context-Handover.zip`.
 
 ---
 
@@ -323,7 +345,7 @@ Release builds produce four deliverables: `Glide-4.2.5-Portable.zip`, `dist-inst
 Glide follows six core design principles:
 1. **Measured Image-Open Speed:** Zero splash screens; direct, single real-window launch.
 2. **Smooth High-Volume Navigation:** Instant folder traversal and predictive caching.
-3. **Broad Format Breadth:** 196 extensions recognized without loading heavy optional codecs during cold startup.
+3. **Broad Format Breadth:** 196 extensions recognized, with bundled built-in decoders for SVG and legacy raster formats and no heavy optional codecs loaded during cold startup.
 4. **Deep Customizability:** Total control over keyboard, mouse, gestures, UI layout, and performance policies.
 5. **Modern Tabbed Multitasking:** Drag-and-drop tab detachable workflows across independent windows.
 6. **Self-Documenting Architecture:** Thoroughly documented codebase with diagnostic instrumentation for easy maintenance.

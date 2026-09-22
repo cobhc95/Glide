@@ -12,6 +12,19 @@ public sealed record CodecCapability(string Extension, CodecTier Tier, string Pr
 public static class CodecCapabilityRegistry
 {
     private static readonly HashSet<string> Core = new(ImageFormatRegistry.CoreFastPathExtensions, StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Suffixes Glide can decode in-process with a bundled decoder (no optional codec required):
+    /// the SVG vector rasteriser and the compact built-in raster decoders.
+    /// </summary>
+    private static readonly HashSet<string> BuiltInDecoded = new(new[]
+    {
+        ".svg", ".svgz",
+        ".tga", ".targa", ".icb", ".vda", ".vst",
+        ".pcx", ".pnm", ".ppm", ".pgm", ".pbm", ".pam",
+        ".qoi", ".hdr", ".rgbe", ".wbmp", ".xbm", ".xpm",
+        ".sgi", ".rgb", ".rgba", ".bw"
+    }, StringComparer.OrdinalIgnoreCase);
     private static readonly object ExternalGate = new();
     private static readonly Dictionary<string, string> ExternalProviders = new(StringComparer.OrdinalIgnoreCase);
     public static IReadOnlyList<string> Extensions { get; } = ImageFormatRegistry.Extensions;
@@ -59,19 +72,22 @@ public static class CodecCapabilityRegistry
             or ".jxl" or ".jp2" or ".j2k" or ".j2c" or ".jpc" or ".jpx" or ".jpf" or ".jpm" or ".mj2"
             or ".svg" or ".svgz" or ".exr";
 
+        var builtInDecoded = BuiltInDecoded.Contains(ext);
         var tier = externalProvider is not null ? CodecTier.ExternalProvider
             : Core.Contains(ext) || native ? CodecTier.NativeOs
+            : builtInDecoded ? CodecTier.BuiltIn
             : builtInCandidate ? CodecTier.BuiltIn
             : modular ? CodecTier.ModularNative
             : IsKnownExtension(ext) ? CodecTier.RoutedOnDemand
             : CodecTier.Unsupported;
 
-        // Strict truth: only the preserved core or a provider already verified/loaded is guaranteed.
+        // Strict truth: the preserved core, a verified/loaded provider, or a bundled built-in decoder.
         // RoutedOnDemand remains recognised/navigable but is not advertised here as pre-verified.
-        var enabled = Core.Contains(ext) || externalProvider is not null;
+        var enabled = Core.Contains(ext) || externalProvider is not null || builtInDecoded;
         return new CodecCapability(ext, tier,
             externalProvider ?? (Core.Contains(ext) ? "Glide core (Avalonia/WIC)"
                 : native ? "Windows WIC/Avalonia on-demand"
+                : builtInDecoded ? (ext is ".svg" or ".svgz" ? "Glide vector (Svg.Skia)" : "Glide built-in raster decoder")
                 : builtInCandidate ? "Glide compact/provider route"
                 : modular ? "Optional modular provider"
                 : IsKnownExtension(ext) ? "Adaptive lazy route"

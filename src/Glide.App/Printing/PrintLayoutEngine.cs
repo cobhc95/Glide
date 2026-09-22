@@ -70,7 +70,13 @@ public sealed record PrintPageLayout(
     double SrcHeight,
     double ScaleUsed,
     bool Clipped,
-    string Warning);
+    string Warning,
+    // The content box (user margins intersected with the driver printable rect). Renderers clip
+    // the image to this box so an oversized Actual/Custom image never paints over the margins.
+    double BoxX = 0,
+    double BoxY = 0,
+    double BoxWidth = 0,
+    double BoxHeight = 0);
 
 /// <summary>
 /// Pure page-geometry calculator for image printing. No UI, no printer handles, no
@@ -207,7 +213,8 @@ public static class PrintLayoutEngine
         return new PrintPageLayout(
             rotated, dx, dy, dw, dh,
             Clamp01(sx), Clamp01(sy), Clamp01(sw), Clamp01(sh),
-            scale, clipped, warning.Trim());
+            scale, clipped, warning.Trim(),
+            boxX, boxY, boxW, boxH);
     }
 
     private static bool KeepingAspect(this PrintLayoutInput input) =>

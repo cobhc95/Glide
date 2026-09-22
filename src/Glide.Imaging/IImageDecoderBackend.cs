@@ -71,6 +71,20 @@ public sealed class AvaloniaImageDecoderBackend : IImageDecoderBackend, IPathOpt
 
     public Bitmap DecodeFull(Stream stream, string? sourcePath)
     {
+        // Vector SVG is resolution independent and has no raster "full" decode; render it.
+        if (SvgDecoder.IsSvgPath(sourcePath) && SvgDecoder.TryDecode(sourcePath!, 0, out var svgFull) && svgFull is not null)
+        {
+            if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("svg_full_decode_hit", sourcePath);
+            return svgFull;
+        }
+        // Bundled managed decoders for the long tail of simple raster formats (TGA, PCX, PNM/PAM,
+        // QOI, HDR, WBMP, XBM, XPM, SGI) that neither Skia nor WIC can be relied on for.
+        if (BuiltInRasterDecoder.CanDecode(sourcePath) &&
+            BuiltInRasterDecoder.TryDecode(sourcePath!, out var builtInFull) && builtInFull is not null)
+        {
+            if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("builtin_raster_full_decode_hit", sourcePath);
+            return builtInFull;
+        }
         if (OperatingSystem.IsWindows() && !string.IsNullOrWhiteSpace(sourcePath))
         {
             if (NativeImageDecoder.SupportsDirectNativeDecode(sourcePath))
@@ -91,9 +105,13 @@ public sealed class AvaloniaImageDecoderBackend : IImageDecoderBackend, IPathOpt
         catch (Exception) when (!string.IsNullOrWhiteSpace(sourcePath))
         {
             // Preserve the known-good Avalonia/Skia path first. Only if it cannot decode do we try
-            // Windows' installed WIC codecs, then a genuine Shell thumbnail (never a generic icon).
+            // Windows' installed WIC codecs, then a genuine Shell thumbnail/preview (never a generic
+            // icon). The Shell last resort runs for ANY recognized suffix so formats whose only
+            // handler is a registered Windows thumbnail provider still render instead of failing;
+            // alpha may be flattened in that case, which is preferable to an unusable file.
             if (NativeImageDecoder.TryDecode(sourcePath!, 0, out var native)) return native;
-            if (ShouldTryShellFallback(sourcePath!) && NativeImageDecoder.TryDecodeShellPreview(sourcePath!, 4096, out var shell)) return shell;
+            if (ImageFormatRegistry.IsSupported(sourcePath!) &&
+                NativeImageDecoder.TryDecodeShellPreview(sourcePath!, 4096, out var shell)) return shell;
             throw;
         }
     }
@@ -116,6 +134,13 @@ public sealed class AvaloniaImageDecoderBackend : IImageDecoderBackend, IPathOpt
 
     public Bitmap DecodePreview(Stream stream, ImageDimensions source, int longestSide, BitmapInterpolationMode interpolationMode, string? sourcePath)
     {
+        // Vector SVG renders directly at the requested preview resolution.
+        if (SvgDecoder.IsSvgPath(sourcePath) && SvgDecoder.TryDecode(sourcePath!, longestSide, out var svgPreview) && svgPreview is not null)
+            return svgPreview;
+        // Bundled managed raster decoders (bounded decode) before falling back to Skia.
+        if (BuiltInRasterDecoder.CanDecode(sourcePath) &&
+            BuiltInRasterDecoder.TryDecodeBounded(sourcePath!, longestSide, out var builtInPreview) && builtInPreview is not null)
+            return builtInPreview;
         // Native previews use the native WIC bridge first. This avoids a full-size Skia
         // decode followed by managed downscaling on the critical browse path and lets WIC request
         // a decoder-scaled first frame where the installed codec supports it.
@@ -130,13 +155,16 @@ public sealed class AvaloniaImageDecoderBackend : IImageDecoderBackend, IPathOpt
         catch (Exception) when (!string.IsNullOrWhiteSpace(sourcePath))
         {
             if (NativeImageDecoder.TryDecode(sourcePath!, longestSide, out var native)) return native;
-            if (ShouldTryShellFallback(sourcePath!) && NativeImageDecoder.TryDecodeShellPreview(sourcePath!, longestSide, out var shell)) return shell;
+            if (ImageFormatRegistry.IsSupported(sourcePath!) &&
+                NativeImageDecoder.TryDecodeShellPreview(sourcePath!, longestSide, out var shell)) return shell;
             throw;
         }
     }
 
     public bool SupportsPathPreview(string path) =>
-        OperatingSystem.IsWindows() && ImageFormatRegistry.IsSupported(path);
+        SvgDecoder.IsSvgPath(path) ||
+        BuiltInRasterDecoder.CanDecode(path) ||
+        (OperatingSystem.IsWindows() && ImageFormatRegistry.IsSupported(path));
 
     public Task<PathPreviewDecodeResult?> TryDecodePreviewFromPathAsync(
         string path, ImageDimensions source, int maxWidth, int maxHeight, bool progressiveColorFirstPreview,
@@ -161,6 +189,30 @@ public sealed class AvaloniaImageDecoderBackend : IImageDecoderBackend, IPathOpt
     private static PathPreviewDecodeResult? TryDecodePreviewFromPathCore(
         string path, ImageDimensions source, int maxWidth, int maxHeight, bool progressiveColorFirstPreview)
     {
+        // Vector SVG renders at the requested preview resolution.
+        if (SvgDecoder.IsSvgPath(path))
+        {
+            var longest = Math.Max(maxWidth, maxHeight);
+            if (SvgDecoder.TryDecode(path, longest, out var svgBitmap) && svgBitmap is not null)
+            {
+                if (GlidePerformanceTrace.Enabled)
+                    GlidePerformanceTrace.Mark("svg_preview_ready", $"output={svgBitmap.PixelSize.Width}x{svgBitmap.PixelSize.Height}");
+                return new PathPreviewDecodeResult(svgBitmap, true, "svg-vector");
+            }
+            return null;
+        }
+        // Bundled managed raster decoders (bounded decode) for the long tail of simple formats.
+        if (BuiltInRasterDecoder.CanDecode(path))
+        {
+            var longest = Math.Max(maxWidth, maxHeight);
+            if (BuiltInRasterDecoder.TryDecodeBounded(path, longest, out var rasterBitmap) && rasterBitmap is not null)
+            {
+                if (GlidePerformanceTrace.Enabled)
+                    GlidePerformanceTrace.Mark("builtin_raster_preview_ready", $"output={rasterBitmap.PixelSize.Width}x{rasterBitmap.PixelSize.Height}");
+                return new PathPreviewDecodeResult(rasterBitmap, true, "builtin-raster");
+            }
+            return null;
+        }
         // JPEG/JPEG-XR have a deterministic decoder-native reduced-resolution route. Put it
         // ahead of Shell-cache probing so a cold cache miss cannot add COM/Shell latency to the
         // exact class that exposed the regression. This mirrors legacy's fastest JPEG path while
@@ -228,11 +280,6 @@ public sealed class AvaloniaImageDecoderBackend : IImageDecoderBackend, IPathOpt
         return bitmap.PixelSize.Width >= Math.Min(wantedWidth, Math.Max(256, (int)Math.Ceiling(wantedWidth * .72))) &&
                bitmap.PixelSize.Height >= Math.Min(wantedHeight, Math.Max(256, (int)Math.Ceiling(wantedHeight * .72)));
     }
-
-    private static bool ShouldTryShellFallback(string path) =>
-        ImageFormatRegistry.IsSupported(path) &&
-        !ImageFormatRegistry.IsCoreFastPath(path) &&
-        !ImageFormatRegistry.MayContainTransparency(path);
 }
 
 /// <summary>
