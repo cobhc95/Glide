@@ -1,6 +1,6 @@
 #define MyAppName "Glide Image Viewer"
 #define MyAppShortName "Glide"
-#define MyAppVersion "4.2.7"
+#define MyAppVersion "4.3.0"
 #define MyAppExeName "Glide.exe"
 
 [Setup]
@@ -23,7 +23,7 @@ UsePreviousAppDir=yes
 CloseApplications=yes
 RestartApplications=no
 UninstallDisplayIcon={app}\{#MyAppExeName}
-VersionInfoVersion=4.2.7.0
+VersionInfoVersion=4.3.0.0
 VersionInfoProductName={#MyAppName}
 VersionInfoDescription=Glide Image Viewer Setup
 
@@ -169,10 +169,35 @@ begin
     Exec(ExePath, '--unregister-file-associations', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 end;
 
+procedure RegisterGlideThumbnails;
+var
+  ResultCode: Integer;
+  ExePath: String;
+begin
+  { Explorer thumbnail provider: the CLSID plus the recommended per-extension ShellEx entries. Glide
+    derives the extension set from its own format registry, so new formats need no installer change. }
+  ExePath := ExpandConstant('{app}\Glide.exe');
+  if FileExists(ExePath) then
+    Exec(ExePath, '--register-thumbnails', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
+procedure UnregisterGlideThumbnails;
+var
+  ResultCode: Integer;
+  ExePath: String;
+begin
+  ExePath := ExpandConstant('{app}\Glide.exe');
+  if FileExists(ExePath) then
+    Exec(ExePath, '--unregister-thumbnails', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then
+  begin
     RegisterGlideAssociations;
+    RegisterGlideThumbnails;
+  end;
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
@@ -181,6 +206,7 @@ begin
   begin
     { Stop the warm host so Glide.exe is runnable and not locked while we remove its registration. }
     StopAllGlideProcesses;
+    UnregisterGlideThumbnails;
     UnregisterGlideAssociations;
   end;
 end;

@@ -1,14 +1,25 @@
-# Glide 4.2.7
+# Glide 4.3.0
 
 ## Fast. Lightweight. Multi-tabbed. Multi-window. Highly customizable.
 
 ![Glide main user interface](docs/screenshots/screenshot_1.jpg)
 
-**Glide 4.2.7 is a high-performance Windows image viewer built around instant-feeling image opening, a compact installer, multi-tab and multi-window workflows, transparent overlays, deep mouse/keyboard customization, Launch Speed Boost, complete image printing, native SVG/vector support, automatic Windows Open With integration, and recognition/routing for 196 image and document filename extensions.**
+**Glide 4.3.0 is a high-performance Windows image viewer built around instant-feeling image opening, a compact installer, multi-tab and multi-window workflows, transparent overlays, deep mouse/keyboard customization, Launch Speed Boost, complete image printing, native SVG/vector support, automatic Windows Open With integration, Windows Explorer thumbnails, and recognition/routing for 196 image and document filename extensions.**
 
-## What's new in 4.2.7
+## What's new in 4.3.0
 
-Glide 4.2.7 makes Windows integration automatic:
+- **Windows Explorer thumbnails.** Explorer now shows real thumbnails for every format Glide can
+  open instead of a generic icon. A small native provider decodes inside Explorer's isolated
+  thumbnail host — it never loads .NET or Glide's UI, never creates a window and never blocks
+  Explorer. Embedded previews and decoder-native downscaling keep large folders fast (measured
+  median **1 ms**, p95 **13 ms**). Configure it under **Settings → Windows Integration →
+  Explorer thumbnails**.
+- **Each Glide window gets its own taskbar button**, and minimizing can no longer lose a window —
+  every window keeps its own taskbar entry and restores it after Speed Boost standby.
+
+### Previously in 4.2.7
+
+Glide 4.2.7 made Windows integration automatic:
 
 - **Open With, set up for you.** On install (and on first launch for portable copies) Glide adds
   itself to Windows' **Open With** menu for **every supported format** — no trip to Options required.
@@ -347,7 +358,7 @@ On Windows:
 * Build the application: run `build.cmd`
 * Build the complete standalone installer: run `build.cmd` (or `build.cmd fast --no-pause`)
 
-Release builds produce four deliverables: `Glide-4.2.7-Portable.zip`, `dist-installer\Glide Setup.exe`, `Glide-4.2.7.exe` for direct testing, and the compact `Glide-Zero-Context-Handover.zip`.
+Release builds produce four deliverables: `Glide-4.3.0-Portable.zip`, `dist-installer\Glide Setup.exe`, `Glide-4.3.0.exe` for direct testing, and the compact `Glide-Zero-Context-Handover.zip`.
 
 ---
 

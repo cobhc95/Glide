@@ -21,7 +21,6 @@ internal static class GlideWindowRegistry
             Cleanup();
             if (Windows.Any(x => x.TryGetTarget(out var existing) && ReferenceEquals(existing, window))) return;
             Windows.Add(new WeakReference<MainWindow>(window));
-            RefreshTaskbarRepresentativeLocked();
         }
     }
 
@@ -31,7 +30,6 @@ internal static class GlideWindowRegistry
         lock (Gate)
         {
             Windows.RemoveAll(x => !x.TryGetTarget(out var target) || ReferenceEquals(target, window));
-            RefreshTaskbarRepresentativeLocked();
             live = Windows.Select(x => x.TryGetTarget(out var target) ? target : null)
                 .Where(target => target is not null).Cast<MainWindow>().ToArray();
         }
@@ -53,18 +51,14 @@ internal static class GlideWindowRegistry
     }
 
     /// <summary>
-    /// Keeps one visible Glide window as the taskbar representative. Secondary windows remain
-    /// ordinary top-level windows for independent navigation, but do not create extra taskbar
-    /// buttons. When the representative closes or enters Speed Boost standby, another visible
-    /// Glide window is promoted automatically.
+    /// Retained for call-site compatibility. Glide no longer elects a single taskbar representative:
+    /// every visible window owns its own taskbar button (and a distinct AppUserModelID for secondary
+    /// windows), so multiple Glide windows appear as separate taskbar entries. Hidden windows manage
+    /// their own taskbar eligibility during the Speed Boost standby transition.
     /// </summary>
     public static void RefreshTaskbarRepresentative()
     {
-        lock (Gate)
-        {
-            Cleanup();
-            RefreshTaskbarRepresentativeLocked();
-        }
+        lock (Gate) Cleanup();
     }
 
     public static MainWindow? FindAttachTarget(PixelPoint screenPoint, MainWindow source)
@@ -81,26 +75,6 @@ internal static class GlideWindowRegistry
     }
 
     private static void Cleanup() => Windows.RemoveAll(x => !x.TryGetTarget(out _));
-
-    private static void RefreshTaskbarRepresentativeLocked()
-    {
-        var live = Windows
-            .Select(x => x.TryGetTarget(out var window) ? window : null)
-            .Where(window => window is not null)
-            .Cast<MainWindow>()
-            .ToArray();
-        // Prefer the primary render window whenever it is visible. A secondary window can be the
-        // temporary fallback while Speed Boost has the primary hidden, but it must not reclaim the
-        // taskbar slot when the primary is restored after the last-window standby cycle.
-        var representative = live.FirstOrDefault(window => window.IsVisible && !window.IsSecondaryWindow)
-            ?? live.FirstOrDefault(window => window.IsVisible);
-        foreach (var window in live)
-        {
-            var shouldShow = representative is not null && ReferenceEquals(window, representative);
-            if (window.ShowInTaskbar != shouldShow)
-                window.ShowInTaskbar = shouldShow;
-        }
-    }
 }
 
 internal readonly record struct ScreenPixelRect(int X, int Y, int Width, int Height)

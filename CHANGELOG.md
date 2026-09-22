@@ -4,6 +4,45 @@ All notable changes to Glide Image Viewer are documented here. The format is bas
 [Keep a Changelog](https://keepachangelog.com/), and the project uses dotted feature releases with
 hyphenated follow-up corrections (for example `4.2.0-1`).
 
+## [4.3.0] - 2026-09-22
+
+Explorer integration and window-management release. Glide now draws real thumbnails in Windows
+Explorer, multiple Glide windows each get their own taskbar button, and minimizing can no longer
+lose a window.
+
+### Added
+
+- 🖼️ **Windows Explorer thumbnail provider.** Explorer now shows real thumbnails for the formats
+  Glide can open instead of a generic icon. A small native COM shim
+  (`Glide.ShellThumbnail.dll`) decodes inside Explorer's isolated thumbnail host — it never loads
+  .NET, Avalonia, Glide.exe or any Glide UI, never creates a window, and never shows a dialog.
+  - Format coverage is **derived from Glide's format registry**, so a newly supported format becomes
+    thumbnail-capable automatically (196 extensions, 210 when counting every suffix Glide opens).
+  - Decode strategy: embedded thumbnail/preview first, then decoder-native reduced decode (WIC), then
+    a bounded full decode; SVG is rasterised with Direct2D at the size Explorer asked for.
+  - **Measured:** median **1 ms**, p95 **13 ms**, 100% under 20 ms across a 300-image corpus
+    (640×480 up to 8000×6000) plus TGA/SVG/QOI/PPM, counting COM activation per item.
+    See `docs/explorer-thumbnails.md` and `tools/thumbnail-benchmark.ps1`.
+  - Windows keeps owning the thumbnail cache; Glide adds no second database.
+- ⚙️ **Settings → Windows Integration → Explorer thumbnails**: master toggle, provider mode
+  (Recommended / unsupported-only / all / custom), per-group and per-extension selection, thumbnail
+  quality (Fast/Balanced/High), embedded-preview preference, maximum source decode size, a
+  diagnostics readout (provider present, registered, architecture, formats, mode, version) and
+  actions to re-register, restore recommended defaults and refresh the Windows thumbnail cache.
+- 🗂️ **Each Glide window is its own taskbar button.** Secondary windows now keep their own taskbar
+  entry and receive a distinct AppUserModelID (verified on real windows), so multiple Glide windows
+  no longer collapse into a single button.
+- 🔧 **Installer integration** for the thumbnail provider (machine-wide `HKLM`) with clean uninstall,
+  including stopping the warm host before removal.
+
+### Fixed
+
+- 🪟 **Multiple Glide windows now appear as separate taskbar entries.** The single-taskbar
+  representative suppression was removed; the registry no longer toggles `ShowInTaskbar`.
+- 🗕 **Minimizing can no longer make a window vanish.** Because every window now keeps its own
+  taskbar button and `ExitStandby` restores it after Speed Boost standby, a minimized window can
+  always be restored from the taskbar.
+
 ## [4.2.7] - 2026-09-22
 
 Automatic Windows integration release. Glide now associates itself with every supported format when

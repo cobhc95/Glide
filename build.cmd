@@ -215,6 +215,36 @@ if exist native\Glide.Native\CMakeLists.txt (
   )
 )
 
+if exist native\Glide.ShellThumbnail\CMakeLists.txt (
+  where cmake >nul 2>nul
+  if errorlevel 1 (
+    echo ERROR: CMake is required for the Explorer thumbnail provider.
+    set "GLIDE_BUILD_RC=1"
+    goto :fail
+  ) else (
+    call :progress 24 "Explorer thumbnail provider"
+    echo [2b/8] Building Explorer thumbnail provider ^(parallel, incremental^)...
+    cmake -S native\Glide.ShellThumbnail -B native\Glide.ShellThumbnail\build -A x64
+    if errorlevel 1 (
+      echo ERROR: Explorer thumbnail provider configure failed.
+      set "GLIDE_BUILD_RC=!errorlevel!"
+      goto :fail
+    )
+    cmake --build native\Glide.ShellThumbnail\build --config Release --parallel %NUMBER_OF_PROCESSORS%
+    if errorlevel 1 (
+      echo ERROR: Explorer thumbnail provider build failed.
+      set "GLIDE_BUILD_RC=!errorlevel!"
+      goto :fail
+    )
+    if not exist "native\Glide.ShellThumbnail\build\Release\Glide.ShellThumbnail.dll" (
+      echo ERROR: Explorer thumbnail provider reported success but Glide.ShellThumbnail.dll is missing.
+      set "GLIDE_BUILD_RC=1"
+      goto :fail
+    )
+    echo       Thumbnail provider: native\Glide.ShellThumbnail\build\Release\Glide.ShellThumbnail.dll
+  )
+)
+
 call :progress 32 "Managed restore/build"
 echo [3/8] Restoring and building managed solution ^(incremental / multiprocess^)...
 dotnet restore Glide.sln
@@ -276,6 +306,15 @@ if not exist "dist\Glide.Native.dll" (
   echo ERROR: Native bridge copy to dist failed.
   set "GLIDE_BUILD_RC=1"
   goto :fail
+)
+
+rem Explorer thumbnail provider ships alongside the native bridge. It is optional at runtime: the app
+rem simply reports the provider as unavailable when the DLL is absent.
+if exist "native\Glide.ShellThumbnail\build\Release\Glide.ShellThumbnail.dll" (
+  copy /y "native\Glide.ShellThumbnail\build\Release\Glide.ShellThumbnail.dll" "dist\Glide.ShellThumbnail.dll" >nul
+  echo       Thumbnail provider staged in dist.
+) else (
+  echo WARNING: Glide.ShellThumbnail.dll was not built; Explorer thumbnails will be unavailable.
 )
 
 rem Release deliverables: a clean portable archive and a directly testable EXE.

@@ -31,6 +31,21 @@ internal static class Program
             return ok ? 0 : 1;
         }
 
+        // Machine-wide Explorer thumbnail provider registration, invoked by the installer.
+        if (args.Length >= 1 && args[0].Equals("--register-thumbnails", StringComparison.OrdinalIgnoreCase))
+        {
+            var extensions = Platform.WindowsThumbnailRegistration.ExtensionsFor(Platform.ThumbnailProviderMode.Recommended);
+            var ok = Platform.WindowsThumbnailRegistration.Register(perUser: false, extensions, out var message);
+            Console.WriteLine(message);
+            return ok ? 0 : 1;
+        }
+        if (args.Length >= 1 && args[0].Equals("--unregister-thumbnails", StringComparison.OrdinalIgnoreCase))
+        {
+            var ok = Platform.WindowsThumbnailRegistration.Unregister(perUser: false, ImageFormatRegistry.Extensions, out var message);
+            Console.WriteLine(message);
+            return ok ? 0 : 1;
+        }
+
         // Build-time fixture generation also runs before Avalonia initialization.
         if (args.Length >= 2 && args[0].Equals("--write-diagnostic-fixtures", StringComparison.OrdinalIgnoreCase))
         {
@@ -252,7 +267,7 @@ internal static class Program
             // This process is now the elected UI/broker owner. Start the crash breadcrumb file only
             // here so short-lived forwarding helper processes cannot overwrite the live owner trace.
             if (diagnosticTraceRequested)
-                LiveDiagnosticTrace.Initialize("4.2.7-diagnostic");
+                LiveDiagnosticTrace.Initialize("4.3.0-diagnostic");
             AppDomain.CurrentDomain.UnhandledException += (_, eventArgs) =>
             {
                 if (eventArgs.ExceptionObject is Exception fatal)
