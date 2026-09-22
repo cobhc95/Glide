@@ -28,7 +28,7 @@ internal sealed class NativeOverlayWindowRenderer : IDisposable
     private const uint ULW_ALPHA = 2, BI_RGB = 0, DIB_RGB_COLORS = 0, PM_REMOVE = 1;
     private const uint WM_QUIT = 0x12, WM_NCHITTEST = 0x84, WM_MOUSEACTIVATE = 0x21;
     private const int MA_NOACTIVATE = 3, ERROR_CLASS_ALREADY_EXISTS = 1410;
-    private static readonly string ClassName = "Glide.NativeOverlay.4.2.4";
+    private static readonly string ClassName = "Glide.NativeOverlay.4.2.5";
     private static readonly WindowProc WindowProcedure = NativeWindowProcedure;
 
     private sealed class Item

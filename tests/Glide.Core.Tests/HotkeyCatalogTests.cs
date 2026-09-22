@@ -6,10 +6,17 @@ namespace Glide.Core.Tests;
 public sealed class HotkeyCatalogTests
 {
     [Fact]
-    public void Hotkey_contract_has_68_editable_hotkey_rows()
+    public void Hotkey_contract_has_69_editable_hotkey_rows()
     {
-        Assert.Equal(68, HotkeyCatalog.All.Count);
-        Assert.Equal(68, HotkeyCatalog.All.Select(x => x.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count());
+        Assert.Equal(69, HotkeyCatalog.All.Count);
+        Assert.Equal(69, HotkeyCatalog.All.Select(x => x.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count());
+    }
+
+    [Fact]
+    public void Print_has_the_ctrl_p_default_shortcut()
+    {
+        var bindings = HotkeyCatalog.CreateDefaultMap();
+        Assert.Equal(new[] { "Ctrl+P" }, HotkeyCatalog.ShortcutsForCommand(GlideCommand.Print, bindings));
     }
 
     [Fact]

@@ -4,6 +4,45 @@ All notable changes to Glide Image Viewer are documented here. The format is bas
 [Keep a Changelog](https://keepachangelog.com/), and the project uses dotted feature releases with
 hyphenated follow-up corrections (for example `4.2.0-1`).
 
+## [4.2.5] - 2026-09-22
+
+Image-printing release. Glide now has a complete, WYSIWYG image print workflow modelled on the mature
+viewers (FastStone Image Viewer, IrfanView, XnView). See `docs/print-research.md` for the Phase-1
+reference research and `docs/screenshots/print-research/` for the FastStone 8.5 reference capture.
+
+### Added
+
+- 🖨️ **Print the current image** from `Ctrl+P`, the viewer right-click menu, and the browser item
+  Context menu. It prints the original full-resolution decoded image — never a screenshot of the
+  viewport, so Glide's zoom, pan, selection, overlay borders and other chrome are never baked in.
+- 🪟 **Glide-native Print window** with a live WYSIWYG page preview that updates immediately on any
+  paper, orientation, scaling, margin or alignment change:
+  - Printer selector and native **Properties…** (driver preferences) button
+  - Paper size and paper source (when the driver reports trays)
+  - Portrait / Landscape, Copies (1–99), Colour / Grayscale (when supported)
+  - Scaling: **Best fit**, **Fill page** (crop to fill), **Actual size (100%)**, **Custom scale %**,
+    **Stretch**; with **Keep aspect ratio** and **Automatically rotate for best fit**
+  - Alignment: Left / Centre / Right and Top / Centre / Bottom (all nine positions)
+  - Four independent margins in the locale's physical unit (mm/in)
+- **Embedded-DPI Actual size.** JFIF density, EXIF X/YResolution + unit, PNG `pHYs`, TIFF and BMP
+  resolution fields are read; absent or nonsensical values fall back to a documented **96 DPI**.
+- **Layout preferences persist** between sessions (scaling, margins, auto-rotate, alignment,
+  orientation, copies) in `print.settings.json`. Printer-specific capabilities are never persisted.
+- Print command is user-bindable through the hotkey catalogue; the **Print** title-bar button is
+  available in the title-bar customizer with a new vector glyph.
+
+### Notes
+
+- **Printing is high quality:** the source image's full resolution is spooled, aspect ratio is
+  preserved except in the explicit Stretch mode, the printer's real printable rectangle is respected
+  (zero margins mean "to the printable edge", not over it — avoiding the historical XnView
+  preview/print divergence), alpha is composited against white, and EXIF orientation is honoured.
+- **No print code runs at startup.** Printer enumeration and the GDI+/System.Drawing pipeline load
+  only when Print is invoked, so normal navigation, overlay mode, fullscreen, zoom/pan, tabs and
+  startup performance are unaffected.
+- Single-image printing is complete. Multi-image / contact-sheet printing is intentionally deferred
+  to a follow-up (the layout engine is page-shaped so it can be added without disturbing v1).
+
 ## [4.2.4] - 2026-09-22
 
 Polish and correctness release. See the GitHub release notes for the same list.

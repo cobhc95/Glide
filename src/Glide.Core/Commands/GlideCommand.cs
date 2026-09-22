@@ -75,6 +75,7 @@ public enum GlideCommand
     RenameFile,
     DeleteFile,
     OpenContainingFolder,
+    Print,
     ExternalProgram1,
     ExternalProgram2,
     ExternalProgram3

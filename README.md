@@ -1,36 +1,34 @@
-# Glide 4.2.4
+# Glide 4.2.5
 
 ## Fast. Lightweight. Multi-tabbed. Multi-window. Highly customizable.
 
 ![Glide main user interface](docs/screenshots/screenshot_1.jpg)
 
-**Glide 4.2.4 is a high-performance Windows image viewer built around instant-feeling image opening, a compact installer, multi-tab and multi-window workflows, transparent overlays, deep mouse/keyboard customization, Launch Speed Boost, and recognition/routing for 196 image and document filename extensions.**
+**Glide 4.2.5 is a high-performance Windows image viewer built around instant-feeling image opening, a compact installer, multi-tab and multi-window workflows, transparent overlays, deep mouse/keyboard customization, Launch Speed Boost, complete image printing, and recognition/routing for 196 image and document filename extensions.**
 
-## What's new in 4.2.4
+## What's new in 4.2.5
 
-Glide 4.2.4 is a display-correctness, input and window-behaviour release:
+Glide 4.2.5 adds a complete, reference-faithful image printing workflow:
 
-- **No more stretched photos.** Pictures carrying an EXIF orientation tag (typical portrait phone or
-  camera shots) were drawn at the wrong aspect ratio. The decoded image is now kept in sync with the
-  reported source size on every decode route, so Fit image / Fit width / Fit height all preserve the
-  true aspect ratio.
-- **Fullscreen right-click (backwards) works with a natural hand movement.** Left click advanced on
-  press, but backwards navigation required a near-motionless pointer; both now share a forgiving
-  click-versus-drag tolerance. A deliberate right-drag still pans zoomed content.
-- **New Fit image button + sticky fit scope.** The status bar gains a **Fit image** control beside
-  Fit width / Fit height. All three follow the new **Fit control scope** setting (Only the current
-  image / This session / This session and future sessions, the default).
-- **Always on top from the context menu.** A tickable **Always on top** item is now directly visible
-  in the right-click menu for the windowed viewer and the fullscreen chrome. Always-on-top strength
-  now defaults to **Soft** (Soft / Hard remain selectable).
-- **Minimize keeps your window.** With Speed Boost on, minimizing the last window could hide it from
-  the taskbar; minimize is a real Windows minimize again, and standby stays reserved for closing the
-  last window.
-- **Smarter window and status-bar resizing.** Title-bar icons now yield one at a time as the window
-  narrows; the status bar sizes to its real wrapped content; and the new **Auto-resize** option
-  (on by default) shrinks the status buttons only when space runs out, restoring your configured size.
-- **Settings tidy-up.** The standalone Animation tab is folded into **Window in Window**, and settings
-  search now covers **189 / 189** catalogued settings.
+- **Print the current image** with `Ctrl+P`, the viewer right-click menu, or the browser item menu.
+  Glide prints the **original full-resolution decoded image** — never a screenshot of the viewport,
+  so zoom, pan, selection, overlays and other chrome are never baked into the page.
+- **Glide-native Print window with live WYSIWYG preview** that updates the moment you change paper,
+  orientation, scaling, margins or alignment:
+  - Printer selector and native **Properties…** (driver preferences)
+  - Paper size, paper source (when the driver exposes trays)
+  - Portrait / Landscape, Copies (1–99), Colour / Grayscale (when supported)
+  - Scaling: **Best fit**, **Fill page** (crop to fill), **Actual size (100%)**, **Custom scale %**,
+    **Stretch** — plus **Keep aspect ratio** and **Automatically rotate for best fit**
+  - **Nine alignment positions** (Left / Centre / Right × Top / Centre / Bottom)
+  - Four independent margins in **mm or inches** based on your Windows locale
+- **Accurate WYSIWYG.** The preview and the printed page share one geometry engine and both use the
+  printer's real printable rectangle, so preview and paper cannot disagree — zero margins print to
+  the printable edge, never over it.
+- **Embedded-DPI Actual size** (JFIF, EXIF, PNG `pHYs`, TIFF, BMP) with a documented **96 DPI**
+  fallback, **EXIF orientation** honoured, and transparency composited against white.
+- **Your layout preferences are remembered** between sessions; no printer enumeration happens at
+  startup, so normal viewing performance is unchanged.
 
 See [CHANGELOG.md](CHANGELOG.md) and the GitHub release notes for the full list.
 
@@ -269,6 +267,31 @@ Glide includes a dedicated non-destructive overlay system for image comparison, 
 
 ---
 
+### 13. Image Printing
+
+![Glide Print window](docs/screenshots/print-research/glide-print-dialog.png)
+
+Glide prints the **original decoded image at full resolution**, not a capture of the viewport, through a
+Glide-native window with a live WYSIWYG preview. Open it with `Ctrl+P`, the viewer right-click menu, or
+the browser item menu.
+
+* **Reference-faithful layout:** printer + native Properties, paper size/source, portrait/landscape,
+  copies, colour/grayscale, and a live preview that updates on every change.
+* **Scaling modes:** Best fit (aspect preserved), Fill page (crop to fill), Actual size (embedded DPI
+  with a 96 DPI fallback), Custom scale %, and Stretch.
+* **Alignment and margins:** nine anchor positions and four independent margins in mm or inches
+  (locale-aware). Preview and print both honour the printer's real printable rectangle, so zero
+  margins never bleed past the printable edge.
+* **Correct image handling:** EXIF orientation is respected, transparency is composited against white,
+  and high-quality downsampling is used for the printer's DPI.
+* **Remembered layout:** scaling, margins, rotation, alignment, orientation and copies persist; printer
+  capabilities are re-read live so switching printers can never leave stale settings behind.
+
+See [docs/print-research.md](docs/print-research.md) for the Phase-1 reference behaviour study of
+FastStone Image Viewer 8.5, IrfanView and XnView.
+
+---
+
 ## Recognized & Routed Formats
 
 Glide recognizes and routes **196 filename extensions**:
@@ -291,7 +314,7 @@ On Windows:
 * Build the application: run `build.cmd`
 * Build the complete standalone installer: run `build.cmd` (or `build.cmd fast --no-pause`)
 
-Release builds produce four deliverables: `Glide-4.2.4-Portable.zip`, `dist-installer\Glide Setup.exe`, `Glide-4.2.4.exe` for direct testing, and the compact `Glide-Zero-Context-Handover.zip`.
+Release builds produce four deliverables: `Glide-4.2.5-Portable.zip`, `dist-installer\Glide Setup.exe`, `Glide-4.2.5.exe` for direct testing, and the compact `Glide-Zero-Context-Handover.zip`.
 
 ---
 

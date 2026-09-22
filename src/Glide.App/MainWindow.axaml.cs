@@ -19,6 +19,7 @@ using Avalonia.VisualTree;
 using Glide.App.Controls;
 using Glide.App.Diagnostics;
 using Glide.App.Platform;
+using Glide.App.Printing;
 using Glide.App.Settings;
 using Glide.App.Services;
 using Glide.Core;
@@ -765,6 +766,9 @@ public partial class MainWindow : Window
             // maximization state match an actual click on Windows' maximize button.
             Dispatcher.UIThread.Post(RestoreValidatedStartupNormalPosition, DispatcherPriority.Loaded);
             Dispatcher.UIThread.Post(EnsureNativeMaximizedState, DispatcherPriority.Loaded);
+
+            if (!string.IsNullOrWhiteSpace(App.CapturePrintDialogImage))
+                Dispatcher.UIThread.Post(async () => await CapturePrintDialogForDiagnosticsAsync(App.CapturePrintDialogImage!, App.CapturePrintDialogOutput!), DispatcherPriority.Background);
         };
 
         // Resolve the final startup geometry before Windows ever shows the HWND. Applying reference
@@ -1327,7 +1331,7 @@ public partial class MainWindow : Window
     {
         if (!File.Exists(path) || !ImageNavigator.IsSupported(path))
         {
-            Title = "Glide 4.2.4 — Unsupported or missing image";
+            Title = "Glide 4.2.5 — Unsupported or missing image";
             return;
         }
         if (openInNewTab || !_workspace.ReplaceActiveWithImage(path)) _workspace.AddImage(path);
@@ -1714,7 +1718,7 @@ public partial class MainWindow : Window
             if (IsRequestCurrent(request))
             {
                 _diagnostics.Write("decode", "foreground_failed", new { path, request = request.ImageRequestId, error = ex.GetType().Name, ex.Message });
-                Title = $"Glide 4.2.4 — Open failed: {ex.GetType().Name}";
+                Title = $"Glide 4.2.5 — Open failed: {ex.GetType().Name}";
             }
             if (_warmPresentationGateActive)
                 await ReleaseWarmPresentationGateAsync(safeFrameReady: false);
@@ -2554,7 +2558,7 @@ public partial class MainWindow : Window
             : "Fast browsing, precise zooming, and familiar Windows controls.";
         home.TipsGrid.IsVisible = !recentLanding && _settings.ShowHomeTips;
         ApplyWelcomeLayout();
-        Title = recentLanding ? "Glide 4.2.4 — Recent pictures" : "Glide 4.2.4 — Home";
+        Title = recentLanding ? "Glide 4.2.5 — Recent pictures" : "Glide 4.2.5 — Home";
         RefreshRecentHistoryHome();
         ApplyStatusVisibility();
     }
@@ -4232,7 +4236,7 @@ public partial class MainWindow : Window
         BrowserBackButton.IsEnabled = session.Index > 0 || (_tabForwardImageTargets.TryGetValue(id, out var backTarget) && File.Exists(backTarget));
         BrowserForwardButton.IsEnabled = session.Index >= 0 && session.Index < session.History.Count - 1;
         BrowserUpButton.IsEnabled = Directory.GetParent(folder) is not null;
-        Title = $"Glide 4.2.4 — Explorer — {folder}";
+        Title = $"Glide 4.2.5 — Explorer — {folder}";
         RebuildTabStrip();
         SelectBrowserHighlight(id);
         UpdateTabNavigationButtons();
@@ -4323,7 +4327,7 @@ public partial class MainWindow : Window
         BrowserBackButton.IsEnabled = session.Index > 0 || (_tabForwardImageTargets.TryGetValue(browser.Id, out var nativeBackTarget) && File.Exists(nativeBackTarget));
         BrowserForwardButton.IsEnabled = session.Index >= 0 && session.Index < session.History.Count - 1;
         BrowserUpButton.IsEnabled = Directory.GetParent(folder) is not null;
-        Title = $"Glide 4.2.4 — Explorer — {folder}";
+        Title = $"Glide 4.2.5 — Explorer — {folder}";
         RebuildTabStrip();
         SelectBrowserHighlight(browser.Id);
         UpdateTabNavigationButtons();
@@ -4698,6 +4702,12 @@ public partial class MainWindow : Window
         var delete = new MenuItem { Header = "Delete to Recycle Bin" };
         delete.Click += (_, _) => DeleteBrowserPath(path, directory);
         items.Add(delete);
+        if (!directory && File.Exists(path) && ImageNavigator.IsSupported(path))
+        {
+            var print = new MenuItem { Header = "Print…" };
+            print.Click += async (_, _) => await PrintFileAsync(path);
+            items.Add(print);
+        }
         items.Add(new MenuItem { Header = "-" });
         AppendWholeAppOverlayMenuItems(items);
         menu.ItemsSource = items;
@@ -7460,14 +7470,14 @@ public partial class MainWindow : Window
     {
         if (string.IsNullOrWhiteSpace(_currentPath) || !ImageView.IsVisible)
         {
-            if (HomeHost.IsVisible) Title = "Glide 4.2.4 — Home";
+            if (HomeHost.IsVisible) Title = "Glide 4.2.5 — Home";
             return;
         }
         var display = _settings.FullPathInTitle ? _currentPath : Path.GetFileName(_currentPath);
         var index = _navigator.Count > 0 ? $"[{_navigator.Index + 1}/{_navigator.Count}]" : string.Empty;
         Title = prefix is null
-            ? $"Glide 4.2.4 — {display}  {index}  {Viewport.ZoomPercent}%"
-            : $"Glide 4.2.4 — {prefix} — {display}";
+            ? $"Glide 4.2.5 — {display}  {index}  {Viewport.ZoomPercent}%"
+            : $"Glide 4.2.5 — {prefix} — {display}";
     }
 
     private static string FormatFileSize(long bytes)
@@ -8119,7 +8129,7 @@ public partial class MainWindow : Window
             [GlideCommand.DetachTab] = async () => { if (_workspace.Active is { } a) await DetachTabAsync(a.Id, this.PointToScreen(new Point(Bounds.Width / 2, 48))); }, [GlideCommand.CloseWindow] = () => { Close(); return Task.CompletedTask; }, [GlideCommand.ToggleFullscreen] = () => { ToggleFullscreen(); return Task.CompletedTask; }, [GlideCommand.StartPauseSlideshow] = ToggleSlideshowAsync, [GlideCommand.StopSlideshow] = () => { StopSlideshow(true); return Task.CompletedTask; },
             [GlideCommand.ToggleImageInfo] = () => Event(InfoClicked), [GlideCommand.ClearSelection] = HandleEscapeAsync, [GlideCommand.Settings] = () => Event(SettingsClicked), [GlideCommand.AddOverlay] = () => Event(OverlayAddClicked), [GlideCommand.SaveOverlayLayout] = () => Event(OverlaySaveClicked), [GlideCommand.LoadOverlayLayout] = () => Event(OverlayLoadClicked), [GlideCommand.ResetSelectedOverlayZoom] = () => { EnsureOverlays().ResetSelectedZoom(); return Task.CompletedTask; }, [GlideCommand.BringSelectedOverlayFront] = () => { EnsureOverlays().BringSelectedToFront(); return Task.CompletedTask; },
             [GlideCommand.ToggleAlwaysOnTop] = () => Event(AlwaysOnTopClicked), [GlideCommand.ToggleTransparency] = () => Event(TransparencyClicked), [GlideCommand.ShowContextMenu] = () => { ShowViewerContextMenu(); return Task.CompletedTask; }, [GlideCommand.BrowserBack] = () => Event(BrowserBackClicked), [GlideCommand.BrowserForward] = () => Event(BrowserForwardClicked), [GlideCommand.BrowserUp] = () => Event(BrowserUpClicked),
-            [GlideCommand.CopyImage] = () => { CopyImagePixels(); return Task.CompletedTask; }, [GlideCommand.ExportSelection] = ExportSelectionAsync, [GlideCommand.CopyFile] = () => { CopyImageFile(); return Task.CompletedTask; }, [GlideCommand.CopyFileName] = () => CopyTextAsync(_currentPath is null ? null : Path.GetFileName(_currentPath)), [GlideCommand.CopyFolderPath] = () => CopyTextAsync(_currentPath is null ? null : Path.GetDirectoryName(_currentPath)), [GlideCommand.CopyFullPath] = () => CopyTextAsync(_currentPath), [GlideCommand.RenameFile] = RenameCurrentFileAsync, [GlideCommand.DeleteFile] = DeleteCurrentFileAsync, [GlideCommand.OpenContainingFolder] = () => { OpenContainingFolder(); return Task.CompletedTask; }, [GlideCommand.ExternalProgram1] = () => { LaunchExternal(1); return Task.CompletedTask; }, [GlideCommand.ExternalProgram2] = () => { LaunchExternal(2); return Task.CompletedTask; }, [GlideCommand.ExternalProgram3] = () => { LaunchExternal(3); return Task.CompletedTask; }
+            [GlideCommand.CopyImage] = () => { CopyImagePixels(); return Task.CompletedTask; }, [GlideCommand.ExportSelection] = ExportSelectionAsync, [GlideCommand.CopyFile] = () => { CopyImageFile(); return Task.CompletedTask; }, [GlideCommand.CopyFileName] = () => CopyTextAsync(_currentPath is null ? null : Path.GetFileName(_currentPath)), [GlideCommand.CopyFolderPath] = () => CopyTextAsync(_currentPath is null ? null : Path.GetDirectoryName(_currentPath)), [GlideCommand.CopyFullPath] = () => CopyTextAsync(_currentPath), [GlideCommand.RenameFile] = RenameCurrentFileAsync, [GlideCommand.DeleteFile] = DeleteCurrentFileAsync, [GlideCommand.OpenContainingFolder] = () => { OpenContainingFolder(); return Task.CompletedTask; }, [GlideCommand.Print] = PrintCurrentImageAsync, [GlideCommand.ExternalProgram1] = () => { LaunchExternal(1); return Task.CompletedTask; }, [GlideCommand.ExternalProgram2] = () => { LaunchExternal(2); return Task.CompletedTask; }, [GlideCommand.ExternalProgram3] = () => { LaunchExternal(3); return Task.CompletedTask; }
         };
         actions[GlideCommand.ToggleStatusSurface] = () => { if (!_settings.ShowStatusSurface) { _settings.ShowStatusSurface = true; _statusCollapsed = false; SaveSettingsAndPublish(); } else _statusCollapsed = !_statusCollapsed; ApplyStatusVisibility(); return Task.CompletedTask; };
         MainWindowCommandDispatcher.AssertComplete(actions.Keys);
@@ -8253,6 +8263,161 @@ public partial class MainWindow : Window
         if (string.IsNullOrWhiteSpace(_currentPath)) return;
         var ok = WindowsClipboard.TrySetFileDrop(_currentPath);
         _diagnostics.Write("clipboard", ok ? "image_file_copied" : "image_file_copy_failed", new { path = _currentPath });
+    }
+
+    /// <summary>
+    /// File → Print… / Ctrl+P / viewer context menu. Prints the currently displayed image
+    /// from its original decoded pixels — never a screenshot of the viewport.
+    /// </summary>
+    private Task PrintCurrentImageAsync()
+    {
+        if (!PrintService.IsSupported)
+        {
+            _diagnostics.Write("print", "unsupported_platform", null);
+            return Task.CompletedTask;
+        }
+        var path = _currentPath;
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path) || Viewport.Bitmap is null)
+        {
+            _diagnostics.Write("print", "rejected_no_image", new { path });
+            return Task.CompletedTask;
+        }
+        var frame = Viewport.PresentedFrame;
+        var fullW = frame.SourceSize.Width > 0 ? (int)frame.SourceSize.Width : Viewport.Bitmap.PixelSize.Width;
+        var fullH = frame.SourceSize.Height > 0 ? (int)frame.SourceSize.Height : Viewport.Bitmap.PixelSize.Height;
+        return ShowPrintDialogAsync(path, Viewport.Bitmap, disposePreviewAfter: false, fullW, fullH);
+    }
+
+    /// <summary>Browser item Print…: prints that file without disturbing the current view.</summary>
+    private async Task PrintFileAsync(string path)
+    {
+        if (!PrintService.IsSupported || string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return;
+        Bitmap? preview = null;
+        var disposePreview = false;
+        try
+        {
+            if (string.Equals(path, _currentPath, StringComparison.OrdinalIgnoreCase) && Viewport.Bitmap is not null)
+            {
+                var frame = Viewport.PresentedFrame;
+                var w = frame.SourceSize.Width > 0 ? (int)frame.SourceSize.Width : Viewport.Bitmap.PixelSize.Width;
+                var h = frame.SourceSize.Height > 0 ? (int)frame.SourceSize.Height : Viewport.Bitmap.PixelSize.Height;
+                await ShowPrintDialogAsync(path, Viewport.Bitmap, disposePreviewAfter: false, w, h);
+                return;
+            }
+            // Decode a small bounded preview for the dialog; the spool path loads full resolution.
+            preview = await Task.Run(() =>
+            {
+                try
+                {
+                    if (!ImageHeaderProbe.TryProbe(path, out var dims) || !dims.IsValid)
+                        return null;
+                    var longest = Math.Max(1, Math.Min(900, dims.LongestSide));
+                    using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 64 * 1024, FileOptions.SequentialScan);
+                    var backend = new AvaloniaImageDecoderBackend();
+                    return backend.DecodePreview(stream, dims, longest, BitmapInterpolationMode.MediumQuality, path);
+                }
+                catch { return null; }
+            });
+            if (preview is null) return;
+            disposePreview = true;
+            if (!ImageHeaderProbe.TryProbe(path, out var full) || !full.IsValid)
+                full = new ImageDimensions(preview.PixelSize.Width, preview.PixelSize.Height);
+            await ShowPrintDialogAsync(path, preview, disposePreviewAfter: true, full.Width, full.Height);
+            disposePreview = false; // dialog took effect; ownership transferred below
+        }
+        finally
+        {
+            if (disposePreview) preview?.Dispose();
+        }
+    }
+
+    private async Task ShowPrintDialogAsync(string path, Bitmap previewBitmap, bool disposePreviewAfter, int fullWidthPx, int fullHeightPx)
+    {
+        Bitmap? ownedPreview = disposePreviewAfter ? previewBitmap : null;
+        try
+        {
+            var (dpiX, dpiY, _) = await Task.Run(() => PrintDpiReader.GetDpi(path));
+            var args = new PrintWindowArgs(
+                path, previewBitmap,
+                Math.Max(1, fullWidthPx), Math.Max(1, fullHeightPx),
+                dpiX, dpiY,
+                ct => ResolveFullPrintBitmapAsync(path, ct));
+            var window = new PrintWindow(args) { Topmost = Topmost };
+            _overlays?.SetModalSuppressed(true);
+            try
+            {
+                await ShowOwnedDialogAsync<bool>(window);
+            }
+            finally
+            {
+                _overlays?.SetModalSuppressed(false);
+            }
+            _diagnostics.Write("print", "dialog_closed", new { path });
+        }
+        catch (Exception ex)
+        {
+            _diagnostics.Write("print", "dialog_failed", new { path, error = ex.GetType().Name, ex.Message });
+        }
+        finally
+        {
+            ownedPreview?.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Loads the authoritative full-resolution frame for spooling. Never the viewport-sized
+    /// preview: the dialog preview bitmap may be a downscaled first frame.
+    /// </summary>
+    private async Task<(Bitmap Bitmap, int WidthPx, int HeightPx)> ResolveFullPrintBitmapAsync(string path, CancellationToken ct)
+    {
+        var result = await _loader.LoadFullForegroundAsync(path, ct, cacheResult: false);
+        if (result?.Bitmap is null)
+            throw new InvalidOperationException("Could not decode the image at full resolution.");
+        var w = result.SourceWidth > 0 ? result.SourceWidth : result.Bitmap.PixelSize.Width;
+        var h = result.SourceHeight > 0 ? result.SourceHeight : result.Bitmap.PixelSize.Height;
+        return (result.Bitmap, w, h);
+    }
+
+    /// <summary>
+    /// Diagnostic-only capture of the Print window (used by --capture-print-dialog). Opens the real
+    /// dialog so its printer query, live preview and chrome are exercised, captures the pixels, exits.
+    /// </summary>
+    private async Task CapturePrintDialogForDiagnosticsAsync(string image, string output)
+    {
+        try
+        {
+            if (!string.Equals(_currentPath, image, StringComparison.OrdinalIgnoreCase))
+            {
+                try { await OpenAsImageTabAsync(image); await Task.Delay(700); } catch { }
+            }
+            if (Viewport.Bitmap is not { } bitmap)
+            {
+                Console.Error.WriteLine("capture_print_dialog: no bitmap presented");
+                return;
+            }
+            var frame = Viewport.PresentedFrame;
+            var w = frame.SourceSize.Width > 0 ? (int)frame.SourceSize.Width : bitmap.PixelSize.Width;
+            var h = frame.SourceSize.Height > 0 ? (int)frame.SourceSize.Height : bitmap.PixelSize.Height;
+            var (dpiX, dpiY, _) = await Task.Run(() => PrintDpiReader.GetDpi(image));
+            var args = new PrintWindowArgs(image, bitmap, w, h, dpiX, dpiY,
+                ct => ResolveFullPrintBitmapAsync(image, ct));
+            var window = new PrintWindow(args) { Topmost = false };
+            window.Show(this);
+            await Task.Delay(3500); // printer enumeration + preview settle
+            await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Render);
+            var ok = UiDiagnosticCapture.TryCapture(window, output, out var error);
+            Console.WriteLine(ok ? $"capture_print_dialog: wrote {output}" : $"capture_print_dialog: FAILED {error}");
+            window.Close();
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine("capture_print_dialog failed: " + ex);
+        }
+        finally
+        {
+            // Diagnostic capture must terminate even with Speed Boost standby enabled.
+            ForceExit();
+        }
     }
 
     private async Task CopyTextAsync(string? text)
@@ -8801,6 +8966,7 @@ public partial class MainWindow : Window
         // File operations
         items.Add(Item("Rename…", GlideCommand.RenameFile, _currentPath is not null));
         items.Add(Item("Delete to Recycle Bin", GlideCommand.DeleteFile, _currentPath is not null));
+        items.Add(Item("Print…", GlideCommand.Print, Viewport.Bitmap is not null));
         items.Add(new MenuItem { Header = "-" });
 
         var navigation = new MenuItem { Header = "Navigation" };

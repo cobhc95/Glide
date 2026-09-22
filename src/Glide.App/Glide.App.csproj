@@ -14,6 +14,7 @@
     <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.20" />
     <PackageReference Include="Avalonia.Diagnostics" Version="11.3.20" Condition="'$(Configuration)' == 'Debug'" />
     <PackageReference Include="Avalonia.Controls.ItemsRepeater" Version="11.1.5" />
+    <PackageReference Include="System.Drawing.Common" Version="8.0.11" />
     <ProjectReference Include="..\Glide.Core\Glide.Core.csproj" />
     <ProjectReference Include="..\Glide.Input\Glide.Input.csproj" />
     <ProjectReference Include="..\Glide.Imaging\Glide.Imaging.csproj" />

@@ -54,6 +54,42 @@ internal static class Program
             return 0;
         }
 
+        // Image-printing acceptance harness. Runs before Avalonia: GDI+ decodes the oriented image and
+        // the shared PrintService geometry/render path spools to a file (Microsoft Print to PDF, etc.).
+        if (args.Length >= 3 && args[0].Equals("--print-to-pdf", StringComparison.OrdinalIgnoreCase))
+        {
+            var image = args[1];
+            var output = args[2];
+            var printer = "Microsoft Print to PDF";
+            var scaling = "Best fit";
+            var landscape = false;
+            var keepAspect = true;
+            var autoRotate = true;
+            var hAlign = "Centre";
+            var vAlign = "Centre";
+            var color = true;
+            short copies = 1;
+            double ml = 50, mt = 50, mr = 50, mb = 50, custom = 100;
+            for (var i = 3; i + 1 < args.Length; i += 2)
+            {
+                var (key, value) = (args[i], args[i + 1]);
+                if (key.Equals("--printer", StringComparison.OrdinalIgnoreCase)) printer = value;
+                else if (key.Equals("--scaling", StringComparison.OrdinalIgnoreCase)) scaling = value;
+                else if (key.Equals("--landscape", StringComparison.OrdinalIgnoreCase)) landscape = value == "1";
+                else if (key.Equals("--keep-aspect", StringComparison.OrdinalIgnoreCase)) keepAspect = value == "1";
+                else if (key.Equals("--auto-rotate", StringComparison.OrdinalIgnoreCase)) autoRotate = value == "1";
+                else if (key.Equals("--h", StringComparison.OrdinalIgnoreCase)) hAlign = value;
+                else if (key.Equals("--v", StringComparison.OrdinalIgnoreCase)) vAlign = value;
+                else if (key.Equals("--color", StringComparison.OrdinalIgnoreCase)) color = value == "1";
+                else if (key.Equals("--copies", StringComparison.OrdinalIgnoreCase) && short.TryParse(value, out var c)) copies = c;
+                else if (key.Equals("--margin", StringComparison.OrdinalIgnoreCase) && double.TryParse(value, out var m)) { ml = mt = mr = mb = m; }
+                else if (key.Equals("--scale", StringComparison.OrdinalIgnoreCase) && double.TryParse(value, out var s)) custom = s;
+            }
+            return Printing.PrintAcceptance.PrintToFileAsync(image, output, printer, scaling, landscape,
+                ml, mt, mr, mb, keepAspect, autoRotate, hAlign, vAlign, custom, copies, color, Console.Out)
+                .GetAwaiter().GetResult();
+        }
+
         // Diagnostics run before Avalonia initialization so broken UI startup can still be diagnosed.
         if (args.Length >= 2 && args[0].Equals("--diagnostics", StringComparison.OrdinalIgnoreCase))
         {
@@ -133,6 +169,12 @@ internal static class Program
                     App.AutoExportDiagnosticsFolder = args[++i];
                 continue;
             }
+            if (args[i].Equals("--capture-print-dialog", StringComparison.OrdinalIgnoreCase) && i + 2 < args.Length)
+            {
+                App.CapturePrintDialogImage = args[++i];
+                App.CapturePrintDialogOutput = args[++i];
+                continue;
+            }
             appArgs.Add(args[i]);
         }
         GlidePerformanceTrace.Mark("process_entry");
@@ -195,7 +237,7 @@ internal static class Program
             // This process is now the elected UI/broker owner. Start the crash breadcrumb file only
             // here so short-lived forwarding helper processes cannot overwrite the live owner trace.
             if (diagnosticTraceRequested)
-                LiveDiagnosticTrace.Initialize("4.2.4-diagnostic");
+                LiveDiagnosticTrace.Initialize("4.2.5-diagnostic");
             AppDomain.CurrentDomain.UnhandledException += (_, eventArgs) =>
             {
                 if (eventArgs.ExceptionObject is Exception fatal)

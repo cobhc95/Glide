@@ -20,6 +20,7 @@ public static class TitleBarButtonCatalog
     {
         new("window.alwaysOnTop", "Always on top", "AlwaysOnTop", GlideCommand.ToggleAlwaysOnTop),
         new("file.open", "Open file", "Open", GlideCommand.OpenFile),
+        new("file.print", "Print", "Print", GlideCommand.Print),
         new("file.locate", "Navigate to folder", "FolderLocate", GlideCommand.OpenContainingFolder),
         new("folder.previous", "Previous folder", "FolderPrevious", GlideCommand.PreviousFolder),
         new("folder.next", "Next folder", "FolderNext", GlideCommand.NextFolder),

@@ -16,6 +16,9 @@ public partial class App : Application
     public static string? NotifyFirstFrameEventName { get; set; }
     public static bool AutoExportDiagnostics { get; set; }
     public static string? AutoExportDiagnosticsFolder { get; set; }
+    // Diagnostic-only: open the Print window for one image, capture it, then exit.
+    public static string? CapturePrintDialogImage { get; set; }
+    public static string? CapturePrintDialogOutput { get; set; }
     public static Task<Glide.App.Settings.GlideSettingsState>? StartupSettingsTask { get; set; }
     public static Glide.App.Settings.SettingsStore.FirstFramePolicy? StartupFirstFramePolicy { get; set; }
     public static bool StartHidden { get; set; }
