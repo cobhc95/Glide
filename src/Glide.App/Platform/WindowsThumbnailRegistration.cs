@@ -39,6 +39,11 @@ internal static class WindowsThumbnailRegistration
     /// <summary>Formats Glide decodes natively; Glide owns these even when a weak handler exists.</summary>
     private static readonly HashSet<string> GlideNativeFormats = new(StringComparer.OrdinalIgnoreCase)
     {
+        // WebP is decoded by the vendored libwebp decoder inside Glide.ShellThumbnail.dll. Windows
+        // registers its in-box "Photo Thumbnail Provider" for .webp, but that handler needs the
+        // optional "Webp Image Extensions" WIC codec and fails without it — so a weakly-handled
+        // .webp must still be claimed by Glide or Explorer is left with a generic icon.
+        ".webp",
         ".svg", ".svgz", ".tga", ".targa", ".icb", ".vda", ".vst", ".pcx", ".pnm", ".ppm", ".pgm", ".pbm",
         ".pam", ".qoi", ".hdr", ".rgbe", ".wbmp", ".xbm", ".xpm", ".sgi", ".rgb", ".rgba", ".bw"
     };

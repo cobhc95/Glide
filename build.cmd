@@ -46,7 +46,7 @@ setlocal EnableExtensions EnableDelayedExpansion
 cd /d "%~dp0"
 rem Single-source the product version from Directory.Build.props so build banners, deliverable
 rem names and fixture identities can never drift from the assembly metadata again.
-set "GLIDE_VERSION=4.2.2"
+set "GLIDE_VERSION=4.3.1"
 for /f "tokens=3 delims=<>" %%V in ('findstr /r /c:"^ *<Version>" "Directory.Build.props"') do set "GLIDE_VERSION=%%V"
 title Glide %GLIDE_VERSION%
 

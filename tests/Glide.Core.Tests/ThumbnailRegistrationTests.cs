@@ -32,6 +32,10 @@ public sealed class ThumbnailRegistrationTests
         Assert.Contains(".svg", set);
         Assert.Contains(".tga", set);
         Assert.Contains(".qoi", set);
+        // WebP must be owned by Glide even though Windows registers its in-box, WIC-dependent
+        // "Photo Thumbnail Provider" for it: without the optional Webp Image Extensions package
+        // that handler fails and Explorer would otherwise show a generic icon.
+        Assert.Contains(".webp", set);
     }
 
     [Fact]

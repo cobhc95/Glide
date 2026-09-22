@@ -4,6 +4,27 @@ All notable changes to Glide Image Viewer are documented here. The format is bas
 [Keep a Changelog](https://keepachangelog.com/), and the project uses dotted feature releases with
 hyphenated follow-up corrections (for example `4.2.0-1`).
 
+## [4.3.1] - 2026-09-22
+
+Follow-up to 4.3.0 that fixes WebP thumbnails in Windows Explorer.
+
+### Fixed
+
+- 🖼️ **WebP files now show real thumbnails in Explorer.** Windows ships no in-box WebP codec — it
+  is delivered only by the optional *Webp Image Extensions* Store package — and the in-box
+  "Photo Thumbnail Provider" registered for `.webp` fails without it
+  (`WINCODEC_ERR_COMPONENTINITIALIZEFAILURE`), leaving a generic icon. Glide now:
+  - links a **vendored, decode-only libwebp** (`native/third_party/libwebp`, BSD-3-Clause) into
+    `Glide.ShellThumbnail.dll`, decoding lossy VP8, lossless VP8L and alpha WebP directly; and
+  - treats `.webp` as a Glide-native format in **Recommended** thumbnail mode, so Glide claims it
+    even though Windows registers a weak handler for it.
+
+  Both changes are self-contained: no Store package and no runtime download is required.
+
+### Changed
+
+- Version, assembly, installer and UI metadata advanced to **4.3.1**.
+
 ## [4.3.0] - 2026-09-22
 
 Explorer integration and window-management release. Glide now draws real thumbnails in Windows

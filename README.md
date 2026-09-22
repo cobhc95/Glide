@@ -1,12 +1,21 @@
-# Glide 4.3.0
+# Glide 4.3.1
 
 ## Fast. Lightweight. Multi-tabbed. Multi-window. Highly customizable.
 
 ![Glide main user interface](docs/screenshots/screenshot_1.jpg)
 
-**Glide 4.3.0 is a high-performance Windows image viewer built around instant-feeling image opening, a compact installer, multi-tab and multi-window workflows, transparent overlays, deep mouse/keyboard customization, Launch Speed Boost, complete image printing, native SVG/vector support, automatic Windows Open With integration, Windows Explorer thumbnails, and recognition/routing for 196 image and document filename extensions.**
+**Glide 4.3.1 is a high-performance Windows image viewer built around instant-feeling image opening, a compact installer, multi-tab and multi-window workflows, transparent overlays, deep mouse/keyboard customization, Launch Speed Boost, complete image printing, native SVG/vector support, automatic Windows Open With integration, Windows Explorer thumbnails, and recognition/routing for 196 image and document filename extensions.**
 
-## What's new in 4.3.0
+## What's new in 4.3.1
+
+- **WebP thumbnails in Explorer.** Windows ships no in-box WebP codec (it comes only with the
+  optional *Webp Image Extensions* Store package), so `.webp` files showed a generic icon even with
+  Explorer thumbnails enabled — the in-box "Photo Thumbnail Provider" fails without that codec.
+  Glide now bundles a small decode-only **libwebp** decoder inside its native thumbnail provider and
+  claims `.webp` itself, so real WebP thumbnails appear on any Windows install. This is entirely
+  self-contained: no Store package and no runtime download is required.
+
+### Previously in 4.3.0
 
 - **Windows Explorer thumbnails.** Explorer now shows real thumbnails for every format Glide can
   open instead of a generic icon. A small native provider decodes inside Explorer's isolated
@@ -363,7 +372,7 @@ On Windows:
 * Build the application: run `build.cmd`
 * Build the complete standalone installer: run `build.cmd` (or `build.cmd fast --no-pause`)
 
-Release builds produce four deliverables: `Glide-4.3.0-Portable.zip`, `dist-installer\Glide Setup.exe`, `Glide-4.3.0.exe` for direct testing, and the compact `Glide-Zero-Context-Handover.zip`.
+Release builds produce four deliverables: `Glide-4.3.1-Portable.zip`, `dist-installer\Glide Setup.exe`, `Glide-4.3.1.exe` for direct testing, and the compact `Glide-Zero-Context-Handover.zip`.
 
 ---
 

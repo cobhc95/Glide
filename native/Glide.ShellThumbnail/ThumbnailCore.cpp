@@ -15,6 +15,10 @@
 #include <dxgi.h>
 #include <shlwapi.h>
 
+// Vendored decode-only libwebp. Windows has no in-box WebP WIC codec, so this is the only
+// dependency-free way to render WebP thumbnails (see native/third_party/libwebp/GLIDE_VENDOR.md).
+#include <webp/decode.h>
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -1292,6 +1296,90 @@ namespace glide::thumb
             if (!ok) out = {};
             return ok;
         }
+
+        // ---------------------------------------------------------------- WebP ----------------
+
+        bool LooksLikeWebp(const std::uint8_t* data, std::size_t size, const std::wstring& extension)
+        {
+            if (size >= 12 && std::memcmp(data, "RIFF", 4) == 0 && std::memcmp(data + 8, "WEBP", 4) == 0)
+                return true;
+            return extension == L".webp";
+        }
+
+        // Decodes a still WebP (lossy VP8 or lossless VP8L) straight to straight-alpha BGRA. libwebp
+        // performs any requested scaled decode itself, so a large source is never materialised at
+        // full resolution just to be shrunk afterwards. Returns false for anything it cannot decode
+        // (including multi-frame animations), leaving the WIC/icon fallback intact.
+        bool DecodeWebp(const std::uint8_t* data, std::size_t size,
+                        std::uint32_t maxWidth, std::uint32_t maxHeight, Image& out)
+        {
+            if (!data || size == 0 || size > static_cast<std::size_t>(std::numeric_limits<int>::max()))
+                return false;
+
+            int width = 0;
+            int height = 0;
+            if (!WebPGetInfo(data, size, &width, &height) || width <= 0 || height <= 0)
+                return false;
+            if (static_cast<std::uint32_t>(width) > MaxDimension ||
+                static_cast<std::uint32_t>(height) > MaxDimension)
+                return false;
+
+            std::uint32_t targetWidth = static_cast<std::uint32_t>(width);
+            std::uint32_t targetHeight = static_cast<std::uint32_t>(height);
+            const std::uint32_t cap = std::max(maxWidth, maxHeight);
+            if (cap > 0)
+            {
+                const std::uint32_t longest = std::max(targetWidth, targetHeight);
+                if (longest > cap)
+                {
+                    const double ratio = static_cast<double>(cap) / longest;
+                    targetWidth = std::max<std::uint32_t>(1, static_cast<std::uint32_t>(std::floor(targetWidth * ratio)));
+                    targetHeight = std::max<std::uint32_t>(1, static_cast<std::uint32_t>(std::floor(targetHeight * ratio)));
+                }
+            }
+
+            WebPDecoderConfig config;
+            if (!WebPInitDecoderConfig(&config)) return false;
+            config.output.colorspace = MODE_BGRA; // straight (non-premultiplied) BGRA, matching Image
+            if (targetWidth != static_cast<std::uint32_t>(width) ||
+                targetHeight != static_cast<std::uint32_t>(height))
+            {
+                config.options.use_scaling = 1;
+                config.options.scaled_width = static_cast<int>(targetWidth);
+                config.options.scaled_height = static_cast<int>(targetHeight);
+            }
+
+            if (WebPDecode(data, size, &config) != VP8_STATUS_OK)
+            {
+                WebPFreeDecBuffer(&config.output);
+                return false;
+            }
+
+            const int decodedWidth = config.output.width;
+            const int decodedHeight = config.output.height;
+            bool ok = false;
+            if (decodedWidth > 0 && decodedHeight > 0 &&
+                config.output.u.RGBA.rgba != nullptr &&
+                config.output.u.RGBA.stride >= decodedWidth * 4)
+            {
+                if (AllocateImage(static_cast<std::uint32_t>(decodedWidth),
+                                  static_cast<std::uint32_t>(decodedHeight), out))
+                {
+                    const std::uint8_t* source = config.output.u.RGBA.rgba;
+                    const std::size_t rowBytes = static_cast<std::size_t>(decodedWidth) * 4;
+                    for (int y = 0; y < decodedHeight; ++y)
+                    {
+                        std::memcpy(out.pixels.data() + static_cast<std::size_t>(y) * rowBytes,
+                                    source + static_cast<std::size_t>(y) * config.output.u.RGBA.stride,
+                                    rowBytes);
+                    }
+                    ok = true;
+                }
+            }
+            WebPFreeDecBuffer(&config.output);
+            if (!ok) out = {};
+            return ok;
+        }
     } // namespace
 
     bool IsCompactRasterExtension(const wchar_t* extension)
@@ -1336,7 +1424,25 @@ namespace glide::thumb
             }
         }
 
-        // 2. Windows Imaging Component (covers JPEG/PNG/BMP/GIF/TIFF/WebP/ICO/DDS/JPEG-XR and any
+        // 2. WebP through the vendored libwebp decoder. Windows ships no in-box WebP WIC codec
+        //    (it arrives only with the optional "Webp Image Extensions" Store package), so Glide
+        //    owns WebP itself. Tried ahead of WIC so a missing or stale platform codec can never
+        //    regress .webp thumbnails.
+        if (LooksLikeWebp(data, size, extensionValue))
+        {
+            const std::uint64_t webpStarted = NowMicros();
+            Image decoded;
+            if (DecodeWebp(data, size, maxWidth, maxHeight, decoded) && decoded.Valid())
+            {
+                result.image = std::move(decoded);
+                result.ok = true;
+                result.decoder = "webp";
+                result.decodeMicros = NowMicros() - webpStarted;
+                return result;
+            }
+        }
+
+        // 3. Windows Imaging Component (covers JPEG/PNG/BMP/GIF/TIFF/ICO/DDS/JPEG-XR and any
         //    installed HEIF/AVIF/JXL codec), preferring an embedded thumbnail when present.
         bool embeddedUsed = false;
         {
@@ -1351,7 +1457,7 @@ namespace glide::thumb
             }
         }
 
-        // 3. Compact native decoders for the simple formats WIC does not cover.
+        // 4. Compact native decoders for the simple formats WIC does not cover.
         if (IsCompactRasterExtension(extensionValue.c_str()) || extensionValue.empty())
         {
             const std::uint64_t compactStarted = NowMicros();

@@ -19,12 +19,12 @@ namespace Glide.Diagnostics;
 /// </summary>
 public static class DiagnosticRunner
 {
-    public const string BuildVersion = "4.3.0";
+    public const string BuildVersion = "4.3.1";
 
     public static DiagnosticSnapshot Capture() => new(
         Product: "Glide",
         Version: BuildVersion,
-        Release: "Glide 4.3.0 (Explorer thumbnails + taskbar/minimize fixes)",
+        Release: "Glide 4.3.1 (Explorer WebP thumbnails)",
         Architecture: "C# + Avalonia retained-mode UI + semantic core + small native C++ bridge; NativeAOT blocked pending COM isolation",
         TimestampUtc: DateTimeOffset.UtcNow,
         Framework: RuntimeInformation.FrameworkDescription,
@@ -279,7 +279,7 @@ public static class DiagnosticRunner
                 ? CodecProviderRuntime.Shared.Artifacts
                 : Array.Empty<CodecProviderArtifact>(), jsonOptions));
         File.WriteAllText(Path.Combine(folder, "README.txt"),
-            "Glide 4.3.0 evidence bundle. PASS means a named assertion actually ran. SKIP means the owning subsystem is absent or the check requires a live UI. codec_capabilities.json separates recognised/routed suffixes from guaranteed decode; codec_providers.json reports only providers already indexed/verified in this process and never wakes optional providers during export. When exported from Settings > Developer Options, Glide.App appends immediate/settled screenshots, logical-control geometry/layout audit, settings-effect coverage, current settings, capability/provider inventory and a live behaviour event trace. Do not infer UI parity from headless structural PASS.\n");
+            "Glide 4.3.1 evidence bundle. PASS means a named assertion actually ran. SKIP means the owning subsystem is absent or the check requires a live UI. codec_capabilities.json separates recognised/routed suffixes from guaranteed decode; codec_providers.json reports only providers already indexed/verified in this process and never wakes optional providers during export. When exported from Settings > Developer Options, Glide.App appends immediate/settled screenshots, logical-control geometry/layout audit, settings-effect coverage, current settings, capability/provider inventory and a live behaviour event trace. Do not infer UI parity from headless structural PASS.\n");
         output.WriteLine($"Diagnostics exported to: {Path.GetFullPath(folder)}");
         return checks.Any(x => x.Status == "FAIL") ? 1 : 0;
     }

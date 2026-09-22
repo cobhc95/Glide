@@ -13,9 +13,12 @@ crashing. This document records the routes and compares them with IrfanView's fo
    - `BuiltInRasterDecoder` — compact managed decoders for legacy/simple raster formats:
      TGA/TARGA/ICB/VDA/VST, PCX, PNM (PBM/PGM/PPM/PAM), QOI, Radiance HDR/RGBE, WBMP, XBM, XPM, SGI.
 2. **Native Windows WIC** (`Glide.Native` → WIC): JPEG aliases, PNG/APNG, BMP/DIB, GIF, TIFF,
-   WebP, ICO/CUR, JPEG-XR/HDP/WDP, DDS, and any other content whose bytes a WIC codec understands
+   ICO/CUR, JPEG-XR/HDP/WDP, DDS, and any other content whose bytes a WIC codec understands
    (including HEIC/AVIF/RAW when the matching Windows codec extension is installed).
-3. **Avalonia/Skia** (`new Bitmap(stream)`): additional raster formats Skia understands.
+3. **Avalonia/Skia** (`new Bitmap(stream)`): additional raster formats Skia understands — including
+   **WebP**, which Windows does not decode through WIC unless the optional *Webp Image Extensions*
+   Store package is installed. The Explorer thumbnail provider uses a bundled decode-only **libwebp**
+   for the same reason; see `docs/explorer-thumbnails.md`.
 4. **Windows Shell thumbnail/preview** (last resort, THUMBNAILONLY — never a generic icon): any
    recognised suffix with a registered Windows thumbnail/preview handler (PDF, EPS/AI, Office, CAD,
    camera RAW, HEIC/AVIF without a WIC codec, etc.). Alpha may be flattened in this route.

@@ -3,7 +3,7 @@ setlocal EnableExtensions EnableDelayedExpansion
 cd /d "%~dp0"
 rem Single-source the version from Directory.Build.props (see build.cmd) so the installer banner
 rem and any versioned text cannot drift from the assembly metadata.
-set "GLIDE_VERSION=4.2.2"
+set "GLIDE_VERSION=4.3.1"
 for /f "tokens=3 delims=<>" %%V in ('findstr /r /c:"^ *<Version>" "Directory.Build.props"') do set "GLIDE_VERSION=%%V"
 title Glide Installer Builder
 

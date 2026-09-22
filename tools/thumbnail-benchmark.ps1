@@ -32,7 +32,8 @@ for ($i = 0; $i -lt $Count; $i++) {
 # Include the non-WIC formats the provider handles itself.
 $files = Get-ChildItem $corpus -Filter *.jpg | Select-Object -ExpandProperty FullName
 foreach ($extra in @("artifacts\format-acceptance\sample-gradient.tga",
-                     "artifacts\format-acceptance\sample-vector.svg")) {
+                     "artifacts\format-acceptance\sample-vector.svg",
+                     "artifacts\diagnostic-fixtures\fixture.webp")) {
     if (Test-Path $extra) { $files += (Resolve-Path $extra).Path }
 }
 

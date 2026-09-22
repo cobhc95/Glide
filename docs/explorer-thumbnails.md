@@ -14,7 +14,9 @@ Glide.ShellThumbnail.dll            native/Glide.ShellThumbnail
       │  COM in-proc server, no .NET, no Avalonia, no Glide UI
       ▼
 ThumbnailCore.cpp
-      ├─ WIC               JPEG/PNG/BMP/GIF/TIFF/WebP/ICO/DDS/JPEG-XR
+      ├─ libwebp           WebP (lossy VP8 / lossless VP8L / alpha) via a vendored, decode-only
+      │                    libwebp build; no optional Windows codec required
+      ├─ WIC               JPEG/PNG/BMP/GIF/TIFF/ICO/DDS/JPEG-XR
       │                    + embedded thumbnail/preview extraction
       │                    + decoder-native reduced decode (IWICBitmapSourceTransform)
       ├─ Direct2D (D2D1SVG) SVG / SVGZ rasterised straight to the requested size
@@ -24,6 +26,15 @@ ThumbnailCore.cpp
 The provider **never** loads Glide.exe, .NET, Avalonia, settings, tabs, history or plugins, **never**
 creates a window, and **never** shows UI. All decoding happens in-process inside Explorer's isolated
 thumbnail host, so a malformed file cannot destabilise Explorer.
+
+### Why WebP is bundled
+
+Windows has no in-box WebP **WIC** codec; it arrives only with the optional *Webp Image Extensions*
+Store package. On a clean install the in-box "Photo Thumbnail Provider" is still registered for
+`.webp`, but it fails (`WINCODEC_ERR_COMPONENTINITIALIZEFAILURE`) because the codec it needs is
+absent, leaving Explorer with a generic icon. Glide therefore links a decode-only build of
+**libwebp** (see `native/third_party/libwebp/GLIDE_VENDOR.md`) and decodes WebP itself, so WebP
+thumbnails work regardless of which optional Store codecs are installed.
 
 ### Why native C++ rather than .NET
 

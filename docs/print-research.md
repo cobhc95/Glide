@@ -162,7 +162,7 @@ embed the full image.
 > **Superseded capture note (2026-09-22):** the original `glide-print-dialog.png` showed the
 > auto-rotate **stretch** defect — a 16:9 landscape photo drawn as a tall, narrow portrait crop. That
 > screenshot was captured before the 4.2.6 fix (auto-rotate now performs a real rotation in both the
-> preview and the spool path). Both files above are regenerated from the fixed 4.3.0 build.
+> preview and the spool path). Both files above are regenerated from the fixed 4.3.1 build.
 
 **Deferred:** multi-image / contact-sheet printing (see §5).
 
