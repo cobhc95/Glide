@@ -34,11 +34,15 @@ public static class ImageMetadataReader
             var ext = ImageFormatRegistry.GetLongestExtension(path).ToLowerInvariant();
             if (ext is ".jpg" or ".jpeg" or ".jpe")
             {
-                using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 64 * 1024, FileOptions.SequentialScan);
+                // FileShare.Delete is mandatory: the metadata read is launched fire-and-forget after
+                // first paint, so it can still be running when the user deletes/moves the image. A
+                // read that withholds delete sharing makes Windows report the file as "in use in
+                // Glide" even though the viewer itself has moved on.
+                using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 64 * 1024, FileOptions.SequentialScan);
                 return ParseJpegStream(stream, token);
             }
 
-            using var fallbackStream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 64 * 1024, FileOptions.SequentialScan);
+            using var fallbackStream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 64 * 1024, FileOptions.SequentialScan);
             if (fallbackStream.Length > 64 * 1024 * 1024) return new ImageMetadata();
             var data = new byte[checked((int)fallbackStream.Length)];
             fallbackStream.ReadExactly(data);

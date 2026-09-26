@@ -101,7 +101,8 @@ public static class CodecProviderInventory
 
     public static string ComputeSha256(string path)
     {
-        using var stream = File.OpenRead(path); using var sha = SHA256.Create();
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 64 * 1024, FileOptions.SequentialScan);
+        using var sha = SHA256.Create();
         return Convert.ToHexString(sha.ComputeHash(stream)).ToLowerInvariant();
     }
     private static string SafeHash(string path) { try { return ComputeSha256(path); } catch { return ""; } }

@@ -1,12 +1,21 @@
-# Glide 4.3.1
+# Glide 4.3.2
 
 ## Fast. Lightweight. Multi-tabbed. Multi-window. Highly customizable.
 
 ![Glide main user interface](docs/screenshots/screenshot_1.jpg)
 
-**Glide 4.3.1 is a high-performance Windows image viewer built around instant-feeling image opening, a compact installer, multi-tab and multi-window workflows, transparent overlays, deep mouse/keyboard customization, Launch Speed Boost, complete image printing, native SVG/vector support, automatic Windows Open With integration, Windows Explorer thumbnails, and recognition/routing for 196 image and document filename extensions.**
+**Glide 4.3.2 is a high-performance Windows image viewer built around instant-feeling image opening, a compact installer, multi-tab and multi-window workflows, transparent overlays, deep mouse/keyboard customization, Launch Speed Boost, complete image printing, native SVG/vector support, automatic Windows Open With integration, Windows Explorer thumbnails, and recognition/routing for 196 image and document filename extensions.**
 
-## What's new in 4.3.1
+## What's new in 4.3.2
+
+- **A viewed image is never left locked after you close it.** Deleting or moving an image that had
+  already been closed could fail with *"the file is open in Glide Image Viewer"*. Glide's background
+  readers (EXIF/metadata, print DPI and the SVG loader) now open the source with full delete sharing,
+  and the SVG loader reads the document into memory instead of handing the raw path to the third-party
+  loader. A read that outlives the viewer — including after a Speed Boost standby close — can no
+  longer block Explorer.
+
+### Previously in 4.3.1
 
 - **WebP thumbnails in Explorer.** Windows ships no in-box WebP codec (it comes only with the
   optional *Webp Image Extensions* Store package), so `.webp` files showed a generic icon even with
@@ -372,7 +381,7 @@ On Windows:
 * Build the application: run `build.cmd`
 * Build the complete standalone installer: run `build.cmd` (or `build.cmd fast --no-pause`)
 
-Release builds produce four deliverables: `Glide-4.3.1-Portable.zip`, `dist-installer\Glide Setup.exe`, `Glide-4.3.1.exe` for direct testing, and the compact `Glide-Zero-Context-Handover.zip`.
+Release builds produce four deliverables: `Glide-4.3.2-Portable.zip`, `dist-installer\Glide Setup.exe`, `Glide-4.3.2.exe` for direct testing, and the compact `Glide-Zero-Context-Handover.zip`.
 
 ---
 

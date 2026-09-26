@@ -4,6 +4,26 @@ All notable changes to Glide Image Viewer are documented here. The format is bas
 [Keep a Changelog](https://keepachangelog.com/), and the project uses dotted feature releases with
 hyphenated follow-up corrections (for example `4.2.0-1`).
 
+## [4.3.2] - 2026-09-26
+
+Follow-up to 4.3.1 that releases a viewed image as soon as it is closed.
+
+### Fixed
+
+- 🔓 **A viewed image is never locked by Glide after it is closed.** Windows reported
+  *"the file is open in Glide Image Viewer"* when deleting or moving an image that had already been
+  closed (including after a Speed Boost standby close). Glide's asynchronous readers — the EXIF/metadata
+  reader, the print DPI reader and the SVG loader — opened the user's file without `FileShare.Delete`,
+  so any read that overlapped the delete/move denied the rename. All user-image reads now open with
+  `FileShare.ReadWrite | FileShare.Delete`, and the SVG loader reads the document into memory with
+  full sharing instead of handing the file path to the third-party `Svg.Skia` loader (which could
+  retain the handle). `FileHandleReleaseTests` pins both contracts.
+
+### Changed
+
+- Version, assembly, installer, window titles and the Settings footer advanced to **4.3.2**. The
+  Settings footer now derives its label from assembly metadata so it cannot drift again.
+
 ## [4.3.1] - 2026-09-22
 
 Follow-up to 4.3.0 that fixes WebP thumbnails in Windows Explorer.

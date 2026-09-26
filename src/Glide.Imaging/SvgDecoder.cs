@@ -18,6 +18,9 @@ public static class SvgDecoder
     /// <summary>Cap for full-resolution vector renders so a huge viewBox cannot exhaust memory.</summary>
     public const int DefaultFullLongestSide = 4096;
 
+    /// <summary>Largest encoded SVG/SVGZ document read into memory (keeps loading bounded and lock-free).</summary>
+    private const long MaxDocumentBytes = 128L * 1024L * 1024L;
+
     public static bool IsSvgPath(string? path) =>
         !string.IsNullOrWhiteSpace(path) &&
         (path.EndsWith(".svg", StringComparison.OrdinalIgnoreCase) || path.EndsWith(".svgz", StringComparison.OrdinalIgnoreCase));
@@ -72,13 +75,28 @@ public static class SvgDecoder
 
     private static SKPicture? LoadPicture(SKSvg svg, string path)
     {
+        // Read the encoded document with full delete sharing and hand Svg.Skia an in-memory stream.
+        // Passing a path lets the third-party loader retain a file handle; that keeps the SVG
+        // undeletable in Explorer ("in use in Glide") after the viewer has closed it. The read is
+        // bounded so a hostile/huge document cannot pin unbounded managed memory.
+        var info = new FileInfo(path);
+        if (info.Length <= 0 || info.Length > MaxDocumentBytes) return null;
+
+        using var file = new FileStream(path, FileMode.Open, FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete, 64 * 1024, FileOptions.SequentialScan);
         if (path.EndsWith(".svgz", StringComparison.OrdinalIgnoreCase))
         {
-            using var file = File.OpenRead(path);
             using var gzip = new GZipStream(file, CompressionMode.Decompress);
-            return svg.Load(gzip);
+            using var decompressed = new MemoryStream(checked((int)Math.Min(info.Length * 8, MaxDocumentBytes)));
+            gzip.CopyTo(decompressed);
+            decompressed.Position = 0;
+            return svg.Load(decompressed);
         }
-        return svg.Load(path);
+
+        using var buffer = new MemoryStream(checked((int)info.Length));
+        file.CopyTo(buffer);
+        buffer.Position = 0;
+        return svg.Load(buffer);
     }
 
     private static unsafe Bitmap? Render(SKPicture picture, int width, int height)

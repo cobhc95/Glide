@@ -90,6 +90,20 @@ public partial class SettingsWindow : Window
     // Production opens use the staged-state constructor below.
     public SettingsWindow() : this(new GlideSettingsState(), (_, _) => { }) { }
 
+    /// <summary>Visible product version, derived from assembly metadata so it cannot drift.</summary>
+    private static string ProductVersionLabel()
+    {
+        var assembly = typeof(SettingsWindow).Assembly;
+        var informational = assembly
+            .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
+            .OfType<System.Reflection.AssemblyInformationalVersionAttribute>()
+            .FirstOrDefault()?.InformationalVersion;
+        var version = string.IsNullOrWhiteSpace(informational)
+            ? assembly.GetName().Version?.ToString(3) ?? "4.3.2"
+            : informational;
+        return "Glide " + version;
+    }
+
     public SettingsWindow(GlideSettingsState current, Action<GlideSettingsState, bool> apply)
     {
         _committed = current.CloneState();
@@ -102,6 +116,9 @@ public partial class SettingsWindow : Window
         // cannot dereference panel/control maps that are intentionally built immediately afterwards.
         _loadingControls = true;
         InitializeComponent();
+        // Single-source the visible product version from assembly metadata (Directory.Build.props), so
+        // the About/footer label can never drift behind the actual build again.
+        AboutVersionText.Text = ProductVersionLabel();
         // Legacy Glide treats static Settings chrome/text as draggable window surface. Interactive
         // controls remain authoritative and must never start a native move loop.
         ReferenceRoot.AddHandler(InputElement.PointerPressedEvent, SettingsSurfacePointerPressed, RoutingStrategies.Tunnel, true);

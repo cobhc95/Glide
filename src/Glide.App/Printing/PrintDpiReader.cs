@@ -41,7 +41,7 @@ public static class PrintDpiReader
 
     private static (double, double, string) ReadJpegDpi(string path)
     {
-        using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 64 * 1024, FileOptions.SequentialScan);
+        using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 64 * 1024, FileOptions.SequentialScan);
         Span<byte> soI = stackalloc byte[2];
         if (fs.Read(soI) != 2 || soI[0] != 0xFF || soI[1] != 0xD8)
             return (DefaultDpi, DefaultDpi, "default");
@@ -93,7 +93,7 @@ public static class PrintDpiReader
 
     private static (double, double, string) ReadPngDpi(string path)
     {
-        using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 4096, FileOptions.SequentialScan);
+        using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 4096, FileOptions.SequentialScan);
         Span<byte> sig = stackalloc byte[8];
         if (fs.Read(sig) != 8) return (DefaultDpi, DefaultDpi, "default");
         Span<byte> hdr = stackalloc byte[8];
@@ -121,7 +121,7 @@ public static class PrintDpiReader
 
     private static (double, double, string) ReadTiffDpi(string path)
     {
-        using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 64 * 1024, FileOptions.SequentialScan);
+        using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 64 * 1024, FileOptions.SequentialScan);
         if (fs.Length > 32 * 1024 * 1024) return (DefaultDpi, DefaultDpi, "default");
         var buf = new byte[fs.Length];
         fs.ReadExactly(buf);
@@ -131,7 +131,7 @@ public static class PrintDpiReader
 
     private static (double, double, string) ReadBmpDpi(string path)
     {
-        using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 4096, FileOptions.SequentialScan);
+        using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 4096, FileOptions.SequentialScan);
         Span<byte> hdr = stackalloc byte[54];
         if (fs.Read(hdr) != 54) return (DefaultDpi, DefaultDpi, "default");
         if (hdr[0] != (byte)'B' || hdr[1] != (byte)'M') return (DefaultDpi, DefaultDpi, "default");
