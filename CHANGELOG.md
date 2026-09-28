@@ -4,6 +4,16 @@ All notable changes to Glide Image Viewer are documented here. The format is bas
 [Keep a Changelog](https://keepachangelog.com/), and the project uses dotted feature releases with
 hyphenated follow-up corrections (for example `4.2.0-1`).
 
+## [4.3.3] - 2026-09-28
+
+### Added
+
+- Size presets (25%, 50%, 75%, 100%, 125%, 150%, 200%) in both image-overlay and whole-app Overlay context menus. The image and frame resize together and stay within the available viewport or screen.
+
+### Changed
+
+- Application, diagnostic, and installer versions advanced to 4.3.3.
+
 ## [4.3.2] - 2026-09-26
 
 Follow-up to 4.3.1 that releases a viewed image as soon as it is closed.

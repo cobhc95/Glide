@@ -992,6 +992,7 @@ public sealed class WindowInWindowOverlayManager : IDisposable
                 Item("Zoom in\t+", () => ZoomSelected(1.20)),
                 Item("Zoom out\t−", () => ZoomSelected(1.0 / 1.20)),
                 Item("Restore default zoom", ResetSelectedZoom),
+                CreateSizeMenu(id),
                 Item($"{(FindIndex(id) >= 0 && _items[FindIndex(id)].State.PreserveAspectRatio ? "✓ " : "")}Preserve aspect ratio",
                     () => ToggleSelectedAspectRatio(id)),
                 new Separator(),
@@ -1014,6 +1015,44 @@ public sealed class WindowInWindowOverlayManager : IDisposable
         menu.Opened += (_, _) => ContextMenuVisibilityChanged?.Invoke(true);
         menu.Closed += (_, _) => ContextMenuVisibilityChanged?.Invoke(false);
         menu.Open(_inputHost);
+    }
+
+    private MenuItem CreateSizeMenu(Guid id)
+    {
+        var menu = new MenuItem { Header = "Size" };
+        foreach (var percent in new[] { 25, 50, 75, 100, 125, 150, 200 })
+        {
+            var choice = new MenuItem { Header = $"{percent}%" };
+            choice.Click += (_, _) => SetOverlaySize(id, percent);
+            menu.Items.Add(choice);
+        }
+        return menu;
+    }
+
+    private void SetOverlaySize(Guid id, int percent)
+    {
+        var index = FindIndex(id);
+        if (index < 0) return;
+        var item = _items[index];
+        var state = item.State;
+        var host = _inputHost.Bounds.Size;
+        if (host.Width <= 0 || host.Height <= 0) return;
+        var pixels = item.Bitmap.PixelSize;
+        var factor = Math.Min(percent / 100.0,
+            Math.Min(host.Width / Math.Max(1, pixels.Width), host.Height / Math.Max(1, pixels.Height)));
+        var width = Math.Max(1, pixels.Width * factor);
+        var height = Math.Max(1, pixels.Height * factor);
+        SetState(index, state with
+        {
+            X = Math.Clamp(state.X + (state.Width - width) / 2, 0, Math.Max(0, host.Width - width)),
+            Y = Math.Clamp(state.Y + (state.Height - height) / 2, 0, Math.Max(0, host.Height - height)),
+            Width = width,
+            Height = height,
+            ContentScale = factor,
+            Zoom = 1,
+            PanX = 0,
+            PanY = 0
+        });
     }
 
     private void ToggleSelectedAspectRatio(Guid id)

@@ -1331,7 +1331,7 @@ public partial class MainWindow : Window
     {
         if (!File.Exists(path) || !ImageNavigator.IsSupported(path))
         {
-            Title = "Glide 4.3.2 — Unsupported or missing image";
+            Title = "Glide 4.3.3 — Unsupported or missing image";
             return;
         }
         if (openInNewTab || !_workspace.ReplaceActiveWithImage(path)) _workspace.AddImage(path);
@@ -1720,8 +1720,8 @@ public partial class MainWindow : Window
                 _diagnostics.Write("decode", "foreground_failed", new { path, request = request.ImageRequestId, error = ex.GetType().Name, ex.Message });
                 var extension = ImageFormatRegistry.GetLongestExtension(path);
                 Title = string.IsNullOrEmpty(extension)
-                    ? $"Glide 4.3.2 — Open failed: {ex.GetType().Name}"
-                    : $"Glide 4.3.2 — No decoder for {extension} (optional codec required)";
+                    ? $"Glide 4.3.3 — Open failed: {ex.GetType().Name}"
+                    : $"Glide 4.3.3 — No decoder for {extension} (optional codec required)";
             }
             if (_warmPresentationGateActive)
                 await ReleaseWarmPresentationGateAsync(safeFrameReady: false);
@@ -2561,7 +2561,7 @@ public partial class MainWindow : Window
             : "Fast browsing, precise zooming, and familiar Windows controls.";
         home.TipsGrid.IsVisible = !recentLanding && _settings.ShowHomeTips;
         ApplyWelcomeLayout();
-        Title = recentLanding ? "Glide 4.3.2 — Recent pictures" : "Glide 4.3.2 — Home";
+        Title = recentLanding ? "Glide 4.3.3 — Recent pictures" : "Glide 4.3.3 — Home";
         RefreshRecentHistoryHome();
         ApplyStatusVisibility();
     }
@@ -4239,7 +4239,7 @@ public partial class MainWindow : Window
         BrowserBackButton.IsEnabled = session.Index > 0 || (_tabForwardImageTargets.TryGetValue(id, out var backTarget) && File.Exists(backTarget));
         BrowserForwardButton.IsEnabled = session.Index >= 0 && session.Index < session.History.Count - 1;
         BrowserUpButton.IsEnabled = Directory.GetParent(folder) is not null;
-        Title = $"Glide 4.3.2 — Explorer — {folder}";
+        Title = $"Glide 4.3.3 — Explorer — {folder}";
         RebuildTabStrip();
         SelectBrowserHighlight(id);
         UpdateTabNavigationButtons();
@@ -4330,7 +4330,7 @@ public partial class MainWindow : Window
         BrowserBackButton.IsEnabled = session.Index > 0 || (_tabForwardImageTargets.TryGetValue(browser.Id, out var nativeBackTarget) && File.Exists(nativeBackTarget));
         BrowserForwardButton.IsEnabled = session.Index >= 0 && session.Index < session.History.Count - 1;
         BrowserUpButton.IsEnabled = Directory.GetParent(folder) is not null;
-        Title = $"Glide 4.3.2 — Explorer — {folder}";
+        Title = $"Glide 4.3.3 — Explorer — {folder}";
         RebuildTabStrip();
         SelectBrowserHighlight(browser.Id);
         UpdateTabNavigationButtons();
@@ -5759,6 +5759,14 @@ public partial class MainWindow : Window
         };
         interactions.Click += (_, _) => ToggleWholeAppOverlayInteractionMode();
         items.Add(interactions);
+        var sizeMenu = new MenuItem { Header = "Size" };
+        foreach (var percent in new[] { 25, 50, 75, 100, 125, 150, 200 })
+        {
+            var choice = new MenuItem { Header = $"{percent}%" };
+            choice.Click += (_, _) => SetWholeAppOverlaySize(percent);
+            sizeMenu.Items.Add(choice);
+        }
+        items.Add(sizeMenu);
         items.Add(new MenuItem { Header = "—", IsEnabled = false });
 
         var always = new MenuItem
@@ -5777,6 +5785,28 @@ public partial class MainWindow : Window
         var exit = new MenuItem { Header = "Exit Overlay mode" };
         exit.Click += (_, _) => ExitWholeAppOverlayMode();
         items.Add(exit);
+    }
+
+    private void SetWholeAppOverlaySize(int percent)
+    {
+        if (!_wholeAppOverlayMode || WindowState != WindowState.Normal) return;
+        var screen = Screens.All.FirstOrDefault(s => s.WorkingArea.Contains(Position)) ?? Screens.Primary;
+        if (screen is null) return;
+        var scale = screen.Scaling > 0 ? screen.Scaling : 1.0;
+        var pixels = Viewport.Bitmap?.PixelSize;
+        var sourceWidth = Math.Max(1, _currentPixelWidth > 0 ? _currentPixelWidth : pixels?.Width ?? 1);
+        var sourceHeight = Math.Max(1, _currentPixelHeight > 0 ? _currentPixelHeight : pixels?.Height ?? 1);
+        var area = screen.WorkingArea;
+        var factor = Math.Min(percent / 100.0,
+            Math.Min(area.Width / (scale * sourceWidth), area.Height / (scale * sourceHeight)));
+        var width = sourceWidth * factor;
+        var height = sourceHeight * factor;
+        var x = Math.Clamp(Position.X + (int)Math.Round((Bounds.Width - width) * scale / 2), area.X, area.Right - (int)Math.Ceiling(width * scale));
+        var y = Math.Clamp(Position.Y + (int)Math.Round((Bounds.Height - height) * scale / 2), area.Y, area.Bottom - (int)Math.Ceiling(height * scale));
+        Position = new PixelPoint(x, y);
+        Width = width;
+        Height = height;
+        SaveCurrentWholeAppOverlayPlacement();
     }
 
     private ContextMenu BuildWholeAppOverlayOnlyContextMenu()
@@ -7473,14 +7503,14 @@ public partial class MainWindow : Window
     {
         if (string.IsNullOrWhiteSpace(_currentPath) || !ImageView.IsVisible)
         {
-            if (HomeHost.IsVisible) Title = "Glide 4.3.2 — Home";
+            if (HomeHost.IsVisible) Title = "Glide 4.3.3 — Home";
             return;
         }
         var display = _settings.FullPathInTitle ? _currentPath : Path.GetFileName(_currentPath);
         var index = _navigator.Count > 0 ? $"[{_navigator.Index + 1}/{_navigator.Count}]" : string.Empty;
         Title = prefix is null
-            ? $"Glide 4.3.2 — {display}  {index}  {Viewport.ZoomPercent}%"
-            : $"Glide 4.3.2 — {prefix} — {display}";
+            ? $"Glide 4.3.3 — {display}  {index}  {Viewport.ZoomPercent}%"
+            : $"Glide 4.3.3 — {prefix} — {display}";
     }
 
     private static string FormatFileSize(long bytes)
