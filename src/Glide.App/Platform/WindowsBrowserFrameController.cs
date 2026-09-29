@@ -413,7 +413,7 @@ internal sealed class WindowsBrowserFrameController : IDisposable
 
     private int HitTestResizeBorder(int screenX, int screenY)
     {
-        if (_window.WindowState is WindowState.Maximized or WindowState.FullScreen) return HtClient;
+        if (_window.WindowState == WindowState.FullScreen || IsZoomed(_hwnd)) return HtClient;
         if (!GetWindowRect(_hwnd, out var rect)) return HtClient;
 
         // Firefox/Chromium deliberately keep the outermost edge available to resize even when
@@ -478,7 +478,7 @@ internal sealed class WindowsBrowserFrameController : IDisposable
         var command = hit switch
         {
             HtMinButton => ScMinimize,
-            HtMaxButton => _window.WindowState == WindowState.Maximized ? ScRestore : ScMaximize,
+            HtMaxButton => IsZoomed(_hwnd) ? ScRestore : ScMaximize,
             HtClose => ScClose,
             _ => 0
         };
@@ -581,6 +581,10 @@ internal sealed class WindowsBrowserFrameController : IDisposable
 
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     private delegate IntPtr WndProc(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsZoomed(IntPtr hwnd);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern IntPtr CallWindowProcW(IntPtr previous, IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);

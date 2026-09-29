@@ -4,6 +4,12 @@ All notable changes to Glide Image Viewer are documented here. The format is bas
 [Keep a Changelog](https://keepachangelog.com/), and the project uses dotted feature releases with
 hyphenated follow-up corrections (for example `4.2.0-1`).
 
+## [4.3.4] - 2026-09-29
+
+### Fixed
+
+- Use the actual Windows HWND maximized state for caption maximize/restore and resize-edge hit testing. This prevents a stale cached window state after snapping or warm restoration from making maximize restore a half-width window or disabling resizing.
+
 ## [4.3.3] - 2026-09-28
 
 ### Added

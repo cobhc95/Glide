@@ -6654,7 +6654,10 @@ public partial class MainWindow : Window
                     ExitFullscreen(forceMaximized: false);
                     break;
                 }
-                var restore = WindowState == WindowState.Maximized;
+                // Hide/show and shell snapping can leave Avalonia's cached state out of sync
+                // with the HWND. A stale Maximized value used to send SC_RESTORE to an
+                // already-normal, half-screen window instead of maximizing it.
+                var restore = TryGetNativeZoomed(out var zoomed) ? zoomed : WindowState == WindowState.Maximized;
                 if (!TrySendNativeSystemCommand(restore ? ScRestore : ScMaximize))
                     WindowState = restore ? WindowState.Normal : WindowState.Maximized;
                 break;
@@ -8469,6 +8472,20 @@ public partial class MainWindow : Window
             WindowState = _stateBeforeMinimize == WindowState.Maximized ? WindowState.Maximized : WindowState.Normal;
         EnsureNativeMaximizedState();
     }
+
+    private bool TryGetNativeZoomed(out bool zoomed)
+    {
+        zoomed = false;
+        if (!OperatingSystem.IsWindows()) return false;
+        var handle = TryGetPlatformHandle();
+        if (handle is null || handle.Handle == IntPtr.Zero) return false;
+        zoomed = IsZoomed(handle.Handle);
+        return true;
+    }
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsZoomed(IntPtr hWnd);
 
     private void EnsureNativeMaximizedState()
     {
