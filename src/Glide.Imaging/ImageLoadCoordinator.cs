@@ -15,6 +15,9 @@ public sealed class NativeCompressedBuffer : IDisposable
     private IntPtr _pointer;
     private readonly long _length;
     private int _disposed;
+    // The cache owns one reference; every read stream holds another. Cache eviction (trim, purge on
+    // minimize, invalidation) used to free the memory while a decoder was still reading it.
+    private int _refCount = 1;
 
     public const long MaxAllowedBufferBytes = 1024L * 1024L * 1024L; // 1 GB max compressed stream buffer
 
@@ -37,8 +40,40 @@ public sealed class NativeCompressedBuffer : IDisposable
 
     public unsafe UnmanagedMemoryStream CreateReadStream()
     {
-        ObjectDisposedException.ThrowIf(_disposed != 0, this);
-        return new UnmanagedMemoryStream((byte*)_pointer, _length, _length, FileAccess.Read);
+        ObjectDisposedException.ThrowIf(_disposed != 0 || !TryAddRef(), this);
+        return new LeasedReadStream(this, (byte*)_pointer, _length);
+    }
+
+    private bool TryAddRef()
+    {
+        while (true)
+        {
+            var current = Volatile.Read(ref _refCount);
+            if (current == 0) return false;
+            if (Interlocked.CompareExchange(ref _refCount, current + 1, current) == current) return true;
+        }
+    }
+
+    private void Release()
+    {
+        if (Interlocked.Decrement(ref _refCount) != 0) return;
+        var ptr = Interlocked.Exchange(ref _pointer, IntPtr.Zero);
+        if (ptr != IntPtr.Zero)
+        {
+            unsafe { NativeMemory.Free((void*)ptr); }
+        }
+    }
+
+    private sealed unsafe class LeasedReadStream(NativeCompressedBuffer owner, byte* pointer, long length)
+        : UnmanagedMemoryStream(pointer, length, length, FileAccess.Read)
+    {
+        private int _released;
+
+        protected override void Dispose(bool disposing)
+        {
+            base.Dispose(disposing);
+            if (Interlocked.Exchange(ref _released, 1) == 0) owner.Release();
+        }
     }
 
     public unsafe UnmanagedMemoryStream CreateWriteStream()
@@ -49,14 +84,7 @@ public sealed class NativeCompressedBuffer : IDisposable
 
     public void Dispose()
     {
-        if (Interlocked.Exchange(ref _disposed, 1) == 0)
-        {
-            var ptr = Interlocked.Exchange(ref _pointer, IntPtr.Zero);
-            if (ptr != IntPtr.Zero)
-            {
-                unsafe { NativeMemory.Free((void*)ptr); }
-            }
-        }
+        if (Interlocked.Exchange(ref _disposed, 1) == 0) Release();
     }
 }
 
@@ -612,7 +640,11 @@ public sealed class ImageLoadCoordinator : IDisposable
     private (Stream Stream, bool CacheHit) OpenDecodeStream(string path, bool sequential)
     {
         if (TryGetCompressed(path, out var buffer) && buffer is not null)
-            return (buffer.CreateReadStream(), true);
+        {
+            // A concurrent trim/purge may evict the entry between lookup and lease; read from disk then.
+            try { return (buffer.CreateReadStream(), true); }
+            catch (ObjectDisposedException) { }
+        }
 
         var options = FileOptions.Asynchronous | (sequential ? FileOptions.SequentialScan : FileOptions.None);
         return (new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 128 * 1024, options), false);

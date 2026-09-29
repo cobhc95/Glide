@@ -46,7 +46,7 @@ setlocal EnableExtensions EnableDelayedExpansion
 cd /d "%~dp0"
 rem Single-source the product version from Directory.Build.props so build banners, deliverable
 rem names and fixture identities can never drift from the assembly metadata again.
-set "GLIDE_VERSION=4.3.4"
+set "GLIDE_VERSION=4.3.5"
 for /f "tokens=3 delims=<>" %%V in ('findstr /r /c:"^ *<Version>" "Directory.Build.props"') do set "GLIDE_VERSION=%%V"
 title Glide %GLIDE_VERSION%
 
@@ -353,7 +353,7 @@ if /I "%GLIDE_SKIP_INSTALLER%"=="1" (
   call :progress 94 "Installer package"
   echo [9/9] Building Inno Setup installer...
   set "GLIDE_INSTALLER_PARENT=1"
-  call build-installer.cmd --from-build
+  call "%~dp0build-installer.cmd" --from-build
   set "GLIDE_INSTALLER_PARENT="
   if errorlevel 1 (
     set "GLIDE_BUILD_RC=!errorlevel!"

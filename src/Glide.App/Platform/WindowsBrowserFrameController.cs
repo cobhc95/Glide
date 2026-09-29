@@ -32,6 +32,17 @@ internal sealed class WindowsBrowserFrameController : IDisposable
     private const long WsThickFrame = 0x00040000L;
     private const long WsMinimizeBox = 0x00020000L;
     private const long WsMaximizeBox = 0x00010000L;
+    private const uint WsExAppWindow = 0x00040000;
+    private const uint WmSetIcon = 0x0080;
+    private const int IconSmall = 0;
+    private const int IconBig = 1;
+    private const int IconSmall2 = 2;
+    private const int GclpHIcon = -14;
+    private const int GclpHIconSm = -34;
+    private const int SmCxIcon = 11;
+    private const int SmCyIcon = 12;
+    private const int SmCxSmIcon = 49;
+    private const int SmCySmIcon = 50;
 
     private const uint WmNcHitTest = 0x0084;
     private const uint WmNcMouseMove = 0x00A0;
@@ -46,6 +57,13 @@ internal sealed class WindowsBrowserFrameController : IDisposable
     private const uint WmSize = 0x0005;
     private const uint WmEnterSizeMove = 0x0231;
     private const uint WmExitSizeMove = 0x0232;
+    private const uint WmSettingChange = 0x001A;
+    private const uint WmDisplayChange = 0x007E;
+    private const uint WmDpiChanged = 0x02E0;
+    private const uint WmAppRefitMaximized = 0x8000 + 0x47;
+    private const int SpiSetWorkArea = 0x002F;
+    private const int SizeMaximized = 2;
+    private const uint MonitorDefaultToNearest = 2;
     private const int VkRButton = 0x02;
     private const int IdcArrow = 32512;
 
@@ -100,6 +118,9 @@ internal sealed class WindowsBrowserFrameController : IDisposable
     private IntPtr _privacyCurtain;
     private IntPtr _privacyBrush;
     private uint _privacyColor;
+    private readonly Win32Properties.CustomWindowStylesCallback _stylesCallback;
+    private IntPtr _bigIcon;
+    private IntPtr _smallIcon;
 
     private WindowsBrowserFrameController(Window window, Button minimize, Button maximize, Button close, IntPtr hwnd, Func<PixelPoint, bool>? selectionHitTest, Func<PixelPoint, bool>? imageHitTest, Action? minimizeAction, Action? maximizeAction, Action? closeAction, Action? nativeResizeStarted, Action? nativeResizeEnded, Control? protectedClientChrome)
     {
@@ -128,6 +149,61 @@ internal sealed class WindowsBrowserFrameController : IDisposable
 
         var proc = Marshal.GetFunctionPointerForDelegate(_wndProc);
         _previousWndProc = SetWindowLongPtrCompat(_hwnd, GwlpWndProc, proc);
+
+        // Avalonia rebuilds GWL_STYLE from its own model on every WindowState / ShowInTaskbar /
+        // decoration update and, for SystemDecorations="None", strips WS_SYSMENU and WS_THICKFRAME.
+        // Setting them once above was therefore undone by the first maximize/restore, leaving a
+        // window the shell no longer treats as a normal app window (lost taskbar icon, no Snap
+        // Layouts). The styles callback reapplies them on every Avalonia rewrite.
+        _stylesCallback = ApplyFrameStyles;
+        Win32Properties.AddWindowStylesCallback(_window, _stylesCallback);
+        ApplyTaskbarIcons();
+    }
+
+    private (uint style, uint exStyle) ApplyFrameStyles(uint style, uint exStyle)
+    {
+        if (_disposed || _window.WindowState == WindowState.FullScreen) return (style, exStyle);
+        style |= (uint)(WsSysMenu | WsThickFrame | WsMinimizeBox | WsMaximizeBox);
+        if (_window.ShowInTaskbar) exStyle |= WsExAppWindow;
+        return (style, exStyle);
+    }
+
+    /// <summary>
+    /// Attach Glide's icon to the HWND and its window class at the exact sizes the shell asks for.
+    /// The taskbar, Alt+Tab and the jump-list header read these handles, independently of the
+    /// scaled bitmap Avalonia derives from the XAML Icon.
+    /// </summary>
+    public void ApplyTaskbarIcons()
+    {
+        if (_disposed || _hwnd == IntPtr.Zero) return;
+        try
+        {
+            var exe = Environment.ProcessPath;
+            if (string.IsNullOrEmpty(exe)) return;
+            if (_bigIcon == IntPtr.Zero)
+                _bigIcon = ExtractIcon(exe, GetSystemMetrics(SmCxIcon), GetSystemMetrics(SmCyIcon));
+            if (_smallIcon == IntPtr.Zero)
+                _smallIcon = ExtractIcon(exe, GetSystemMetrics(SmCxSmIcon), GetSystemMetrics(SmCySmIcon));
+            if (_bigIcon != IntPtr.Zero)
+            {
+                SendMessageW(_hwnd, WmSetIcon, new IntPtr(IconBig), _bigIcon);
+                SetClassLongPtrCompat(_hwnd, GclpHIcon, _bigIcon);
+            }
+            if (_smallIcon != IntPtr.Zero)
+            {
+                SendMessageW(_hwnd, WmSetIcon, new IntPtr(IconSmall), _smallIcon);
+                SendMessageW(_hwnd, WmSetIcon, new IntPtr(IconSmall2), _smallIcon);
+                SetClassLongPtrCompat(_hwnd, GclpHIconSm, _smallIcon);
+            }
+        }
+        catch { /* icon attachment is cosmetic */ }
+    }
+
+    private static IntPtr ExtractIcon(string path, int cx, int cy)
+    {
+        var icons = new IntPtr[1];
+        var ids = new uint[1];
+        return PrivateExtractIconsW(path, 0, cx, cy, icons, ids, 1, 0) == 1 ? icons[0] : IntPtr.Zero;
     }
 
     public static WindowsBrowserFrameController? TryAttach(Window window, Button minimize, Button maximize, Button close, Func<PixelPoint, bool>? selectionHitTest = null, Func<PixelPoint, bool>? imageHitTest = null, Action? minimizeAction = null, Action? maximizeAction = null, Action? closeAction = null, Action? nativeResizeStarted = null, Action? nativeResizeEnded = null, Control? protectedClientChrome = null)
@@ -166,6 +242,7 @@ internal sealed class WindowsBrowserFrameController : IDisposable
                 SwpNoSize | SwpNoMove | SwpNoZOrder | SwpNoActivate | SwpFrameChanged);
         }
         catch { }
+        ApplyTaskbarIcons();
     }
 
     /// <summary>Cover the client area of a warm HWND before it is shown.</summary>
@@ -238,7 +315,26 @@ internal sealed class WindowsBrowserFrameController : IDisposable
         {
             case WmSize:
                 ResizePrivacyCurtain(show: true);
+                // With SystemDecorations="None" Avalonia does not let Windows size the maximized
+                // HWND; it SetWindowPos()es it to the WorkingArea of its *cached* Screen object right
+                // after this message. That cache is only invalidated by WM_DISPLAYCHANGE, so after a
+                // rotation/resolution change (where Explorer moves the taskbar and updates rcWork
+                // later) or a plain taskbar move, maximize lands on the old, e.g. portrait, rect while
+                // WS_MAXIMIZE is set. Re-check against the live monitor work area once Avalonia is done.
+                if (wParam.ToInt64() == SizeMaximized)
+                    PostMessageW(_hwnd, WmAppRefitMaximized, IntPtr.Zero, IntPtr.Zero);
                 break;
+            case WmAppRefitMaximized:
+                RefitMaximizedToLiveWorkArea();
+                return IntPtr.Zero;
+            case WmDisplayChange:
+            case WmDpiChanged:
+            case WmSettingChange when wParam.ToInt64() == SpiSetWorkArea:
+            {
+                var result = CallWindowProcW(_previousWndProc, hwnd, message, wParam, lParam);
+                ScheduleWorkAreaResync();
+                return result;
+            }
             case WmCtlColorStatic when lParam == _privacyCurtain && _privacyBrush != IntPtr.Zero:
                 SetBkColor(wParam, _privacyColor);
                 return _privacyBrush;
@@ -401,6 +497,47 @@ internal sealed class WindowsBrowserFrameController : IDisposable
             catch { return IntPtr.Zero; }
         }
     }
+    private void ScheduleWorkAreaResync()
+    {
+        // Explorer re-docks the taskbar asynchronously after a display change, so rcWork can still
+        // be transitional when WM_DISPLAYCHANGE arrives. Resync now and again once it has settled.
+        foreach (var delayMs in new[] { 0, 300, 1200 })
+        {
+            DispatcherTimer.RunOnce(() =>
+            {
+                if (_disposed) return;
+                InvalidateAvaloniaScreenCache();
+                RefitMaximizedToLiveWorkArea();
+            }, TimeSpan.FromMilliseconds(Math.Max(1, delayMs)));
+        }
+    }
+
+    private void InvalidateAvaloniaScreenCache()
+    {
+        // Avalonia only refreshes its monitor cache on WM_DISPLAYCHANGE (it ignores SPI_SETWORKAREA).
+        // Forwarding a synthetic one straight to its WndProc is side-effect free and makes the next
+        // Avalonia maximize use the current work area.
+        try { CallWindowProcW(_previousWndProc, _hwnd, WmDisplayChange, IntPtr.Zero, IntPtr.Zero); } catch { }
+    }
+
+    private void RefitMaximizedToLiveWorkArea()
+    {
+        if (_disposed || _hwnd == IntPtr.Zero || _window.WindowState == WindowState.FullScreen || !IsZoomed(_hwnd)) return;
+        var monitor = MonitorFromWindow(_hwnd, MonitorDefaultToNearest);
+        var info = new NativeMonitorInfo { cbSize = (uint)Marshal.SizeOf<NativeMonitorInfo>() };
+        if (monitor == IntPtr.Zero || !GetMonitorInfoW(monitor, ref info) || !GetWindowRect(_hwnd, out var rect)) return;
+        var work = info.rcWork;
+        if (rect.Left == work.Left && rect.Top == work.Top && rect.Right == work.Right && rect.Bottom == work.Bottom) return;
+        LiveDiagnosticTrace.Write("win32", "maximized_refit", new
+        {
+            from = $"{rect.Left},{rect.Top},{rect.Right},{rect.Bottom}",
+            to = $"{work.Left},{work.Top},{work.Right},{work.Bottom}"
+        });
+        InvalidateAvaloniaScreenCache();
+        SetWindowPos(_hwnd, IntPtr.Zero, work.Left, work.Top, work.Right - work.Left, work.Bottom - work.Top,
+            SwpNoZOrder | SwpNoActivate);
+    }
+
     private bool IsFullscreenCornerCloseHit(int screenX, int screenY)
     {
         if (!GetWindowRect(_hwnd, out var rect)) return false;
@@ -552,12 +689,15 @@ internal sealed class WindowsBrowserFrameController : IDisposable
         _disposed = true;
         HidePrivacyCurtain();
         ClearVisualState();
+        try { Win32Properties.RemoveWindowStylesCallback(_window, _stylesCallback); } catch { }
         if (_hwnd != IntPtr.Zero && _previousWndProc != IntPtr.Zero)
         {
             try { SetWindowLongPtrCompat(_hwnd, GwlpWndProc, _previousWndProc); } catch { }
         }
         if (_zoomInCursor != IntPtr.Zero) DestroyCursor(_zoomInCursor);
         if (_zoomOutCursor != IntPtr.Zero) DestroyCursor(_zoomOutCursor);
+        // The HWND may still reference these through WM_GETICON until it is destroyed; the handles
+        // are tiny and process-lifetime, so they are intentionally not destroyed here.
         GC.KeepAlive(_wndProc);
     }
 
@@ -569,6 +709,15 @@ internal sealed class WindowsBrowserFrameController : IDisposable
 
     [StructLayout(LayoutKind.Sequential)]
     private struct NativeRect { public int Left, Top, Right, Bottom; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeMonitorInfo
+    {
+        public uint cbSize;
+        public NativeRect rcMonitor;
+        public NativeRect rcWork;
+        public uint dwFlags;
+    }
 
     [StructLayout(LayoutKind.Sequential)]
     private struct NativeTrackMouseEvent
@@ -634,6 +783,31 @@ internal sealed class WindowsBrowserFrameController : IDisposable
 
     [DllImport("user32.dll")]
     private static extern bool PostMessageW(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern uint PrivateExtractIconsW(string file, int index, int cx, int cy, IntPtr[] icons, uint[] ids, uint count, uint flags);
+
+    [DllImport("user32.dll")]
+    private static extern int GetSystemMetrics(int index);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr SendMessageW(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll", EntryPoint = "SetClassLongPtrW")]
+    private static extern IntPtr SetClassLongPtr64(IntPtr hwnd, int index, IntPtr value);
+
+    [DllImport("user32.dll", EntryPoint = "SetClassLongW")]
+    private static extern uint SetClassLong32(IntPtr hwnd, int index, uint value);
+
+    private static IntPtr SetClassLongPtrCompat(IntPtr hwnd, int index, IntPtr value) =>
+        IntPtr.Size == 8 ? SetClassLongPtr64(hwnd, index, value) : new IntPtr(SetClassLong32(hwnd, index, (uint)value.ToInt32()));
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint flags);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetMonitorInfoW(IntPtr monitor, ref NativeMonitorInfo info);
 
     [DllImport("user32.dll", EntryPoint = "TrackMouseEvent")]
     private static extern bool TrackMouseEventNative(ref NativeTrackMouseEvent trackEvent);

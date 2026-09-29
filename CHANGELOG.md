@@ -4,6 +4,20 @@ All notable changes to Glide Image Viewer are documented here. The format is bas
 [Keep a Changelog](https://keepachangelog.com/), and the project uses dotted feature releases with
 hyphenated follow-up corrections (for example `4.2.0-1`).
 
+## [4.3.5] - 2026-09-29
+
+### Fixed
+
+- **Maximize no longer gets stuck at the old size after rotating the display** (portrait ↔ landscape) or moving the taskbar. Avalonia sizes a maximized borderless window from a cached monitor work area that it only refreshes on WM_DISPLAYCHANGE, often before Explorer has re-docked the taskbar. Glide now re-fits a maximized window to the live work area, refreshes Avalonia's monitor cache on display, DPI and work-area changes, and re-checks after the taskbar settles.
+- Double-clicking the empty title/tab bar now toggles maximize/restore from the real Windows state, like the Maximize button, instead of a possibly stale cached state.
+- **Missing taskbar icon.** Avalonia rewrote the window style on every maximize, restore and taskbar change, which stripped `WS_SYSMENU`/`WS_THICKFRAME` from Glide's custom frame. The shell then stopped treating Glide as a normal app window (missing taskbar icon, unreliable Snap Layouts). The frame styles are now reapplied on every rewrite, and Glide attaches DPI-correct icons from `Glide.exe` to each window and its window class, including after Speed Boost restore.
+- Fixed a possible hard crash or corrupted image when the compressed-image cache evicted a file (trim, purge on minimize, or refresh) while it was still being decoded. Cached buffers are now reference-counted for as long as a decoder reads them.
+- An unexpected error inside a UI event handler is now logged to the diagnostic trace (`dispatcher_unhandled_exception`) instead of closing Glide.
+
+### Changed
+
+- Application, diagnostic, title-bar and installer versions advanced to 4.3.5. The earlier 4.3.4 build still showed 4.3.3 in the window title and About page.
+
 ## [4.3.4] - 2026-09-29
 
 ### Fixed

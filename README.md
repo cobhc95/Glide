@@ -1,12 +1,29 @@
-# Glide 4.3.2
+# Glide 4.3.5
 
 ## Fast. Lightweight. Multi-tabbed. Multi-window. Highly customizable.
 
 ![Glide main user interface](docs/screenshots/screenshot_1.jpg)
 
-**Glide 4.3.2 is a high-performance Windows image viewer built around instant-feeling image opening, a compact installer, multi-tab and multi-window workflows, transparent overlays, deep mouse/keyboard customization, Launch Speed Boost, complete image printing, native SVG/vector support, automatic Windows Open With integration, Windows Explorer thumbnails, and recognition/routing for 196 image and document filename extensions.**
+**Glide 4.3.5 is a high-performance Windows image viewer built around instant-feeling image opening, a compact installer, multi-tab and multi-window workflows, transparent overlays, deep mouse/keyboard customization, Launch Speed Boost, complete image printing, native SVG/vector support, automatic Windows Open With integration, Windows Explorer thumbnails, and recognition/routing for 196 image and document filename extensions.**
 
-## What's new in 4.3.2
+## What's new in 4.3.5
+
+- **Maximize no longer sticks at the old size after rotating the display** (portrait ↔ landscape) or
+  moving the taskbar. Glide re-fits a maximized window to the monitor's live work area and refreshes
+  its monitor cache on display, DPI and taskbar changes. A title-bar double-click now uses the real
+  Windows maximized state.
+- **Taskbar icon is back.** The window's native frame styles are reapplied every time the UI framework
+  rewrites them, and Glide attaches system-sized icons from `Glide.exe` to every window, including
+  after Speed Boost restore. Windows Snap Layouts are more reliable as a result.
+- **Stability:** fixed a possible crash while browsing when the image cache evicted a file that was
+  still being decoded. Unexpected UI errors are now logged instead of closing the viewer.
+
+### Previously in 4.3.4 and 4.3.3
+
+- 4.3.4: maximize/restore and resize-edge decisions use Windows' actual window state.
+- 4.3.3: 25–200% size presets in the image-overlay and whole-app Overlay context menus.
+
+### Previously in 4.3.2
 
 - **A viewed image is never left locked after you close it.** Deleting or moving an image that had
   already been closed could fail with *"the file is open in Glide Image Viewer"*. Glide's background
@@ -381,7 +398,7 @@ On Windows:
 * Build the application: run `build.cmd`
 * Build the complete standalone installer: run `build.cmd` (or `build.cmd fast --no-pause`)
 
-Release builds produce four deliverables: `Glide-4.3.2-Portable.zip`, `dist-installer\Glide Setup.exe`, `Glide-4.3.2.exe` for direct testing, and the compact `Glide-Zero-Context-Handover.zip`.
+Release builds produce four deliverables: `Glide-4.3.5-Portable.zip`, `dist-installer\Glide Setup.exe`, `Glide-4.3.5.exe` for direct testing, and the compact `Glide-Zero-Context-Handover.zip`.
 
 ---
 

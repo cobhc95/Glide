@@ -1,4 +1,4 @@
-using Avalonia;
+﻿using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
@@ -121,6 +121,15 @@ public partial class App : Application
     public override void OnFrameworkInitializationCompleted()
     {
         GlidePerformanceTrace.Mark("framework_init_start");
+        // Exceptions escaping UI callbacks (including the many async void event handlers) would
+        // otherwise terminate the whole viewer. Log them and keep running; only genuinely
+        // unrecoverable process states are allowed to propagate.
+        Dispatcher.UIThread.UnhandledException += (_, e) =>
+        {
+            var fatal = e.Exception is OutOfMemoryException or InsufficientExecutionStackException;
+            Glide.Diagnostics.Runtime.LiveDiagnosticTrace.WriteException("ui", "dispatcher_unhandled_exception", e.Exception, new { handled = !fatal });
+            if (!fatal) e.Handled = true;
+        };
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;

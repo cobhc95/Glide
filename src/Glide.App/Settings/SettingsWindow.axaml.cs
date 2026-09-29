@@ -99,7 +99,7 @@ public partial class SettingsWindow : Window
             .OfType<System.Reflection.AssemblyInformationalVersionAttribute>()
             .FirstOrDefault()?.InformationalVersion;
         var version = string.IsNullOrWhiteSpace(informational)
-            ? assembly.GetName().Version?.ToString(3) ?? "4.3.3"
+            ? assembly.GetName().Version?.ToString(3) ?? "4.3.5"
             : informational;
         return "Glide " + version;
     }
