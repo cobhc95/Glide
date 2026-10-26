@@ -2,10 +2,10 @@
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <!-- Glide 4.1 release: warm-engine Launch Speed Boost, background standby, and the current image-opening pipeline. -->
-    <Version>4.3.5</Version>
-    <AssemblyVersion>4.3.5.0</AssemblyVersion>
-    <FileVersion>4.3.5.0</FileVersion>
-    <InformationalVersion>4.3.5</InformationalVersion>
+    <Version>4.4.0</Version>
+    <AssemblyVersion>4.4.0.0</AssemblyVersion>
+    <FileVersion>4.4.0.0</FileVersion>
+    <InformationalVersion>4.4.0</InformationalVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
@@ -21,6 +21,14 @@
   </PropertyGroup>
   <ItemGroup Condition="Exists('$(MSBuildThisFileDirectory)dist\Glide.Native.dll')">
     <None Include="$(MSBuildThisFileDirectory)dist\Glide.Native.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Visible>false</Visible>
+    </None>
+  </ItemGroup>
+  <!-- Clean builds delete dist\ before managed build/test; fall back to the freshly built native
+       bridge so tests exercising the WIC encoder/decoder see the current Glide.Native.dll. -->
+  <ItemGroup Condition="!Exists('$(MSBuildThisFileDirectory)dist\Glide.Native.dll') And Exists('$(MSBuildThisFileDirectory)native\Glide.Native\build\Release\Glide.Native.dll')">
+    <None Include="$(MSBuildThisFileDirectory)native\Glide.Native\build\Release\Glide.Native.dll">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <Visible>false</Visible>
     </None>

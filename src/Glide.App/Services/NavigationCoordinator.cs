@@ -16,4 +16,5 @@ public sealed class NavigationCoordinator
     public void OpenSingleOnly(string path) => _inner.OpenSingleOnly(path);
     public void ReplaceFolderIndex(IEnumerable<string> paths, string current) => _inner.ReplaceFolderIndex(paths, current);
     public string? SelectIndex(int index) => _inner.SelectIndex(index);
+    public bool ApplyChanges(IEnumerable<string> added, IEnumerable<string> removed) => _inner.ApplyChanges(added, removed);
 }

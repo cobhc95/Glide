@@ -355,7 +355,8 @@ namespace glide::thumb
             const std::uint8_t idLength = r.U8();
             const std::uint8_t colorMapType = r.U8();
             const std::uint8_t imageType = r.U8();
-            r.U16Le(); r.U16Le();            // color map first entry + length
+            const std::uint16_t colorMapFirst = r.U16Le();
+            const std::uint16_t colorMapLength = r.U16Le();
             const std::uint8_t colorMapEntrySize = r.U8();
             r.U16Le(); r.U16Le();            // x/y origin
             const std::uint16_t width = r.U16Le();
@@ -363,6 +364,7 @@ namespace glide::thumb
             const std::uint8_t bpp = r.U8();
             const std::uint8_t descriptor = r.U8();
             if (width == 0 || height == 0 || !r.Skip(idLength)) return false;
+            if (bpp != 8 && bpp != 15 && bpp != 16 && bpp != 24 && bpp != 32) return false;
             if (!AllocateImage(width, height, out)) return false;
 
             const bool rle = imageType == 9 || imageType == 10 || imageType == 11;
@@ -372,21 +374,21 @@ namespace glide::thumb
             const bool gray = base == 3;
             if (!colorMapped && !trueColor && !gray) return false;
 
+            // The colour map follows the ID field; its size and index base come from the header.
             const std::uint8_t* palette = nullptr;
-            std::size_t paletteCount = 0;
+            const std::size_t entryBytes = (colorMapEntrySize + 7) / 8;
             if (colorMapType == 1)
             {
-                paletteCount = r.U16Le();
-                const std::uint8_t firstEntry = r.U8();
-                (void)firstEntry;
-                const std::uint8_t entryBytes = static_cast<std::uint8_t>((colorMapEntrySize + 7) / 8);
-                const std::size_t paletteBytes = paletteCount * entryBytes;
+                if (entryBytes < 2 || entryBytes > 4) return false;
+                const std::size_t paletteBytes = static_cast<std::size_t>(colorMapLength) * entryBytes;
                 if (!r.Remaining(paletteBytes)) return false;
                 palette = r.Raw() + r.Position();
                 r.Skip(paletteBytes);
             }
+            if (colorMapped && !palette) return false;
 
             const int pixelBytes = (bpp + 7) / 8;
+            if (pixelBytes > 4) return false;
             const bool topLeft = (descriptor & 0x20) != 0;
             const std::uint32_t total = static_cast<std::uint32_t>(width) * height;
             std::uint32_t produced = 0;
@@ -416,18 +418,21 @@ namespace glide::thumb
                     return true;
                 }
                 // colour-mapped
-                const std::uint8_t index = r.U8();
-                if (!palette || index >= paletteCount) return false;
-                const std::uint8_t* entry = palette + static_cast<std::size_t>(index) * ((colorMapEntrySize + 7) / 8);
-                if (colorMapEntrySize >= 24)
+                const std::uint32_t index = pixelBytes == 2 ? r.U16Le() : r.U8();
+                if (index < colorMapFirst || index - colorMapFirst >= colorMapLength) return false;
+                const std::uint8_t* entry = palette + static_cast<std::size_t>(index - colorMapFirst) * entryBytes;
+                if (entryBytes == 2)
                 {
-                    bgra[0] = entry[0]; bgra[1] = entry[1]; bgra[2] = entry[2];
-                    bgra[3] = colorMapEntrySize >= 32 ? entry[3] : 255;
+                    const std::uint16_t value = static_cast<std::uint16_t>(entry[0] | (entry[1] << 8));
+                    bgra[0] = static_cast<std::uint8_t>(((value & 0x1F) * 255) / 31);
+                    bgra[1] = static_cast<std::uint8_t>((((value >> 5) & 0x1F) * 255) / 31);
+                    bgra[2] = static_cast<std::uint8_t>((((value >> 10) & 0x1F) * 255) / 31);
+                    bgra[3] = 255;
                 }
                 else
                 {
-                    bgra[0] = bgra[1] = bgra[2] = entry[0];
-                    bgra[3] = 255;
+                    bgra[0] = entry[0]; bgra[1] = entry[1]; bgra[2] = entry[2];
+                    bgra[3] = entryBytes == 4 ? entry[3] : 255;
                 }
                 return true;
             };
@@ -481,17 +486,19 @@ namespace glide::thumb
             r.Skip(48);                       // 16-colour palette
             r.U8();                           // reserved
             const std::uint8_t planes = r.U8();
-            r.U16Le();                        // bytes per line
+            const std::uint16_t headerBytesPerPlane = r.U16Le();
             r.U16Le();                        // palette type
             r.Skip(58);                       // header filler
             if (encoding != 1 || bitsPerPixel != 1 && bitsPerPixel != 2 && bitsPerPixel != 4 && bitsPerPixel != 8)
                 return false;
+            const bool rgb24 = bitsPerPixel == 8 && planes == 3;
+            if (planes != 1 && !rgb24) return false;
             const std::uint32_t width = static_cast<std::uint32_t>(xMax - xMin) + 1;
             const std::uint32_t height = static_cast<std::uint32_t>(yMax - yMin) + 1;
             if (!AllocateImage(width, height, out)) return false;
 
             std::uint8_t palette[256][3] = {};
-            if (bitsPerPixel == 8)
+            if (bitsPerPixel == 8 && !rgb24)
             {
                 // VGA palette lives in the final 769 bytes: 0x0C then 256 RGB triples.
                 if (size < 769) return false;
@@ -514,7 +521,10 @@ namespace glide::thumb
                 }
             }
 
-            const std::uint32_t bytesPerLine = planes * ((width * bitsPerPixel + 7) / 8);
+            // Each plane's scanline is padded to the header's (even) bytes-per-plane value.
+            const std::uint32_t minPlaneBytes = (width * bitsPerPixel + 7) / 8;
+            const std::uint32_t planeBytes = headerBytesPerPlane >= minPlaneBytes ? headerBytesPerPlane : minPlaneBytes;
+            const std::uint32_t bytesPerLine = planes * planeBytes;
             std::vector<std::uint8_t> line(bytesPerLine);
             std::size_t read = 128;
             for (std::uint32_t y = 0; y < height; ++y)
@@ -539,17 +549,17 @@ namespace glide::thumb
                 for (std::uint32_t x = 0; x < width; ++x)
                 {
                     std::uint8_t r8 = 0, g8 = 0, b8 = 0;
-                    if (bitsPerPixel == 8)
+                    if (rgb24)
+                    {
+                        // Planes are stored R, G, B.
+                        r8 = line[x];
+                        g8 = line[planeBytes + x];
+                        b8 = line[planeBytes * 2 + x];
+                    }
+                    else if (bitsPerPixel == 8)
                     {
                         const std::uint8_t index = line[x];
                         r8 = palette[index][0]; g8 = palette[index][1]; b8 = palette[index][2];
-                    }
-                    else if (planes >= 3)
-                    {
-                        const std::uint32_t rowBytes = (width * bitsPerPixel + 7) / 8;
-                        b8 = line[x];
-                        g8 = line[rowBytes + x];
-                        r8 = line[rowBytes * 2 + x];
                     }
                     else
                     {
@@ -606,8 +616,10 @@ namespace glide::thumb
                 return any ? value : -1;
             };
 
-            if (!HasPrefix(data, size, "P", 1)) return false;
-            const std::uint8_t kind = data[1];
+            if (size < 2 || !HasPrefix(data, size, "P", 1)) return false;
+            // The magic is the ASCII digit after 'P' ("P1".."P7").
+            const int kind = data[1] - '0';
+            if (kind < 1 || kind > 7) return false;
             r.Skip(2);
 
             if (kind == 7) // PAM
@@ -653,12 +665,14 @@ namespace glide::thumb
             const long heightLong = readNumber();
             long maxValue = 1;
             if (kind != 1 && kind != 4) maxValue = readNumber();
-            if (widthLong <= 0 || heightLong <= 0 || maxValue <= 0) return false;
+            if (widthLong <= 0 || heightLong <= 0 || maxValue <= 0 || maxValue > 65535) return false;
             const auto width = static_cast<std::uint32_t>(widthLong);
             const auto height = static_cast<std::uint32_t>(heightLong);
             if (!AllocateImage(width, height, out)) return false;
 
             const bool ascii = kind == 1 || kind == 2 || kind == 3;
+            // Binary rasters start after exactly one whitespace byte following the header.
+            if (!ascii && !r.Skip(1)) return false;
             const std::size_t bytesPerSample = maxValue > 255 ? 2 : 1;
             auto nextSample = [&]() -> std::uint32_t
             {
@@ -672,7 +686,8 @@ namespace glide::thumb
             };
             auto scale = [&](std::uint32_t value) -> std::uint8_t
             {
-                if (maxValue == 0 || maxValue == 255) return static_cast<std::uint8_t>(value);
+                if (value > static_cast<std::uint32_t>(maxValue)) value = static_cast<std::uint32_t>(maxValue);
+                if (maxValue == 255) return static_cast<std::uint8_t>(value);
                 return static_cast<std::uint8_t>((value * 255u) / static_cast<std::uint32_t>(maxValue));
             };
 
@@ -698,9 +713,11 @@ namespace glide::thumb
             {
                 for (std::uint32_t x = 0; x < width; ++x)
                 {
-                    if (kind == 1) // ASCII PBM bitmap: 1 = black
+                    if (kind == 1) // ASCII PBM bitmap: 1 = black; digits may be unseparated
                     {
-                        const std::uint32_t bit = nextSample();
+                        skipWhitespaceAndComments();
+                        if (!r.Remaining(1)) return false;
+                        const std::uint32_t bit = r.U8() == '1' ? 1u : 0u;
                         const std::uint8_t value = bit ? 0 : 255;
                         SetPixel(out, x, y, value, value, value);
                     }
@@ -1055,7 +1072,7 @@ namespace glide::thumb
             const std::uint16_t width = r.U16Be();
             const std::uint16_t height = r.U16Be();
             const std::uint16_t channels = r.U16Be();
-            r.Skip(500 - 12);
+            r.Skip(512 - 12);                 // the SGI header is 512 bytes
             if (width == 0 || height == 0 || channels < 1 || channels > 4) return false;
             if (bytesPerChannel != 1 && bytesPerChannel != 2) return false;
             if (!AllocateImage(width, height, out)) return false;
@@ -1065,17 +1082,21 @@ namespace glide::thumb
 
             if (storage == 1) // RLE
             {
-                const std::size_t tableBytes = static_cast<std::size_t>(height) * channels * 4 * 2;
+                // All scanline start offsets come first, then all lengths, ordered channel-major.
+                const std::size_t entries = static_cast<std::size_t>(height) * channels;
+                const std::size_t tableBytes = entries * 4 * 2;
                 if (!r.Remaining(tableBytes)) return false;
-                std::size_t tablePosition = r.Position();
+                const std::size_t offsetTable = r.Position();
+                const std::size_t lengthTable = offsetTable + entries * 4;
                 r.Skip(tableBytes);
                 for (std::uint32_t channel = 0; channel < channels; ++channel)
                 {
                     for (std::uint32_t y = 0; y < height; ++y)
                     {
-                        const std::uint32_t offset = ReadU32BeAt(data, size, tablePosition); tablePosition += 4;
-                        const std::uint32_t length = ReadU32BeAt(data, size, tablePosition); tablePosition += 4;
-                        if (offset + length > size) return false;
+                        const std::size_t entry = static_cast<std::size_t>(channel) * height + y;
+                        const std::uint32_t offset = ReadU32BeAt(data, size, offsetTable + entry * 4);
+                        const std::uint32_t length = ReadU32BeAt(data, size, lengthTable + entry * 4);
+                        if (offset > size || length > size - offset) return false;
                         std::size_t source = offset;
                         std::size_t produced = 0;
                         std::uint8_t* plane = planar.data() + (static_cast<std::size_t>(channel) * planeSize + y * width) * bytesPerChannel;

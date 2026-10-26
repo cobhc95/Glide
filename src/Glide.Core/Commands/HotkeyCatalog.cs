@@ -82,6 +82,9 @@ public static class HotkeyCatalog
         new("file.rename", "Rename current file", "File", GlideCommand.RenameFile, ["F2", "F6"]),
         new("file.delete", "Delete current file to Recycle Bin", "File", GlideCommand.DeleteFile, ["Delete"]),
         new("file.print", "Print current image", "File", GlideCommand.Print, ["Ctrl+P"]),
+        new("file.save", "Save (overwrite with current rotation/flip)", "File", GlideCommand.SaveImage, ["Ctrl+S"]),
+        // Ctrl+Shift+S is already the canonical overlay-layout save shortcut.
+        new("file.saveAs", "Save as…", "File", GlideCommand.SaveImageAs, ["Ctrl+Alt+S"]),
         new("external.1", "Open in external program 1", "External", GlideCommand.ExternalProgram1, ["Shift+1"]),
         new("external.2", "Open in external program 2", "External", GlideCommand.ExternalProgram2, ["Shift+2"]),
         new("external.3", "Open in external program 3", "External", GlideCommand.ExternalProgram3, ["Shift+3"])

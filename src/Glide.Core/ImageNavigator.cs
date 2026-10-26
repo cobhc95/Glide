@@ -57,6 +57,62 @@ public sealed class ImageNavigator
         }
     }
 
+    private static int CompareCanonical(string a, string b)
+    {
+        var c = StringComparer.OrdinalIgnoreCase.Compare(Path.GetFileName(a), Path.GetFileName(b));
+        return c != 0 ? c : StringComparer.Ordinal.Compare(a, b);
+    }
+
+    /// <summary>
+    /// Incrementally merges watcher-detected additions/removals without a rescan. Keeps the
+    /// canonical name order and keeps the index on the current file. If the current file was
+    /// removed, the index moves to the item that now occupies its slot (clamped).
+    /// Returns true when the list changed.
+    /// </summary>
+    public bool ApplyChanges(IEnumerable<string> added, IEnumerable<string> removed)
+    {
+        var current = Current;
+        var changed = false;
+        var removedSet = new HashSet<string>(removed.Select(Path.GetFullPath), StringComparer.OrdinalIgnoreCase);
+        var oldIndex = Index;
+        if (removedSet.Count > 0)
+        {
+            var n = _paths.RemoveAll(p => removedSet.Contains(p));
+            changed |= n > 0;
+        }
+        foreach (var raw in added)
+        {
+            var full = Path.GetFullPath(raw);
+            if (!IsSupported(full)) continue;
+            var pos = BinarySearch(full);
+            if (pos >= 0) continue;
+            // Fall back to a linear dedupe for case-variant paths.
+            if (_paths.Exists(p => string.Equals(p, full, StringComparison.OrdinalIgnoreCase))) continue;
+            _paths.Insert(~pos, full);
+            changed = true;
+        }
+        if (!changed) return false;
+
+        var keep = current is null ? -1 : _paths.FindIndex(p => string.Equals(p, current, StringComparison.OrdinalIgnoreCase));
+        if (keep >= 0) Index = keep;
+        else if (_paths.Count == 0) Index = -1;
+        else Index = Math.Clamp(oldIndex < 0 ? 0 : oldIndex, 0, _paths.Count - 1);
+        return true;
+    }
+
+    private int BinarySearch(string full)
+    {
+        int lo = 0, hi = _paths.Count - 1;
+        while (lo <= hi)
+        {
+            var mid = (lo + hi) >>> 1;
+            var c = CompareCanonical(_paths[mid], full);
+            if (c == 0) return mid;
+            if (c < 0) lo = mid + 1; else hi = mid - 1;
+        }
+        return ~lo;
+    }
+
     public static string[] EnumerateSupportedFolder(string path)
         => EnumerateSupportedFolder(path, null);
 

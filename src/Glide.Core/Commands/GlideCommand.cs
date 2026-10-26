@@ -78,5 +78,7 @@ public enum GlideCommand
     Print,
     ExternalProgram1,
     ExternalProgram2,
-    ExternalProgram3
+    ExternalProgram3,
+    SaveImage,
+    SaveImageAs
 }

@@ -623,14 +623,16 @@ extern "C" __declspec(dllexport) void __cdecl GlideFreeImageBuffer(void* data)
 // Component boundary used by the decoder.  Keeping this in the small native bridge
 // avoids pulling a second managed image stack into the application and preserves
 // real PNG/JPEG/BMP output on Windows.
-extern "C" __declspec(dllexport) int __cdecl GlideEncodeImageW(const wchar_t* path,
+// format: 0 PNG, 1 JPEG, 2 BMP, 3 TIFF. quality (JPEG only) is 0..1; <=0 means 0.95.
+extern "C" __declspec(dllexport) int __cdecl GlideEncodeImageExW(const wchar_t* path,
     std::uint32_t width, std::uint32_t height, std::uint32_t stride,
-    const void* pixels, std::uint32_t format)
+    const void* pixels, std::uint32_t format, float quality)
 {
     const std::uint64_t minimumStride = static_cast<std::uint64_t>(width) * 4ull;
     const std::uint64_t bufferBytes = static_cast<std::uint64_t>(stride) * height;
     if (!path || !pixels || width == 0 || height == 0 || width > std::numeric_limits<UINT>::max() / 4u ||
-        static_cast<std::uint64_t>(stride) < minimumStride || bufferBytes > std::numeric_limits<UINT>::max() || format > 2) return 0;
+        static_cast<std::uint64_t>(stride) < minimumStride || bufferBytes > std::numeric_limits<UINT>::max() || format > 3) return 0;
+    if (!(quality > 0.0f) || quality > 1.0f) quality = 0.95f;
     const HRESULT init = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     const bool mustUninit = SUCCEEDED(init);
     if (FAILED(init) && init != RPC_E_CHANGED_MODE) return 0;
@@ -650,7 +652,8 @@ extern "C" __declspec(dllexport) int __cdecl GlideEncodeImageW(const wchar_t* pa
         GUID_WICPixelFormat32bppPBGRA, stride, stride * height,
         static_cast<BYTE*>(const_cast<void*>(pixels)), &bitmap);
     const GUID* container = format == 0 ? &GUID_ContainerFormatPng :
-                            format == 1 ? &GUID_ContainerFormatJpeg : &GUID_ContainerFormatBmp;
+                            format == 1 ? &GUID_ContainerFormatJpeg :
+                            format == 3 ? &GUID_ContainerFormatTiff : &GUID_ContainerFormatBmp;
     // CreateEncoder returns an encoder; create the frame with its property bag
     // so JPEG remains a genuine WIC encode.
     if (SUCCEEDED(hr)) hr = factory->CreateEncoder(*container, nullptr, &encoder);
@@ -659,14 +662,14 @@ extern "C" __declspec(dllexport) int __cdecl GlideEncodeImageW(const wchar_t* pa
     if (SUCCEEDED(hr) && format == 1 && properties)
     {
         PROPBAG2 option{}; option.pstrName = const_cast<LPOLESTR>(L"ImageQuality");
-        VARIANT value; VariantInit(&value); value.vt = VT_R4; value.fltVal = 0.95f;
+        VARIANT value; VariantInit(&value); value.vt = VT_R4; value.fltVal = quality;
         properties->Write(1, &option, &value); VariantClear(&value);
     }
     if (SUCCEEDED(hr)) hr = frame->Initialize(properties);
     if (SUCCEEDED(hr)) hr = frame->SetSize(width, height);
     // PNG keeps alpha as 32-bit BGRA. JPEG and the broadly compatible BMP path
     // intentionally use 24-bit BGR; no undocumented BMP V5/alpha assumptions.
-    WICPixelFormatGUID pixelFormat = format == 0 ? GUID_WICPixelFormat32bppBGRA : GUID_WICPixelFormat24bppBGR;
+    WICPixelFormatGUID pixelFormat = (format == 0 || format == 3) ? GUID_WICPixelFormat32bppBGRA : GUID_WICPixelFormat24bppBGR;
     if (SUCCEEDED(hr)) hr = frame->SetPixelFormat(&pixelFormat);
     IWICBitmapSource* source = bitmap;
     // SetPixelFormat is a negotiation: use the encoder's returned format rather
@@ -691,4 +694,12 @@ extern "C" __declspec(dllexport) int __cdecl GlideEncodeImageW(const wchar_t* pa
     if (factory) factory->Release();
     if (mustUninit) CoUninitialize();
     return ok;
+}
+
+extern "C" __declspec(dllexport) int __cdecl GlideEncodeImageW(const wchar_t* path,
+    std::uint32_t width, std::uint32_t height, std::uint32_t stride,
+    const void* pixels, std::uint32_t format)
+{
+    if (format > 2) return 0;
+    return GlideEncodeImageExW(path, width, height, stride, pixels, format, 0.95f);
 }

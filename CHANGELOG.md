@@ -4,6 +4,32 @@ All notable changes to Glide Image Viewer are documented here. The format is bas
 [Keep a Changelog](https://keepachangelog.com/), and the project uses dotted feature releases with
 hyphenated follow-up corrections (for example `4.2.0-1`).
 
+## [4.4.0] - 2026-10-26
+
+### Added
+
+- **Live folder refresh.** Images that are downloaded, copied, moved or renamed into the open folder appear in next/previous navigation and the image counter without reopening it. Deleted files drop out. Partial downloads and temp files (`.crdownload`, `.part`, `.tmp`, `.download`, `~*`) are ignored until they finish. A file is added once it can be opened. Events are batched, and a full rescan only happens if the watcher overflows. The current image stays selected.
+- **Save (Ctrl+S) and Save As (Ctrl+Alt+S)**, available from the context menu. Rotation and flips are applied to the pixels. The file is written to a temporary file and then swapped in, so a failed save cannot damage the original. Save keeps the original format and asks before overwriting. Save As writes JPEG, PNG, BMP or TIFF. The native encoder can now write TIFF and takes a quality setting; JPEG is saved at 92%.
+- **Fullscreen cursor auto-hide.** The cursor hides after 3 s without movement and only comes back after about 1 s of continuous movement, so small bumps, clicks and key presses don't show it. It stays visible over controls, menus and overlays, and is restored when you leave fullscreen or switch away. It follows the existing "hide cursor in fullscreen" setting.
+
+### Security
+
+- **Explorer thumbnail provider:** fixed a stack buffer overflow in the TGA decoder. A crafted bits-per-pixel value could write past a 4-byte buffer while Explorer was only *showing* a folder. Bit depth is now validated.
+- Fixed an integer overflow in the SGI RLE bounds check that allowed out-of-bounds reads.
+- TGA colour-mapped images could read past the end of the file. The colour-map entry size and index range are now validated.
+
+### Fixed
+
+- Explorer thumbnails for PNM/PBM/PGM/PPM/PAM files: the format digit was compared as a number instead of a character, so almost every file in this family decoded wrongly. P1–P7 now decode correctly, including padded P4 rows, unseparated P1 digits and the whitespace after the header.
+- Explorer thumbnails for 24-bit PCX images now decode in colour, and use the bytes-per-line value from the header.
+- Explorer thumbnails for compressed SGI images: the scanline tables were read 12 bytes early and with the wrong layout.
+- TGA colour maps are now read using the header's first-entry and length fields.
+
+### Changed
+
+- Version advanced to 4.4.0 throughout: assembly, installer, window title, About page and diagnostics.
+- Hotkey catalogue: 69 → 71 commands.
+
 ## [4.3.5] - 2026-09-29
 
 ### Fixed

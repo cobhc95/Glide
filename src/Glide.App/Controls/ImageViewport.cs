@@ -705,6 +705,9 @@ public sealed class ImageViewport : Control
         }
     }
 
+    /// <summary>Current non-destructive edit state (what Save bakes into pixels).</summary>
+    public Glide.Core.ImageEditTransform EditTransform => new(_quarterTurns, _flipHorizontal, _flipVertical);
+
     public void RotateLeft()
     {
         _quarterTurns = (_quarterTurns + 3) % 4;
