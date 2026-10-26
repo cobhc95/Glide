@@ -1,12 +1,35 @@
-# Glide 4.3.5
+# Glide 4.4.0
 
 ## Fast. Lightweight. Multi-tabbed. Multi-window. Highly customizable.
 
 ![Glide main user interface](docs/screenshots/screenshot_1.jpg)
 
-**Glide 4.3.5 is a high-performance Windows image viewer built around instant-feeling image opening, a compact installer, multi-tab and multi-window workflows, transparent overlays, deep mouse/keyboard customization, Launch Speed Boost, complete image printing, native SVG/vector support, automatic Windows Open With integration, Windows Explorer thumbnails, and recognition/routing for 196 image and document filename extensions.**
+**Glide 4.4.0 is a high-performance Windows image viewer built around instant-feeling image opening, a compact installer, multi-tab and multi-window workflows, live folder refresh, Save / Save As with format conversion, transparent overlays, deep mouse/keyboard customization, Launch Speed Boost, complete image printing, native SVG/vector support, automatic Windows Open With integration, Windows Explorer thumbnails, and recognition/routing for 196 image and document filename extensions.**
 
-## What's new in 4.3.5
+## What's new in 4.4.0
+
+> **Security update — please upgrade.** 4.4.0 fixes a memory-safety bug in Glide's Explorer
+> thumbnail provider. A crafted `.tga` file could trigger it simply by opening its folder in
+> Explorer.
+
+- **Live folder refresh.** Images that are downloaded, copied, moved or renamed into the folder you're
+  viewing appear in next/previous navigation and the image counter without reopening it. Deleted files
+  drop out. Partial downloads (`.crdownload`, `.part`, `.tmp`) are ignored until they finish, and the
+  current image stays selected.
+- **Save and Save As.** `Ctrl+S` saves over the current file in its original format, after asking
+  first. `Ctrl+Alt+S` saves a copy as JPEG, PNG, BMP or TIFF. Rotations and flips are written into the
+  pixels. The file is written to a temporary file and then swapped in, so a failed save can never
+  damage the original. Both commands are also in the right-click menu.
+- **Fullscreen cursor auto-hide.** The cursor hides after 3 seconds without movement and only comes
+  back after about a second of continuous movement, so a nudge of the desk, a click or a key press
+  won't show it. It stays visible over controls and menus.
+- **Explorer thumbnail fixes.** Fixed a TGA stack overflow, an SGI bounds-check overflow and a TGA
+  colour-map out-of-bounds read. PNM/PBM/PGM/PPM/PAM, 24-bit PCX and compressed SGI thumbnails now
+  decode correctly.
+
+Known limitations: Save As cannot write WebP, and saving does not keep EXIF or other metadata.
+
+### Previously in 4.3.5
 
 - **Maximize no longer sticks at the old size after rotating the display** (portrait ↔ landscape) or
   moving the taskbar. Glide re-fits a maximized window to the monitor's live work area and refreshes
@@ -132,7 +155,7 @@ Glide's interface is engineered with a responsive design system that reflows sea
 
 ## Core Feature Reference & Settings Gallery
 
-The Glide Settings engine exposes nearly every aspect of the viewer's execution, rendering, input handling, and presentation. The existing screenshots below are retained as the historical UI gallery while Glide 4.2.4 carries forward the warm-engine launch, Windows Snap restore, and warm-process privacy improvements.
+The Glide Settings engine exposes nearly every aspect of the viewer's execution, rendering, input handling, and presentation. The screenshots below are a gallery of the settings UI from earlier releases and may differ slightly from the current version.
 
 ---
 
@@ -146,6 +169,7 @@ Glide provides flexible session management, folder traversal policies, and start
 * **History & Session Retention:** Maintain recent file and folder history with a configurable capacity (e.g., 50 items). Option to display recent files/folders directly on the Home dashboard.
 * **Window State Memory:** Automatically remembers window size, position, and maximized state across sessions.
 * **Instance Reuse:** Single-instance mode ensures file launches from Windows Explorer open into the active Glide instance instead of spawning unnecessary background processes.
+* **Live Folder Refresh:** The open folder is watched. New, deleted and renamed images update navigation immediately, and in-progress downloads and copies are picked up once they finish.
 * **Hierarchical Folder Traversal:**
   * Automatically advance into adjacent sibling folders when reaching the end of the current directory.
   * Extend continuous navigation into parent/grandparent directory branches.
@@ -194,7 +218,7 @@ Fine-tune every visual component of the viewing canvas and window chrome:
 * **Fullscreen Experience:**
   * Auto-hide title bar and tab strip in fullscreen with smooth mouse reveal.
   * Option to pin title/tab bars in fullscreen with automatic image letterboxing.
-  * Auto-hide the mouse cursor during fullscreen inactivity.
+  * Auto-hide the mouse cursor after 3 s of fullscreen inactivity; it returns only after about 1 s of sustained movement, so accidental bumps, clicks and key presses don't reveal it.
   * Exact restoration of pre-fullscreen window geometry upon exit.
 * **Initial Zoom Framing:** Default view for newly opened images: *Fit to Window*, *Fit Width*, *Fit Height*, or *1:1 (100% Native Resolution)*.
 * **Navigation Zoom Lock:** Option to lock and preserve manual zoom/pan levels when flipping through consecutive images in a directory.
@@ -343,7 +367,17 @@ Glide includes a dedicated non-destructive overlay system for image comparison, 
 
 ---
 
-### 13. Image Printing
+### 13. Saving & Format Conversion
+
+* **Save (`Ctrl+S`)** writes the current image, including rotations and flips, back to its original format after a confirmation.
+* **Save As (`Ctrl+Alt+S`)** converts to **JPEG, PNG, BMP or TIFF**. JPEG is saved at 92% quality.
+* **Safe writes:** output goes to a temporary file in the same folder and is then swapped in, so a failed or interrupted save never corrupts the original. Images are re-decoded at full resolution, so a reduced preview is never what gets saved.
+* Files saved into the open folder appear in navigation automatically.
+* WebP, GIF and HEIC sources open Save As, because the Windows encoder cannot write them. EXIF and other metadata are not carried over.
+
+---
+
+### 14. Image Printing
 
 ![Glide Print window — a 1280×720 landscape photo in Best fit, shown at its true 16:9 proportions](docs/screenshots/print-research/glide-print-dialog.png)
 
@@ -398,7 +432,7 @@ On Windows:
 * Build the application: run `build.cmd`
 * Build the complete standalone installer: run `build.cmd` (or `build.cmd fast --no-pause`)
 
-Release builds produce four deliverables: `Glide-4.3.5-Portable.zip`, `dist-installer\Glide Setup.exe`, `Glide-4.3.5.exe` for direct testing, and the compact `Glide-Zero-Context-Handover.zip`.
+Release builds produce four deliverables: `Glide-4.4.0-Portable.zip`, `dist-installer\Glide Setup.exe`, `Glide-4.4.0.exe` for direct testing, and the compact `Glide-Zero-Context-Handover.zip`.
 
 ---
 
