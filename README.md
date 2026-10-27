@@ -1,12 +1,25 @@
-# Glide 4.4.0
+# Glide 4.5.0
 
 ## Fast. Lightweight. Multi-tabbed. Multi-window. Highly customizable.
 
 ![Glide main user interface](docs/screenshots/screenshot_1.jpg)
 
-**Glide 4.4.0 is a high-performance Windows image viewer built around instant-feeling image opening, a compact installer, multi-tab and multi-window workflows, live folder refresh, Save / Save As with format conversion, transparent overlays, deep mouse/keyboard customization, Launch Speed Boost, complete image printing, native SVG/vector support, automatic Windows Open With integration, Windows Explorer thumbnails, and recognition/routing for 196 image and document filename extensions.**
+**Glide 4.5.0 is a high-performance Windows image viewer built around instant-feeling image opening, a compact installer, multi-tab and multi-window workflows, live folder refresh, Save / Save As with format conversion, transparent overlays, deep mouse/keyboard customization, Launch Speed Boost, complete image printing, native SVG/vector support, Photoshop PSD/PSB viewing, automatic Windows Open With integration, Windows Explorer thumbnails, and recognition/routing for 196 image and document filename extensions.**
 
-## What's new in 4.4.0
+## What's new in 4.5.0
+
+- **Photoshop files open in Glide.** `.psd`, `.psb` (large document) and `.pdd` files now open in the
+  viewer and get thumbnails both inside Glide and in Windows Explorer. Glide shows the flattened image
+  Photoshop stores in the file, so it opens fast without rebuilding layers. RGB, CMYK, grayscale,
+  indexed, bitmap, duotone and Lab images are supported at 8, 16 and 32 bits per channel, with
+  transparency.
+
+After upgrading, re-register Explorer thumbnails in Settings so Explorer picks up `.psd`/`.psb`.
+
+Known limitation: if a PSD was saved with "Maximize Compatibility" turned off, the stored flattened
+image can be out of date, and that is what Glide shows.
+
+### Previously in 4.4.0
 
 > **Security update — please upgrade.** 4.4.0 fixes a memory-safety bug in Glide's Explorer
 > thumbnail provider. A crafted `.tga` file could trigger it simply by opening its folder in
@@ -432,7 +445,7 @@ On Windows:
 * Build the application: run `build.cmd`
 * Build the complete standalone installer: run `build.cmd` (or `build.cmd fast --no-pause`)
 
-Release builds produce four deliverables: `Glide-4.4.0-Portable.zip`, `dist-installer\Glide Setup.exe`, `Glide-4.4.0.exe` for direct testing, and the compact `Glide-Zero-Context-Handover.zip`.
+Release builds produce four deliverables: `Glide-4.5.0-Portable.zip`, `dist-installer\Glide Setup.exe`, `Glide-4.5.0.exe` for direct testing, and the compact `Glide-Zero-Context-Handover.zip`.
 
 ---
 

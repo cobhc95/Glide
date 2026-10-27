@@ -108,6 +108,7 @@ public static class BuiltInRasterDecoder
         ".pcx" => true,
         ".pnm" or ".ppm" or ".pgm" or ".pbm" or ".pam" => true,
         ".qoi" => true,
+        ".psd" or ".psb" or ".pdd" => true,
         ".hdr" or ".rgbe" => true,
         ".wbmp" => true,
         ".xbm" => true,
@@ -147,6 +148,7 @@ public static class BuiltInRasterDecoder
                 ".pcx" => TryDecodePcx(data, out image),
                 ".pnm" or ".ppm" or ".pgm" or ".pbm" or ".pam" => TryDecodePnm(data, out image),
                 ".qoi" => TryDecodeQoi(data, out image),
+                ".psd" or ".psb" or ".pdd" => TryDecodePsd(data, out image),
                 ".hdr" or ".rgbe" => TryDecodeHdr(data, out image),
                 ".wbmp" => TryDecodeWbmp(data, out image),
                 ".xbm" => TryDecodeXbm(data, out image),
@@ -173,6 +175,7 @@ public static class BuiltInRasterDecoder
                 ".pcx" => TryProbePcx(data, out dimensions),
                 ".pnm" or ".ppm" or ".pgm" or ".pbm" or ".pam" => TryProbePnm(data, out dimensions),
                 ".qoi" => TryProbeQoi(data, out dimensions),
+                ".psd" or ".psb" or ".pdd" => TryProbePsd(data, out dimensions),
                 ".hdr" or ".rgbe" => TryProbeHdr(data, out dimensions),
                 ".wbmp" => TryProbeWbmp(data, out dimensions),
                 ".xbm" => TryProbeXbm(data, out dimensions),
@@ -1657,6 +1660,220 @@ public static class BuiltInRasterDecoder
 
     // ---------------------------------------------------------------------------------------------
     // Shared helpers
+    // ---------------------------------------------------------------------------------------------
+    // Photoshop PSD / PSB — flattened composite only (layers are never re-composited)
+    // ---------------------------------------------------------------------------------------------
+
+    private static bool TryDecodePsd(ReadOnlySpan<byte> data, out DecodedImage image)
+    {
+        image = default;
+        if (!TryParsePsdHeader(data, out var header)) return false;
+        if (!IsValidDimensions(header.Width, header.Height)) return false;
+
+        var position = 26;
+        if (!SkipPsdBlock(data, ref position)) return false; // colour mode data
+        var paletteStart = 30;
+        var paletteLength = (int)ReadU32BigEndian(data, 26);
+        if (!SkipPsdBlock(data, ref position)) return false; // image resources
+
+        // Layer and mask section. A negative layer count means the first extra channel holds the
+        // composite's transparency.
+        var lengthSize = header.Large ? 8 : 4;
+        if (position + lengthSize > data.Length) return false;
+        var layerSectionLength = header.Large ? (long)BinaryPrimitives.ReadUInt64BigEndian(data.Slice(position, 8))
+                                              : ReadU32BigEndian(data, position);
+        position += lengthSize;
+        if (layerSectionLength < 0 || layerSectionLength > data.Length - position) return false;
+        var mergedAlpha = false;
+        if (layerSectionLength >= lengthSize + 2 && position + lengthSize + 2 <= data.Length)
+            mergedAlpha = (short)ReadU16BigEndian(data, position + lengthSize) < 0;
+        position += (int)layerSectionLength;
+
+        var colorChannels = header.Mode switch
+        {
+            0 or 1 or 2 or 8 => 1, // bitmap, grayscale, indexed, duotone
+            3 or 9 => 3,           // RGB, Lab
+            4 => 4,                // CMYK
+            _ => 0,
+        };
+        if (colorChannels == 0 || header.Channels < colorChannels) return false;
+        if (header.Mode == 0 && header.Depth != 1) return false;
+        if (header.Mode == 2 && (header.Depth != 8 || paletteLength < 768)) return false;
+        var hasAlpha = mergedAlpha && header.Channels > colorChannels && header.Mode is not (0 or 2);
+        var needed = colorChannels + (hasAlpha ? 1 : 0);
+
+        if (position + 2 > data.Length) return false;
+        var compression = ReadU16BigEndian(data, position);
+        position += 2;
+        if (compression > 1) return false;
+
+        int width = header.Width, height = header.Height, depth = header.Depth;
+        var rowBytes = (int)(((long)width * depth + 7) / 8);
+        var pixelCount = (long)width * height;
+        var planes = new byte[needed][];
+        for (var c = 0; c < needed; c++) planes[c] = new byte[pixelCount];
+        var row = new byte[rowBytes];
+
+        var countSize = header.Large ? 4 : 2;
+        var tableStart = position;
+        long cursor = compression == 1 ? tableStart + (long)header.Channels * height * countSize : tableStart;
+        if (cursor > data.Length) return false;
+
+        for (var c = 0; c < needed; c++)
+        {
+            for (var y = 0; y < height; y++)
+            {
+                ReadOnlySpan<byte> rowData;
+                if (compression == 0)
+                {
+                    if (cursor + rowBytes > data.Length) return false;
+                    rowData = data.Slice((int)cursor, rowBytes);
+                    cursor += rowBytes;
+                }
+                else
+                {
+                    var entry = tableStart + ((long)c * height + y) * countSize;
+                    long length = header.Large ? ReadU32BigEndian(data, (int)entry) : ReadU16BigEndian(data, (int)entry);
+                    if (cursor + length > data.Length) return false;
+                    if (!PsdPackBits(data.Slice((int)cursor, (int)length), row)) return false;
+                    cursor += length;
+                    rowData = row;
+                }
+                var plane = planes[c];
+                var offset = (long)y * width;
+                for (var x = 0; x < width; x++) plane[offset + x] = PsdSample(rowData, x, depth);
+            }
+        }
+
+        var palette = header.Mode == 2 ? data.Slice(paletteStart, 768) : ReadOnlySpan<byte>.Empty;
+        var output = new byte[checked(pixelCount * 4)];
+        for (long i = 0; i < pixelCount; i++)
+        {
+            byte r, g, b;
+            var a = hasAlpha ? planes[colorChannels][i] : (byte)255;
+            switch (header.Mode)
+            {
+                case 2:
+                    var index = planes[0][i];
+                    r = palette[index]; g = palette[256 + index]; b = palette[512 + index];
+                    break;
+                case 3:
+                    r = planes[0][i]; g = planes[1][i]; b = planes[2][i];
+                    break;
+                case 4:
+                    // PSD stores CMYK inverted: 255 means no ink.
+                    var k = planes[3][i];
+                    r = (byte)(planes[0][i] * k / 255);
+                    g = (byte)(planes[1][i] * k / 255);
+                    b = (byte)(planes[2][i] * k / 255);
+                    break;
+                case 9:
+                    LabToRgb(planes[0][i], planes[1][i], planes[2][i], out r, out g, out b);
+                    break;
+                default:
+                    r = g = b = planes[0][i];
+                    break;
+            }
+            var o = i * 4;
+            output[o] = b; output[o + 1] = g; output[o + 2] = r; output[o + 3] = a;
+        }
+
+        image = new DecodedImage(width, height, output);
+        return true;
+    }
+
+    private static bool TryProbePsd(ReadOnlySpan<byte> data, out ImageDimensions dimensions)
+    {
+        dimensions = default;
+        return TryParsePsdHeader(data, out var header) && SetDimensions(header.Width, header.Height, out dimensions);
+    }
+
+    private readonly record struct PsdHeader(bool Large, int Channels, int Width, int Height, int Depth, int Mode);
+
+    private static bool TryParsePsdHeader(ReadOnlySpan<byte> data, out PsdHeader header)
+    {
+        header = default;
+        if (data.Length < 30 || !data[..4].SequenceEqual("8BPS"u8)) return false;
+        var version = ReadU16BigEndian(data, 4);
+        if (version is not (1 or 2)) return false;
+        var channels = ReadU16BigEndian(data, 12);
+        var height = ReadU32BigEndian(data, 14);
+        var width = ReadU32BigEndian(data, 18);
+        var depth = ReadU16BigEndian(data, 22);
+        var mode = ReadU16BigEndian(data, 24);
+        if (channels is < 1 or > 56 || depth is not (1 or 8 or 16 or 32)) return false;
+        if (width > MaxDimension || height > MaxDimension) return false;
+        header = new PsdHeader(version == 2, channels, (int)width, (int)height, depth, mode);
+        return true;
+    }
+
+    private static bool SkipPsdBlock(ReadOnlySpan<byte> data, ref int position)
+    {
+        if (position + 4 > data.Length) return false;
+        long length = ReadU32BigEndian(data, position);
+        if (position + 4 + length > data.Length) return false;
+        position += 4 + (int)length;
+        return true;
+    }
+
+    private static bool PsdPackBits(ReadOnlySpan<byte> source, byte[] destination)
+    {
+        int input = 0, output = 0;
+        while (output < destination.Length && input < source.Length)
+        {
+            int n = (sbyte)source[input++];
+            if (n >= 0)
+            {
+                var count = n + 1;
+                if (input + count > source.Length || output + count > destination.Length) return false;
+                source.Slice(input, count).CopyTo(destination.AsSpan(output));
+                input += count;
+                output += count;
+            }
+            else if (n != -128)
+            {
+                var count = 1 - n;
+                if (input >= source.Length || output + count > destination.Length) return false;
+                destination.AsSpan(output, count).Fill(source[input++]);
+                output += count;
+            }
+        }
+        return output == destination.Length;
+    }
+
+    private static byte PsdSample(ReadOnlySpan<byte> row, int x, int depth)
+    {
+        switch (depth)
+        {
+            case 1: return (row[x >> 3] & (0x80 >> (x & 7))) != 0 ? (byte)0 : (byte)255;
+            case 8: return row[x];
+            case 16: return row[x * 2];
+            default:
+                var value = BinaryPrimitives.ReadSingleBigEndian(row.Slice(x * 4, 4));
+                if (!(value > 0f)) return 0;
+                if (value >= 1f) return 255;
+                return (byte)(MathF.Pow(value, 1f / 2.2f) * 255f + 0.5f);
+        }
+    }
+
+    private static void LabToRgb(byte lightness, byte aStar, byte bStar, out byte r, out byte g, out byte b)
+    {
+        var fy = (lightness * 100.0 / 255.0 + 16.0) / 116.0;
+        var fx = fy + (aStar - 128.0) / 500.0;
+        var fz = fy - (bStar - 128.0) / 200.0;
+        static double Inverse(double t) => t > 6.0 / 29.0 ? t * t * t : 3.0 * (6.0 / 29.0) * (6.0 / 29.0) * (t - 4.0 / 29.0);
+        static byte Gamma(double v)
+        {
+            v = Math.Clamp(v, 0.0, 1.0);
+            v = v <= 0.0031308 ? 12.92 * v : 1.055 * Math.Pow(v, 1.0 / 2.4) - 0.055;
+            return (byte)(v * 255.0 + 0.5);
+        }
+        double x = 0.95047 * Inverse(fx), y = Inverse(fy), z = 1.08883 * Inverse(fz);
+        r = Gamma(3.2406 * x - 1.5372 * y - 0.4986 * z);
+        g = Gamma(-0.9689 * x + 1.8758 * y + 0.0415 * z);
+        b = Gamma(0.0557 * x - 0.2040 * y + 1.0570 * z);
+    }
+
     // ---------------------------------------------------------------------------------------------
 
     private static bool IsValidDimensions(int width, int height)

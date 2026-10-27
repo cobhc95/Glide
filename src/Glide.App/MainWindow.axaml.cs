@@ -1341,7 +1341,7 @@ public partial class MainWindow : Window
     {
         if (!File.Exists(path) || !ImageNavigator.IsSupported(path))
         {
-            Title = "Glide 4.4.0 — Unsupported or missing image";
+            Title = "Glide 4.5.0 — Unsupported or missing image";
             return;
         }
         if (openInNewTab || !_workspace.ReplaceActiveWithImage(path)) _workspace.AddImage(path);
@@ -1800,8 +1800,8 @@ public partial class MainWindow : Window
                 _diagnostics.Write("decode", "foreground_failed", new { path, request = request.ImageRequestId, error = ex.GetType().Name, ex.Message });
                 var extension = ImageFormatRegistry.GetLongestExtension(path);
                 Title = string.IsNullOrEmpty(extension)
-                    ? $"Glide 4.4.0 — Open failed: {ex.GetType().Name}"
-                    : $"Glide 4.4.0 — No decoder for {extension} (optional codec required)";
+                    ? $"Glide 4.5.0 — Open failed: {ex.GetType().Name}"
+                    : $"Glide 4.5.0 — No decoder for {extension} (optional codec required)";
             }
             if (_warmPresentationGateActive)
                 await ReleaseWarmPresentationGateAsync(safeFrameReady: false);
@@ -2641,7 +2641,7 @@ public partial class MainWindow : Window
             : "Fast browsing, precise zooming, and familiar Windows controls.";
         home.TipsGrid.IsVisible = !recentLanding && _settings.ShowHomeTips;
         ApplyWelcomeLayout();
-        Title = recentLanding ? "Glide 4.4.0 — Recent pictures" : "Glide 4.4.0 — Home";
+        Title = recentLanding ? "Glide 4.5.0 — Recent pictures" : "Glide 4.5.0 — Home";
         RefreshRecentHistoryHome();
         ApplyStatusVisibility();
     }
@@ -4319,7 +4319,7 @@ public partial class MainWindow : Window
         BrowserBackButton.IsEnabled = session.Index > 0 || (_tabForwardImageTargets.TryGetValue(id, out var backTarget) && File.Exists(backTarget));
         BrowserForwardButton.IsEnabled = session.Index >= 0 && session.Index < session.History.Count - 1;
         BrowserUpButton.IsEnabled = Directory.GetParent(folder) is not null;
-        Title = $"Glide 4.4.0 — Explorer — {folder}";
+        Title = $"Glide 4.5.0 — Explorer — {folder}";
         RebuildTabStrip();
         SelectBrowserHighlight(id);
         UpdateTabNavigationButtons();
@@ -4410,7 +4410,7 @@ public partial class MainWindow : Window
         BrowserBackButton.IsEnabled = session.Index > 0 || (_tabForwardImageTargets.TryGetValue(browser.Id, out var nativeBackTarget) && File.Exists(nativeBackTarget));
         BrowserForwardButton.IsEnabled = session.Index >= 0 && session.Index < session.History.Count - 1;
         BrowserUpButton.IsEnabled = Directory.GetParent(folder) is not null;
-        Title = $"Glide 4.4.0 — Explorer — {folder}";
+        Title = $"Glide 4.5.0 — Explorer — {folder}";
         RebuildTabStrip();
         SelectBrowserHighlight(browser.Id);
         UpdateTabNavigationButtons();
@@ -7625,14 +7625,14 @@ public partial class MainWindow : Window
     {
         if (string.IsNullOrWhiteSpace(_currentPath) || !ImageView.IsVisible)
         {
-            if (HomeHost.IsVisible) Title = "Glide 4.4.0 — Home";
+            if (HomeHost.IsVisible) Title = "Glide 4.5.0 — Home";
             return;
         }
         var display = _settings.FullPathInTitle ? _currentPath : Path.GetFileName(_currentPath);
         var index = _navigator.Count > 0 ? $"[{_navigator.Index + 1}/{_navigator.Count}]" : string.Empty;
         Title = prefix is null
-            ? $"Glide 4.4.0 — {display}  {index}  {Viewport.ZoomPercent}%"
-            : $"Glide 4.4.0 — {prefix} — {display}";
+            ? $"Glide 4.5.0 — {display}  {index}  {Viewport.ZoomPercent}%"
+            : $"Glide 4.5.0 — {prefix} — {display}";
     }
 
     private static string FormatFileSize(long bytes)

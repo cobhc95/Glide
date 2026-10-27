@@ -27,6 +27,7 @@
 #include <limits>
 #include <sstream>
 #include <string>
+#include <vector>
 
 #pragma comment(lib, "windowscodecs.lib")
 #pragma comment(lib, "d2d1.lib")
@@ -1153,6 +1154,213 @@ namespace glide::thumb
             return true;
         }
 
+        // ---------------------------------------------------------------- PSD / PSB ----------
+        //
+        // Renders the flattened composite ("image data" section) Photoshop stores after the layer
+        // data. Layers are never composited here; files saved without "Maximize Compatibility"
+        // still carry a composite, it is just occasionally stale.
+
+        std::uint8_t PsdSample(const std::uint8_t* row, std::uint32_t x, std::uint32_t depth)
+        {
+            switch (depth)
+            {
+            case 1: return (row[x >> 3] & (0x80 >> (x & 7))) ? 0 : 255;
+            case 8: return row[x];
+            case 16: return row[x * 2];
+            case 32:
+            {
+                const std::uint8_t* p = row + static_cast<std::size_t>(x) * 4;
+                const std::uint32_t bits = (static_cast<std::uint32_t>(p[0]) << 24) | (p[1] << 16) | (p[2] << 8) | p[3];
+                float value;
+                std::memcpy(&value, &bits, 4);
+                if (!(value > 0.0f)) return 0;
+                if (value >= 1.0f) return 255;
+                return static_cast<std::uint8_t>(std::pow(value, 1.0f / 2.2f) * 255.0f + 0.5f);
+            }
+            default: return 0;
+            }
+        }
+
+        bool PsdPackBits(const std::uint8_t* src, std::size_t srcSize, std::uint8_t* dst, std::size_t dstSize)
+        {
+            std::size_t in = 0, out = 0;
+            while (out < dstSize && in < srcSize)
+            {
+                const int n = static_cast<std::int8_t>(src[in++]);
+                if (n >= 0)
+                {
+                    const std::size_t count = static_cast<std::size_t>(n) + 1;
+                    if (in + count > srcSize || out + count > dstSize) return false;
+                    std::memcpy(dst + out, src + in, count);
+                    in += count; out += count;
+                }
+                else if (n != -128)
+                {
+                    const std::size_t count = static_cast<std::size_t>(1 - n);
+                    if (in >= srcSize || out + count > dstSize) return false;
+                    std::memset(dst + out, src[in++], count);
+                    out += count;
+                }
+            }
+            return out == dstSize;
+        }
+
+        std::uint64_t PsdLength(Reader& r, bool large)
+        {
+            if (!large) return r.U32Be();
+            const std::uint64_t high = r.U32Be();
+            return (high << 32) | r.U32Be();
+        }
+
+        bool DecodePsd(const std::uint8_t* data, std::size_t size, Image& out)
+        {
+            if (size < 26 || std::memcmp(data, "8BPS", 4) != 0) return false;
+            Reader r(data, size);
+            r.Skip(4);
+            const std::uint16_t version = r.U16Be();
+            if (version != 1 && version != 2) return false;
+            const bool large = version == 2;
+            r.Skip(6);
+            const std::uint32_t channels = r.U16Be();
+            const std::uint32_t height = r.U32Be();
+            const std::uint32_t width = r.U32Be();
+            const std::uint32_t depth = r.U16Be();
+            const std::uint32_t mode = r.U16Be();
+            if (channels == 0 || channels > 56) return false;
+            if (depth != 1 && depth != 8 && depth != 16 && depth != 32) return false;
+
+            const std::uint32_t paletteLength = r.U32Be();
+            const std::size_t paletteStart = r.Position();
+            if (!r.Skip(paletteLength)) return false;
+            if (!r.Skip(r.U32Be())) return false; // image resources
+
+            const std::uint64_t layerSectionLength = PsdLength(r, large);
+            const std::size_t layerSectionStart = r.Position();
+            if (layerSectionLength > size - layerSectionStart) return false;
+            // A negative layer count means the first extra channel holds the composite's transparency.
+            bool mergedAlpha = false;
+            if (layerSectionLength >= (large ? 10u : 6u))
+            {
+                const std::uint64_t layerInfoLength = PsdLength(r, large);
+                if (layerInfoLength >= 2) mergedAlpha = static_cast<std::int16_t>(r.U16Be()) < 0;
+            }
+            if (!r.Seek(layerSectionStart + static_cast<std::size_t>(layerSectionLength))) return false;
+
+            std::uint32_t colorChannels;
+            switch (mode)
+            {
+            case 0: case 1: case 2: case 8: colorChannels = 1; break; // bitmap, gray, indexed, duotone
+            case 3: case 9: colorChannels = 3; break;                 // RGB, Lab
+            case 4: colorChannels = 4; break;                         // CMYK
+            default: return false;
+            }
+            if (mode == 0 && depth != 1) return false;
+            if (mode == 2 && (depth != 8 || paletteLength < 768)) return false;
+            if (channels < colorChannels) return false;
+            const bool alpha = mergedAlpha && channels > colorChannels && mode != 0 && mode != 2;
+            const std::uint32_t needed = colorChannels + (alpha ? 1u : 0u);
+
+            const std::uint16_t compression = r.U16Be();
+            if (compression > 1) return false;
+            if (!AllocateImage(width, height, out)) return false;
+            const std::size_t rowBytes = (static_cast<std::size_t>(width) * depth + 7) / 8;
+
+            std::vector<std::vector<std::uint8_t>> planes(needed);
+            std::vector<std::uint8_t> row;
+            try
+            {
+                row.resize(rowBytes);
+                for (auto& plane : planes) plane.resize(static_cast<std::size_t>(width) * height);
+            }
+            catch (...) { out = {}; return false; }
+
+            const std::size_t countSize = large ? 4 : 2;
+            const std::size_t tableStart = r.Position();
+            const std::uint64_t rows = static_cast<std::uint64_t>(channels) * height;
+            const std::uint64_t dataStart = compression == 1 ? tableStart + rows * countSize : tableStart;
+            if (dataStart > size) { out = {}; return false; }
+            std::size_t cursor = static_cast<std::size_t>(dataStart);
+
+            for (std::uint32_t c = 0; c < needed; ++c)
+            {
+                for (std::uint32_t y = 0; y < height; ++y)
+                {
+                    const std::uint8_t* rowData;
+                    if (compression == 0)
+                    {
+                        if (cursor + rowBytes > size) { out = {}; return false; }
+                        rowData = data + cursor;
+                        cursor += rowBytes;
+                    }
+                    else
+                    {
+                        const std::size_t entry = tableStart + (static_cast<std::size_t>(c) * height + y) * countSize;
+                        const std::size_t length = large ? ReadU32BeAt(data, size, entry)
+                                                         : (static_cast<std::size_t>(data[entry]) << 8) | data[entry + 1];
+                        if (cursor + length > size || !PsdPackBits(data + cursor, length, row.data(), rowBytes)) { out = {}; return false; }
+                        cursor += length;
+                        rowData = row.data();
+                    }
+                    std::uint8_t* target = planes[c].data() + static_cast<std::size_t>(y) * width;
+                    for (std::uint32_t x = 0; x < width; ++x) target[x] = PsdSample(rowData, x, depth);
+                }
+            }
+
+            const std::uint8_t* palette = data + paletteStart;
+            const std::size_t count = static_cast<std::size_t>(width) * height;
+            for (std::size_t i = 0; i < count; ++i)
+            {
+                std::uint8_t red, green, blue;
+                const std::uint8_t a = alpha ? planes[colorChannels][i] : 255;
+                switch (mode)
+                {
+                case 2:
+                {
+                    const std::uint8_t index = planes[0][i];
+                    red = palette[index]; green = palette[256 + index]; blue = palette[512 + index];
+                    break;
+                }
+                case 3:
+                    red = planes[0][i]; green = planes[1][i]; blue = planes[2][i];
+                    break;
+                case 4:
+                {
+                    // PSD stores CMYK inverted: 255 means no ink.
+                    const unsigned k = planes[3][i];
+                    red = static_cast<std::uint8_t>(planes[0][i] * k / 255);
+                    green = static_cast<std::uint8_t>(planes[1][i] * k / 255);
+                    blue = static_cast<std::uint8_t>(planes[2][i] * k / 255);
+                    break;
+                }
+                case 9:
+                {
+                    const double L = planes[0][i] * 100.0 / 255.0;
+                    const double fy = (L + 16.0) / 116.0;
+                    const double fx = fy + (planes[1][i] - 128.0) / 500.0;
+                    const double fz = fy - (planes[2][i] - 128.0) / 200.0;
+                    auto inv = [](double t) { return t > 6.0 / 29.0 ? t * t * t : 3.0 * (6.0 / 29.0) * (6.0 / 29.0) * (t - 4.0 / 29.0); };
+                    const double X = 0.95047 * inv(fx), Y = inv(fy), Z = 1.08883 * inv(fz);
+                    auto gamma = [](double v)
+                    {
+                        v = std::clamp(v, 0.0, 1.0);
+                        v = v <= 0.0031308 ? 12.92 * v : 1.055 * std::pow(v, 1.0 / 2.4) - 0.055;
+                        return static_cast<std::uint8_t>(v * 255.0 + 0.5);
+                    };
+                    red = gamma(3.2406 * X - 1.5372 * Y - 0.4986 * Z);
+                    green = gamma(-0.9689 * X + 1.8758 * Y + 0.0415 * Z);
+                    blue = gamma(0.0557 * X - 0.2040 * Y + 1.0570 * Z);
+                    break;
+                }
+                default:
+                    red = green = blue = planes[0][i];
+                    break;
+                }
+                std::uint8_t* p = out.pixels.data() + i * 4;
+                p[0] = blue; p[1] = green; p[2] = red; p[3] = a;
+            }
+            return true;
+        }
+
         bool DecodeCompact(const std::uint8_t* data, std::size_t size, const std::wstring& extension, Image& out)
         {
             if (extension == L".tga" || extension == L".targa" || extension == L".icb" || extension == L".vda" || extension == L".vst")
@@ -1161,6 +1369,7 @@ namespace glide::thumb
             if (extension == L".pnm" || extension == L".ppm" || extension == L".pgm" || extension == L".pbm" || extension == L".pam")
                 return DecodePnm(data, size, out);
             if (extension == L".qoi") return DecodeQoi(data, size, out);
+            if (extension == L".psd" || extension == L".psb" || extension == L".pdd") return DecodePsd(data, size, out);
             if (extension == L".hdr" || extension == L".rgbe") return DecodeHdr(data, size, out);
             if (extension == L".wbmp") return DecodeWbmp(data, size, out);
             if (extension == L".xbm") return DecodeXbm(data, size, out);
@@ -1410,7 +1619,7 @@ namespace glide::thumb
                value == L".pcx" || value == L".pnm" || value == L".ppm" || value == L".pgm" || value == L".pbm" ||
                value == L".pam" || value == L".qoi" || value == L".hdr" || value == L".rgbe" || value == L".wbmp" ||
                value == L".xbm" || value == L".xpm" || value == L".sgi" || value == L".rgb" || value == L".rgba" ||
-               value == L".bw";
+               value == L".bw" || value == L".psd" || value == L".psb" || value == L".pdd";
     }
 
     bool IsVectorExtension(const wchar_t* extension)

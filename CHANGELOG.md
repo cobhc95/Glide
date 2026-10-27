@@ -4,6 +4,17 @@ All notable changes to Glide Image Viewer are documented here. The format is bas
 [Keep a Changelog](https://keepachangelog.com/), and the project uses dotted feature releases with
 hyphenated follow-up corrections (for example `4.2.0-1`).
 
+## [4.5.0] - 2026-10-27
+
+### Added
+
+- **Photoshop PSD / PSB / PDD support.** The files open in the viewer and get thumbnails in Glide and in Windows Explorer. Glide renders the flattened composite stored in the file; layers are not re-composited. Supported: RGB, CMYK, grayscale, indexed, bitmap, duotone and Lab colour modes; 1/8/16/32-bit depth; raw and RLE (PackBits) compression; composite transparency. A managed decoder was added to `BuiltInRasterDecoder` and a matching native decoder to the Explorer thumbnail provider. Both reject malformed or truncated input without throwing.
+
+### Changed
+
+- Glide now claims `.psd`, `.psb` and `.pdd` when registering Explorer thumbnails. Re-register thumbnails after upgrading.
+- Version advanced to 4.5.0 throughout: assembly, installer, window title, About page and diagnostics.
+
 ## [4.4.0] - 2026-10-26
 
 ### Added

@@ -23,6 +23,7 @@ public static class CodecCapabilityRegistry
         ".tga", ".targa", ".icb", ".vda", ".vst",
         ".pcx", ".pnm", ".ppm", ".pgm", ".pbm", ".pam",
         ".qoi", ".hdr", ".rgbe", ".wbmp", ".xbm", ".xpm",
+        ".psd", ".psb", ".pdd",
         ".sgi", ".rgb", ".rgba", ".bw"
     }, StringComparer.OrdinalIgnoreCase);
     private static readonly object ExternalGate = new();

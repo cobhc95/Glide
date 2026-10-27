@@ -45,7 +45,8 @@ internal static class WindowsThumbnailRegistration
         // .webp must still be claimed by Glide or Explorer is left with a generic icon.
         ".webp",
         ".svg", ".svgz", ".tga", ".targa", ".icb", ".vda", ".vst", ".pcx", ".pnm", ".ppm", ".pgm", ".pbm",
-        ".pam", ".qoi", ".hdr", ".rgbe", ".wbmp", ".xbm", ".xpm", ".sgi", ".rgb", ".rgba", ".bw"
+        ".pam", ".qoi", ".hdr", ".rgbe", ".wbmp", ".xbm", ".xpm", ".sgi", ".rgb", ".rgba", ".bw",
+        ".psd", ".psb", ".pdd"
     };
 
     public static string ProviderDllPath => Path.Combine(AppContext.BaseDirectory, ProviderDllName);
