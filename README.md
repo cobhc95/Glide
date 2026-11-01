@@ -4,7 +4,7 @@
 
 ## Fast. Lightweight. Multi-tabbed. Multi-window. Highly customizable.
 
-![Glide main user interface](docs/screenshots/screenshot_1.jpg)
+![Glide main user interface](docs/screenshots/4.6/hero.jpg)
 
 **Glide 4.6.0 is a high-performance Windows image viewer built around instant-feeling image opening, a compact installer, multi-tab and multi-window workflows, live folder refresh, Save / Save As with format conversion, transparent overlays, deep mouse/keyboard customization, Launch Speed Boost, complete image printing, native SVG/vector support, Photoshop PSD/PSB viewing, automatic Windows Open With integration, Windows Explorer thumbnails, and recognition/routing for 196 image and document filename extensions.**
 
