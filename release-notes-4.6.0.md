@@ -1,4 +1,4 @@
-# Glide 4.6.0 release notes (draft)
+# Glide 4.6.0 release notes
 
 Glide 4.6.0 adds video playback inside Window-in-Window overlays and makes the viewer easier to navigate and customise. This release includes changes made since 4.5.0, including work previously tracked as 4.5.1 and 4.5.2.
 
@@ -20,4 +20,4 @@ Glide 4.6.0 adds video playback inside Window-in-Window overlays and makes the v
 
 Save As supports JPEG, PNG, BMP and TIFF; it does not preserve EXIF or other metadata. Photoshop files display their stored flattened composite, which may be out of date if Maximize Compatibility was disabled when saving.
 
-See [CHANGELOG.md](CHANGELOG.md) for the detailed list. These notes are prepared for 4.6.0; the release has not yet been published.
+See the [changelog](https://github.com/cobhc95/Glide/blob/main/CHANGELOG.md) for the detailed list. The installer and portable archive contain 4.6.0; the source currently on GitHub remains at 4.5.0.

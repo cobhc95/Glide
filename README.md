@@ -1,6 +1,6 @@
 # Glide 4.6.0
 
-> **4.6.0 preview:** This README describes the local 4.6.0 build. The source currently on GitHub and the latest published release are 4.5.0; 4.6.0 has not yet been published.
+> **Glide 4.6.0 is available:** Download the [installer or portable archive](https://github.com/cobhc95/Glide/releases/tag/v4.6.0). The source currently on GitHub remains at 4.5.0.
 
 ## Fast. Lightweight. Multi-tabbed. Multi-window. Highly customizable.
 
@@ -17,7 +17,7 @@
 * **Navigation and reliability fixes:** Explorer-style natural sorting, corrected mouse-wheel direction, working drag and drop, title-bar double-click, fullscreen window restoration and Speed Boost launches.
 * **Security and performance:** bounded PNG text and SVGZ decompression, safer codec handling, and improvements to startup, printing and overlay rendering.
 
-See the [4.6.0 draft release notes](release-notes-4.6.0.md) and [changelog](CHANGELOG.md) for the full list. Earlier highlights (4.5.0):
+See the [4.6.0 release notes](release-notes-4.6.0.md) and [changelog](CHANGELOG.md) for the full list. Earlier highlights (4.5.0):
 
 - **Photoshop files open in Glide.** `.psd`, `.psb` (large document) and `.pdd` files now open in the
   viewer and get thumbnails both inside Glide and in Windows Explorer. Glide shows the flattened image

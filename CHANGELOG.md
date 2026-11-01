@@ -4,7 +4,7 @@ All notable changes to Glide Image Viewer are documented here. The format is bas
 [Keep a Changelog](https://keepachangelog.com/), and the project uses dotted feature releases with
 hyphenated follow-up corrections (for example `4.2.0-1`).
 
-## [4.6.0] - Unreleased
+## [4.6.0] - 2026-11-01
 
 Everything since the published 4.5.0 release, including the 4.5.1 and 4.5.2 work that was never released separately.
 
