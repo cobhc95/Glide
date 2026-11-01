@@ -167,7 +167,7 @@ Glide is designed for users who desire the instantaneous startup and minimal res
 
 ## Visual Overview & Adaptive Layout
 
-![Glide Home screen](docs/screenshots/home.png)
+![Glide Home screen](docs/screenshots/4.6/welcome.jpg)
 
 Glide's interface is engineered with a responsive design system that reflows seamlessly across any window size, aspect ratio, or DPI scale.
 
