@@ -4,6 +4,67 @@ All notable changes to Glide Image Viewer are documented here. The format is bas
 [Keep a Changelog](https://keepachangelog.com/), and the project uses dotted feature releases with
 hyphenated follow-up corrections (for example `4.2.0-1`).
 
+## [4.6.0] - Unreleased
+
+Everything since the published 4.5.0 release, including the 4.5.1 and 4.5.2 work that was never released separately.
+
+### Added
+
+- **Video in Window-in-Window overlays.** Drop or open a video as an overlay: MP4, M4V, MOV, MKV, WebM, AVI, WMV, ASF, 3GP/3G2, TS/MTS/M2TS, MPG/MPEG/M2V and VOB. Playback uses Windows Media Foundation with a bundled FFmpeg fallback decoder (loaded only when a video needs it). The overlay has its own transport bar and right-click Video menu: play/pause, previous/next video in the folder, restart, mute and volume, loop and auto-play next. Volume, loop and auto-play choices are remembered per overlay. Videos are overlay-only and never enter the main viewer's image navigation.
+- **Custom animation area.** Draw a rectangle that an animated overlay is confined to; it is stored as fractions of the viewer so it keeps covering the same part of the view when the window is resized, maximised or made fullscreen.
+- **Adaptive status bar.** Wide windows keep the stats, every icon group and the window buttons on one row. As the window narrows, the stats move to a header line beside the window buttons (wrapping only at the separators, never inside a value like "3744 × 5616") and whole icon groups spread over one or two balanced rows; groups never split and the "–" / "✕" buttons stay pinned top-right. When even that cannot fit, the lowest-priority groups (overlay, settings, save, info, fit) move into a "⋯" menu that runs the same actions. New **Tiny** size (smaller than Very small), and **Small** is now the default for new settings (saved choices are kept).
+- **Save and Save as buttons in the status bar.** Two floppy-disk icons sit beside Settings. Save (also Ctrl+S and the context-menu item) now does nothing, and its button is greyed out, until the picture has been rotated or flipped; Save as always writes a copy.
+- **Grouped menus with icons.** Every menu is regrouped by purpose and every item has an icon in the toolbar's own style; nothing was removed. The viewer right-click menu is now Copy pixels, Fit and zoom, Rotate and flip, Copy and export, File, Navigate, View and present, Overlay mode, Settings, Exit. The overlay window menu is grouped into Video, Zoom and size, Opacity and order, Animate, Open and Close; the status-bar menu keeps its six sizes in a Size submenu; tab, title-bar, fullscreen and file-browser menus gained icons; the title-bar customiser lists its 22 actions under category headings.
+- About twenty new icons (rotate, flip, copy, file, rename, delete, eye, bring to front, open with, volume, crop, check, navigate, present, move) and redrawn Refresh, Opacity, Appearance, Performance, Developer and Tabs icons.
+- **Selection buffer around the picture, now configurable.** A left-press in the empty area around a picture starts a selection clamped to the picture's pixels. When maximized the whole empty area is the buffer; in a normal window about one third of the empty space on each side is. Settings > Mouse & keyboard: turn it off, set the windowed and maximized sizes (0-100 %), or use the maximized size in every window state. Fullscreen is unaffected.
+- **Choose the image order for next / previous.** New settings in Settings > Interface & window: Name (like Explorer, the default), Name (plain characters, the old behaviour), Type, Size, Date modified or Date created, with an option to reverse the order. The open folder is re-sorted in place when you change it, keeping the current image selected.
+- **Slideshow left-click action.** Settings > Slideshow & overlays and the Start slideshow prompt choose what a left-click on the picture does during a slideshow: pause / resume (default), next image, previous image, stop, or nothing. Space now always pauses or resumes an active slideshow.
+- **Shortcut search.** The Keyboard shortcuts list has its own filter box; every word must match the action, its category or one of its keys.
+- **Settings search covers more of what is on screen.** Search also matches a row's other text and tooltips, drop-down option text, the note line under a row and each section's title and description. The thumbnail "Maximum source decode size" drop-down is now a catalogued, searchable setting. A new test fails if any setting's tooltip, option or row text cannot find its setting.
+- `tools/sign-local.ps1` signs a locally built Glide with a self-signed certificate and clears the downloaded-from-the-internet mark, and the executable now carries product and company version details.
+
+### Changed
+
+- **Settings reorganised from 14 categories into 8**: General & startup, Appearance & viewing, Interface & window, Tabs & status bar, Mouse & keyboard, Slideshow & overlays, Performance, Windows & developer. Every control is still there, now under headed sections. The search category filter follows the same eight groups.
+- **Settings search ranks title matches first.** Results whose title (or the on-screen label of the control) matches your words are listed first; settings that match only through a description, tooltip or search term follow under a "Related settings" heading. A new setting (Settings > General, on by default) hides the related group. Search also stopped indexing a whole page's text into every setting on pages without section headings, which had made about thirty Performance settings match every query.
+- **Settings feel faster.** A control change no longer applies the whole live preview before the control repaints (it is deferred and coalesced), and search results are built a few at a time and abandoned as soon as you type again.
+- The status bar's width is no longer capped by its size setting, so smaller icons genuinely fit on one row instead of shrinking and still wrapping.
+- Version advanced to 4.6.0 throughout: assembly, installer, window title, About page, README and diagnostics.
+
+### Fixed
+
+- **Mouse wheel direction.** Scroll down now goes to the next image and scroll up to the previous one. The wheel was reversed on the reported setup. The setting "Reverse mouse-wheel direction" (Settings > Mouse & keyboard) flips it back, and it also reverses wheel zoom when wheel zoom is on.
+- **Next / previous now follow Windows Explorer's order.** Glide sorted a folder by plain character order, so a name such as `3m90fxiwwfo61.png` sorted after every file starting with `0`, `1` or `2`, and stepping through a folder jumped around compared with Explorer. The default order is now Explorer's natural name order (numbers compare by value: `3m90…`, `5sh7…`, `8ptx…`, then `03325…`, `04001…`, `106481…`). The windowed first-open list, the full folder index, live folder refresh, the folder browser, the "first image in folder" action and sibling-folder navigation all use the same shared ordering, so they can no longer disagree.
+- **Double-clicking the title bar now maximises and restores the window.** The press no longer enters Windows' native move loop immediately (it swallowed the release, so the second click was never seen as a double-click); a drag starts only after the pointer moves, and the maximise or restore command is sent after the press completes.
+- **Explorer opens no longer stall after closing to the tray.** The internal Speed Boost standby close can no longer be cancelled by the home-suppression window or the fullscreen close handling, which previously left a hidden window owning the launch broker with nothing to receive new files.
+- **Drag and drop into Glide.** The window now accepts file drags, so dropping images and folders works instead of showing the "not allowed" cursor.
+- **Normal window size survives fullscreen.** Leaving fullscreen into maximized (unchanged) no longer overwrites the remembered normal bounds with the maximized size, so un-maximizing returns to your real window size and position.
+- **Buttons are centred.** Labels on dialog and Settings buttons (Cancel, Apply, OK, Go Back, Close Anyway) hugged the top-left; the theme now centres button content.
+- Source-contract tests read every `MainWindow.*.cs` partial, not only `MainWindow.axaml.cs`.
+
+### Security
+
+- Bounded decompression: PNG text chunks are inflated within a 1 MB budget, and SVGZ (gzip) documents are rejected past 128 MB, instead of copying unbounded output and checking afterwards.
+- Native codec surfaces are validated (stride, size, dimensions) before use, so a malformed provider falls back instead of faulting.
+- The built-in raster decoder opens each file once and reads it with a capped pooled-buffer loop, closing a check-then-read window and avoiding large-object-heap spikes.
+- The single-instance launch pipe checks that the connecting peer is the same user (it fails open and records mismatches, so a legitimate Explorer double-click is never dropped).
+- "Show in Explorer" passes its path as an argument rather than a hand-quoted string and rejects quote and line-break characters.
+- The secure disk cache writes through to stable storage before the entry becomes visible, so a crash cannot leave a torn file.
+- Obscure numeric IP spellings (for example `2130706433`, `0x7f.0.0.1`) have a deterministic parser with tests that pin the existing loopback and private-address blocking.
+
+### Performance
+
+- The startup image preloader is awaited instead of blocking the calling thread for up to 500 ms, and the speculative-cache memory limit is cached for two seconds instead of queried on every warm.
+- Print preview reuses its brushes and pens instead of allocating them on every repaint.
+- The native overlay rasteriser uses integer bilinear sampling with per-column tables, so video overlays can rasterise every frame.
+
+### Internal
+
+- `MainWindow` is split from one ~8,700-line file into 15 focused partial files, and the scattered literals now have single sources: `UiMetrics`, `ThemePalette`, `AppVersion` and `ProtocolNames`.
+- New tooling and tests: `tools/fetch-ffmpeg.ps1`, `tools/create-handover-zip.ps1`, video player and overlay-chrome tests, overlay animation-area tests, status-bar layout tests for the wide, medium and narrow layouts, and the search-coverage tests above.
+- A new test fails if any enabled interactive Settings control is not mapped to a catalogued (so searchable and editable) setting. Settings catalogue now holds 202 entries; the build-script fallback versions and `app.manifest` identity are aligned to 4.6.0.
+
+
 ## [4.5.0] - 2026-10-27
 
 ### Added

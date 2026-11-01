@@ -1,12 +1,23 @@
-# Glide 4.5.0
+# Glide 4.6.0
+
+> **4.6.0 preview:** This README describes the local 4.6.0 build. The source currently on GitHub and the latest published release are 4.5.0; 4.6.0 has not yet been published.
 
 ## Fast. Lightweight. Multi-tabbed. Multi-window. Highly customizable.
 
-![Glide main user interface](docs/screenshots/screenshot_1.jpg)
+![Glide main user interface](docs/screenshots/home.png)
 
-**Glide 4.5.0 is a high-performance Windows image viewer built around instant-feeling image opening, a compact installer, multi-tab and multi-window workflows, live folder refresh, Save / Save As with format conversion, transparent overlays, deep mouse/keyboard customization, Launch Speed Boost, complete image printing, native SVG/vector support, Photoshop PSD/PSB viewing, automatic Windows Open With integration, Windows Explorer thumbnails, and recognition/routing for 196 image and document filename extensions.**
+**Glide 4.6.0 is a high-performance Windows image viewer built around instant-feeling image opening, a compact installer, multi-tab and multi-window workflows, live folder refresh, Save / Save As with format conversion, transparent overlays, deep mouse/keyboard customization, Launch Speed Boost, complete image printing, native SVG/vector support, Photoshop PSD/PSB viewing, automatic Windows Open With integration, Windows Explorer thumbnails, and recognition/routing for 196 image and document filename extensions.**
 
-## What's new in 4.5.0
+## What's new in 4.6.0
+
+* **Video overlays:** play videos in Window-in-Window overlays with transport controls, volume, looping and automatic next video. Windows Media Foundation is backed by a bundled FFmpeg decoder. Videos remain separate from image navigation.
+* **A clearer Settings window:** 14 categories are reorganised into eight, with improved search, shortcut filtering and faster updates.
+* **Adaptive status bar and menus:** controls rearrange as the window narrows, with an overflow menu, a new Tiny size, Save and Save As buttons, and grouped menus with icons.
+* **More control over viewing:** choose image sort order, set a selection buffer around the picture, configure slideshow clicks and draw a custom animation area for overlays.
+* **Navigation and reliability fixes:** Explorer-style natural sorting, corrected mouse-wheel direction, working drag and drop, title-bar double-click, fullscreen window restoration and Speed Boost launches.
+* **Security and performance:** bounded PNG text and SVGZ decompression, safer codec handling, and improvements to startup, printing and overlay rendering.
+
+See the [4.6.0 draft release notes](release-notes-4.6.0.md) and [changelog](CHANGELOG.md) for the full list. Earlier highlights (4.5.0):
 
 - **Photoshop files open in Glide.** `.psd`, `.psb` (large document) and `.pdd` files now open in the
   viewer and get thumbnails both inside Glide and in Windows Explorer. Glide shows the flattened image
@@ -83,7 +94,7 @@ Known limitations: Save As cannot write WebP, and saving does not keep EXIF or o
   open instead of a generic icon. A small native provider decodes inside Explorer's isolated
   thumbnail host — it never loads .NET or Glide's UI, never creates a window and never blocks
   Explorer. Embedded previews and decoder-native downscaling keep large folders fast (measured
-  median **1 ms**, p95 **13 ms**). Configure it under **Settings → Windows Integration →
+  median **1 ms**, p95 **13 ms**). Configure it under **Settings → Windows & developer →
   Explorer thumbnails**.
 - **Each Glide window gets its own taskbar button**, and minimizing can no longer lose a window —
   every window keeps its own taskbar entry and restores it after Speed Boost standby.
@@ -145,7 +156,7 @@ Glide 4.2.5 added a complete, reference-faithful image printing workflow:
 See [CHANGELOG.md](CHANGELOG.md) and the GitHub release notes for the full list.
 
 > **Privacy:** Glide writes no diagnostic, telemetry or log files anywhere unless you explicitly ask
-> for an export from Settings → Developer Options. A normal install leaves your Downloads folder
+> for an export from Settings → Windows & developer. A normal install leaves your Downloads folder
 > untouched.
 
 Glide is designed for users who desire the instantaneous startup and minimal resource footprint of classic lightweight viewers without sacrificing modern multi-tabbed navigation, configurable fullscreen behaviour, non-destructive overlays, extensive hotkey mapping, viewer emulation profiles, prefetch controls, and an exhaustively configurable settings engine.
@@ -160,28 +171,27 @@ Glide is designed for users who desire the instantaneous startup and minimal res
 
 Glide's interface is engineered with a responsive design system that reflows seamlessly across any window size, aspect ratio, or DPI scale.
 
-| Standard View | Wide Layout | Tall Layout | Compact Mode |
-| :---: | :---: | :---: | :---: |
-| ![Standard](docs/screenshots/settings/settings_resize_standard.png) | ![Wide](docs/screenshots/settings/settings_resize_wide.png) | ![Tall](docs/screenshots/settings/settings_resize_tall.png) | ![Compact](docs/screenshots/settings/settings_resize_compact.png) |
+The settings window adapts to different window sizes and display scales.
 
 ---
 
 ## Core Feature Reference & Settings Gallery
 
-The Glide Settings engine exposes nearly every aspect of the viewer's execution, rendering, input handling, and presentation. The screenshots below are a gallery of the settings UI from earlier releases and may differ slightly from the current version.
+The Glide Settings engine exposes nearly every aspect of the viewer's execution, rendering, input handling, and presentation. The screenshots below show the 4.6.0 settings UI. The eight categories are General & startup, Appearance & viewing, Interface & window, Tabs & status bar, Mouse & keyboard, Slideshow & overlays, Performance, and Windows & developer.
 
 ---
 
 ### 1. General & Startup Navigation
 
-![General Settings](docs/screenshots/settings/settings_general_settled.png)
-![General Settings Scrolled](docs/screenshots/settings/settings_general_scroll2_settled.png)
+![General Settings](docs/screenshots/4.6/settings_general_settled.png)
+![General Settings Scrolled](docs/screenshots/4.6/settings_general_scroll2_settled.png)
 
 Glide provides flexible session management, folder traversal policies, and startup behaviors:
 
 * **History & Session Retention:** Maintain recent file and folder history with a configurable capacity (e.g., 50 items). Option to display recent files/folders directly on the Home dashboard.
 * **Window State Memory:** Automatically remembers window size, position, and maximized state across sessions.
 * **Instance Reuse:** Single-instance mode ensures file launches from Windows Explorer open into the active Glide instance instead of spawning unnecessary background processes.
+* **Image order:** Sort by Explorer-style name, plain name, type, size, or creation or modification date, with optional reverse order.
 * **Live Folder Refresh:** The open folder is watched. New, deleted and renamed images update navigation immediately, and in-progress downloads and copies are picked up once they finish.
 * **Hierarchical Folder Traversal:**
   * Automatically advance into adjacent sibling folders when reaching the end of the current directory.
@@ -199,7 +209,7 @@ Glide provides flexible session management, folder traversal policies, and start
 
 ### 2. Tabs & Multi-Window Workspace
 
-![Tabs Settings](docs/screenshots/settings/settings_tabs_settled.png)
+![Tabs Settings](docs/screenshots/4.6/settings_status_settled.png)
 
 Glide brings modern browser-grade tab management to image viewing:
 
@@ -219,8 +229,8 @@ Glide brings modern browser-grade tab management to image viewing:
 
 ### 3. Viewing & Interface Presentation
 
-![Viewing Settings](docs/screenshots/settings/settings_viewing_settled.png)
-![Viewing Settings Scrolled](docs/screenshots/settings/settings_viewing_scroll2_settled.png)
+![Viewing Settings](docs/screenshots/4.6/settings_viewing_settled.png)
+![Viewing Settings Scrolled](docs/screenshots/4.6/settings_viewing_scroll2_settled.png)
 
 Fine-tune every visual component of the viewing canvas and window chrome:
 
@@ -241,13 +251,14 @@ Fine-tune every visual component of the viewing canvas and window chrome:
 
 ### 4. Mouse Interactions & Gesture Matrix
 
-![Mouse Settings](docs/screenshots/settings/settings_mouse_settled.png)
-![Mouse Settings Scrolled 1](docs/screenshots/settings/settings_mouse_scroll2_settled.png)
-![Mouse Settings Scrolled 2](docs/screenshots/settings/settings_mouse_scroll3_settled.png)
-![Mouse Settings Scrolled 3](docs/screenshots/settings/settings_mouse_scroll4_settled.png)
+![Mouse Settings](docs/screenshots/4.6/settings_mouse_settled.png)
+![Mouse Settings Scrolled 1](docs/screenshots/4.6/settings_mouse_scroll2_settled.png)
+![Mouse Settings Scrolled 2](docs/screenshots/4.6/settings_mouse_scroll3_settled.png)
+![Mouse Settings Scrolled 3](docs/screenshots/4.6/settings_mouse_scroll4_settled.png)
 
 Glide features one of the most comprehensive input-binding engines available:
 
+* **Selection buffer:** Start a selection in the space around an image, with configurable windowed and maximized margins.
 * **Left-Drag Drag Policy:** Configure left-click-and-drag to *Create Selection Box*, *Pan Image Canvas*, or *Move Window*.
 * **Right-Drag Policy:** Choose between *Smart Mode* (pan if zoomed, move window if fit-to-screen), *Pan Only*, *Move Window*, or *Disabled*.
 * **Selection Box Actions:** Click inside a selection box to instantly crop-zoom into that exact region; right-click inside to zoom back out.
@@ -259,8 +270,8 @@ Glide features one of the most comprehensive input-binding engines available:
 
 ### 5. Performance, Memory & Staged Decoding
 
-![Performance Settings](docs/screenshots/settings/settings_performance_settled.png)
-![Performance Settings Scrolled](docs/screenshots/settings/settings_performance_scroll2_settled.png)
+![Performance Settings](docs/screenshots/4.6/settings_performance_settled.png)
+![Performance Settings Scrolled](docs/screenshots/4.6/settings_performance_scroll2_settled.png)
 
 Engineered for blazing speed even when browsing folders containing thousands of large RAW or high-megapixel images:
 
@@ -275,13 +286,13 @@ Engineered for blazing speed even when browsing folders containing thousands of 
 
 #### Launch Speed Boost
 
-Launch Speed Boost keeps Glide's window, decoder, and external-open broker initialized in the background. When the last Glide window is closed, the window is hidden rather than tearing down the process; image caches are purged, managed memory is compacted, and the Windows working set is trimmed to a negligible **3–4 MB**. When an image is opened from File Explorer, the warm Glide process receives the request, restores its native window frame, and loads the requested file immediately. The feature can be enabled in **Settings → Performance & Startup** and can optionally start with Windows in the background.
+Launch Speed Boost keeps Glide's window, decoder, and external-open broker initialized in the background. When the last Glide window is closed, the window is hidden rather than tearing down the process; image caches are purged, managed memory is compacted, and the Windows working set is trimmed to a negligible **3–4 MB**. When an image is opened from File Explorer, the warm Glide process receives the request, restores its native window frame, and loads the requested file immediately. The feature can be enabled in **Settings → Performance** and can optionally start with Windows in the background.
 
 ---
 
 ### 6. Status Bar Customization
 
-![Status Bar Settings](docs/screenshots/settings/settings_status_settled.png)
+![Status Bar Settings](docs/screenshots/4.6/settings_status_settled.png)
 
 Completely customize the information and action buttons visible in the status bar:
 
@@ -294,18 +305,19 @@ Completely customize the information and action buttons visible in the status ba
   * *Current Zoom Percentage (e.g., 100%)*
   * *File Size (e.g., 2.4 MB)*
   * *Image Codec / Format (e.g., PNG, AVIF)*
-* **Adaptive Multi-Row Reflow:** When resizing to narrow windows, controls gracefully wrap into multi-line layouts without clipping. The bar is only as wide and tall as its real wrapped content — a single line hugs its buttons instead of reserving a phantom second row.
+* **Adaptive layout:** Controls move into balanced rows and, at very narrow widths, an overflow menu. Six sizes include Tiny; Small is the default for new settings.
 
 ---
 
 ### 7. Automated Slideshow
 
-![Slideshow Settings](docs/screenshots/settings/settings_slideshow_settled.png)
+![Slideshow Settings](docs/screenshots/4.6/settings_slideshow_settled.png)
 
 High-performance presentation mode for image portfolios and galleries:
 
 * **Interval Timing:** Millisecond-level duration control (e.g., 5000 ms).
 * **Sequence Control:** Choose between linear loop, bidirectional playback, or randomized shuffle.
+* **Click action:** Choose whether clicking the picture pauses or resumes, moves to the next or previous image, stops the slideshow, or does nothing.
 * **Continuous Folder Playback:** Seamlessly advance across adjacent folders during slideshow playback.
 * **Fullscreen & Focus Integration:** Automatically trigger fullscreen mode upon slideshow start, and pause the timer when Glide loses window focus.
 
@@ -313,9 +325,8 @@ High-performance presentation mode for image portfolios and galleries:
 
 ### 8. Keyboard Shortcuts & Emulation Presets
 
-![Hotkeys Settings](docs/screenshots/settings/settings_hotkeys_settled.png)
-![Hotkeys Settings Scrolled](docs/screenshots/settings/settings_hotkeys_scroll2_settled.png)
-![Hotkeys Search](docs/screenshots/settings/settings_search_hotkey_settled.png)
+![Hotkeys Settings](docs/screenshots/4.6/settings_hotkeys_settled.png)
+![Keyboard shortcuts](docs/screenshots/4.6/settings_hotkeys_scroll5_settled.png)
 
 Glide provides a complete keyboard shortcut manager with 1-click emulation presets:
 
@@ -333,11 +344,13 @@ Glide provides a complete keyboard shortcut manager with 1-click emulation prese
 
 ### 9. Window-in-Window / Transparent Overlays
 
-![Overlays Settings](docs/screenshots/settings/settings_overlays_settled.png)
-![Overlays Settings Scrolled](docs/screenshots/settings/settings_overlays_scroll2_settled.png)
+![Slideshow and overlays settings](docs/screenshots/4.6/settings_slideshow_settled.png)
+![Overlays Settings Scrolled](docs/screenshots/4.6/settings_overlays_scroll2_settled.png)
 
 Glide includes a dedicated non-destructive overlay system for image comparison, reference art, and HUD data:
 
+* **Video overlays:** Play supported videos in an overlay with playback, volume, loop and next-video controls.
+* **Custom animation area:** Draw an area that animated overlays stay within as the window changes size.
 * **Custom HUD Text Overlay:** Fully customizable metadata HUD using tokens:
   * Format: [%INDEX%/%TOTAL%] %FILENAME%  %DIMS% (%MEGAPIXELS% MP)  %FILESIZE%  %ZOOM%
 * **Whole-App Overlay Mode:** Run Glide as a borderless, transparent floating overlay over reference applications with alpha-channel passthrough.
@@ -352,7 +365,7 @@ Glide includes a dedicated non-destructive overlay system for image comparison, 
 
 ### 10. Profiles & Settings Portability
 
-![Profiles Settings](docs/screenshots/settings/settings_profiles_settled.png)
+![Profiles Settings](docs/screenshots/4.6/settings_profiles_settled.png)
 
 * **Named User Profiles:** Save distinct configurations for different workflows (e.g., Photography Review, Pixel Art Inspection, Reference Overlay).
 * **Portability:** Export and import settings as clean, human-readable JSON files.
@@ -362,7 +375,7 @@ Glide includes a dedicated non-destructive overlay system for image comparison, 
 
 ### 11. Windows Integration & External Tools
 
-![Windows Integration Settings](docs/screenshots/settings/settings_windows_settled.png)
+![Windows Integration Settings](docs/screenshots/4.6/settings_windows_settled.png)
 
 * **Open With Integration:** Register Glide with the Windows Open With context menu without overriding your default OS application associations.
 * **Per-User Registration:** Does not require administrator privileges or UAC elevation.
@@ -372,8 +385,7 @@ Glide includes a dedicated non-destructive overlay system for image comparison, 
 
 ### 12. Developer Tools & Built-In Diagnostics
 
-![Developer Settings](docs/screenshots/settings/settings_developer_settled.png)
-![Developer Export](docs/screenshots/settings/settings_export_time.png)
+![Developer Settings](docs/screenshots/4.6/settings_developer_scroll2_settled.png)
 
 * **Diagnostic ZIP Exporter:** Generates a full diagnostic archive with UI geometry, state coverage, active settings diffs, and benchmark logs for easy issue reporting.
 * **Mathematical Tweaks:** Options for inverse zoom-out scaling and absolute coordinate locks across multi-monitor setups.
@@ -445,7 +457,7 @@ On Windows:
 * Build the application: run `build.cmd`
 * Build the complete standalone installer: run `build.cmd` (or `build.cmd fast --no-pause`)
 
-Release builds produce four deliverables: `Glide-4.5.0-Portable.zip`, `dist-installer\Glide Setup.exe`, `Glide-4.5.0.exe` for direct testing, and the compact `Glide-Zero-Context-Handover.zip`.
+Release builds produce four deliverables: `Glide-<version>-Portable.zip`, `dist-installer\Glide Setup.exe`, `Glide-<version>.exe` for direct testing, and the compact `Glide-Zero-Context-Handover.zip`.
 
 ---
 
