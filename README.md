@@ -2,7 +2,7 @@
 
 > **Glide 4.6.0 is available:** Download the [installer or portable archive](https://github.com/cobhc95/Glide/releases/tag/v4.6.0). The source currently on GitHub remains at 4.5.0.
 
-## Fast. Lightweight. Multi-tabbed. Multi-window. Highly customizable.
+## Fast. Multi-tabbed. Multi-window. Highly customizable.
 
 ![Glide main user interface](docs/screenshots/4.6/hero.jpg)
 
@@ -159,7 +159,7 @@ See [CHANGELOG.md](CHANGELOG.md) and the GitHub release notes for the full list.
 > for an export from Settings → Windows & developer. A normal install leaves your Downloads folder
 > untouched.
 
-Glide is designed for users who desire the instantaneous startup and minimal resource footprint of classic lightweight viewers without sacrificing modern multi-tabbed navigation, configurable fullscreen behaviour, non-destructive overlays, extensive hotkey mapping, viewer emulation profiles, prefetch controls, and an exhaustively configurable settings engine.
+Glide is designed for users who desire the instantaneous startup of classic viewers without sacrificing modern multi-tabbed navigation, configurable fullscreen behaviour, non-destructive overlays, extensive hotkey mapping, viewer emulation profiles, prefetch controls, and an exhaustively configurable settings engine.
 
 > **Format Breadth:** Glide recognizes and routes **196 suffixes**. The protected built-in fast path covers JPEG/JPG, PNG, BMP, GIF, TIFF, WebP, and ICO essentials, and bundled built-in decoders cover **SVG/SVGZ** plus the legacy raster family (**TGA, PCX, PNM/PAM, QOI, HDR, WBMP, XBM, XPM, SGI**). Everything else is handled via Windows WIC, a genuine Windows Shell preview, or a verified optional codec provider depending on installed platform capabilities.
 
