@@ -2,8 +2,6 @@
 
 A polish release following 4.7.0, based on more community testing.
 
-Thank you to [@vertigo220](https://github.com/vertigo220) and everyone sending feedback. It is vital to Glide, and it keeps shaping each release.
-
 ## Changes
 
 - **Collapsed status bar is now just the expand button**, with no shaded panel around it.

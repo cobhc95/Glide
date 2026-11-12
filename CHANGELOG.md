@@ -6,7 +6,7 @@ hyphenated follow-up corrections (for example `4.2.0-1`).
 
 ## [4.7.1] - 2026-11-12
 
-Polish from further community testing of 4.7.0. Thank you again to [@vertigo220](https://github.com/vertigo220) and everyone sending feedback.
+Polish from further community testing of 4.7.0.
 
 ### Changed
 
