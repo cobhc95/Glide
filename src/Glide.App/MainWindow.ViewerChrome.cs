@@ -486,6 +486,7 @@ public partial class MainWindow
         {
             scope?.Dispose(); scope = null;
             if (ReferenceEquals(_activeOwnedMenu, menu)) _activeOwnedMenu = null;
+            _ownedMenuClosedTick = Environment.TickCount64;
         };
         // Picking an item can restyle/re-create the window (overlay mode, always-on-top changes);
         // close the popup explicitly afterwards so it never lingers as a ghost.
@@ -494,6 +495,7 @@ public partial class MainWindow
     }
 
     private ContextMenu? _activeOwnedMenu;
+    private long _ownedMenuClosedTick;
 
     private void CloseActiveOwnedMenu(ContextMenu? only = null)
     {

@@ -509,11 +509,13 @@ public partial class MainWindow
     private void WholeAppOverlayContextPointerReleased(object? sender, PointerReleasedEventArgs e)
     {
         if (e.InitialPressMouseButton != MouseButton.Right || ImageView.IsVisible) return;
+        // Choosing an item in (or right-clicking) another Glide menu must never also raise this one.
+        if (_activeOwnedMenu is { IsOpen: true } || Environment.TickCount64 - _ownedMenuClosedTick < 500) return;
 
         // Respect the more specific tab/browser/control context menus. Empty Home/Explorer/chrome
         // areas receive this tiny whole-app menu, making the mode discoverable throughout Glide.
         for (var current = e.Source as Control; current is not null && !ReferenceEquals(current, MainRoot); current = current.GetVisualParent() as Control)
-            if (current.ContextMenu is not null) return;
+            if (current.ContextMenu is not null || ReferenceEquals(current, ViewerStatusSurface) || ReferenceEquals(current, _homeSurface?.StatusSurface)) return;
 
         var target = e.Source as Control ?? MainRoot;
         BuildWholeAppOverlayOnlyContextMenu().Open(target);
