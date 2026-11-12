@@ -1,7 +1,40 @@
 cmake_minimum_required(VERSION 3.20)
 project(GlideNative LANGUAGES CXX)
-add_library(Glide.Native SHARED GlideNative.cpp)
+add_library(Glide.Native SHARED GlideNative.cpp GlideVideo.cpp GlideVideoFfmpeg.cpp)
 target_compile_features(Glide.Native PRIVATE cxx_std_20)
 target_compile_definitions(Glide.Native PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
-target_link_libraries(Glide.Native PRIVATE windowscodecs ole32 oleaut32 propsys shell32)
+target_link_libraries(Glide.Native PRIVATE windowscodecs ole32 oleaut32 propsys shell32 mfplat mfuuid mfreadwrite d3d11 dxgi)
 set_target_properties(Glide.Native PROPERTIES OUTPUT_NAME "Glide.Native")
+
+# Bundled FFmpeg fallback video decoder (fetched by tools/fetch-ffmpeg.ps1). The DLLs are
+# delay-loaded from <app>\ffmpeg so they are mapped only when a video actually needs them.
+set(GLIDE_FFMPEG_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/ffmpeg")
+if(EXISTS "${GLIDE_FFMPEG_DIR}/include/libavcodec/avcodec.h")
+  target_include_directories(Glide.Native PRIVATE "${GLIDE_FFMPEG_DIR}/include")
+  # The upstream .lib files are MinGW-style import libraries, which MSVC cannot delay-load
+  # (LNK4199). Regenerate MSVC import libraries from the shipped .def files instead.
+  set(_glide_ffmpeg_libdir "${CMAKE_CURRENT_BINARY_DIR}/ffmpeg-importlibs")
+  file(MAKE_DIRECTORY "${_glide_ffmpeg_libdir}")
+  set(_glide_ffmpeg_defs GLIDE_HAS_FFMPEG=1)
+  foreach(_lib avutil swresample swscale avcodec avformat)
+    file(GLOB _dll "${GLIDE_FFMPEG_DIR}/bin/${_lib}-*.dll")
+    list(GET _dll 0 _dll)
+    get_filename_component(_name "${_dll}" NAME)
+    get_filename_component(_stem "${_dll}" NAME_WE)
+    execute_process(COMMAND "${CMAKE_AR}" /nologo "/def:${GLIDE_FFMPEG_DIR}/lib/${_stem}.def" "/name:${_name}"
+                            "/out:${_glide_ffmpeg_libdir}/${_lib}.lib" /machine:x64
+                    RESULT_VARIABLE _rc OUTPUT_QUIET)
+    if(NOT _rc EQUAL 0)
+      message(FATAL_ERROR "Glide.Native: could not create import library for ${_name}")
+    endif()
+    target_link_libraries(Glide.Native PRIVATE "${_glide_ffmpeg_libdir}/${_lib}.lib")
+    target_link_options(Glide.Native PRIVATE "/DELAYLOAD:${_name}")
+    string(TOUPPER "${_lib}" _upper)
+    list(APPEND _glide_ffmpeg_defs "GLIDE_FFMPEG_${_upper}=L\"${_name}\"")
+  endforeach()
+  target_link_libraries(Glide.Native PRIVATE delayimp)
+  target_compile_definitions(Glide.Native PRIVATE ${_glide_ffmpeg_defs})
+  message(STATUS "Glide.Native: FFmpeg fallback enabled from ${GLIDE_FFMPEG_DIR}")
+else()
+  message(WARNING "Glide.Native: FFmpeg not found; run tools/fetch-ffmpeg.ps1 to enable the fallback video decoder")
+endif()

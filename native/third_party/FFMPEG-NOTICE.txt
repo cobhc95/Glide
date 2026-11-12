@@ -1,0 +1,23 @@
+Glide Image Viewer - bundled FFmpeg libraries
+==============================================
+
+This folder contains unmodified shared libraries from the FFmpeg project
+(https://ffmpeg.org), used by Glide only as a fallback decoder for video
+overlays that Windows cannot play on its own (for example WebM/VP9, HEVC
+and AV1 on PCs without the Microsoft Store video extensions).
+
+  avcodec, avformat, avutil, swresample, swscale  (FFmpeg 9.0.2)
+
+These libraries are licensed under the GNU Lesser General Public License,
+version 3 (the build enables FFmpeg's LGPLv3 components); see LICENSE.txt
+in this folder. They are LGPL builds
+(no GPL or non-free components) produced by the FFmpeg-Builds project:
+
+  https://github.com/BtbN/FFmpeg-Builds
+  release autobuild-2026-10-27-18-38,
+  ffmpeg-n9.0.2-36-g6882969ce9-win64-lgpl-shared-9.0.zip
+
+Corresponding source code: https://ffmpeg.org/download.html (release
+9.0.2) and https://github.com/FFmpeg/FFmpeg. Glide loads these DLLs
+dynamically; you may replace them with your own compatible builds of the
+same FFmpeg major versions.

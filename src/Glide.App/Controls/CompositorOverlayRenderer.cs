@@ -33,7 +33,8 @@ public sealed record OverlayRenderItem(
     Rect LegalBounds,
     int TargetHz,
     bool AvoidOverlap,
-    long MotionRevision);
+    long MotionRevision,
+    OverlayVideoChrome? Video = null);
 
 public readonly record struct OverlayCompositionMotion(Point Position, Vector Velocity);
 
@@ -86,6 +87,7 @@ internal sealed class CompositorOverlayVisualHandler : CompositionCustomVisualHa
         public int TargetHz;
         public bool AvoidOverlap;
         public long MotionRevision;
+        public OverlayVideoChrome? Video;
     }
 
     private readonly Dictionary<Guid, Item> _items = new();
@@ -131,6 +133,7 @@ internal sealed class CompositorOverlayVisualHandler : CompositionCustomVisualHa
             item.Opacity = Math.Clamp(source.Opacity, 0, 1);
             item.Z = source.Z;
             item.Chrome = source.Chrome;
+            item.Video = source.Video;
             if (!wasRunning || !source.Running || item.MotionRevision != source.MotionRevision)
             {
                 item.Velocity = source.Velocity;
@@ -412,18 +415,20 @@ internal sealed class CompositorOverlayVisualHandler : CompositionCustomVisualHa
         context.DrawLine(new ImmutablePen(white, 2), new Point(hc.X, hc.Y + 6), new Point(hc.X + 4, hc.Y + 2));
 
         // Left-middle opacity slider — same geometry as manager/native renderer.
-        var sliderHeight = Math.Min(130.0, Math.Max(70.0, rect.Height - 80.0));
-        var slider = new Rect(rect.X + 8, rect.Y + (rect.Height - sliderHeight) / 2, 22, sliderHeight);
+        var isVideo = item.Video is not null;
+        Rect Host(Glide.Core.ChromeRect r) => new(rect.X + r.X, rect.Y + r.Y, r.Width, r.Height);
+        var slider = Host(Glide.Core.OverlayVideoChromeLayout.OpacitySlider(rect.Width, rect.Height, isVideo));
         context.DrawRectangle(glass, new ImmutablePen(accent, 1.0), slider, 6, 6);
         var sliderX = slider.Center.X;
         context.DrawLine(new ImmutablePen(white, 2), new Point(sliderX, slider.Top + 10), new Point(sliderX, slider.Bottom - 10));
         var knobY = slider.Bottom - 10 - (slider.Height - 20) * Math.Clamp(item.Opacity, .1, 1.0);
         context.DrawEllipse(accent, null, new Point(sliderX, knobY), 5, 5);
 
-        var zoomOut = new Rect(rect.X + Math.Max(4, rect.Width / 2 - 36), rect.Bottom - 38, 30, 30);
-        var zoomIn = new Rect(rect.X + Math.Max(4, rect.Width / 2 + 6), rect.Bottom - 38, 30, 30);
+        var zoomOut = Host(Glide.Core.OverlayVideoChromeLayout.ZoomOut(rect.Width, rect.Height, isVideo));
+        var zoomIn = Host(Glide.Core.OverlayVideoChromeLayout.ZoomIn(rect.Width, rect.Height, isVideo));
         DrawZoomButton(context, zoomOut, false, glass, accent, white);
         DrawZoomButton(context, zoomIn, true, glass, accent, white);
+        if (item.Video is { } video) OverlayVideoChromePainter.Draw(context, rect, video, accentColor);
     }
 
     private static void DrawZoomButton(ImmediateDrawingContext context, Rect rect, bool plus, IImmutableBrush fill, IImmutableBrush accent, IImmutableBrush text)

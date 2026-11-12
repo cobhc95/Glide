@@ -1,4 +1,4 @@
-﻿using System.Buffers;
+using System.Buffers;
 using System.IO.MemoryMappedFiles;
 using System.Runtime.InteropServices;
 using Avalonia.Media.Imaging;
@@ -211,7 +211,9 @@ public sealed class ImageLoadCoordinator : IDisposable
                 DecodeRoute: "prepared-cache");
         }
 
-        if (StartupImagePreloader.TryConsume(path, out var preloadedResult) && preloadedResult is not null)
+        // Fix (perf): await the preload with WaitAsync(timeout) instead of blocking task.Wait(500).
+        var preloadedResult = await StartupImagePreloader.TryConsumeAsync(path, cancellationToken).ConfigureAwait(false);
+        if (preloadedResult is not null)
         {
             using (preloadedResult)
             {
@@ -580,6 +582,25 @@ public sealed class ImageLoadCoordinator : IDisposable
             await WarmOneAsync(path, epoch, cancellationToken).ConfigureAwait(false);
     }
 
+    // Fix (perf): cache the speculative-limit computation (which queries
+    // GC.GetGCMemoryInfo().TotalAvailableMemoryBytes) for 2s to avoid a per-warm syscall.
+    private static long _specLimitCacheTicks;
+    private static long _specLimitCacheValue;
+    private static int _specLimitCacheBudgetMb;
+
+    private static long GetCachedMaxSpeculativeCompressedFileBytes(ImagePerformancePolicy policy)
+    {
+        var now = Environment.TickCount64;
+        var budgetMb = policy.CompressedCacheMegabytes;
+        if (now - _specLimitCacheTicks < 2000 && budgetMb == _specLimitCacheBudgetMb)
+            return _specLimitCacheValue;
+        var value = ImagePerformanceGovernor.GetMaxSpeculativeCompressedFileBytes(policy);
+        _specLimitCacheValue = value;
+        _specLimitCacheBudgetMb = budgetMb;
+        _specLimitCacheTicks = now;
+        return value;
+    }
+
     private async Task WarmOneAsync(string path, long epoch, CancellationToken token)
     {
         token.ThrowIfCancellationRequested();
@@ -589,7 +610,7 @@ public sealed class ImageLoadCoordinator : IDisposable
         {
             if (!TryIdentity(path, out var before) || before.Length <= 0) return;
             var policy = Policy;
-            var readLimit = ImagePerformanceGovernor.GetMaxSpeculativeCompressedFileBytes(policy);
+            var readLimit = GetCachedMaxSpeculativeCompressedFileBytes(policy);
             if (before.Length > readLimit)
             {
                 if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("compressed_cache_skip_large", $"bytes={before.Length};limit={readLimit}");
@@ -650,17 +671,12 @@ public sealed class ImageLoadCoordinator : IDisposable
         return (new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 128 * 1024, options), false);
     }
 
+    // Fix (perf): FileStream construction performs no I/O; open directly instead of hopping
+    // through Task.Run, avoiding a thread-pool scheduling delay on warm paths.
     private Task<(Stream Stream, bool CacheHit)> OpenDecodeStreamAsync(string path, bool sequential, CancellationToken token)
     {
         token.ThrowIfCancellationRequested();
-        if (Thread.CurrentThread.IsThreadPoolThread)
-            return Task.FromResult(OpenDecodeStream(path, sequential));
-
-        return Task.Run(() =>
-        {
-            token.ThrowIfCancellationRequested();
-            return OpenDecodeStream(path, sequential);
-        }, token);
+        return Task.FromResult(OpenDecodeStream(path, sequential));
     }
 
     private ImageDimensions ProbeDimensionsAsyncDirect(string path)
@@ -768,7 +784,7 @@ public sealed class ImageLoadCoordinator : IDisposable
     private bool AddCompressed(string path, NativeCompressedBuffer buffer, FileIdentity identity, long epoch)
     {
         var budget = Policy.CompressedCacheMegabytes * 1024L * 1024L;
-        if (buffer.Length > ImagePerformanceGovernor.GetMaxSpeculativeCompressedFileBytes(Policy) || buffer.Length > budget || buffer.Length != identity.Length) return false;
+        if (buffer.Length > GetCachedMaxSpeculativeCompressedFileBytes(Policy) || buffer.Length > budget || buffer.Length != identity.Length) return false;
         lock (_cacheGate)
         {
             if (epoch != _cacheEpoch) return false;

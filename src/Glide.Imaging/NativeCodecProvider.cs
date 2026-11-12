@@ -178,6 +178,13 @@ internal sealed class NativeCodecProvider : ICodecSurfaceProvider, IDisposable
                 var width = CheckedDimension(native.Width);
                 var height = CheckedDimension(native.Height);
                 var stride = checked((int)native.Stride);
+                // Fix (native surface validation): verify stride >= width*4 and stride*h <= size
+                // before surface construction so a malformed provider returns null (fallback)
+                // instead of faulting. Marshal.Copy caps elsewhere are unchanged.
+                if (width <= 0 || height <= 0) { _freeBuffer(native.Data, native.Size); return null; }
+                if ((long)stride < (long)width * 4) { _freeBuffer(native.Data, native.Size); return null; }
+                var requiredBytes = (ulong)(uint)stride * (ulong)(uint)height;
+                if (requiredBytes > native.Size.ToUInt64()) { _freeBuffer(native.Data, native.Size); return null; }
                 return new CodecPixelSurface(native.Data, native.Size, width, height, stride,
                     (data, size) => _freeBuffer(data, size));
             }
@@ -190,12 +197,12 @@ internal sealed class NativeCodecProvider : ICodecSurfaceProvider, IDisposable
     }
 
     public Task<ImageMetadata> ReadMetadataAsync(string path, CancellationToken cancellationToken = default)
-        => ReadJsonAsync(_metadata, path, new ImageMetadata(), cancellationToken);
+        => ReadJsonAsync(_metadata, path, new ImageMetadata(), ImagingJsonContext.Default.ImageMetadata, cancellationToken);
 
     public Task<IReadOnlyList<CodecFrameInfo>> ReadFramesAsync(string path, CancellationToken cancellationToken = default)
-        => ReadJsonAsync<IReadOnlyList<CodecFrameInfo>>(_frames, path, Array.Empty<CodecFrameInfo>(), cancellationToken);
+        => ReadJsonAsync<IReadOnlyList<CodecFrameInfo>>(_frames, path, Array.Empty<CodecFrameInfo>(), ImagingJsonContext.Default.IReadOnlyListCodecFrameInfo, cancellationToken);
 
-    private async Task<T> ReadJsonAsync<T>(JsonDelegate? read, string path, T fallback, CancellationToken token)
+    private async Task<T> ReadJsonAsync<T>(JsonDelegate? read, string path, T fallback, System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> typeInfo, CancellationToken token)
     {
         if (read is null) return fallback;
         return await Task.Run(() =>
@@ -211,7 +218,7 @@ internal sealed class NativeCodecProvider : ICodecSurfaceProvider, IDisposable
                 var payloadSize = native.Size.ToUInt64();
                 if (payloadSize > 64UL * 1024 * 1024 || payloadSize > int.MaxValue) throw new InvalidDataException("Provider metadata exceeds the managed limit.");
                 var bytes = new byte[checked((int)payloadSize)]; Marshal.Copy(native.Data, bytes, 0, bytes.Length);
-                return JsonSerializer.Deserialize<T>(bytes, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? fallback;
+                return JsonSerializer.Deserialize(bytes, typeInfo) ?? fallback;
             }
             finally { _freeBuffer(native.Data, native.Size); }
         }, token).ConfigureAwait(false);

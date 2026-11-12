@@ -21,7 +21,9 @@ namespace Glide.App.Controls;
 /// </summary>
 public sealed class WindowInWindowOverlayManager : IDisposable
 {
-    private sealed record Item(OverlayState State, Bitmap Bitmap);
+    // Video overlays swap Bitmap to the session's newest frame; everything else (geometry,
+    // opacity, crop/zoom, animation) treats a video exactly like a still image.
+    private sealed record Item(OverlayState State, Bitmap Bitmap, VideoOverlaySession? Video = null);
 
     private sealed class AnimationState
     {
@@ -30,6 +32,8 @@ public sealed class WindowInWindowOverlayManager : IDisposable
         public long LastTick;
         public bool IsRunning;
         public string Region = "Anywhere";
+        /// <summary>User-drawn area (fractions of the viewer) used when Region is "Custom area".</summary>
+        public ChromeRect? CustomArea;
         public int SpeedDipsPerSecond = 90;
         public int TurnIntervalMs = 2500;
         public int TurnAngleDegrees = 120;
@@ -59,6 +63,15 @@ public sealed class WindowInWindowOverlayManager : IDisposable
     private (Guid Id, Point Origin, double Width, double Height, double ContentScale, ResizeMode Mode)? _resize;
     private (Guid Id, Point Origin, double PanX, double PanY, bool Started)? _pan;
     private Guid? _opacityDrag;
+    private Guid? _seekDrag;
+    private Guid? _volumeDrag;
+    // Overlays currently switching to another video (guards against double skips / auto-advance races).
+    private readonly HashSet<Guid> _switchingVideo = new();
+    private static readonly Cursor MenuCursor = new(StandardCursorType.Arrow);
+    // Custom animation area drawing: target overlay, drag origin/current point (viewer DIPs).
+    private (Guid Id, Point? Origin, Point Current)? _areaDraw;
+    private OverlayAreaAdorner? _areaAdorner;
+    private Cursor? _cursorBeforeAreaDraw;
     private Size _lastHostSize;
     private readonly Dictionary<Guid, AnimationState> _animations = new();
     private readonly HashSet<Bitmap> _retiredCompositionBitmaps = new(ReferenceEqualityComparer.Instance);
@@ -78,6 +91,14 @@ public sealed class WindowInWindowOverlayManager : IDisposable
     public bool RememberZoom { get; set; } = true;
     public int ZoomStepPercent { get; set; } = 20;
     public bool AdaptivePositioningEnabled { get; set; } = true;
+    /// <summary>New video overlays start with sound off; each overlay can be unmuted from its bar.</summary>
+    public bool StartVideosMuted { get; set; }
+    /// <summary>New video overlays move on to the next video in their folder when one ends.</summary>
+    public bool AutoPlayNextVideos { get; set; } = true;
+    private VideoOverlayOptions DefaultVideoOptions => new(StartVideosMuted, 1, Loop: false, AutoPlayNextVideos);
+    /// <summary>Raised when a video overlay cannot be played (path, reason).</summary>
+    public event Action<string, string?>? VideoUnavailable;
+    private readonly HashSet<VideoOverlaySession> _suspendedVideos = new(ReferenceEqualityComparer.Instance);
     public bool ScaleWithHostResize { get; set; } = true;
     public string AnimationRegion { get; set; } = "Anywhere";
     public int AnimationSpeedDipsPerSecond { get; set; } = 90;
@@ -104,7 +125,7 @@ public sealed class WindowInWindowOverlayManager : IDisposable
     // Pointer capture is also used for a deferred fullscreen click. Capture by itself is not an
     // edit operation and must never pause native motion while the viewer decides whether the press
     // becomes navigation or a drag. Only an established drag/resize/pan/opacity edit is interactive.
-    private bool IsPointerInteractionActive => _drag is not null || _resize is not null || _pan is { Started: true } || _opacityDrag is not null;
+    private bool IsPointerInteractionActive => _drag is not null || _resize is not null || _pan is { Started: true } || _opacityDrag is not null || _seekDrag is not null || _volumeDrag is not null;
 
     public WindowInWindowOverlayManager(LegacyOverlaySurface surface, Control inputHost, ImageLoadCoordinator loader, Window owner)
     {
@@ -291,7 +312,7 @@ public sealed class WindowInWindowOverlayManager : IDisposable
         {
             var item = _items[i];
             if (!_animations.TryGetValue(item.State.Id, out var animation)) continue;
-            var bounds = AnimationBounds(item.State, host, animation.Region);
+            var bounds = AnimationBounds(item.State, host, animation.Region, animation.CustomArea);
             SetState(i, item.State with
             {
                 X = Math.Clamp(item.State.X, bounds.Left, bounds.Right),
@@ -308,31 +329,198 @@ public sealed class WindowInWindowOverlayManager : IDisposable
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifetime.Token);
         cancellationToken = linked.Token;
         if (!File.Exists(path)) { Diagnostic?.Invoke("overlay_unavailable", new { path, reason = "missing" }); return false; }
+        if (VideoFormatRegistry.IsVideo(path)) return await AddVideoAsync(path, cancellationToken).ConfigureAwait(true);
         var capability = CodecCapabilityRegistry.Describe(path);
         if (capability.Tier == CodecTier.Unsupported) { Diagnostic?.Invoke("overlay_unavailable", new { path, reason = capability.Provider, tier = capability.Tier.ToString() }); return false; }
         try
         {
             var result = await _loader.LoadFullForegroundAsync(path, cancellationToken, cacheResult: false).ConfigureAwait(true);
             if (_disposed || cancellationToken.IsCancellationRequested || result is null) { result?.Bitmap.Dispose(); return false; }
-            var bitmap = result.Bitmap;
-            var size = bitmap.PixelSize;
-            var width = Math.Clamp(size.Width / 3.0, 180, 640);
-            var ratio = size.Height / Math.Max(1.0, size.Width);
-            var height = Math.Clamp(width * ratio, 120, 480);
-            if (height >= 480) width = Math.Clamp(height / Math.Max(.0001, ratio), 180, 640);
-            var contentScale = Math.Max(0.0001, Math.Min(width / Math.Max(1.0, size.Width), height / Math.Max(1.0, size.Height)));
-            var state = new OverlayState(Guid.NewGuid(), Path.GetFullPath(path), 36 + _items.Count * 22, 36 + _items.Count * 22,
-                width, height, DefaultOpacity, 1, ZIndex: _items.Count, ContentScale: contentScale).Normalize();
-            _items.Add(new Item(state, bitmap));
-            _selected = state.Id;
-            ShowTransientChrome(state.Id);
-            SortZ();
-            Invalidate();
-            Diagnostic?.Invoke("overlay_added", new { state.Path, state.Id });
-            OverlayCountChanged?.Invoke();
+            AddNewItem(path, result.Bitmap, null);
             return true;
         }
         catch (Exception ex) { Diagnostic?.Invoke("overlay_decode_failed", new { path, error = ex.GetType().Name }); return false; }
+    }
+
+    private async Task<bool> AddVideoAsync(string path, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var (session, failure) = await VideoOverlaySession.OpenAsync(path, DefaultVideoOptions, cancellationToken).ConfigureAwait(true);
+            if (session is null)
+            {
+                Diagnostic?.Invoke("overlay_video_unavailable", new { path, reason = failure });
+                VideoUnavailable?.Invoke(path, failure);
+                return false;
+            }
+            if (_disposed || cancellationToken.IsCancellationRequested) { ReleaseVideo(session); return false; }
+            AddNewItem(path, session.Current, session);
+            return true;
+        }
+        catch (OperationCanceledException) { return false; }
+        catch (Exception ex) { Diagnostic?.Invoke("overlay_video_failed", new { path, error = ex.GetType().Name }); return false; }
+    }
+
+    private void AddNewItem(string path, Bitmap bitmap, VideoOverlaySession? video)
+    {
+        var size = bitmap.PixelSize;
+        var width = Math.Clamp(size.Width / 3.0, 180, 640);
+        var ratio = size.Height / Math.Max(1.0, size.Width);
+        var height = Math.Clamp(width * ratio, 120, 480);
+        if (height >= 480) width = Math.Clamp(height / Math.Max(.0001, ratio), 180, 640);
+        var contentScale = Math.Max(0.0001, Math.Min(width / Math.Max(1.0, size.Width), height / Math.Max(1.0, size.Height)));
+        var state = new OverlayState(Guid.NewGuid(), Path.GetFullPath(path), 36 + _items.Count * 22, 36 + _items.Count * 22,
+            width, height, DefaultOpacity, 1, ZIndex: _items.Count, ContentScale: contentScale).Normalize();
+        _items.Add(new Item(state, bitmap, video));
+        if (video is not null) AttachVideo(video);
+        _selected = state.Id;
+        ShowTransientChrome(state.Id);
+        SortZ();
+        Invalidate();
+        Diagnostic?.Invoke("overlay_added", new { state.Path, state.Id, video = video is not null });
+        OverlayCountChanged?.Invoke();
+    }
+
+    /// <summary>Opens either an image bitmap or a video session for a persisted overlay.</summary>
+    private async Task<(Bitmap Bitmap, VideoOverlaySession? Video)?> LoadContentAsync(string path, CancellationToken cancellationToken, VideoOverlayOptions? videoOptions = null)
+    {
+        if (VideoFormatRegistry.IsVideo(path))
+        {
+            var (session, failure) = await VideoOverlaySession.OpenAsync(path, videoOptions ?? DefaultVideoOptions, cancellationToken).ConfigureAwait(true);
+            if (session is null) { Diagnostic?.Invoke("overlay_video_unavailable", new { path, reason = failure }); return null; }
+            return (session.Current, session);
+        }
+        if (CodecCapabilityRegistry.Describe(path).Tier == CodecTier.Unsupported) return null;
+        var result = await _loader.LoadFullForegroundAsync(path, cancellationToken, cacheResult: false).ConfigureAwait(true);
+        return result is null ? null : (result.Bitmap, null);
+    }
+
+    private void AttachVideo(VideoOverlaySession video)
+    {
+        video.FrameReady += VideoFrameReady;
+        video.StateChanged += VideoStateChanged;
+    }
+
+    private void VideoFrameReady(VideoOverlaySession video)
+    {
+        if (_disposed) return;
+        var i = _items.FindIndex(x => ReferenceEquals(x.Video, video));
+        if (i < 0) return;
+        _items[i] = _items[i] with { Bitmap = video.Current };
+        Invalidate();
+    }
+
+    private void VideoStateChanged(VideoOverlaySession video)
+    {
+        if (_disposed) return;
+        var i = _items.FindIndex(x => ReferenceEquals(x.Video, video));
+        if (i < 0) return;
+        var info = video.Info;
+        if (info.Ended && !info.Loop && video.AutoPlayNext)
+        {
+            _ = SwitchVideoAsync(_items[i].State.Id, +1, automatic: true);
+            return;
+        }
+        if (_chromeVisibleId == _items[i].State.Id) Invalidate();
+    }
+
+    private static VideoOverlayOptions VideoOptionsOf(OverlayState state) =>
+        new(state.VideoMuted, state.VideoVolume, state.VideoLoop, state.VideoAutoPlayNext);
+
+    private OverlayState WithVideoOptions(OverlayState state)
+    {
+        var i = FindIndex(state.Id);
+        if (i < 0 || _items[i].Video is not { } video) return state;
+        var options = video.Options;
+        return state with { VideoMuted = options.Muted, VideoVolume = options.Volume, VideoLoop = options.Loop, VideoAutoPlayNext = options.AutoPlayNext };
+    }
+
+    /// <summary>
+    /// Moves a video overlay to the previous/next video in the same folder (Explorer order, wrapping
+    /// around). The overlay keeps its position, width, opacity, animation and playback preferences;
+    /// its height follows the new video's aspect ratio. Videos this PC can't play are skipped.
+    /// </summary>
+    public async Task SwitchVideoAsync(Guid id, int direction, bool automatic = false)
+    {
+        var index = FindIndex(id);
+        if (_disposed || index < 0 || _items[index].Video is not { } current || !_switchingVideo.Add(id)) return;
+        try
+        {
+            var options = current.Options;
+            var startPath = _items[index].State.Path;
+            var folder = Path.GetDirectoryName(startPath);
+            var files = folder is null ? Array.Empty<string>()
+                : await Task.Run(() => { try { return Directory.GetFiles(folder); } catch { return Array.Empty<string>(); } }).ConfigureAwait(true);
+            var order = Glide.App.Services.SiblingFolderNavigationService.WindowsLogicalStringComparer.Instance;
+            var candidate = startPath;
+            var attempts = files.Count(VideoFormatRegistry.IsVideo);
+            for (var attempt = 0; attempt < Math.Max(1, attempts); attempt++)
+            {
+                candidate = VideoFormatRegistry.Sibling(candidate, files, direction, order);
+                if (candidate is null) return;
+                if (string.Equals(candidate, startPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    // The only playable video in the folder: play it again from the start.
+                    current.Restart();
+                    Invalidate();
+                    return;
+                }
+                var (next, failure) = await VideoOverlaySession.OpenAsync(candidate, options, _lifetime.Token).ConfigureAwait(true);
+                if (next is null) { Diagnostic?.Invoke("overlay_video_skip_unplayable", new { path = candidate, reason = failure }); continue; }
+                index = FindIndex(id);
+                if (_disposed || index < 0 || !ReferenceEquals(_items[index].Video, current)) { ReleaseVideo(next); return; }
+                ReplaceVideo(index, next);
+                Diagnostic?.Invoke("overlay_video_switched", new { id, path = candidate, direction, automatic });
+                return;
+            }
+            if (automatic) current.Restart(); // nothing else playable: keep this one going
+        }
+        catch (OperationCanceledException) { }
+        finally { _switchingVideo.Remove(id); }
+    }
+
+    private void ReplaceVideo(int index, VideoOverlaySession next)
+    {
+        var old = _items[index];
+        var state = old.State;
+        var size = next.Current.PixelSize;
+        var ratio = size.Height / Math.Max(1.0, size.Width);
+        var height = Math.Clamp(state.Width * ratio, 60, 4096);
+        var contentScale = Math.Max(0.0001, Math.Min(state.Width / Math.Max(1.0, size.Width), height / Math.Max(1.0, size.Height)));
+        var nextState = (state with { Path = Path.GetFullPath(next.Path), Height = height, Zoom = 1, PanX = 0, PanY = 0, ContentScale = contentScale }).Normalize();
+        _items[index] = new Item(nextState, next.Current, next);
+        AttachVideo(next);
+        if (old.Video is not null) ReleaseVideo(old.Video);
+        if (_animations.ContainsKey(state.Id)) ClampAnimatedOverlaysToHost(_inputHost.Bounds.Size);
+        Invalidate();
+    }
+
+    /// <summary>Stops a video and retires both of its frame bitmaps (the compositor may still hold one).</summary>
+    private void ReleaseVideo(VideoOverlaySession video)
+    {
+        video.Dispose();
+        foreach (var bitmap in video.Bitmaps) RetireCompositionBitmap(bitmap);
+    }
+
+    private void ReleaseItem(Item item)
+    {
+        if (item.Video is not null) ReleaseVideo(item.Video);
+        else RetireCompositionBitmap(item.Bitmap);
+    }
+
+    /// <summary>Pauses or resumes every video overlay (e.g. while Glide is hidden in Speed Boost standby).</summary>
+    public void SetVideosSuspended(bool suspended)
+    {
+        foreach (var item in _items)
+        {
+            if (item.Video is not { } video) continue;
+            if (suspended)
+            {
+                if (video.Info.Playing) { _suspendedVideos.Add(video); video.SetPlaying(false); }
+            }
+            else if (_suspendedVideos.Remove(video)) video.SetPlaying(true);
+        }
+        if (!suspended) _suspendedVideos.Clear();
     }
 
     public async Task RestoreAsync(IEnumerable<OverlayState> states, CancellationToken cancellationToken = default)
@@ -342,12 +530,20 @@ public sealed class WindowInWindowOverlayManager : IDisposable
         foreach (var state in states)
         {
             linked.Token.ThrowIfCancellationRequested();
-            if (!File.Exists(state.Path) || CodecCapabilityRegistry.Describe(state.Path).Tier == CodecTier.Unsupported) continue;
+            if (!File.Exists(state.Path)) continue;
             try
             {
-                var result = await _loader.LoadFullForegroundAsync(state.Path, linked.Token, cacheResult: false).ConfigureAwait(true);
-                if (_disposed || linked.IsCancellationRequested) { result?.Bitmap.Dispose(); return; }
-                if (result is not null) _items.Add(new Item(ClampTransform(state.Normalize(), result.Bitmap), result.Bitmap));
+                var content = await LoadContentAsync(state.Path, linked.Token, VideoOptionsOf(state)).ConfigureAwait(true);
+                if (_disposed || linked.IsCancellationRequested)
+                {
+                    if (content is { } late) { if (late.Video is not null) ReleaseVideo(late.Video); else late.Bitmap.Dispose(); }
+                    return;
+                }
+                if (content is { } loaded)
+                {
+                    _items.Add(new Item(ClampTransform(state.Normalize(), loaded.Bitmap), loaded.Bitmap, loaded.Video));
+                    if (loaded.Video is not null) AttachVideo(loaded.Video);
+                }
             }
             catch (OperationCanceledException) { throw; }
             catch { Diagnostic?.Invoke("overlay_restore_failed", new { state.Path }); }
@@ -361,7 +557,8 @@ public sealed class WindowInWindowOverlayManager : IDisposable
     {
         ClearPointerState();
         StopAllAnimations();
-        foreach (var item in _items) RetireCompositionBitmap(item.Bitmap);
+        foreach (var item in _items) ReleaseItem(item);
+        _suspendedVideos.Clear();
         _items.Clear();
         _selected = _hovered = _chromeVisibleId = null;
         _chromeIdleTimer.Stop();
@@ -375,10 +572,11 @@ public sealed class WindowInWindowOverlayManager : IDisposable
     public void Remove(Guid id)
     {
         var i = FindIndex(id); if (i < 0) return;
+        if (_areaDraw?.Id == id) EndAreaDrawing(commit: false);
         ClearPointerState();
         StopAnimation(id);
         _animations.Remove(id);
-        RetireCompositionBitmap(_items[i].Bitmap);
+        ReleaseItem(_items[i]);
         _items.RemoveAt(i);
         if (_selected == id) _selected = _items.Count == 0 ? null : _items[Math.Min(i, _items.Count - 1)].State.Id;
         if (_hovered == id) _hovered = null;
@@ -431,7 +629,7 @@ public sealed class WindowInWindowOverlayManager : IDisposable
     public void SaveLayout(string path, bool preserveViewState) =>
         OverlayLayoutStore.Save(path, States.Select(state =>
         {
-            var saved = preserveViewState ? state : state with { Zoom = 1, PanX = 0, PanY = 0 };
+            var saved = WithVideoOptions(preserveViewState ? state : state with { Zoom = 1, PanX = 0, PanY = 0 });
             if (!_animations.TryGetValue(state.Id, out var animation))
                 return saved with { AnimationConfigured = false, AnimationRunning = false };
             return saved with
@@ -439,6 +637,10 @@ public sealed class WindowInWindowOverlayManager : IDisposable
                 AnimationConfigured = true,
                 AnimationRunning = animation.IsRunning,
                 AnimationRegion = animation.Region,
+                AnimationAreaX = animation.CustomArea?.X ?? 0,
+                AnimationAreaY = animation.CustomArea?.Y ?? 0,
+                AnimationAreaWidth = animation.CustomArea?.Width ?? 0,
+                AnimationAreaHeight = animation.CustomArea?.Height ?? 0,
                 AnimationSpeedDipsPerSecond = animation.SpeedDipsPerSecond,
                 AnimationTurnIntervalMs = animation.TurnIntervalMs,
                 AnimationTurnAngleDegrees = animation.TurnAngleDegrees,
@@ -458,14 +660,19 @@ public sealed class WindowInWindowOverlayManager : IDisposable
             foreach (var state in loadedStates)
             {
                 linked.Token.ThrowIfCancellationRequested();
-                if (!File.Exists(state.Path) || CodecCapabilityRegistry.Describe(state.Path).Tier == CodecTier.Unsupported) continue;
-                var result = await _loader.LoadFullForegroundAsync(state.Path, linked.Token, cacheResult: false).ConfigureAwait(true);
+                if (!File.Exists(state.Path)) continue;
+                var isVideo = state.IsVideo;
+                if (!isVideo && CodecCapabilityRegistry.Describe(state.Path).Tier == CodecTier.Unsupported) continue;
+                var content = await LoadContentAsync(state.Path, linked.Token, VideoOptionsOf(state)).ConfigureAwait(true);
+                if (content is { } loaded) staged.Add(new Item(ClampTransform(state.Normalize(), loaded.Bitmap), loaded.Bitmap, loaded.Video));
                 if (_disposed || linked.IsCancellationRequested) throw new OperationCanceledException(linked.Token);
-                if (result is null) throw new InvalidDataException("Overlay decode returned no frame.");
-                staged.Add(new Item(ClampTransform(state.Normalize(), result.Bitmap), result.Bitmap));
+                // A video whose codec is missing on this PC is skipped; it must not discard the
+                // rest of the layout. A still image that fails to decode still rejects it.
+                if (content is null && !isVideo) throw new InvalidDataException("Overlay decode returned no frame.");
             }
             Clear();
             _items.AddRange(staged); staged.Clear();
+            foreach (var item in _items) if (item.Video is not null) AttachVideo(item.Video);
             foreach (var item in _items.Where(x => x.State.AnimationConfigured))
             {
                 var state = item.State;
@@ -473,6 +680,7 @@ public sealed class WindowInWindowOverlayManager : IDisposable
                 {
                     IsRunning = state.AnimationRunning,
                     Region = state.AnimationRegion,
+                    CustomArea = state.AnimationArea,
                     SpeedDipsPerSecond = state.AnimationSpeedDipsPerSecond,
                     TurnIntervalMs = state.AnimationTurnIntervalMs,
                     TurnAngleDegrees = state.AnimationTurnAngleDegrees,
@@ -488,7 +696,14 @@ public sealed class WindowInWindowOverlayManager : IDisposable
         }
         catch (OperationCanceledException) { Diagnostic?.Invoke("overlay_layout_cancelled", null); }
         catch (Exception ex) { Diagnostic?.Invoke("overlay_layout_rejected", new { error = ex.GetType().Name }); }
-        finally { foreach (var item in staged) item.Bitmap.Dispose(); }
+        finally
+        {
+            foreach (var item in staged)
+            {
+                if (item.Video is { } video) { video.Dispose(); foreach (var bitmap in video.Bitmaps) bitmap.Dispose(); }
+                else item.Bitmap.Dispose();
+            }
+        }
     }
 
     internal void RenderSurface(DrawingContext context)
@@ -517,7 +732,7 @@ public sealed class WindowInWindowOverlayManager : IDisposable
             if (chromeVisible)
                 // Hover-visible chrome includes the glow; both controls and glow disappear together
                 // when the pointer leaves the overlay.
-                DrawChrome(context, s, true);
+                DrawChrome(context, s, true, item.Video);
         }
     }
 
@@ -538,7 +753,7 @@ public sealed class WindowInWindowOverlayManager : IDisposable
         } catch { return new Rect(0,0,1,1); }
     }
 
-    private void DrawChrome(DrawingContext context, OverlayState s, bool isInteracting = false)
+    private void DrawChrome(DrawingContext context, OverlayState s, bool isInteracting = false, VideoOverlaySession? video = null)
     {
         var accent = AccentBrush;
         if (isInteracting)
@@ -598,6 +813,10 @@ public sealed class WindowInWindowOverlayManager : IDisposable
 
         DrawZoomButton(context, ZoomOutRect(s), false, glass, accent, text);
         DrawZoomButton(context, ZoomInRect(s), true, glass, accent, text);
+        if (video is not null)
+            OverlayVideoChromePainter.Draw(context, new Rect(s.X, s.Y, s.Width, s.Height),
+                new OverlayVideoChrome(video.Progress, video.Info.Playing && !video.Info.Ended, video.Info.Muted, video.Info.Volume),
+                (accent as ISolidColorBrush)?.Color ?? Color.FromRgb(0x36, 0xB8, 0xF4));
     }
 
     private static void DrawZoomButton(DrawingContext context, Rect rect, bool plus, IBrush fill, IBrush accent, IBrush text)
@@ -613,13 +832,14 @@ public sealed class WindowInWindowOverlayManager : IDisposable
     private static Rect ResizeRectVisual(OverlayState s) => new(s.X + s.Width - 28, s.Y + s.Height - 28, 24, 24);
     private static Rect ResizeWidthRect(OverlayState s) => new(s.X + s.Width - 22, s.Y + s.Height / 2 - 22, 22, 44);
     private static Rect ResizeHeightRect(OverlayState s) => new(s.X + s.Width / 2 - 22, s.Y, 44, 22);
-    private static Rect SliderRect(OverlayState s)
-    {
-        var h = Math.Min(130.0, Math.Max(70.0, s.Height - 80.0));
-        return new Rect(s.X + 8, s.Y + (s.Height - h) / 2, 22, h);
-    }
-    private static Rect ZoomOutRect(OverlayState s) => new(s.X + Math.Max(4, s.Width / 2 - 36), s.Y + Math.Max(4, s.Height - 38), 30, 30);
-    private static Rect ZoomInRect(OverlayState s) => new(s.X + Math.Max(4, s.Width / 2 + 6), s.Y + Math.Max(4, s.Height - 38), 30, 30);
+    private static Rect SliderRect(OverlayState s) => ToHost(s, OverlayVideoChromeLayout.OpacitySlider(s.Width, s.Height, s.IsVideo));
+    private static Rect ZoomOutRect(OverlayState s) => ToHost(s, OverlayVideoChromeLayout.ZoomOut(s.Width, s.Height, s.IsVideo));
+    private static Rect ZoomInRect(OverlayState s) => ToHost(s, OverlayVideoChromeLayout.ZoomIn(s.Width, s.Height, s.IsVideo));
+    private static Rect NavigationBarRect(OverlayState s) => s.IsVideo ? ToHost(s, OverlayVideoChromeLayout.NavigationBar(s.Width, s.Height)) : default;
+    private static Rect PlayPauseRect(OverlayState s) => s.IsVideo ? ToHost(s, OverlayVideoChromeLayout.PlayPauseButton(s.Width, s.Height)) : default;
+    private static Rect MuteRect(OverlayState s) => s.IsVideo ? ToHost(s, OverlayVideoChromeLayout.MuteButton(s.Width, s.Height)) : default;
+    private static Rect SeekRect(OverlayState s) => s.IsVideo ? ToHost(s, OverlayVideoChromeLayout.SeekTrack(s.Width, s.Height)) : default;
+    private static Rect ToHost(OverlayState s, ChromeRect r) => new(s.X + r.X, s.Y + r.Y, r.Width, r.Height);
 
     // This manager listens on the whole ImageView using tunnel routing so that the
     // drawn overlay chrome remains interactive.  A real viewer control can therefore
@@ -645,6 +865,19 @@ public sealed class WindowInWindowOverlayManager : IDisposable
 
     private void SurfacePointerPressed(object? sender, PointerPressedEventArgs e)
     {
+        if (_areaDraw is { } draw)
+        {
+            var point = e.GetCurrentPoint(_inputHost);
+            if (point.Properties.IsLeftButtonPressed)
+            {
+                _areaDraw = (draw.Id, point.Position, point.Position);
+                Capture(e.Pointer);
+                UpdateAreaAdorner();
+            }
+            else EndAreaDrawing(commit: false);
+            e.Handled = true;
+            return;
+        }
         if (IsViewerControlSource(e.Source)) return;
 
         var p = e.GetPosition(_inputHost);
@@ -661,7 +894,7 @@ public sealed class WindowInWindowOverlayManager : IDisposable
                 CloseRect(item.State).Contains(p) || ZoomOutRect(item.State).Contains(p) ||
                 ZoomInRect(item.State).Contains(p) || ResizeRect(item.State).Contains(p) ||
                 ResizeWidthRect(item.State).Contains(p) || ResizeHeightRect(item.State).Contains(p) ||
-                SliderRect(item.State).Contains(p);
+                SliderRect(item.State).Contains(p) || NavigationBarRect(item.State).Contains(p);
             if (IsFullscreen?.Invoke() == true && !chromeHit)
             {
                 _pendingFullscreenDrag = (item.State.Id, p, item.State.X, item.State.Y);
@@ -686,6 +919,32 @@ public sealed class WindowInWindowOverlayManager : IDisposable
             {
                 var step = 1 + Math.Clamp(ZoomStepPercent, 1, 100) / 100.0;
                 ZoomSelected(step); e.Handled = true; return;
+            }
+            if (item.Video is { } video && NavigationBarRect(item.State).Contains(p))
+            {
+                var local = new Point(p.X - item.State.X, p.Y - item.State.Y);
+                if (PlayPauseRect(item.State).Contains(p)) video.TogglePlaying();
+                else if (MuteRect(item.State).Contains(p)) video.ToggleMuted();
+                else if (OverlayVideoChromeLayout.PreviousButton(item.State.Width, item.State.Height) is { } previous && previous.Contains(local.X, local.Y))
+                    _ = SwitchVideoAsync(item.State.Id, -1);
+                else if (OverlayVideoChromeLayout.NextButton(item.State.Width, item.State.Height) is { } next && next.Contains(local.X, local.Y))
+                    _ = SwitchVideoAsync(item.State.Id, +1);
+                else if (OverlayVideoChromeLayout.VolumeTrack(item.State.Width, item.State.Height) is { } volume && volume.Contains(local.X, local.Y))
+                {
+                    _volumeDrag = item.State.Id;
+                    video.SetVolume(OverlayVideoChromeLayout.VolumeFraction(item.State.Width, item.State.Height, local.X));
+                    Capture(e.Pointer);
+                }
+                else if (SeekRect(item.State).Contains(p))
+                {
+                    _seekDrag = item.State.Id;
+                    video.SeekFraction(OverlayVideoChromeLayout.SeekFraction(item.State.Width, item.State.Height, p.X - item.State.X));
+                    Capture(e.Pointer);
+                }
+                // The rest of the bar is inert so a near-miss never starts a drag.
+                Invalidate();
+                e.Handled = true;
+                return;
             }
             if (ResizeRect(item.State).Contains(p))
                 _resize = (item.State.Id, p, item.State.Width, item.State.Height, EnsureContentScale(item.State, item.Bitmap).ContentScale, ResizeMode.Proportional);
@@ -719,6 +978,17 @@ public sealed class WindowInWindowOverlayManager : IDisposable
     private void SurfacePointerMoved(object? sender, PointerEventArgs e)
     {
         var p = e.GetPosition(_inputHost);
+        if (_areaDraw is { } draw)
+        {
+            if (draw.Origin is not null)
+            {
+                var size = _inputHost.Bounds.Size;
+                _areaDraw = draw with { Current = new Point(Math.Clamp(p.X, 0, size.Width), Math.Clamp(p.Y, 0, size.Height)) };
+                UpdateAreaAdorner();
+            }
+            e.Handled = true;
+            return;
+        }
         if (_pendingFullscreenDrag is { } pending)
         {
             var dx = p.X - pending.Origin.X;
@@ -733,6 +1003,20 @@ public sealed class WindowInWindowOverlayManager : IDisposable
                 e.Handled = true;
             }
             return;
+        }
+        if (_volumeDrag is Guid volumeId)
+        {
+            var i = FindIndex(volumeId);
+            if (i >= 0 && _items[i].Video is { } video)
+                video.SetVolume(OverlayVideoChromeLayout.VolumeFraction(_items[i].State.Width, _items[i].State.Height, p.X - _items[i].State.X));
+            Invalidate(); e.Handled = true; return;
+        }
+        if (_seekDrag is Guid seekId)
+        {
+            var i = FindIndex(seekId);
+            if (i >= 0 && _items[i].Video is { } video)
+                video.SeekFraction(OverlayVideoChromeLayout.SeekFraction(_items[i].State.Width, _items[i].State.Height, p.X - _items[i].State.X));
+            Invalidate(); e.Handled = true; return;
         }
         if (_drag is { } drag)
         {
@@ -865,13 +1149,20 @@ public sealed class WindowInWindowOverlayManager : IDisposable
 
     private void SurfacePointerReleased(object? sender, PointerReleasedEventArgs e)
     {
+        if (_areaDraw is { Origin: not null })
+        {
+            EndAreaDrawing(commit: true);
+            e.Handled = true;
+            return;
+        }
+        if (_areaDraw is not null) { e.Handled = true; return; }
         // This handler is registered on the whole ImageView with handledEventsToo. Never release a
         // pointer merely because an overlay manager exists: the underlying ImageViewport may own
         // that capture (notably fullscreen right-click = Previous). Releasing somebody else's
         // capture fires PointerCaptureLost on ImageViewport and cancels its pending click gesture.
         var ownsOverlayPointer = ReferenceEquals(_capturedPointer, e.Pointer) ||
             _pendingFullscreenDrag is not null || _drag is not null || _resize is not null ||
-            _pan is not null || _opacityDrag is not null;
+            _pan is not null || _opacityDrag is not null || _seekDrag is not null || _volumeDrag is not null;
         if (!ownsOverlayPointer) return;
 
         var fullscreenClick = _pendingFullscreenDrag is not null &&
@@ -912,6 +1203,15 @@ public sealed class WindowInWindowOverlayManager : IDisposable
         // immediately, even when it was never clicked/selected first.
         var hit = HitTest(p);
         if (hit < 0) return;
+        if (_items[hit].Video is { } wheelVideo && NavigationBarRect(_items[hit].State).Contains(p))
+        {
+            var volume = wheelVideo.Info.Muted ? 0 : wheelVideo.Info.Volume;
+            wheelVideo.SetVolume(Math.Round((volume + Math.Sign(e.Delta.Y) * 0.05) * 20) / 20);
+            ShowTransientChrome(_items[hit].State.Id, hold: true);
+            Invalidate();
+            e.Handled = true;
+            return;
+        }
         var ctrl = (e.KeyModifiers & KeyModifiers.Control) != 0;
         var configured = ResolveGesture?.Invoke(ctrl ? "overlay.ctrlWheel" : "overlay.wheel");
         var enabled = ctrl ? CtrlWheelZoomEnabled : WheelZoomEnabled;
@@ -955,6 +1255,7 @@ public sealed class WindowInWindowOverlayManager : IDisposable
         var i = FindIndex(id);
         if (i < 0) return;
         var path = _items[i].State.Path;
+        if (_items[i].Video is not null) return;
         if (!File.Exists(path)) { Diagnostic?.Invoke("overlay_refresh_failed", new { path, reason = "missing" }); return; }
 
         try
@@ -979,39 +1280,94 @@ public sealed class WindowInWindowOverlayManager : IDisposable
     private void OpenContextMenu()
     {
         if (_selected is not Guid id) return;
-        MenuItem Item(string header, Action action)
+        MenuItem Item(string header, Action action, string? icon = null)
         {
             var mi = new MenuItem { Header = header };
+            if (icon is not null) mi.Icon = MenuIcons.Create(_inputHost, icon);
             mi.Click += (_, _) => { _selected = id; action(); };
             return mi;
         }
-        var menu = new ContextMenu
+        MenuItem Group(string header, string icon, params object[] children)
         {
-            Items =
+            var group = new MenuItem { Header = header, Icon = MenuIcons.Create(_inputHost, icon) };
+            group.ItemsSource = children;
+            return group;
+        }
+        static MenuItem Divider() => new() { Header = "-" };
+
+        var selectedIndex = FindIndex(id);
+        var video = selectedIndex >= 0 ? _items[selectedIndex].Video : null;
+        var items = new List<object>();
+
+        if (video is not null)
+        {
+            var info = video.Info;
+            var volumeMenu = new MenuItem { Header = $"Volume: {(info.Muted ? 0 : Math.Round(info.Volume * 100))}%", Icon = MenuIcons.Create(_inputHost, "Volume") };
+            foreach (var percent in new[] { 100, 75, 50, 25, 10 })
             {
-                Item("Zoom in\t+", () => ZoomSelected(1.20)),
-                Item("Zoom out\t−", () => ZoomSelected(1.0 / 1.20)),
-                Item("Restore default zoom", ResetSelectedZoom),
-                CreateSizeMenu(id),
-                Item($"{(FindIndex(id) >= 0 && _items[FindIndex(id)].State.PreserveAspectRatio ? "✓ " : "")}Preserve aspect ratio",
-                    () => ToggleSelectedAspectRatio(id)),
-                new Separator(),
-                Item("Opacity 100%", () => SetSelectedOpacity(1.0)),
-                Item("Opacity 75%", () => SetSelectedOpacity(.75)),
-                Item("Opacity 50%", () => SetSelectedOpacity(.50)),
-                new Separator(),
-                Item("Bring to front", BringSelectedToFront),
-                CreateAnimationMenu(id),
-                Item("Refresh", () => _ = RefreshSelectedAsync(id)),
-                new Separator(),
-                Item("Open file location in Explorer", () => { var i = FindIndex(id); if (i >= 0) OpenFileLocationRequested?.Invoke(_items[i].State.Path); }),
-                Item("Open in new tab", () => { var i = FindIndex(id); if (i >= 0) OpenInNewTabRequested?.Invoke(_items[i].State.Path); }),
-                Item("Open with external program...", () => { var i = FindIndex(id); if (i >= 0) OpenWithRequested?.Invoke(_items[i].State.Path); }),
-                new Separator(),
-                Item("Close overlay", RemoveSelected),
-                Item("Close all overlays", Clear)
+                var level = new MenuItem { Header = $"{(!info.Muted && Math.Abs(info.Volume * 100 - percent) < 0.5 ? "✓ " : "")}{percent}%" };
+                level.Click += (_, _) => { video.SetVolume(percent / 100.0); Invalidate(); };
+                volumeMenu.Items.Add(level);
             }
+            items.Add(Group("Video", "Play",
+                Item(info.Playing && !info.Ended ? "Pause video" : "Play video", () => { video.TogglePlaying(); Invalidate(); }, info.Playing && !info.Ended ? "Pause" : "Play"),
+                Item("Previous video in folder", () => _ = SwitchVideoAsync(id, -1), "Previous"),
+                Item("Next video in folder", () => _ = SwitchVideoAsync(id, +1), "Next"),
+                Item("Restart video", () => { video.Restart(); Invalidate(); }, "Refresh"),
+                Divider(),
+                Item(info.Muted ? "Unmute" : "Mute", () => { video.ToggleMuted(); Invalidate(); }, "Volume"),
+                volumeMenu,
+                Divider(),
+                Item($"{(video.AutoPlayNext && !info.Loop ? "✓ " : "")}Auto-play next video in folder", () =>
+                {
+                    video.AutoPlayNext = !video.AutoPlayNext || info.Loop;
+                    if (video.AutoPlayNext && info.Loop) video.ToggleLoop();
+                }),
+                Item($"{(info.Loop ? "✓ " : "")}Loop video", video.ToggleLoop)));
+        }
+
+        items.Add(Group("Zoom and size", "ZoomIn",
+            Item("Zoom in\t+", () => ZoomSelected(1.20), "ZoomIn"),
+            Item("Zoom out\t−", () => ZoomSelected(1.0 / 1.20), "ZoomOut"),
+            Item("Restore default zoom", ResetSelectedZoom, "Actual"),
+            Divider(),
+            CreateSizeMenu(id),
+            Item($"{(FindIndex(id) >= 0 && _items[FindIndex(id)].State.PreserveAspectRatio ? "✓ " : "")}Preserve aspect ratio",
+                () => ToggleSelectedAspectRatio(id))));
+
+        items.Add(Group("Opacity and order", "WindowOpacity",
+            Item("Opacity 100%", () => SetSelectedOpacity(1.0)),
+            Item("Opacity 75%", () => SetSelectedOpacity(.75)),
+            Item("Opacity 50%", () => SetSelectedOpacity(.50)),
+            Divider(),
+            Item("Bring to front", BringSelectedToFront, "BringToFront")));
+
+        var animate = CreateAnimationMenu(id);
+        animate.Icon = MenuIcons.Create(_inputHost, "Move");
+        items.Add(animate);
+
+        // A video is already live and the main viewer cannot display video, so Refresh and
+        // "Open in new tab" only apply to image overlays.
+        if (video is null) items.Add(Item("Refresh", () => _ = RefreshSelectedAsync(id), "Refresh"));
+
+        var openItems = new List<object>
+        {
+            Item("Open file location in Explorer", () => { var i = FindIndex(id); if (i >= 0) OpenFileLocationRequested?.Invoke(_items[i].State.Path); }, "FolderLocate")
         };
+        if (video is null)
+            openItems.Add(Item("Open in new tab", () => { var i = FindIndex(id); if (i >= 0) OpenInNewTabRequested?.Invoke(_items[i].State.Path); }, "Tabs"));
+        openItems.Add(Item("Open with external program...", () => { var i = FindIndex(id); if (i >= 0) OpenWithRequested?.Invoke(_items[i].State.Path); }, "OpenWith"));
+        items.Add(Group("Open", "Open", openItems.ToArray()));
+
+        items.Add(Divider());
+        items.Add(Item("Close overlay", RemoveSelected, "Close"));
+        items.Add(Item("Close all overlays", Clear, "Close"));
+
+        var menu = new ContextMenu { ItemsSource = items };
+        // The menu is a separate popup window opened over the overlay's native presentation
+        // window. Give it an explicit arrow so the pointer never depends on an inherited or
+        // platform-default cursor while hovering menu items (the pointer used to vanish there).
+        menu.Cursor = MenuCursor;
         menu.Opened += (_, _) => ContextMenuVisibilityChanged?.Invoke(true);
         menu.Closed += (_, _) => ContextMenuVisibilityChanged?.Invoke(false);
         menu.Open(_inputHost);
@@ -1074,9 +1430,12 @@ public sealed class WindowInWindowOverlayManager : IDisposable
                           !(animation.PauseWhileInteracting && IsPointerInteractionActive);
             var bounds = animation is null
                 ? new Rect(state.X, state.Y, 0, 0)
-                : AnimationBounds(state, host, animation.Region);
+                : AnimationBounds(state, host, animation.Region, animation.CustomArea);
             var isInteracting = (_drag?.Id == state.Id) || (_resize?.Id == state.Id) ||
-                                (_pan?.Id == state.Id) || (_opacityDrag == state.Id);
+                                (_pan?.Id == state.Id) || (_opacityDrag == state.Id) || (_seekDrag == state.Id);
+            var videoChrome = item.Video is { } video
+                ? new OverlayVideoChrome(video.Progress, video.Info.Playing && !video.Info.Ended, video.Info.Muted, video.Info.Volume)
+                : (OverlayVideoChrome?)null;
             items.Add(new OverlayRenderItem(
                 state.Id,
                 item.Bitmap,
@@ -1091,7 +1450,8 @@ public sealed class WindowInWindowOverlayManager : IDisposable
                 bounds,
                 AnimationRefreshRateHz,
                 animation?.AvoidOverlap ?? AnimationAvoidOverlap,
-                animation?.MotionRevision ?? 0));
+                animation?.MotionRevision ?? 0,
+                videoChrome));
         }
         var accent = (AccentBrush as ISolidColorBrush)?.Color ?? Color.FromRgb(0x36, 0xB8, 0xF4);
         PixelPoint hostOrigin;
@@ -1152,7 +1512,94 @@ public sealed class WindowInWindowOverlayManager : IDisposable
                 ClampAnimatedOverlaysToHost(_inputHost.Bounds.Size);
                 Invalidate();
             }));
+        menu.Items.Add(new Separator());
+        if (animation.CustomArea is not null)
+            menu.Items.Add(CreateMenuItem($"{(OverlayAnimationArea.IsCustom(animation.Region) ? "✓ " : "")}{OverlayAnimationArea.CustomRegionName}", () =>
+            {
+                GetOrCreateAnimationState(id).Region = OverlayAnimationArea.CustomRegionName;
+                ClampAnimatedOverlaysToHost(_inputHost.Bounds.Size);
+                Invalidate();
+            }));
+        // Start drawing once the menu has closed so the drag lands on the viewer, not the menu.
+        menu.Items.Add(CreateMenuItem(animation.CustomArea is null ? "Draw custom area…" : "Redraw custom area…",
+            () => Dispatcher.UIThread.Post(() => BeginAreaDrawing(id), DispatcherPriority.Background)));
         return menu;
+    }
+
+    /// <summary>
+    /// Enters area-drawing mode for one overlay: the next left drag on the viewer defines the area it
+    /// may move in. Esc or a right click cancels. On completion the area is applied and motion starts.
+    /// </summary>
+    public void BeginAreaDrawing(Guid id)
+    {
+        if (_disposed || FindIndex(id) < 0) return;
+        ClearPointerState();
+        _areaDraw = (id, null, default);
+        _cursorBeforeAreaDraw = _inputHost.Cursor;
+        _inputHost.Cursor = new Cursor(StandardCursorType.Cross);
+        if (TopLevel.GetTopLevel(_inputHost) is { } top)
+            top.AddHandler(InputElement.KeyDownEvent, AreaDrawKeyDown, RoutingStrategies.Tunnel, true);
+        UpdateAreaAdorner();
+        Diagnostic?.Invoke("overlay_area_draw_start", new { id });
+    }
+
+    private void AreaDrawKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (_areaDraw is null || e.Key != Key.Escape) return;
+        EndAreaDrawing(commit: false);
+        e.Handled = true;
+    }
+
+    private void EndAreaDrawing(bool commit)
+    {
+        if (_areaDraw is not { } draw) return;
+        _areaDraw = null;
+        _inputHost.Cursor = _cursorBeforeAreaDraw;
+        _cursorBeforeAreaDraw = null;
+        if (TopLevel.GetTopLevel(_inputHost) is { } top) top.RemoveHandler(InputElement.KeyDownEvent, AreaDrawKeyDown);
+        try { _capturedPointer?.Capture(null); } catch { }
+        _capturedPointer = null;
+
+        var host = _inputHost.Bounds.Size;
+        var area = commit && draw.Origin is { } origin
+            ? OverlayAnimationArea.FromDrag(origin.X, origin.Y, draw.Current.X, draw.Current.Y, host.Width, host.Height)
+            : null;
+        if (area is not null && FindIndex(draw.Id) >= 0)
+        {
+            var animation = GetOrCreateAnimationState(draw.Id);
+            animation.CustomArea = area;
+            animation.Region = OverlayAnimationArea.CustomRegionName;
+            ClampAnimatedOverlaysToHost(host);
+            if (!animation.IsRunning) StartAnimation(draw.Id, randomize: true);
+            Diagnostic?.Invoke("overlay_area_set", new { id = draw.Id, area });
+        }
+        else Diagnostic?.Invoke("overlay_area_draw_cancelled", new { id = draw.Id });
+        UpdateAreaAdorner();
+        Invalidate();
+    }
+
+    /// <summary>Shows the area being drawn, or outlines the hovered overlay's custom area.</summary>
+    private void UpdateAreaAdorner()
+    {
+        Rect? shown = null;
+        var drawing = _areaDraw is not null;
+        if (_areaDraw is { Origin: { } origin } draw)
+            shown = new Rect(origin, draw.Current).Normalize();
+        else if (!drawing && _chromeVisibleId is Guid id && _animations.TryGetValue(id, out var animation) &&
+                 OverlayAnimationArea.IsCustom(animation.Region) && animation.CustomArea is { } area)
+        {
+            var host = OverlayAnimationArea.ToHost(area, _inputHost.Bounds.Width, _inputHost.Bounds.Height);
+            shown = new Rect(host.X, host.Y, host.Width, host.Height);
+        }
+        if (_areaAdorner is null)
+        {
+            if (!drawing && shown is null) return;
+            if (AdornerLayer.GetAdornerLayer(_inputHost) is not { } layer) return;
+            _areaAdorner = new OverlayAreaAdorner();
+            AdornerLayer.SetAdornedElement(_areaAdorner, _inputHost);
+            layer.Children.Add(_areaAdorner);
+        }
+        _areaAdorner.Show(shown, drawing, (AccentBrush as ISolidColorBrush)?.Color ?? Color.FromRgb(0x36, 0xB8, 0xF4));
     }
 
     private MenuItem CreateAnimationSpeedMenu(Guid id, AnimationState animation)
@@ -1378,7 +1825,7 @@ public sealed class WindowInWindowOverlayManager : IDisposable
                     continue;
                 }
 
-                var bounds = AnimationBounds(item.State, host, animation.Region);
+                var bounds = AnimationBounds(item.State, host, animation.Region, animation.CustomArea);
                 var proposedX = item.State.X + velocity.X * delta;
                 var proposedY = item.State.Y + velocity.Y * delta;
                 var lockX = bounds.Right <= bounds.Left;
@@ -1442,7 +1889,7 @@ public sealed class WindowInWindowOverlayManager : IDisposable
 
                 if (firstResponsive && firstAnimation is not null)
                 {
-                    var bounds = AnimationBounds(firstItem.State, host, firstAnimation.Region);
+                    var bounds = AnimationBounds(firstItem.State, host, firstAnimation.Region, firstAnimation.CustomArea);
                     var x = separateHorizontally ? Math.Clamp(firstItem.State.X + direction * firstShare, bounds.Left, bounds.Right) : firstItem.State.X;
                     var y = separateHorizontally ? firstItem.State.Y : Math.Clamp(firstItem.State.Y + direction * firstShare, bounds.Top, bounds.Bottom);
                     firstAnimation.Velocity = ChooseCollisionVelocity(firstAnimation.SpeedDipsPerSecond, separateHorizontally, direction);
@@ -1452,7 +1899,7 @@ public sealed class WindowInWindowOverlayManager : IDisposable
                 }
                 if (secondResponsive && secondAnimation is not null)
                 {
-                    var bounds = AnimationBounds(secondItem.State, host, secondAnimation.Region);
+                    var bounds = AnimationBounds(secondItem.State, host, secondAnimation.Region, secondAnimation.CustomArea);
                     var x = separateHorizontally ? Math.Clamp(secondItem.State.X - direction * secondShare, bounds.Left, bounds.Right) : secondItem.State.X;
                     var y = separateHorizontally ? secondItem.State.Y : Math.Clamp(secondItem.State.Y - direction * secondShare, bounds.Top, bounds.Bottom);
                     secondAnimation.Velocity = ChooseCollisionVelocity(secondAnimation.SpeedDipsPerSecond, separateHorizontally, -direction);
@@ -1481,8 +1928,13 @@ public sealed class WindowInWindowOverlayManager : IDisposable
         return horizontal ? new Vector(outwardDirection * speed, 0) : new Vector(0, outwardDirection * speed);
     }
 
-    private Rect AnimationBounds(OverlayState state, Size host, string? region = null)
+    private Rect AnimationBounds(OverlayState state, Size host, string? region = null, ChromeRect? customArea = null)
     {
+        if (OverlayAnimationArea.IsCustom(region ?? AnimationRegion) && customArea is { } area)
+        {
+            var range = OverlayAnimationArea.PositionRange(area, host.Width, host.Height, state.Width, state.Height);
+            return new Rect(range.X, range.Y, range.Width, range.Height);
+        }
         var left = 0.0;
         var top = 0.0;
         var right = host.Width;
@@ -1577,7 +2029,8 @@ public sealed class WindowInWindowOverlayManager : IDisposable
                 CloseRect(s).Contains(p) ||
                 ZoomOutRect(s).Contains(p) ||
                 ZoomInRect(s).Contains(p) ||
-                SliderRect(s).Contains(p))
+                SliderRect(s).Contains(p) ||
+                NavigationBarRect(s).Contains(p))
                 return i;
         }
         return -1;
@@ -1660,11 +2113,12 @@ public sealed class WindowInWindowOverlayManager : IDisposable
             try { _capturedPointer?.Capture(null); } catch { }
         }
         _capturedPointer = null;
-        _drag = null; _pendingFullscreenDrag = null; _resize = null; _pan = null; _opacityDrag = null;
+        _drag = null; _pendingFullscreenDrag = null; _resize = null; _pan = null; _opacityDrag = null; _seekDrag = null; _volumeDrag = null;
     }
 
     private void Invalidate()
     {
+        UpdateAreaAdorner();
         if (_surface.UsesCompositionRenderer) RefreshCompositionSnapshot();
         else _surface.InvalidateVisual();
     }
@@ -1693,14 +2147,20 @@ public sealed class WindowInWindowOverlayManager : IDisposable
     public void Dispose()
     {
         if (_disposed) return;
+        EndAreaDrawing(commit: false);
         _disposed = true;
         _lifetime.Cancel();
+        if (_areaAdorner is not null && AdornerLayer.GetAdornerLayer(_inputHost) is { } adornerLayer) adornerLayer.Children.Remove(_areaAdorner);
         StopAllAnimations();
         ClearPointerState();
         _chromeIdleTimer.Stop();
         _nativeAnimationControlTimer.Stop();
         _surface.DisableCompositionRenderer();
-        foreach (var item in _items) item.Bitmap.Dispose();
+        foreach (var item in _items)
+        {
+            if (item.Video is { } video) { video.Dispose(); foreach (var bitmap in video.Bitmaps) bitmap.Dispose(); }
+            else item.Bitmap.Dispose();
+        }
         foreach (var bitmap in _retiredCompositionBitmaps) bitmap.Dispose();
         _retiredCompositionBitmaps.Clear();
         _items.Clear();

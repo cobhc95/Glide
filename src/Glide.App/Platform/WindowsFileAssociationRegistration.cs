@@ -67,12 +67,15 @@ internal static class WindowsFileAssociationRegistration
     public static bool Register(out string message) => RegisterInHive(Registry.CurrentUser, perUser: true, out message);
 
     /// <summary>Adds Glide to Windows Open With for every recognised extension (all users; needs elevation).</summary>
+    // HKLM writes require elevation; the installer invokes this via --register-associations
+    // from an elevated process. Per-user startup path (HKCU) never attempts HKLM.
     public static bool RegisterMachineWide(out string message) => RegisterInHive(Registry.LocalMachine, perUser: false, out message);
 
     /// <summary>Removes the current user's registration and opts out of automatic re-registration.</summary>
     public static bool Unregister(out string message) => UnregisterInHive(Registry.CurrentUser, perUser: true, out message);
 
     /// <summary>Removes the machine-wide (installer) registration.</summary>
+    // HKLM removal likewise requires elevation; installer flag --unregister-associations.
     public static bool UnregisterMachineWide(out string message) => UnregisterInHive(Registry.LocalMachine, perUser: false, out message);
 
     /// <summary>True when this executable is registered in Open With for the current user or machine-wide.</summary>
@@ -108,6 +111,9 @@ internal static class WindowsFileAssociationRegistration
             // File associations launch the real Glide process directly. A separate preview/launcher
             // window makes cold start look like two applications handing off, which is perceptually
             // slower even when the first pixel arrives early. Keep one HWND identity from first paint.
+            // Quoting verified: both exe and "%1" are double-quoted so paths with spaces
+            // (e.g. C:\Program Files\Glide\Glide.exe) and image paths with spaces/& resolve
+            // to a single argv each. No behavior change.
             var command = $"\"{executable}\" \"%1\"";
 
             using (var app = hive.CreateSubKey($@"Software\Classes\Applications\{ApplicationExe}", writable: true))

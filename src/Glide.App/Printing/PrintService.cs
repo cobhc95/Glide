@@ -257,7 +257,7 @@ public static class PrintService
         // margins even when Actual/Custom size makes the image larger than the page.
         var box = new RectangleF(H(layout.BoxX), V(layout.BoxY), H(layout.BoxWidth), V(layout.BoxHeight));
         if (string.Equals(Environment.GetEnvironmentVariable("GLIDE_PRINT_DEBUG"), "1", StringComparison.Ordinal))
-            Console.WriteLine($"  render dest=({dest.X:F0},{dest.Y:F0},{dest.Width:F0},{dest.Height:F0}) box=({box.X:F0},{box.Y:F0},{box.Width:F0},{box.Height:F0}) pageUnit={g.PageUnit} clip={g.VisibleClipBounds}");
+            System.Diagnostics.Debug.WriteLine($"  render dest=({dest.X:F0},{dest.Y:F0},{dest.Width:F0},{dest.Height:F0}) box=({box.X:F0},{box.Y:F0},{box.Width:F0},{box.Height:F0}) pageUnit={g.PageUnit} clip={g.VisibleClipBounds}");
         // Alpha has nowhere to go on paper: composite against white (the box-sized white fill
         // doubles as the page background behind the image).
         using (var white = new SolidBrush(Color.White))

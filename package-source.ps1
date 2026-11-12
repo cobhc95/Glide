@@ -15,13 +15,18 @@ Copy-Item $project $stagedProject -Recurse
 $auditEvidence = Join-Path $stagedProject 'audit_evidence'
 if (Test-Path $auditEvidence) { Remove-Item $auditEvidence -Recurse -Force }
 
+# The FFmpeg SDK is fetched (pinned + hash-verified) by tools\fetch-ffmpeg.ps1; never ship it as source.
+$ffmpegSdk = Join-Path $stagedProject 'native\third_party\ffmpeg'
+if (Test-Path $ffmpegSdk) { Remove-Item $ffmpegSdk -Recurse -Force }
+
 $codecDir = Join-Path $stagedProject 'codecs'
 $indexTool = Join-Path $stagedProject 'tools\generate-codec-index.ps1'
 if ((Test-Path $codecDir) -and (Test-Path $indexTool)) {
     & $indexTool -CodecDirectory $codecDir
 }
 
-Get-ChildItem $stagedProject -Directory -Recurse | Where-Object { $_.Name -in @('bin','obj','build','dist','artifacts','.artifacts','dist-installer','.git','screenshots','docs','diagnostic_corpus') } | Remove-Item -Recurse -Force
+# Superseded release notes and handoff history live under Archive/ and stay out of handover ZIPs.
+Get-ChildItem $stagedProject -Directory -Recurse | Where-Object { $_.Name -in @('bin','obj','build','dist','artifacts','.artifacts','dist-installer','.git','screenshots','docs','diagnostic_corpus','Archive') } | Remove-Item -Recurse -Force
 Get-ChildItem $stagedProject -File -Recurse | Where-Object {
     $_.Name -match '\.(bak|tmp|orig|prehelddrag|log|pdb|exe|dll|ilk|exp|lib|obj|pch|idb)$' -or $_.Name -like '*.zip' -or $_.Name -like 'build-output.txt' -or $_.Name -like 'installer-output.txt'
 } | Remove-Item -Force

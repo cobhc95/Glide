@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.IO.Compression;
 using Avalonia;
 using Avalonia.Media.Imaging;
@@ -86,9 +87,26 @@ public static class SvgDecoder
             FileShare.ReadWrite | FileShare.Delete, 64 * 1024, FileOptions.SequentialScan);
         if (path.EndsWith(".svgz", StringComparison.OrdinalIgnoreCase))
         {
+            // Fix (SVGZ bomb): budgeted gzip inflation rejects output over MaxDocumentBytes (128MB)
+            // instead of unbounded CopyTo. Keeps FileShare.ReadWrite|Delete and the 4096 copy cap.
             using var gzip = new GZipStream(file, CompressionMode.Decompress);
-            using var decompressed = new MemoryStream(checked((int)Math.Min(info.Length * 8, MaxDocumentBytes)));
-            gzip.CopyTo(decompressed);
+            using var decompressed = new MemoryStream();
+            var rented = ArrayPool<byte>.Shared.Rent(4096);
+            try
+            {
+                long total = 0;
+                int read;
+                while ((read = gzip.Read(rented, 0, rented.Length)) > 0)
+                {
+                    total += read;
+                    if (total > MaxDocumentBytes) return null;
+                    decompressed.Write(rented, 0, read);
+                }
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(rented);
+            }
             decompressed.Position = 0;
             return svg.Load(decompressed);
         }

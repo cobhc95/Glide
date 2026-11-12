@@ -8,51 +8,64 @@ namespace Glide.App.Platform;
 /// button instead of being combined into one. The first (primary) window keeps the process default so
 /// taskbar pinning still groups with the pinned Glide shortcut.
 /// </summary>
-internal static class WindowsTaskbarIdentity
+internal static unsafe class WindowsTaskbarIdentity
 {
+    // IPropertyStore is driven through its raw vtable. The previous source-generated COM wrapper
+    // (ComObject + manual FinalRelease) threw a NullReferenceException from ComObject.Finalize() on
+    // the finalizer thread, which NativeAOT turns into a process-wide fast-fail (0xc0000409) some
+    // time after a second window was created. No managed COM wrapper means nothing to finalize.
     private static readonly Guid IidPropertyStore = new("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99");
     private static readonly PropertyKey AppUserModelIdKey =
         new(new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"), 5);
 
     private const ushort VtLpwstr = 31;
 
+    // IUnknown: 0 QueryInterface, 1 AddRef, 2 Release. IPropertyStore: 3 GetCount, 4 GetAt,
+    // 5 GetValue, 6 SetValue, 7 Commit.
+    private const int SlotRelease = 2, SlotGetValue = 5, SlotSetValue = 6, SlotCommit = 7;
+
     [DllImport("shell32.dll")]
-    private static extern int SHGetPropertyStoreForWindow(IntPtr hwnd, ref Guid riid, out IPropertyStore propertyStore);
+    private static extern int SHGetPropertyStoreForWindow(IntPtr hwnd, ref Guid riid, out IntPtr propertyStore);
 
     [DllImport("ole32.dll")]
     private static extern int PropVariantClear(ref PropVariant pvar);
+
+    private static IntPtr Slot(IntPtr store, int index) => ((IntPtr*)*(IntPtr*)store)[index];
+
+    private static void ReleaseStore(IntPtr store)
+    {
+        if (store != IntPtr.Zero) ((delegate* unmanaged[Stdcall]<IntPtr, uint>)Slot(store, SlotRelease))(store);
+    }
+
+    private static IntPtr TryGetStore(IntPtr hwnd)
+    {
+        var iid = IidPropertyStore;
+        return SHGetPropertyStoreForWindow(hwnd, ref iid, out var pointer) == 0 ? pointer : IntPtr.Zero;
+    }
 
     /// <summary>Reads the window's AppUserModelID (used by diagnostics and the round-trip test).</summary>
     public static string? TryGetWindowAppUserModelId(IntPtr hwnd)
     {
         if (hwnd == IntPtr.Zero) return null;
-
-        var iid = IidPropertyStore;
-        IPropertyStore? store = null;
+        var store = IntPtr.Zero;
         try
         {
-            if (SHGetPropertyStoreForWindow(hwnd, ref iid, out store) != 0 || store is null) return null;
+            store = TryGetStore(hwnd);
+            if (store == IntPtr.Zero) return null;
             var key = AppUserModelIdKey;
-            store.GetValue(ref key, out var value);
+            PropVariant value = default;
+            var hr = ((delegate* unmanaged[Stdcall]<IntPtr, PropertyKey*, PropVariant*, int>)Slot(store, SlotGetValue))(store, &key, &value);
+            if (hr < 0) return null;
             try
             {
                 return value.VariantType == VtLpwstr && value.Pointer != IntPtr.Zero
                     ? Marshal.PtrToStringUni(value.Pointer)
                     : null;
             }
-            finally
-            {
-                PropVariantClear(ref value);
-            }
+            finally { PropVariantClear(ref value); }
         }
-        catch
-        {
-            return null;
-        }
-        finally
-        {
-            if (store is not null) Marshal.ReleaseComObject(store);
-        }
+        catch { return null; }
+        finally { ReleaseStore(store); }
     }
 
     /// <summary>
@@ -62,33 +75,28 @@ internal static class WindowsTaskbarIdentity
     public static bool TrySetWindowAppUserModelId(IntPtr hwnd, string appUserModelId)
     {
         if (hwnd == IntPtr.Zero || string.IsNullOrWhiteSpace(appUserModelId)) return false;
-
-        var iid = IidPropertyStore;
-        IPropertyStore? store = null;
+        var store = IntPtr.Zero;
         var pointer = IntPtr.Zero;
         try
         {
-            if (SHGetPropertyStoreForWindow(hwnd, ref iid, out store) != 0 || store is null) return false;
+            store = TryGetStore(hwnd);
+            if (store == IntPtr.Zero) return false;
             var key = AppUserModelIdKey;
             pointer = Marshal.StringToCoTaskMemUni(appUserModelId);
             var value = new PropVariant { VariantType = VtLpwstr, Pointer = pointer };
-            store.SetValue(ref key, ref value);
-            store.Commit();
-            return true;
+            if (((delegate* unmanaged[Stdcall]<IntPtr, PropertyKey*, PropVariant*, int>)Slot(store, SlotSetValue))(store, &key, &value) < 0) return false;
+            return ((delegate* unmanaged[Stdcall]<IntPtr, int>)Slot(store, SlotCommit))(store) >= 0;
         }
-        catch
-        {
-            return false;
-        }
+        catch { return false; }
         finally
         {
             if (pointer != IntPtr.Zero) Marshal.FreeCoTaskMem(pointer);
-            if (store is not null) Marshal.ReleaseComObject(store);
+            ReleaseStore(store);
         }
     }
 
     [StructLayout(LayoutKind.Sequential, Pack = 4)]
-    private struct PropertyKey(Guid formatId, uint propertyId)
+    internal struct PropertyKey(Guid formatId, uint propertyId)
     {
         public Guid FormatId = formatId;
         public uint PropertyId = propertyId;
@@ -97,19 +105,9 @@ internal static class WindowsTaskbarIdentity
     // PROPVARIANT layout: 8-byte header (VARTYPE + 3 reserved words) followed by the union, which
     // holds the LPWSTR at offset 8 on both x86 and x64.
     [StructLayout(LayoutKind.Explicit)]
-    private struct PropVariant
+    internal struct PropVariant
     {
         [FieldOffset(0)] public ushort VariantType;
         [FieldOffset(8)] public IntPtr Pointer;
-    }
-
-    [ComImport, Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    private interface IPropertyStore
-    {
-        void GetCount(out uint propertyCount);
-        void GetAt(uint propertyIndex, out PropertyKey key);
-        void GetValue(ref PropertyKey key, out PropVariant value);
-        void SetValue(ref PropertyKey key, ref PropVariant value);
-        void Commit();
     }
 }

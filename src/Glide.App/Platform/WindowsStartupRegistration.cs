@@ -1,4 +1,4 @@
-﻿using System.Runtime.InteropServices;
+using System.Runtime.InteropServices;
 using Microsoft.Win32;
 
 namespace Glide.App.Platform;
@@ -6,6 +6,8 @@ namespace Glide.App.Platform;
 /// <summary>
 /// Manages per-user Windows Run registry entry to allow Glide to start minimized/in background
 /// on user login for instant sub-30ms first-image presentation.
+/// HKCU only: no elevation required. A machine-wide (HKLM Run) variant would require elevation
+/// via an installer --register-startup flag and is intentionally not offered here.
 /// </summary>
 internal static class WindowsStartupRegistration
 {
@@ -38,6 +40,8 @@ internal static class WindowsStartupRegistration
                     return false;
                 }
 
+                // Quoting verified: exe is double-quoted so install paths with spaces resolve
+                // to a single argv; --background stays outside the quotes. No behavior change.
                 key.SetValue(ValueName, $"\"{exe}\" --background", RegistryValueKind.String);
                 message = "Glide configured to start in background with Windows.";
                 return true;

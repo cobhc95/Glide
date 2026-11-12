@@ -17,6 +17,8 @@ if exist "%GLIDE_BUILD_LOG%" del /q "%GLIDE_BUILD_LOG%" >nul 2>nul
 echo Glide build running. Output is live and mirrored to build-output.txt...
 powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\build-live.ps1" -BuildScript "%~f0" -LogPath "%GLIDE_BUILD_LOG%" -ForwardArgsLine "%*"
 set "GLIDE_WRAPPER_RC=%errorlevel%"
+rem Success leaves no transcript behind; the transcript is kept only when a build fails.
+if "%GLIDE_WRAPPER_RC%"=="0" if exist "%GLIDE_BUILD_LOG%" del /q "%GLIDE_BUILD_LOG%" >nul 2>nul
 
 if not "%GLIDE_WRAPPER_RC%"=="0" (
   if not exist "%GLIDE_BUILD_LOG%" (
@@ -46,7 +48,7 @@ setlocal EnableExtensions EnableDelayedExpansion
 cd /d "%~dp0"
 rem Single-source the product version from Directory.Build.props so build banners, deliverable
 rem names and fixture identities can never drift from the assembly metadata again.
-set "GLIDE_VERSION=4.5.0"
+set "GLIDE_VERSION="
 for /f "tokens=3 delims=<>" %%V in ('findstr /r /c:"^ *<Version>" "Directory.Build.props"') do set "GLIDE_VERSION=%%V"
 title Glide %GLIDE_VERSION%
 
@@ -173,6 +175,14 @@ if exist native\Glide.Native\CMakeLists.txt (
       )
     )
 
+    rem The fallback video decoder links against a pinned, hash-verified LGPL FFmpeg build.
+    powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File "tools\fetch-ffmpeg.ps1"
+    if errorlevel 1 (
+      echo ERROR: Could not fetch the bundled FFmpeg build ^(tools\fetch-ffmpeg.ps1^).
+      set "GLIDE_BUILD_RC=1"
+      goto :fail
+    )
+
     echo [1/8] Configuring/refreshing native bridge for x64...
     if "!GLIDE_NATIVE_NINJA!"=="1" (
       cmake -G Ninja -S native\Glide.Native -B native\Glide.Native\build -DCMAKE_BUILD_TYPE=Release
@@ -285,11 +295,15 @@ call :progress 78 "Publishing"
 echo [7/8] Publishing...
 if not "%GLIDE_FAST%"=="1" if exist dist rmdir /s /q dist
 if "%GLIDE_FAST%"=="1" if not exist dist mkdir dist
-dotnet publish src\Glide.App\Glide.App.csproj -c Release -r win-x64 --self-contained false -o dist
+rem NativeAOT: Glide.exe needs no installed .NET. The linker step locates MSVC through vswhere.
+set "PATH=%PATH%;%ProgramFiles(x86)%\Microsoft Visual Studio\Installer"
+dotnet publish src\Glide.App\Glide.App.csproj -c Release -r win-x64 --self-contained true -p:PublishAot=true -o dist
 if errorlevel 1 (
   set "GLIDE_BUILD_RC=!errorlevel!"
   goto :fail
 )
+rem Post-build cleanup: fast mode keeps dist\, so drop any symbol files left by earlier builds.
+del /q "dist\*.pdb" >nul 2>nul
 
 if not defined GLIDE_NATIVE_DLL (
   if exist "native\Glide.Native\build\Release\Glide.Native.dll" set "GLIDE_NATIVE_DLL=%CD%\native\Glide.Native\build\Release\Glide.Native.dll"
@@ -307,6 +321,9 @@ if not exist "dist\Glide.Native.dll" (
   set "GLIDE_BUILD_RC=1"
   goto :fail
 )
+
+rem FFmpeg is not shipped: Glide downloads it only if Windows can't play a video (see tools\package-ffmpeg-pack.ps1).
+if exist "dist\ffmpeg" rmdir /s /q "dist\ffmpeg"
 
 rem Explorer thumbnail provider ships alongside the native bridge. It is optional at runtime: the app
 rem simply reports the provider as unavailable when the DLL is absent.

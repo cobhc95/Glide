@@ -170,6 +170,35 @@ public sealed class SecurityAuditTests : IDisposable
         Assert.Equal(shouldBlock, blocked);
     }
 
+    [Theory]
+    // Redirect targets must never escape to file:// or private IPs: ValidateUrl rejects
+    // non-HTTP schemes, and the socket layer blocks private IPs even after a redirect.
+    [InlineData("file:///C:/Windows/System32/cmd.exe")]
+    [InlineData("file:///etc/passwd")]
+    public void SecureImageFetcher_ValidateUrl_Rejects_Redirect_To_File_Urls(string url)
+    {
+        Assert.False(SecureImageFetcher.ValidateUrl(url, out _, out var reason));
+        Assert.NotEmpty(reason);
+    }
+
+    [Theory]
+    // Obscure numeric IP spellings that normalize to loopback must parse-and-block.
+    [InlineData("2130706433")] // 0x7F000001 == 127.0.0.1
+    [InlineData("0x7f.0.0.1")] // hex-dotted loopback
+    [InlineData("0x7F000001")] // single hex loopback
+    [InlineData("0177.0.0.01")] // octal-dotted loopback
+    public void SecureImageFetcher_NumericIp_Parses_And_Blocks_Loopback(string host)
+    {
+        Assert.True(SecureImageFetcher.TryParseNumericIp(host, out var address), $"Numeric host '{host}' should parse.");
+        Assert.NotNull(address);
+        Assert.True(SecureImageFetcher.IsBlockedIpAddress(address!), $"Numeric host '{host}' ({address}) must be blocked.");
+    }
+
+    // NOTE: ContentLength-lie (declared length small, body huge) needs a mock HTTP server;
+    // no such pattern exists in this file, so it is intentionally skipped. Enforcement lives
+    // in SecureImageFetcher.FetchImageBytesAsync via the streaming totalRead > maxDownloadBytes
+    // cap, which covers lies regardless of the declared header.
+
     #endregion
 
     #region Cache Handling & Path Traversal Defenses

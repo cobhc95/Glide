@@ -45,6 +45,13 @@ public sealed class PrintPreviewControl : Control
             MarginLeftProperty, MarginTopProperty, MarginRightProperty, MarginBottomProperty);
     }
 
+    // Cached per-Render allocations: brushes/pens are immutable after construction and safe to
+    // share across Render calls, avoiding GC churn on every preview repaint/resize.
+    private static readonly SolidColorBrush ShadowBrush = new(Color.FromArgb(90, 0, 0, 0));
+    private static readonly SolidColorBrush ShadeBrush = new(Color.FromArgb(38, 120, 120, 120));
+    private static readonly SolidColorBrush MarginEdgeBrush = new(Color.FromRgb(0x38, 0xA9, 0xF5));
+    private static readonly Pen MarginEdgePen = new(MarginEdgeBrush, 1) { DashStyle = DashStyle.Dash };
+
     public PrintPaperGeometry? Paper { get => GetValue(PaperProperty); set => SetValue(PaperProperty, value); }    public bool Landscape { get => GetValue(LandscapeProperty); set => SetValue(LandscapeProperty, value); }
     public PrintPageLayout? Layout { get => GetValue(LayoutProperty); set => SetValue(LayoutProperty, value); }
     public Bitmap? PreviewBitmap { get => GetValue(PreviewBitmapProperty); set => SetValue(PreviewBitmapProperty, value); }
@@ -75,7 +82,7 @@ public sealed class PrintPreviewControl : Control
         double Y(double v) => oy + v * scale;
 
         // Drop shadow + sheet.
-        context.FillRectangle(new SolidColorBrush(Color.FromArgb(90, 0, 0, 0)),
+        context.FillRectangle(ShadowBrush,
             new Rect(ox + 4, oy + 4, paperW * scale, paperH * scale));
         context.FillRectangle(Brushes.White, new Rect(ox, oy, paperW * scale, paperH * scale));
 
@@ -83,15 +90,13 @@ public sealed class PrintPreviewControl : Control
         var (prX, prY, prW, prH) = Landscape
             ? (paper.PrintableY, paper.PrintableX, paper.PrintableHeight, paper.PrintableWidth)
             : (paper.PrintableX, paper.PrintableY, paper.PrintableWidth, paper.PrintableHeight);
-        var shade = new SolidColorBrush(Color.FromArgb(38, 120, 120, 120));
-        context.FillRectangle(shade, new Rect(ox, oy, paperW * scale, Y(prY) - oy));
-        context.FillRectangle(shade, new Rect(ox, Y(prY + prH), paperW * scale, oy + paperH * scale - Y(prY + prH)));
-        context.FillRectangle(shade, new Rect(ox, Y(prY), X(prX) - ox, prH * scale));
-        context.FillRectangle(shade, new Rect(X(prX + prW), Y(prY), ox + paperW * scale - X(prX + prW), prH * scale));
+        context.FillRectangle(ShadeBrush, new Rect(ox, oy, paperW * scale, Y(prY) - oy));
+        context.FillRectangle(ShadeBrush, new Rect(ox, Y(prY + prH), paperW * scale, oy + paperH * scale - Y(prY + prH)));
+        context.FillRectangle(ShadeBrush, new Rect(ox, Y(prY), X(prX) - ox, prH * scale));
+        context.FillRectangle(ShadeBrush, new Rect(X(prX + prW), Y(prY), ox + paperW * scale - X(prX + prW), prH * scale));
 
         // User margins (dashed accent).
-        var marginPen = new Pen(new SolidColorBrush(Color.FromRgb(0x38, 0xA9, 0xF5)), 1)
-        { DashStyle = DashStyle.Dash };
+        var marginPen = MarginEdgePen;
         var mx = Math.Max(0, MarginLeft); var my = Math.Max(0, MarginTop);
         var mr = Math.Max(0, MarginRight); var mb = Math.Max(0, MarginBottom);
         context.DrawRectangle(marginPen, new Rect(X(mx), Y(my),

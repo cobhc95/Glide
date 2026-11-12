@@ -14,4 +14,8 @@
   <ItemGroup>
     <Using Include="Xunit" />
   </ItemGroup>
+  <ItemGroup>
+    <None Include="Fixtures\overlay-video.mp4" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="Fixtures\overlay-video-vp9.webm" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

@@ -1,6 +1,10 @@
 #define MyAppName "Glide Image Viewer"
 #define MyAppShortName "Glide"
-#define MyAppVersion "4.5.0"
+; Version keys below (MyAppVersion/VersionInfoVersion) are owned by the release lead (4.5.2 -> 4.6.0);
+; hygiene passes must not bump them.
+#ifndef MyAppVersion
+#error MyAppVersion must be supplied by build-installer.cmd
+#endif
 #define MyAppExeName "Glide.exe"
 
 [Setup]
@@ -23,7 +27,7 @@ UsePreviousAppDir=yes
 CloseApplications=yes
 RestartApplications=no
 UninstallDisplayIcon={app}\{#MyAppExeName}
-VersionInfoVersion=4.5.0.0
+VersionInfoVersion={#MyAppVersion}.0
 VersionInfoProductName={#MyAppName}
 VersionInfoDescription=Glide Image Viewer Setup
 

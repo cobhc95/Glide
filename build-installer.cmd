@@ -3,7 +3,7 @@ setlocal EnableExtensions EnableDelayedExpansion
 cd /d "%~dp0"
 rem Single-source the version from Directory.Build.props (see build.cmd) so the installer banner
 rem and any versioned text cannot drift from the assembly metadata.
-set "GLIDE_VERSION=4.5.0"
+set "GLIDE_VERSION="
 for /f "tokens=3 delims=<>" %%V in ('findstr /r /c:"^ *<Version>" "Directory.Build.props"') do set "GLIDE_VERSION=%%V"
 title Glide Installer Builder
 
@@ -15,6 +15,7 @@ if exist "%GLIDE_INSTALLER_LOG%" del /q "%GLIDE_INSTALLER_LOG%" >nul 2>nul
 call :main > "%GLIDE_INSTALLER_LOG%" 2>&1
 set "RC=%errorlevel%"
 type "%GLIDE_INSTALLER_LOG%"
+if "%RC%"=="0" del /q "%GLIDE_INSTALLER_LOG%" >nul 2>nul
 
 if not "%RC%"=="0" (
   echo.
@@ -85,7 +86,7 @@ echo   !ISCC!
 echo.
 
 if exist dist-installer rmdir /s /q dist-installer
-"!ISCC!" "installer\Glide.iss"
+"!ISCC!" /DMyAppVersion=%GLIDE_VERSION% "installer\Glide.iss"
 set "ISCC_RC=!errorlevel!"
 if not "!ISCC_RC!"=="0" (
   echo ERROR: Inno Setup compiler failed with exit code !ISCC_RC!.

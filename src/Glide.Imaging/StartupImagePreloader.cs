@@ -88,6 +88,9 @@ public static class StartupImagePreloader
                 }
             }
 
+            // Preload bytes stay as byte[] (not NativeCompressedBuffer): the handoff to the
+            // foreground path is a short-lived MemoryStream read, so native-lifetime management
+            // is not trivial here. Bounded by the 128MB cap to limit LOH impact. Minimal change.
             var fileInfo = new FileInfo(path);
             if (fileInfo.Length > 0 && fileInfo.Length <= 128 * 1024 * 1024)
             {
@@ -133,12 +136,14 @@ public static class StartupImagePreloader
 
         try
         {
-            // Wait for background preload if still in flight (usually already completed)
+            // Wait for background preload if still in flight (usually already completed).
+            // Fix (perf): non-blocking WaitAsync with timeout instead of task.Wait(500), so the
+            // calling (often UI) thread is not blocked. Async callers should prefer TryConsumeAsync.
             if (!task.IsCompleted)
             {
                 if (GlidePerformanceTrace.Enabled)
                     GlidePerformanceTrace.Mark("startup_preload_await_wait", Path.GetFileName(path));
-                task.Wait(500);
+                task.WaitAsync(TimeSpan.FromMilliseconds(500)).GetAwaiter().GetResult();
             }
 
             if (task.IsCompletedSuccessfully && task.Result is { } preloaded)
@@ -152,5 +157,44 @@ public static class StartupImagePreloader
         catch { }
 
         return false;
+    }
+
+    internal static async Task<StartupPreloadResult?> TryConsumeAsync(string path, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return null;
+        var fullPath = Path.GetFullPath(path);
+        Task<StartupPreloadResult?>? task = null;
+        lock (Sync)
+        {
+            if (_preloadedPath is null || !string.Equals(_preloadedPath, fullPath, StringComparison.OrdinalIgnoreCase))
+                return null;
+            task = _preloadTask;
+            _preloadedPath = null;
+            _preloadTask = null;
+        }
+
+        if (task is null) return null;
+
+        try
+        {
+            // Fix (perf): await WaitAsync(timeout) instead of blocking task.Wait(500).
+            if (!task.IsCompleted)
+            {
+                if (GlidePerformanceTrace.Enabled)
+                    GlidePerformanceTrace.Mark("startup_preload_await_wait", Path.GetFileName(path));
+                await task.WaitAsync(TimeSpan.FromMilliseconds(500), cancellationToken).ConfigureAwait(false);
+            }
+
+            if (task.IsCompletedSuccessfully && task.Result is { } preloaded)
+            {
+                if (GlidePerformanceTrace.Enabled)
+                    GlidePerformanceTrace.Mark("startup_preload_consumed", Path.GetFileName(path));
+                return preloaded;
+            }
+        }
+        catch (OperationCanceledException) { throw; }
+        catch { }
+
+        return null;
     }
 }

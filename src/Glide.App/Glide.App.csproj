@@ -7,10 +7,20 @@
     <ApplicationIcon>Assets\Glide.ico</ApplicationIcon>
     <PublishAot Condition="'$(PublishAot)' == ''">false</PublishAot>
     <InvariantGlobalization>false</InvariantGlobalization>
+    <!-- Source-generated COM interop (GeneratedComInterface) emits unsafe code. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- Version-resource identity: an exe with no company/product metadata scores worse with
+         SmartScreen/Defender heuristics than one that identifies itself. -->
+    <Product>Glide Image Viewer</Product>
+    <Company>cobhc95</Company>
+    <Authors>cobhc95</Authors>
+    <Description>Glide Image Viewer</Description>
+    <Copyright>Copyright (c) cobhc95</Copyright>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Avalonia" Version="11.3.20" />
-    <PackageReference Include="Avalonia.Desktop" Version="11.3.20" />
+    <PackageReference Include="Avalonia.Win32" Version="11.3.20" />
+    <PackageReference Include="Avalonia.Skia" Version="11.3.20" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.20" />
     <PackageReference Include="Avalonia.Diagnostics" Version="11.3.20" Condition="'$(Configuration)' == 'Debug'" />
     <PackageReference Include="Avalonia.Controls.ItemsRepeater" Version="11.1.5" />

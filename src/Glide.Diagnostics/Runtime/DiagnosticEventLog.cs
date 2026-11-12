@@ -1,5 +1,5 @@
 using System.Collections.Concurrent;
-using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace Glide.Diagnostics.Runtime;
 
@@ -25,7 +25,14 @@ public sealed class DiagnosticEventLog
     public void ExportJsonLines(string path)
     {
         using var writer = new StreamWriter(path, false, new System.Text.UTF8Encoding(false));
-        foreach (var item in Snapshot()) writer.WriteLine(JsonSerializer.Serialize(item));
+        foreach (var item in Snapshot()) writer.WriteLine(new JsonObject
+        {
+            ["Time"] = item.Time,
+            ["Subsystem"] = item.Subsystem,
+            ["Name"] = item.Name,
+            // Payloads are anonymous objects; their generated ToString needs no reflection.
+            ["Data"] = item.Data?.ToString()
+        }.ToJsonString());
     }
 }
 

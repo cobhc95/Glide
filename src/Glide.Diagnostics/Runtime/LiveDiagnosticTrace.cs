@@ -33,8 +33,11 @@ public static class LiveDiagnosticTrace
         _version = string.IsNullOrWhiteSpace(version) ? "unknown" : version;
         try
         {
-            var downloads = System.IO.Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
+            // Build and test runs set GLIDE_DIAGNOSTIC_TRACE_DIR to a throwaway folder so nothing is written to Downloads.
+            var downloads = Environment.GetEnvironmentVariable("GLIDE_DIAGNOSTIC_TRACE_DIR");
+            if (string.IsNullOrWhiteSpace(downloads))
+                downloads = System.IO.Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
             Directory.CreateDirectory(downloads);
             _path = System.IO.Path.Combine(downloads, "Glide-Diagnostic-Latest.txt");
             PreservePreviousAbnormalTrace(downloads);
@@ -199,9 +202,11 @@ public static class LiveDiagnosticTrace
         _writer!.WriteLine($"{DateTimeOffset.Now:O} | +{Lifetime.Elapsed.TotalMilliseconds:F1}ms | T{Environment.CurrentManagedThreadId} | {subsystem}.{name}{payload}");
     }
 
+    // Payloads are anonymous objects, whose compiler-generated ToString lists every property and
+    // needs no reflection (Glide ships as NativeAOT).
     private static string SafeSerialize(object data)
     {
-        try { return JsonSerializer.Serialize(data); }
-        catch { return data.ToString() ?? "<unserializable>"; }
+        try { return data.ToString() ?? "<unserializable>"; }
+        catch { return "<unserializable>"; }
     }
 }

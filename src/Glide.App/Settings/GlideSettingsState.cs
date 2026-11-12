@@ -14,6 +14,11 @@ public sealed record GlideSettingsState
 
     // General
     public bool RecentHistoryEnabled { get; set; } = true;
+    // Settings search: also list matches found only in descriptions, tooltips and search terms (after the title matches).
+    public bool SearchShowRelatedResults { get; set; } = true;
+    // Order of the images in a folder for next / previous (see Glide.Core.ImageSortOrder). Default matches Windows Explorer.
+    public string NavigationSortOrder { get; set; } = "Name (like Explorer)";
+    public bool NavigationSortDescending { get; set; }
     public int HistorySize { get; set; } = 8;
     public bool RememberWindowPlacement { get; set; } = true;
     public bool ReuseSingleInstance { get; set; } = true;
@@ -51,6 +56,7 @@ public sealed record GlideSettingsState
     public string MainBackgroundChoice { get; set; } = "Follow theme";
     public string CustomMainBackgroundHex { get; set; } = "#101214";
     public int GlowIntensityPercent { get; set; } = 100;
+    // Retired with the Home feature cards (4.7.0); kept so older settings files still deserialize.
     public bool ShowHomeTips { get; set; } = true;
     public bool ShowRecentOnHome { get; set; } = true;
     public bool ConfirmDiscardSettingsChanges { get; set; } = true;
@@ -110,6 +116,8 @@ public sealed record GlideSettingsState
     // Default restores the exact pre-fullscreen normal placement/state captured on entry.
     public string FullscreenExitBehavior { get; set; } = "Restore size and location";
     public string DefaultViewMode { get; set; } = "Fit image";
+    // Play animated GIFs in the main viewer (the first frame is always shown immediately).
+    public bool AnimateGifs { get; set; } = true;
     // How the status bar Fit Width/Fit Height controls propagate the chosen fit mode: only the
     // current image, every image in this session, or this session plus future launches (default).
     public string StatusFitScope { get; set; } = "This session and future sessions";
@@ -145,6 +153,14 @@ public sealed record GlideSettingsState
     public bool RightDragPan { get; set; } = true;
     public bool SelectionClickZoom { get; set; } = true;
     public bool SelectionRightClickZoomOut { get; set; } = true;
+    // Selection buffer: a left-press in the empty area around the picture starts a selection
+    // (clamped to the image). Each percentage is the share of the empty space on each side of the
+    // image that counts as buffer; 100 = the whole empty area. 0 disables the buffer for that state.
+    public bool SelectionBufferEnabled { get; set; } = true;
+    public int SelectionBufferWindowedPercent { get; set; } = 33;
+    public int SelectionBufferMaximizedPercent { get; set; } = 100;
+    // When true the maximized percentage applies in every window state, not only when maximized.
+    public bool SelectionBufferAllModes { get; set; }
     public bool ReverseSelectionZoomOutScale { get; set; } = true;
     public bool BackgroundDragWindow { get; set; } = true;
     public bool CtrlWheelZoom { get; set; } = true;
@@ -178,7 +194,11 @@ public sealed record GlideSettingsState
     public string InteractivePanQuality { get; set; } = "Full quality";
     public bool SpeedBoostEnabled { get; set; } = true;
     public bool StartWithWindowsInBackground { get; set; }
+    // Legacy master switch (no UI). False is honoured as "Never" by SpeedBoostTrayIcon.
     public bool ShowTrayIcon { get; set; } = true;
+    // "Always", "Only while Glide is closed" or "Never". Speed Boost standby works without the icon:
+    // launching Glide again wakes the warm instance.
+    public string SpeedBoostTrayIcon { get; set; } = "Always";
     public bool PerformanceUserCustom { get; set; }
     public bool PerformanceUserCustomSaved { get; set; }
     public string UserCustomPanQuality { get; set; } = "Full quality";
@@ -208,8 +228,14 @@ public sealed record GlideSettingsState
     public bool StatusStatZoom { get; set; } = true;
     public bool StatusStatFileSize { get; set; }
     public bool StatusStatFormat { get; set; }
+    // File name (or full path when "Show full path in title" is on) as the first status segment.
+    public bool StatusStatFileName { get; set; } = true;
     // Current five-step status-size ladder preserves the visual mapping of older saved values during migration.
-    public string StatusBarSize { get; set; } = "Medium";
+    public string StatusBarSize { get; set; } = "Small";
+    /// <summary>Where the floating status bar sits: Center (default), Left or Right.</summary>
+    /// <summary>When collapsed, park the expand button in the lower-right corner, away from the image.</summary>
+    public bool StatusCollapsedToCorner { get; set; } = true;
+    public string StatusBarAlignment { get; set; } = "Center";
     public int StatusBarGlobalScalePercent { get; set; } = 100;
     public bool StatusBarAutoFit { get; set; } = true;
     public int StatusBarMaximizedBoostPercent { get; set; } = 15;
@@ -223,6 +249,8 @@ public sealed record GlideSettingsState
     public bool SlideshowStartFullscreen { get; set; }
     public bool SlideshowPauseWhenInactive { get; set; } = true;
     public bool SlideshowRightClickStops { get; set; } = true;
+    // What a left-click on the picture does while a slideshow is active (see SlideshowLeftClickActions).
+    public string SlideshowLeftClickAction { get; set; } = "Pause / resume slideshow";
     public bool SlideshowShowQualityIndicator { get; set; } = true;
 
     // Tabs & Workspace (only the currently implemented subset is active in UI)
@@ -235,10 +263,15 @@ public sealed record GlideSettingsState
     public bool CloseEmptyWindowAfterDetach { get; set; }
     public bool DetachedWindowHomeTab { get; set; }
     public bool DoubleClickTabCloses { get; set; } = true;
+    public bool MiddleClickTabCloses { get; set; } = true;
+    // "Tab order" cycles left-to-right; "Most recently used" cycles like Alt+Tab while Ctrl is held.
+    public string TabCycleOrder { get; set; } = "Tab order";
     // "Open home page", "Keep last tab open", or "Close program". Applies when the user closes the final ordinary tab.
     public string LastTabCloseBehavior { get; set; } = "Open home page";
     // "Welcome page" or "Recent pictures page". Legacy Browser page values are migrated to Welcome.
     public string HomePageMode { get; set; } = "Welcome page";
+    public bool ShowFolderCounter { get; set; }
+    public bool FolderCounterIncludeGrandparent { get; set; }
     public bool FolderNavShowGroup { get; set; } = true;
     public bool FolderNavShowPrevious { get; set; } = true;
     public bool FolderNavShowNext { get; set; } = true;

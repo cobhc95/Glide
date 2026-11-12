@@ -1,6 +1,7 @@
-﻿using Avalonia;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
+using Avalonia.Controls.Primitives.PopupPositioning;
 using Avalonia.Markup.Xaml;
 using Avalonia.Threading;
 using Glide.App.Services;
@@ -103,6 +104,8 @@ public partial class App : Application
         lock (SettingsGate)
             if (_currentSettings is not null) return _currentSettings.CloneState();
         var task = StartupSettingsTask;
+        // Block-free by contract: Result is only touched when IsCompletedSuccessfully is already
+        // true, so a still-running background load returns null instead of stalling the UI thread.
         return task is { IsCompletedSuccessfully: true } ? task.Result.CloneState() : null;
     }
 
@@ -116,6 +119,29 @@ public partial class App : Application
         GlidePerformanceTrace.Mark("avalonia_xaml_start");
         AvaloniaXamlLoader.Load(this);
         GlidePerformanceTrace.Mark("avalonia_xaml_end");
+        RegisterToolTipPlacement();
+    }
+
+    /// <summary>
+    /// Avalonia opens tooltips at the pointer by default, so the popup lands on top of the hovered
+    /// toolbar button: the button can no longer be clicked and, because the pointer is now over the
+    /// popup, moving onto a neighbouring button never closes it. Anchor every tooltip to its control
+    /// instead, opening away from the window edge the control sits on (above for the bottom status
+    /// bar, below for the title/tab bar), so it never covers the control row.
+    /// </summary>
+    private static void RegisterToolTipPlacement()
+    {
+        ToolTip.ToolTipOpeningEvent.AddClassHandler<Control>((control, _) =>
+        {
+            if (TopLevel.GetTopLevel(control) is not { } top) return;
+            var origin = control.TranslatePoint(default, top);
+            if (origin is null) return;
+            var centerY = origin.Value.Y + control.Bounds.Height / 2;
+            var lowerHalf = centerY > top.Bounds.Height / 2;
+            ToolTip.SetPlacement(control, lowerHalf ? PlacementMode.Top : PlacementMode.Bottom);
+            ToolTip.SetHorizontalOffset(control, 0);
+            ToolTip.SetVerticalOffset(control, lowerHalf ? -6 : 6);
+        }, handledEventsToo: true);
     }
 
     public override void OnFrameworkInitializationCompleted()
@@ -158,7 +184,7 @@ public partial class App : Application
                 {
                     // Background startup must not leave a live Avalonia composition target merely
                     // hidden. Enter the same dormant-window lifecycle used by Speed Boost close.
-                    window.EnterSpeedBoostStandby();
+                    window.EnterSpeedBoostStandby(persistSession: false);
                 };
             }
 
@@ -197,7 +223,7 @@ public partial class App : Application
             var icon = new TrayIcon
             {
                 ToolTipText = "Glide Image Viewer (Speed Boost)",
-                IsVisible = settings.SpeedBoostEnabled && settings.ShowTrayIcon
+                IsVisible = ShouldShowTrayIcon(settings)
             };
 
             try
@@ -244,15 +270,38 @@ public partial class App : Application
         if (TrayIconInstance is null) return;
         settings ??= TryGetStartupSettings();
         if (settings is null) return;
-        TrayIconInstance.IsVisible = settings.SpeedBoostEnabled && settings.ShowTrayIcon;
+        TrayIconInstance.IsVisible = ShouldShowTrayIcon(settings);
+    }
+
+    /// <summary>Tray icon mode, honouring the legacy ShowTrayIcon=false switch as "Never".</summary>
+    internal static string EffectiveTrayIconMode(Settings.GlideSettingsState settings)
+    {
+        if (!settings.ShowTrayIcon) return "Never";
+        return settings.SpeedBoostTrayIcon switch
+        {
+            "Only while Glide is closed" or "Never" => settings.SpeedBoostTrayIcon,
+            _ => "Always"
+        };
+    }
+
+    private static bool ShouldShowTrayIcon(Settings.GlideSettingsState settings)
+    {
+        if (!settings.SpeedBoostEnabled) return false;
+        return EffectiveTrayIconMode(settings) switch
+        {
+            "Never" => false,
+            // Only while no Glide window is on screen, i.e. the warm instance is in standby.
+            "Only while Glide is closed" => !Platform.GlideWindowRegistry.Snapshot().Any(window => window.IsVisible),
+            _ => true
+        };
     }
 
     /// <summary>
-    /// True when a tray icon is actually registered. Speed Boost standby removes the render window
-    /// from the taskbar and relies on the tray icon as the user's only way back, so standby must not
-    /// hide the last window when no tray icon is present.
+    /// True when the Speed Boost infrastructure (tray host + resident broker) is running. Standby no
+    /// longer requires the icon to be visible: the user may hide it, and launching Glide again wakes
+    /// the warm instance through the broker. The tray host exists only on Windows.
     /// </summary>
-    internal static bool IsTrayIconAvailable => TrayIconInstance?.IsVisible == true;
+    internal static bool IsTrayIconAvailable => TrayIconInstance is not null;
 
     public static void ShowMainWindow()
     {

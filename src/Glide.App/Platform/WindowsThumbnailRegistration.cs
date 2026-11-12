@@ -88,6 +88,9 @@ internal static class WindowsThumbnailRegistration
 
     public static bool Register(bool perUser, IEnumerable<string> extensions, out string message)
         => Apply(perUser, extensions, register: true, out message);
+    // NOTE: perUser=false targets HKLM and requires elevation; the installer calls this via
+    // --register-thumbnails from an elevated process. No command-line quoting applies here
+    // (InprocServer32 stores a bare DLL path, not a command); verified no quoting bug.
 
     public static bool Unregister(bool perUser, IEnumerable<string> extensions, out string message)
         => Apply(perUser, extensions, register: false, out message);

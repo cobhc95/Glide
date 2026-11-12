@@ -1,5 +1,5 @@
 using System.Runtime.InteropServices;
-using System.Runtime.InteropServices.ComTypes;
+using System.Runtime.InteropServices.Marshalling;
 using System.Text;
 using Avalonia;
 using Avalonia.Controls;
@@ -22,13 +22,17 @@ public enum ExplorerHostState
 /// BrowserTabState stays platform-neutral; non-Windows platforms simply retain the lightweight fallback.
 /// Native readiness is explicit: MainWindow must keep its managed fallback visible until IsReady is true.
 /// </summary>
-[ComVisible(true)]
-[ClassInterface(ClassInterfaceType.None)]
-public sealed class WindowsExplorerHost : NativeControlHost, IExplorerBrowserEventsNative, IServiceProviderNative, ICommDlgBrowserNative
+/// <remarks>COM goes through source-generated interop because NativeAOT has no built-in COM support.</remarks>
+[GeneratedComClass]
+public sealed partial class WindowsExplorerHost : NativeControlHost, IExplorerBrowserEventsNative, IServiceProviderNative, ICommDlgBrowserNative
 {
     private static readonly Guid ExplorerBrowserClsid = new("71F96385-DDD6-48D3-A0C1-AE06E8B055FB");
     private static readonly Guid CommDlgBrowserIid = new("000214F1-0000-0000-C000-000000000046");
+    private static readonly Guid ExplorerBrowserIid = new("DFD3B6B5-C10C-4BE9-85F6-A66969F402F6");
+    private static readonly Guid ExplorerEventsIid = new("361BBDC7-E6EE-4E13-BE58-58E2240C810F");
+    private static readonly StrategyBasedComWrappers ComWrappers = new();
     private IExplorerBrowser? _browser;
+    private IntPtr _browserPointer;
     private string? _pendingFolder;
     private IPlatformHandle? _hostHandle;
     private uint _eventsCookie;
@@ -90,22 +94,20 @@ public sealed class WindowsExplorerHost : NativeControlHost, IExplorerBrowserEve
         SetState(ExplorerHostState.Creating);
         try
         {
-            var type = Type.GetTypeFromCLSID(ExplorerBrowserClsid, throwOnError: true)!;
-            _browser = (IExplorerBrowser)Activator.CreateInstance(type)!;
+            var clsid = ExplorerBrowserClsid;
+            var browserIid = ExplorerBrowserIid;
+            ThrowIfFailed(CoCreateInstance(ref clsid, IntPtr.Zero, ClsCtxInprocServer, ref browserIid, out _browserPointer));
+            _browser = (IExplorerBrowser)ComWrappers.GetOrCreateObjectForComInstance(_browserPointer, CreateObjectFlags.UniqueInstance);
             Emit("com_activated", new { clsid = ExplorerBrowserClsid, hwnd = handle.Handle.ToInt64() });
-            ThrowIfFailed(IUnknown_SetSite(_browser, this));
+            var site = ComWrappers.GetOrCreateComInterfaceForObject(this, CreateComInterfaceFlags.None);
+            try { ThrowIfFailed(IUnknown_SetSite(_browserPointer, site)); }
+            finally { Marshal.Release(site); }
             Emit("site_set");
             var rect = CurrentRect();
             var folderSettings = new FolderSettings { ViewMode = 4, Flags = 0 };
             ThrowIfFailed(_browser.Initialize(handle.Handle, ref rect, ref folderSettings));
             Emit("initialized", new { rect.Left, rect.Top, rect.Right, rect.Bottom });
-            Emit("com_callback_visibility", new
-            {
-                explorerEvents = Marshal.IsTypeVisibleFromCom(typeof(IExplorerBrowserEventsNative)),
-                serviceProvider = Marshal.IsTypeVisibleFromCom(typeof(IServiceProviderNative)),
-                commDlgBrowser = Marshal.IsTypeVisibleFromCom(typeof(ICommDlgBrowserNative))
-            });
-            _eventsInterface = Marshal.GetComInterfaceForObject(this, typeof(IExplorerBrowserEventsNative));
+            _eventsInterface = QueryThisFor(ExplorerEventsIid);
             ThrowIfFailed(_browser.Advise(_eventsInterface, out _eventsCookie));
             Emit("advised", new { cookie = _eventsCookie });
             ThrowIfFailed(_browser.SetOptions(ExplorerBrowserOptions.ShowFrames | ExplorerBrowserOptions.AlwaysNavigate | ExplorerBrowserOptions.NoBorder));
@@ -225,6 +227,18 @@ public sealed class WindowsExplorerHost : NativeControlHost, IExplorerBrowserEve
         }
     }
 
+    /// <summary>Returns this object's COM pointer for <paramref name="iid"/>; the caller owns one reference.</summary>
+    private IntPtr QueryThisFor(Guid iid)
+    {
+        var unknown = ComWrappers.GetOrCreateComInterfaceForObject(this, CreateComInterfaceFlags.None);
+        try
+        {
+            ThrowIfFailed(Marshal.QueryInterface(unknown, ref iid, out var pointer));
+            return pointer;
+        }
+        finally { Marshal.Release(unknown); }
+    }
+
     private void ReleaseBrowser()
     {
         if (_browser is null) return;
@@ -238,10 +252,15 @@ public sealed class WindowsExplorerHost : NativeControlHost, IExplorerBrowserEve
             try { Marshal.Release(_eventsInterface); } catch { }
             _eventsInterface = IntPtr.Zero;
         }
-        try { IUnknown_SetSite(_browser, null); } catch { }
+        try { IUnknown_SetSite(_browserPointer, IntPtr.Zero); } catch { }
         try { _browser.Destroy(); } catch { }
-        try { Marshal.FinalReleaseComObject(_browser); } catch { }
+        try { ((ComObject)(object)_browser).FinalRelease(); } catch { }
         _browser = null;
+        if (_browserPointer != IntPtr.Zero)
+        {
+            Marshal.Release(_browserPointer);
+            _browserPointer = IntPtr.Zero;
+        }
         Emit("browser_released");
     }
 
@@ -287,7 +306,7 @@ public sealed class WindowsExplorerHost : NativeControlHost, IExplorerBrowserEve
             return HResultNoInterface;
         try
         {
-            ppvObject = Marshal.GetComInterfaceForObject(this, typeof(ICommDlgBrowserNative));
+            ppvObject = QueryThisFor(CommDlgBrowserIid);
             return 0;
         }
         catch
@@ -324,32 +343,34 @@ public sealed class WindowsExplorerHost : NativeControlHost, IExplorerBrowserEve
         if (shellView == IntPtr.Zero) return null;
         object? viewObject = null;
         object? dataObjectRaw = null;
+        var dataPointer = IntPtr.Zero;
         try
         {
-            viewObject = Marshal.GetObjectForIUnknown(shellView);
+            viewObject = ComWrappers.GetOrCreateObjectForComInstance(shellView, CreateObjectFlags.UniqueInstance);
             if (viewObject is not IShellViewNative view) return null;
             var iidDataObject = IDataObjectIid;
-            dataObjectRaw = view.GetItemObject(SvgioSelection, ref iidDataObject);
-            if (dataObjectRaw is not IDataObject dataObject) return null;
+            if (view.GetItemObject(SvgioSelection, ref iidDataObject, out dataPointer) < 0 || dataPointer == IntPtr.Zero) return null;
+            dataObjectRaw = ComWrappers.GetOrCreateObjectForComInstance(dataPointer, CreateObjectFlags.UniqueInstance);
+            if (dataObjectRaw is not IDataObjectNative dataObject) return null;
 
-            var format = new FORMATETC
+            var format = new FormatEtc
             {
-                cfFormat = CfHDrop,
-                dwAspect = DVASPECT.DVASPECT_CONTENT,
-                lindex = -1,
-                ptd = IntPtr.Zero,
-                tymed = TYMED.TYMED_HGLOBAL
+                Format = CfHDrop,
+                Aspect = DvAspectContent,
+                Index = -1,
+                TargetDevice = IntPtr.Zero,
+                Medium = TymedHGlobal
             };
-            dataObject.GetData(ref format, out var medium);
+            if (dataObject.GetData(ref format, out var medium) < 0) return null;
             try
             {
-                if (medium.tymed != TYMED.TYMED_HGLOBAL || medium.unionmember == IntPtr.Zero) return null;
-                var count = DragQueryFile(medium.unionmember, uint.MaxValue, null, 0);
+                if (medium.Medium != TymedHGlobal || medium.Handle == IntPtr.Zero) return null;
+                var count = DragQueryFile(medium.Handle, uint.MaxValue, null, 0);
                 if (count != 1) return null;
-                var length = DragQueryFile(medium.unionmember, 0, null, 0);
+                var length = DragQueryFile(medium.Handle, 0, null, 0);
                 if (length == 0) return null;
                 var buffer = new StringBuilder(checked((int)length + 1));
-                return DragQueryFile(medium.unionmember, 0, buffer, (uint)buffer.Capacity) > 0
+                return DragQueryFile(medium.Handle, 0, buffer, (uint)buffer.Capacity) > 0
                     ? buffer.ToString()
                     : null;
             }
@@ -364,14 +385,9 @@ public sealed class WindowsExplorerHost : NativeControlHost, IExplorerBrowserEve
         }
         finally
         {
-            if (dataObjectRaw is not null && Marshal.IsComObject(dataObjectRaw))
-            {
-                try { Marshal.ReleaseComObject(dataObjectRaw); } catch { }
-            }
-            if (viewObject is not null && Marshal.IsComObject(viewObject))
-            {
-                try { Marshal.ReleaseComObject(viewObject); } catch { }
-            }
+            if (dataObjectRaw is ComObject data) { try { data.FinalRelease(); } catch { } }
+            if (dataPointer != IntPtr.Zero) Marshal.Release(dataPointer);
+            if (viewObject is ComObject viewCom) { try { viewCom.FinalRelease(); } catch { } }
         }
     }
 
@@ -399,6 +415,9 @@ public sealed class WindowsExplorerHost : NativeControlHost, IExplorerBrowserEve
     private const int HResultNoInterface = unchecked((int)0x80004002);
     private const uint SvgioSelection = 0x1;
     private const short CfHDrop = 15;
+    private const int DvAspectContent = 1;
+    private const int TymedHGlobal = 1;
+    private const uint ClsCtxInprocServer = 1;
     private static readonly Guid IDataObjectIid = new("0000010E-0000-0000-C000-000000000046");
 
     private enum ShellDisplayName : uint
@@ -407,7 +426,7 @@ public sealed class WindowsExplorerHost : NativeControlHost, IExplorerBrowserEve
     }
 
     [Flags]
-    private enum ExplorerBrowserOptions : uint
+    internal enum ExplorerBrowserOptions : uint
     {
         ShowFrames = 0x2,
         AlwaysNavigate = 0x4,
@@ -415,67 +434,49 @@ public sealed class WindowsExplorerHost : NativeControlHost, IExplorerBrowserEve
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    private struct NativeRect
+    internal struct NativeRect
     {
         public int Left, Top, Right, Bottom;
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    private struct FolderSettings
+    internal struct FolderSettings
     {
         public int ViewMode;
         public uint Flags;
     }
 
-    [ComImport, Guid("000214E3-0000-0000-C000-000000000046"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    private interface IShellViewNative
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct FormatEtc
     {
-        void VTableGap01();
-        void VTableGap02();
-        void VTableGap03();
-        void VTableGap04();
-        void VTableGap05();
-        void VTableGap06();
-        void VTableGap07();
-        void VTableGap08();
-        void VTableGap09();
-        void VTableGap10();
-        void VTableGap11();
-        void VTableGap12();
-        [return: MarshalAs(UnmanagedType.Interface)]
-        object GetItemObject(uint aspectOfView, ref Guid riid);
+        public short Format;
+        public IntPtr TargetDevice;
+        public int Aspect;
+        public int Index;
+        public int Medium;
     }
 
-    [ComImport, Guid("DFD3B6B5-C10C-4BE9-85F6-A66969F402F6"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    private interface IExplorerBrowser
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct StgMedium
     {
-        [PreserveSig] int Initialize(IntPtr hwndParent, ref NativeRect rect, ref FolderSettings folderSettings);
-        [PreserveSig] int Destroy();
-        [PreserveSig] int SetRect(IntPtr deferredWindowPosition, ref NativeRect rect);
-        [PreserveSig] int SetPropertyBag([MarshalAs(UnmanagedType.LPWStr)] string propertyBag);
-        [PreserveSig] int SetEmptyText([MarshalAs(UnmanagedType.LPWStr)] string emptyText);
-        [PreserveSig] int SetFolderSettings(ref FolderSettings folderSettings);
-        [PreserveSig] int Advise(IntPtr events, out uint cookie);
-        [PreserveSig] int Unadvise(uint cookie);
-        [PreserveSig] int SetOptions(ExplorerBrowserOptions options);
-        [PreserveSig] int GetOptions(out ExplorerBrowserOptions options);
-        [PreserveSig] int BrowseToIDList(IntPtr pidl, uint flags);
-        [PreserveSig] int BrowseToObject(IntPtr unknown, uint flags);
-        [PreserveSig] int FillFromObject(IntPtr unknown, uint flags);
-        [PreserveSig] int RemoveAll();
-        [PreserveSig] int GetCurrentView(ref Guid iid, out IntPtr view);
+        public int Medium;
+        public IntPtr Handle;
+        public IntPtr ReleaseUnknown;
     }
+
+    [DllImport("ole32.dll", PreserveSig = true)]
+    private static extern int CoCreateInstance(ref Guid clsid, IntPtr outer, uint context, ref Guid iid, out IntPtr instance);
 
     [DllImport("Shlwapi.dll", PreserveSig = true)]
     private static extern int IUnknown_SetSite(
-        [MarshalAs(UnmanagedType.IUnknown)] object target,
-        [MarshalAs(UnmanagedType.IUnknown)] object? site);
+        IntPtr target,
+        IntPtr site);
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)]
     private static extern uint DragQueryFile(IntPtr hDrop, uint fileIndex, [Out] StringBuilder? fileName, uint fileNameLength);
 
     [DllImport("ole32.dll", PreserveSig = false)]
-    private static extern void ReleaseStgMedium(ref STGMEDIUM medium);
+    private static extern void ReleaseStgMedium(ref StgMedium medium);
 
     [DllImport("shell32.dll", PreserveSig = true)]
     private static extern int SHGetNameFromIDList(IntPtr pidl, ShellDisplayName sigdnName, out IntPtr ppszName);
@@ -507,31 +508,76 @@ public sealed class WindowsExplorerHost : NativeControlHost, IExplorerBrowserEve
 }
 
 
-[ComVisible(true)]
+[GeneratedComInterface]
 [Guid("6D5140C1-7436-11CE-8034-00AA006009FA")]
-[InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-public interface IServiceProviderNative
+internal partial interface IServiceProviderNative
 {
     [PreserveSig] int QueryService(ref Guid guidService, ref Guid riid, out IntPtr ppvObject);
 }
 
-[ComVisible(true)]
+[GeneratedComInterface]
 [Guid("000214F1-0000-0000-C000-000000000046")]
-[InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-public interface ICommDlgBrowserNative
+internal partial interface ICommDlgBrowserNative
 {
     [PreserveSig] int OnDefaultCommand(IntPtr shellView);
     [PreserveSig] int OnStateChange(IntPtr shellView, uint change);
     [PreserveSig] int IncludeObject(IntPtr shellView, IntPtr pidl);
 }
 
-[ComVisible(true)]
+[GeneratedComInterface]
 [Guid("361BBDC7-E6EE-4E13-BE58-58E2240C810F")]
-[InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-public interface IExplorerBrowserEventsNative
+internal partial interface IExplorerBrowserEventsNative
 {
     [PreserveSig] int OnNavigationPending(IntPtr pidlFolder);
     [PreserveSig] int OnViewCreated(IntPtr shellView);
     [PreserveSig] int OnNavigationComplete(IntPtr pidlFolder);
     [PreserveSig] int OnNavigationFailed(IntPtr pidlFolder);
+}
+
+[GeneratedComInterface]
+[Guid("000214E3-0000-0000-C000-000000000046")]
+internal partial interface IShellViewNative
+{
+    // IOleWindow + IShellView members before GetItemObject; only their vtable slots matter.
+    void VTableGap01();
+    void VTableGap02();
+    void VTableGap03();
+    void VTableGap04();
+    void VTableGap05();
+    void VTableGap06();
+    void VTableGap07();
+    void VTableGap08();
+    void VTableGap09();
+    void VTableGap10();
+    void VTableGap11();
+    void VTableGap12();
+    [PreserveSig] int GetItemObject(uint aspectOfView, ref Guid riid, out IntPtr item);
+}
+
+[GeneratedComInterface]
+[Guid("0000010E-0000-0000-C000-000000000046")]
+internal partial interface IDataObjectNative
+{
+    [PreserveSig] int GetData(ref WindowsExplorerHost.FormatEtc format, out WindowsExplorerHost.StgMedium medium);
+}
+
+[GeneratedComInterface(StringMarshalling = StringMarshalling.Utf16)]
+[Guid("DFD3B6B5-C10C-4BE9-85F6-A66969F402F6")]
+internal partial interface IExplorerBrowser
+{
+    [PreserveSig] int Initialize(IntPtr hwndParent, ref WindowsExplorerHost.NativeRect rect, ref WindowsExplorerHost.FolderSettings folderSettings);
+    [PreserveSig] int Destroy();
+    [PreserveSig] int SetRect(IntPtr deferredWindowPosition, ref WindowsExplorerHost.NativeRect rect);
+    [PreserveSig] int SetPropertyBag(string propertyBag);
+    [PreserveSig] int SetEmptyText(string emptyText);
+    [PreserveSig] int SetFolderSettings(ref WindowsExplorerHost.FolderSettings folderSettings);
+    [PreserveSig] int Advise(IntPtr events, out uint cookie);
+    [PreserveSig] int Unadvise(uint cookie);
+    [PreserveSig] int SetOptions(WindowsExplorerHost.ExplorerBrowserOptions options);
+    [PreserveSig] int GetOptions(out WindowsExplorerHost.ExplorerBrowserOptions options);
+    [PreserveSig] int BrowseToIDList(IntPtr pidl, uint flags);
+    [PreserveSig] int BrowseToObject(IntPtr unknown, uint flags);
+    [PreserveSig] int FillFromObject(IntPtr unknown, uint flags);
+    [PreserveSig] int RemoveAll();
+    [PreserveSig] int GetCurrentView(ref Guid iid, out IntPtr view);
 }

@@ -80,5 +80,6 @@ public enum GlideCommand
     ExternalProgram2,
     ExternalProgram3,
     SaveImage,
-    SaveImageAs
+    SaveImageAs,
+    FitWindow
 }

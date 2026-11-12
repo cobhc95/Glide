@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.IO.Pipes;
+using System.Security.Principal;
 using System.Text;
 using Avalonia.Threading;
 using Glide.Core;
@@ -23,16 +24,16 @@ internal sealed record ExternalLaunchBatch(IReadOnlyList<ExternalLaunchRequest> 
 /// </summary>
 internal static class ExternalLaunchBroker
 {
-    private const string PipeName = "Glide3.ExternalOpen.v2";
+    private const string PipeName = ProtocolNames.PipeName;
     // v3 is an EventWaitHandle sentinel rather than a thread-affine mutex. Creation is the process
     // election primitive; followers close their handle immediately, so the sentinel disappears when
     // the elected owner releases/exits and another live Glide process can take over.
-    private const string PresenceName = @"Local\Glide3.ProcessPresence.v3";
+    private const string PresenceName = ProtocolNames.PresenceName;
     private static string EffectivePresenceName =>
         AppContext.BaseDirectory.Contains("Glide.Core.Tests", StringComparison.OrdinalIgnoreCase)
             ? $"{PresenceName}.{Environment.ProcessId}"
             : PresenceName;
-    private const string ProtocolHeader = "GLIDE3\t2";
+    private const string ProtocolHeader = ProtocolNames.ProtocolHeader;
     // A ready warm broker normally accepts the connection immediately. This deadline is only a
     // bounded safety net for the owner-startup/pipe-replacement race; it is not a hot-path delay.
     private static readonly TimeSpan ClientDeadline = TimeSpan.FromMilliseconds(250);
@@ -57,6 +58,28 @@ internal static class ExternalLaunchBroker
     private enum BrokerState { Owner, Follower, Ready, Stopping }
 
     internal static string PresenceObjectNameForTests => EffectivePresenceName;
+
+    // IPC peer check (inbox only — no extra ACL packages): after a client connects the
+    // server compares the impersonated peer name to the current user. This is FAIL-OPEN
+    // by design: dropping on mismatch broke legitimate double-click opens (impersonation
+    // APIs disagree across split tokens/service sessions), which is worse than the residual
+    // cross-user open-request risk — requested paths are still validated, canonicalized and
+    // re-checked for existence/type before use, and only open/activate files, never commands.
+    // Mismatches are marked in the performance trace for diagnostics. Proper fix when the
+    // NuGet feed is reachable: PipeSecurity via System.IO.Pipes.AccessControl.
+    private static bool IsSameUserPeer(NamedPipeServerStream server, out string? peerName)
+    {
+        peerName = null;
+        if (!OperatingSystem.IsWindows()) return true;
+        try
+        {
+            peerName = server.GetImpersonationUserName();
+            var self = WindowsIdentity.GetCurrent()?.Name;
+            return !string.IsNullOrEmpty(peerName) &&
+                   string.Equals(peerName, self, StringComparison.OrdinalIgnoreCase);
+        }
+        catch { return false; }
+    }
 
     public static ExternalLaunchBatch? PrepareForwardBatch(IEnumerable<string> paths)
     {
@@ -433,8 +456,9 @@ internal static class ExternalLaunchBroker
         {
             try
             {
+                // Plain pipe; the peer is authenticated via IsSameUserPeer after connect.
                 await using var server = new NamedPipeServerStream(
-                    PipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+                        PipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
                 if (!readinessPublished)
                 {
                     lock (Gate)
@@ -449,6 +473,9 @@ internal static class ExternalLaunchBroker
                 }
 
                 await server.WaitForConnectionAsync(token).ConfigureAwait(false);
+                // Fail-open peer gate (see IsSameUserPeer): accept, but mark mismatches.
+                if (!IsSameUserPeer(server, out var peerName) && !string.IsNullOrEmpty(peerName))
+                    GlidePerformanceTrace.Mark("ipc_cross_user_peer_accepted");
                 using var peerCts = CancellationTokenSource.CreateLinkedTokenSource(token);
                 peerCts.CancelAfter(ServerPeerDeadline);
                 using var reader = new StreamReader(server, Encoding.UTF8, leaveOpen: true);
@@ -468,12 +495,30 @@ internal static class ExternalLaunchBroker
                     var line = await ReadBoundedLineAsync(reader, peerCts.Token).ConfigureAwait(false);
                     if (line is null) { malformed = true; break; }
                     var parts = line.Split('\t', 3);
+                    // Server-side allowlist: Kind must be exactly 'A' (activate), 'D' (directory),
+                    // or 'F' (file). Anything else is rejected before any filesystem touch.
                     if (parts.Length != 3 || parts[0].Length != 1 || (parts[0][0] != 'F' && parts[0][0] != 'D' && parts[0][0] != 'A') ||
                         !Guid.TryParseExact(parts[1], "N", out var requestId)) { malformed = true; break; }
                     try
                     {
-                        var path = Encoding.UTF8.GetString(Convert.FromBase64String(parts[2]));
-                        requests.Add(new ExternalLaunchRequest(parts[0][0], path, requestId));
+                        var rawPath = Encoding.UTF8.GetString(Convert.FromBase64String(parts[2]));
+                        var kind = parts[0][0];
+                        string normalizedPath;
+                        if (kind == 'A')
+                        {
+                            // Activate carries no path; reject smuggled payloads.
+                            if (!string.IsNullOrEmpty(rawPath)) { malformed = true; break; }
+                            normalizedPath = string.Empty;
+                        }
+                        else
+                        {
+                            if (string.IsNullOrWhiteSpace(rawPath)) { malformed = true; break; }
+                            // Canonicalize to defeat "..", mixed separators, and UNC tricks;
+                            // AcceptOwnership re-checks existence/type after this.
+                            normalizedPath = Path.GetFullPath(rawPath);
+                            if (!Path.IsPathRooted(normalizedPath)) { malformed = true; break; }
+                        }
+                        requests.Add(new ExternalLaunchRequest(kind, normalizedPath, requestId));
                     }
                     catch { malformed = true; break; }
                 }

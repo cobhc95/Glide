@@ -7,6 +7,8 @@ namespace Glide.Core;
 public sealed class ImageNavigator
 {
     private readonly List<string> _paths = new();
+    // The order this folder session was built with (Explorer-style natural name order unless Settings choose otherwise).
+    private IComparer<string> _order = ImageSortOrder.CreateComparer();
     public IReadOnlyList<string> Paths => _paths;
     public int Index { get; private set; } = -1;
     public string? Current => Index >= 0 && Index < _paths.Count ? _paths[Index] : null;
@@ -20,9 +22,8 @@ public sealed class ImageNavigator
         var directory = Path.GetDirectoryName(full);
         if (!string.IsNullOrWhiteSpace(directory) && Directory.Exists(directory))
         {
-            _paths.AddRange(Directory.EnumerateFiles(directory)
-                .Where(IsSupported)
-                .OrderBy(p => Path.GetFileName(p), StringComparer.OrdinalIgnoreCase));
+            _order = ImageSortOrder.CreateComparer();
+            _paths.AddRange(ImageSortOrder.Sort(Directory.EnumerateFiles(directory).Where(IsSupported), _order));
         }
 
         Index = _paths.FindIndex(p => string.Equals(p, full, StringComparison.OrdinalIgnoreCase));
@@ -46,21 +47,29 @@ public sealed class ImageNavigator
     public void ReplaceFolderIndex(IEnumerable<string> orderedPaths, string currentPath)
     {
         var currentFull = Path.GetFullPath(currentPath);
+        _order = ImageSortOrder.CreateComparer();
         _paths.Clear();
         _paths.AddRange(orderedPaths.Select(Path.GetFullPath).Distinct(StringComparer.OrdinalIgnoreCase));
         Index = _paths.FindIndex(p => string.Equals(p, currentFull, StringComparison.OrdinalIgnoreCase));
         if (Index < 0)
         {
             _paths.Add(currentFull);
-            _paths.Sort((a, b) => StringComparer.OrdinalIgnoreCase.Compare(Path.GetFileName(a), Path.GetFileName(b)));
+            _paths.Sort(_order);
             Index = _paths.FindIndex(p => string.Equals(p, currentFull, StringComparison.OrdinalIgnoreCase));
         }
     }
 
-    private static int CompareCanonical(string a, string b)
+    /// <summary>
+    /// Re-sorts the open folder session with the order currently chosen in Settings, keeping the
+    /// current image selected. Call after the sort setting changes.
+    /// </summary>
+    public void Resort()
     {
-        var c = StringComparer.OrdinalIgnoreCase.Compare(Path.GetFileName(a), Path.GetFileName(b));
-        return c != 0 ? c : StringComparer.Ordinal.Compare(a, b);
+        var current = Current;
+        _order = ImageSortOrder.CreateComparer();
+        _paths.Sort(_order);
+        if (current is not null) Index = _paths.FindIndex(p => string.Equals(p, current, StringComparison.OrdinalIgnoreCase));
+        if (Index < 0 && _paths.Count > 0) Index = 0;
     }
 
     /// <summary>
@@ -106,7 +115,7 @@ public sealed class ImageNavigator
         while (lo <= hi)
         {
             var mid = (lo + hi) >>> 1;
-            var c = CompareCanonical(_paths[mid], full);
+            var c = _order.Compare(_paths[mid], full);
             if (c == 0) return mid;
             if (c < 0) lo = mid + 1; else hi = mid - 1;
         }
@@ -129,48 +138,40 @@ public sealed class ImageNavigator
         var full = Path.GetFullPath(path);
         var directory = Path.GetDirectoryName(full);
         if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory)) return [full];
+        var order = ImageSortOrder.CreateComparer();
         if (maxCount is not > 0)
-            return Directory.EnumerateFiles(directory)
-                .Where(IsSupported)
-                .OrderBy(p => Path.GetFileName(p), StringComparer.OrdinalIgnoreCase)
-                .ToArray();
+            return ImageSortOrder.Sort(Directory.EnumerateFiles(directory).Where(IsSupported), order);
 
         var limit = Math.Max(1, maxCount.Value);
         if (limit == 1) return [full];
 
         var neighbourCapacity = limit - 1;
-        var requestedName = Path.GetFileName(full);
-        var nameComparer = StringComparer.OrdinalIgnoreCase;
-        // lower is a normal min-heap: once over capacity, discard the lexically smallest
-        // (farthest preceding) name so the greatest/nearest preceding names survive.
-        var lower = new PriorityQueue<string, string>(nameComparer);
-        // upper reverses priority: once over capacity, dequeue the lexically greatest
-        // (farthest following) name so the smallest/nearest following names survive.
-        var reverseNameComparer = Comparer<string>.Create((a, b) => nameComparer.Compare(b, a));
-        var upper = new PriorityQueue<string, string>(reverseNameComparer);
+        // lower is a normal min-heap: once over capacity, discard the earliest-sorting
+        // (farthest preceding) path so the latest/nearest preceding paths survive.
+        var lower = new PriorityQueue<string, string>(order);
+        // upper reverses priority: once over capacity, dequeue the latest-sorting
+        // (farthest following) path so the earliest/nearest following paths survive.
+        var reverseOrder = Comparer<string>.Create((x, y) => order.Compare(y, x));
+        var upper = new PriorityQueue<string, string>(reverseOrder);
 
         foreach (var candidate in Directory.EnumerateFiles(directory))
         {
             if (!IsSupported(candidate) || string.Equals(candidate, full, StringComparison.OrdinalIgnoreCase)) continue;
-            var candidateName = Path.GetFileName(candidate);
-            var comparison = nameComparer.Compare(candidateName, requestedName);
-            if (comparison == 0) comparison = StringComparer.Ordinal.Compare(candidate, full);
+            var comparison = order.Compare(candidate, full);
             if (comparison < 0)
             {
-                lower.Enqueue(candidate, candidateName);
+                lower.Enqueue(candidate, candidate);
                 if (lower.Count > neighbourCapacity) lower.Dequeue();
             }
             else
             {
-                upper.Enqueue(candidate, candidateName);
+                upper.Enqueue(candidate, candidate);
                 if (upper.Count > neighbourCapacity) upper.Dequeue();
             }
         }
 
-        var lowerOrdered = lower.UnorderedItems.Select(x => x.Element)
-            .OrderBy(p => Path.GetFileName(p), nameComparer).ToArray();
-        var upperOrdered = upper.UnorderedItems.Select(x => x.Element)
-            .OrderBy(p => Path.GetFileName(p), nameComparer).ToArray();
+        var lowerOrdered = ImageSortOrder.Sort(lower.UnorderedItems.Select(x => x.Element), order);
+        var upperOrdered = ImageSortOrder.Sort(upper.UnorderedItems.Select(x => x.Element), order);
         var beforeWanted = neighbourCapacity / 2;
         var afterWanted = neighbourCapacity - beforeWanted;
         var beforeCount = Math.Min(beforeWanted, lowerOrdered.Length);

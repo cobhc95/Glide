@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Buffers.Binary;
 using System.Globalization;
 using System.Runtime.InteropServices;
@@ -123,12 +124,33 @@ public static class BuiltInRasterDecoder
         if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return false;
         try
         {
-            var info = new FileInfo(path);
-            if (info.Length <= 0 || info.Length > MaxSourceBytes) return false;
-            var data = File.ReadAllBytes(path);
-            var extension = ImageFormatRegistry.GetLongestExtension(path);
-            if (!IsSupportedExtension(extension)) return false;
-            return TryDecodeBuffer(data, extension, out image);
+            // Fix (TOCTOU + LOH): single FileStream open, Length checked once on the open handle,
+            // then a capped ArrayPool loop read. Keeps FileShare.ReadWrite|Delete, MaxSourceBytes
+            // (1GiB), MaxDimension (65535) and MaxTotalPixels (256M) checks. Never throws.
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete, 4096, FileOptions.SequentialScan);
+            var length = stream.Length;
+            if (length <= 0 || length > MaxSourceBytes) return false;
+            var count = checked((int)length);
+            var rented = ArrayPool<byte>.Shared.Rent(count);
+            try
+            {
+                var read = 0;
+                while (read < count)
+                {
+                    var chunk = stream.Read(rented, read, count - read);
+                    if (chunk <= 0) break;
+                    read += chunk;
+                }
+                if (read != count) return false;
+                var extension = ImageFormatRegistry.GetLongestExtension(path);
+                if (!IsSupportedExtension(extension)) return false;
+                return TryDecodeBuffer(rented.AsSpan(0, count), extension, out image);
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(rented);
+            }
         }
         catch
         {

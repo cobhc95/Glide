@@ -2,20 +2,34 @@
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <!-- Glide 4.1 release: warm-engine Launch Speed Boost, background standby, and the current image-opening pipeline. -->
-    <Version>4.5.0</Version>
-    <AssemblyVersion>4.5.0.0</AssemblyVersion>
-    <FileVersion>4.5.0.0</FileVersion>
-    <InformationalVersion>4.5.0</InformationalVersion>
+    <Version>4.7.0</Version>
+    <AssemblyVersion>$(Version).0</AssemblyVersion>
+    <FileVersion>$(Version).0</FileVersion>
+    <InformationalVersion>$(Version)</InformationalVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <LangVersion>latest</LangVersion>
+    <LangVersion>12</LangVersion>
+    <!-- Pinned to 12 (was `latest`): SDK upgrades must not silently change language semantics. -->
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <!-- Hygiene: warnings stay non-fatal (too noisy to enforce), but editor/IDE style rules are
+         enforced at build time so formatting drift fails locally before review. -->
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <!-- Recommended analyzer ruleset; NOT All (too noisy for this codebase). -->
+    <AnalysisMode>Recommended</AnalysisMode>
     <Deterministic>true</Deterministic>
     <TieredPGO Condition="'$(Configuration)' == 'Release'">true</TieredPGO>
-    <PublishReadyToRun Condition="'$(Configuration)' == 'Release'">true</PublishReadyToRun>
+    <!-- Release builds ship without PDB debug symbols so each build leaves no .pdb bloat behind. -->
+    <DebugType Condition="'$(Configuration)' == 'Release'">none</DebugType>
+    <PublishReadyToRun Condition="'$(Configuration)' == 'Release' And '$(PublishAot)' != 'true'">true</PublishReadyToRun>
     <!-- Cold launch is Glide 3.0's overriding constraint. Composite R2R trades some publish size
          and build time for less cross-assembly JIT/runtime work before first useful pixels. -->
-    <PublishReadyToRunComposite Condition="'$(Configuration)' == 'Release'">true</PublishReadyToRunComposite>
+    <PublishReadyToRunComposite Condition="'$(Configuration)' == 'Release' And '$(PublishAot)' != 'true'">true</PublishReadyToRunComposite>
+    <!-- Release size. Exception messages and stack traces stay on so error text and crash reports remain useful. -->
+    <IlcOptimizationPreference Condition="'$(PublishAot)' == 'true'">Size</IlcOptimizationPreference>
+    <EventSourceSupport Condition="'$(PublishAot)' == 'true'">false</EventSourceSupport>
+    <MetricsSupport Condition="'$(PublishAot)' == 'true'">false</MetricsSupport>
+    <HttpActivityPropagationSupport Condition="'$(PublishAot)' == 'true'">false</HttpActivityPropagationSupport>
+    <DebuggerSupport Condition="'$(PublishAot)' == 'true'">false</DebuggerSupport>
     <UseArtifactsOutput>true</UseArtifactsOutput>
     <ArtifactsPath>$(MSBuildThisFileDirectory).artifacts</ArtifactsPath>
   </PropertyGroup>
@@ -29,6 +43,14 @@
        bridge so tests exercising the WIC encoder/decoder see the current Glide.Native.dll. -->
   <ItemGroup Condition="!Exists('$(MSBuildThisFileDirectory)dist\Glide.Native.dll') And Exists('$(MSBuildThisFileDirectory)native\Glide.Native\build\Release\Glide.Native.dll')">
     <None Include="$(MSBuildThisFileDirectory)native\Glide.Native\build\Release\Glide.Native.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Visible>false</Visible>
+    </None>
+  </ItemGroup>
+  <!-- Dev runs and tests load FFmpeg from <output>\ffmpeg. Releases exclude it: users download it only if Windows can't play a video. -->
+  <ItemGroup Condition="Exists('$(MSBuildThisFileDirectory)native\third_party\ffmpeg\bin') And '$(PublishAot)' != 'true'">
+    <None Include="$(MSBuildThisFileDirectory)native\third_party\ffmpeg\bin\avutil-*.dll;$(MSBuildThisFileDirectory)native\third_party\ffmpeg\bin\swresample-*.dll;$(MSBuildThisFileDirectory)native\third_party\ffmpeg\bin\swscale-*.dll;$(MSBuildThisFileDirectory)native\third_party\ffmpeg\bin\avcodec-*.dll;$(MSBuildThisFileDirectory)native\third_party\ffmpeg\bin\avformat-*.dll">
+      <Link>ffmpeg\%(Filename)%(Extension)</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <Visible>false</Visible>
     </None>

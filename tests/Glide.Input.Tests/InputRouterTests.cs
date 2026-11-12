@@ -58,8 +58,11 @@ public sealed class InputRouterTests
         var router = new InputRouter();
         var map = GestureCatalog.CreateDefaultMap();
         map["wheel.windowed"] = GestureCatalog.ZoomIn;
-        Assert.Equal(GestureCatalog.ZoomIn, router.ResolveGesture("wheel.windowed", map));
-        Assert.Equal(GlideCommand.ZoomIn, router.ResolveGestureCommand("wheel.windowed", map));
+        // Legacy "Zoom in" on a wheel slot migrates to the merged "Zoom in/out" item.
+        Assert.Equal(GestureCatalog.ZoomWheel, router.ResolveGesture("wheel.windowed", map));
+        map["windowed.leftClickImage"] = GestureCatalog.ZoomIn;
+        Assert.Equal(GestureCatalog.ZoomIn, router.ResolveGesture("windowed.leftClickImage", map));
+        Assert.Equal(GlideCommand.ZoomIn, router.ResolveGestureCommand("windowed.leftClickImage", map));
     }
 
     [Fact]

@@ -1,6 +1,6 @@
 namespace Glide.Core;
 
-/// <summary>Framework-free state for a Window-in-Window image overlay.</summary>
+/// <summary>Framework-free state for a Window-in-Window image or video overlay.</summary>
 public sealed record OverlayState(
     Guid Id,
     string Path,
@@ -22,8 +22,26 @@ public sealed record OverlayState(
     bool AnimationPauseWhileInteracting = true,
     bool AnimationAvoidOverlap = true,
     bool PreserveAspectRatio = true,
-    double ContentScale = 0)
+    double ContentScale = 0,
+    // Custom animation area as fractions of the viewer; used when AnimationRegion is "Custom area".
+    double AnimationAreaX = 0,
+    double AnimationAreaY = 0,
+    double AnimationAreaWidth = 0,
+    double AnimationAreaHeight = 0,
+    // Video overlay playback preferences.
+    bool VideoMuted = false,
+    double VideoVolume = 1,
+    bool VideoLoop = false,
+    bool VideoAutoPlayNext = true)
 {
+    /// <summary>True when the overlay plays a video (derived from the path; never persisted).</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool IsVideo => VideoFormatRegistry.IsVideo(Path);
+
+    /// <summary>The stored custom animation area, or null when none was drawn.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public ChromeRect? AnimationArea => OverlayAnimationArea.Normalize(AnimationAreaX, AnimationAreaY, AnimationAreaWidth, AnimationAreaHeight);
+
     public OverlayState Normalize()
     {
         var width = Math.Clamp(Width, 80, 4096);
@@ -40,6 +58,11 @@ public sealed record OverlayState(
             PanY = double.IsFinite(PanY) ? PanY : 0,
             ContentScale = double.IsFinite(ContentScale) && ContentScale > 0 ? ContentScale : 0,
             AnimationRegion = NormalizeAnimationRegion(AnimationRegion),
+            AnimationAreaX = AnimationArea?.X ?? 0,
+            AnimationAreaY = AnimationArea?.Y ?? 0,
+            AnimationAreaWidth = AnimationArea?.Width ?? 0,
+            AnimationAreaHeight = AnimationArea?.Height ?? 0,
+            VideoVolume = double.IsFinite(VideoVolume) ? Math.Clamp(VideoVolume, 0, 1) : 1,
             AnimationSpeedDipsPerSecond = Math.Clamp(AnimationSpeedDipsPerSecond, 10, 2000),
             AnimationTurnIntervalMs = Math.Clamp(AnimationTurnIntervalMs, 0, 60000),
             AnimationTurnAngleDegrees = Math.Clamp(AnimationTurnAngleDegrees, 0, 180)
@@ -54,6 +77,7 @@ public sealed record OverlayState(
         "top right quarter" => "Top right quarter",
         "bottom left quarter" => "Bottom left quarter",
         "bottom right quarter" => "Bottom right quarter",
+        "custom area" => OverlayAnimationArea.CustomRegionName,
         _ => "Anywhere"
     };
 }
@@ -62,8 +86,8 @@ public static class OverlayLayoutStore
 {
     public static void Save(string path, IEnumerable<OverlayState> overlays)
     {
-        var payload = new { version = 2, overlays = overlays.Select(x => x.Normalize()).ToArray() };
-        var json = System.Text.Json.JsonSerializer.Serialize(payload, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+        var payload = new OverlayLayoutDocument(2, overlays.Select(x => x.Normalize()).ToArray());
+        var json = System.Text.Json.JsonSerializer.Serialize(payload, CoreJsonContext.Default.OverlayLayoutDocument);
         var temp = path + ".tmp"; Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
         File.WriteAllText(temp, json);
         // Validate the exact bytes before replacing the last known-good layout.
@@ -95,7 +119,7 @@ public static class OverlayLayoutStore
     {
         using var doc = System.Text.Json.JsonDocument.Parse(json);
         if (doc.RootElement.TryGetProperty("version", out var version) && version.GetInt32() is 1 or 2 && doc.RootElement.TryGetProperty("overlays", out var rows))
-            return System.Text.Json.JsonSerializer.Deserialize<OverlayState[]>(rows.GetRawText())?.Select(x => x.Normalize()).ToArray() ?? Array.Empty<OverlayState>();
-        return System.Text.Json.JsonSerializer.Deserialize<OverlayState[]>(doc.RootElement.GetRawText())?.Select(x => x.Normalize()).ToArray() ?? Array.Empty<OverlayState>();
+            return System.Text.Json.JsonSerializer.Deserialize(rows.GetRawText(), CoreJsonContext.Default.OverlayStateArray)?.Select(x => x.Normalize()).ToArray() ?? Array.Empty<OverlayState>();
+        return System.Text.Json.JsonSerializer.Deserialize(doc.RootElement.GetRawText(), CoreJsonContext.Default.OverlayStateArray)?.Select(x => x.Normalize()).ToArray() ?? Array.Empty<OverlayState>();
     }
 }

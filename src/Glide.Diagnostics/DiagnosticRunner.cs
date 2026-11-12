@@ -19,12 +19,12 @@ namespace Glide.Diagnostics;
 /// </summary>
 public static class DiagnosticRunner
 {
-    public const string BuildVersion = "4.5.0";
+    public static string BuildVersion => Glide.Core.AppVersion.Short;
 
     public static DiagnosticSnapshot Capture() => new(
         Product: "Glide",
         Version: BuildVersion,
-        Release: "Glide 4.5.0 (Photoshop PSD/PSB viewing and Explorer thumbnails)",
+        Release: $"Glide {BuildVersion}",
         Architecture: "C# + Avalonia retained-mode UI + semantic core + small native C++ bridge; NativeAOT blocked pending COM isolation",
         TimestampUtc: DateTimeOffset.UtcNow,
         Framework: RuntimeInformation.FrameworkDescription,
@@ -59,8 +59,8 @@ public static class DiagnosticRunner
             $"{snapshot.SettingsSchemaCount} declarative settings registered"));
         var currentSettings = SettingsCatalog.All.Count(x => x.FuturePhase is null);
         var futureSettings = SettingsCatalog.All.Count(x => x.FuturePhase is not null);
-        checks.Add(Check("settings_schema_glide30_contract", snapshot.SettingsSchemaCount == 193 && currentSettings == 193 && futureSettings == 0,
-            $"Glide catalogue contract: total={snapshot.SettingsSchemaCount}, current={currentSettings}, future={futureSettings}; expected 193/193/0."));
+        checks.Add(Check("settings_schema_glide30_contract", snapshot.SettingsSchemaCount == 235 && currentSettings == 235 && futureSettings == 0,
+            $"Glide catalogue contract: total={snapshot.SettingsSchemaCount}, current={currentSettings}, future={futureSettings}; expected 235/235/0."));
         var overlayAvoidOverlap = SettingsCatalog.All.FirstOrDefault(x => string.Equals(x.Id, "overlay.animationAvoidOverlap", StringComparison.OrdinalIgnoreCase));
         checks.Add(Check("overlay_animation_avoid_overlap_contract",
             overlayAvoidOverlap is not null && overlayAvoidOverlap.FuturePhase is null && overlayAvoidOverlap.DefaultValue is bool avoidOverlapEnabled && avoidOverlapEnabled,
@@ -106,8 +106,8 @@ public static class DiagnosticRunner
             .GroupBy(x => x.shortcut, StringComparer.OrdinalIgnoreCase)
             .Where(group => group.Select(x => x.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count() > 1)
             .ToArray();
-        checks.Add(Check("hotkey_contract", HotkeyCatalog.All.Count == 71 &&
-            HotkeyCatalog.All.Select(x => x.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count() == 71 &&
+        checks.Add(Check("hotkey_contract", HotkeyCatalog.All.Count == 72 &&
+            HotkeyCatalog.All.Select(x => x.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count() == 72 &&
             HotkeyCatalog.ShortcutsForCommand(GlideCommand.AddOverlay, defaultHotkeys).Contains("Shift+O") &&
             defaultHotkeys["overlay.saveLayout"].SequenceEqual(new[] { "Ctrl+Shift+S" }, StringComparer.OrdinalIgnoreCase) &&
             defaultHotkeys["overlay.loadLayout"].SequenceEqual(new[] { "Ctrl+Shift+L" }, StringComparer.OrdinalIgnoreCase) &&
@@ -147,11 +147,11 @@ public static class DiagnosticRunner
             SettingsCatalog.All.Any(x => x.Id == "navigation.confirmHierarchicalBoundary") &&
             SettingsCatalog.All.Any(x => x.Id == "developer.reverseSelectionZoomOut"),
             "Glide 3.0 appearance, independent picker directories, external-open policy, multi-tab close policy, responsive-status, proportional overlays, custom colours and performance-preset controls are structurally registered."));
-        checks.Add(Check("gesture_contract_24x19", GestureCatalog.Slots.Count == 24 && GestureCatalog.Actions.Count == 19,
+        checks.Add(Check("gesture_contract_25x23", GestureCatalog.Slots.Count == 25 && GestureCatalog.Actions.Count == 23,
             $"{GestureCatalog.Slots.Count} gesture slots and {GestureCatalog.Actions.Count} gesture actions registered."));
         checks.Add(Check("gesture_unique_ids",
-            GestureCatalog.Slots.Select(x => x.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count() == 24 &&
-            GestureCatalog.Actions.Select(x => x.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count() == 19,
+            GestureCatalog.Slots.Select(x => x.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count() == 25 &&
+            GestureCatalog.Actions.Select(x => x.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count() == 23,
             "Gesture slot/action IDs are unique."));
         var fixtureIssues = ImageDiagnosticFixtures.Validate();
         checks.Add(Check("image_fixture_registry", fixtureIssues.Count == 0,
@@ -245,39 +245,38 @@ public static class DiagnosticRunner
         Directory.CreateDirectory(folder);
         var snapshot = Capture();
         var checks = StructuralChecks();
-        var jsonOptions = new JsonSerializerOptions { WriteIndented = true };
-        File.WriteAllText(Path.Combine(folder, "health.json"), JsonSerializer.Serialize(snapshot, jsonOptions));
-        File.WriteAllText(Path.Combine(folder, "structural_checks.json"), JsonSerializer.Serialize(checks, jsonOptions));
+        File.WriteAllText(Path.Combine(folder, "health.json"), JsonSerializer.Serialize(snapshot, DiagnosticsJsonContext.Default.DiagnosticSnapshot));
+        File.WriteAllText(Path.Combine(folder, "structural_checks.json"), JsonSerializer.Serialize<IReadOnlyList<DiagnosticCheck>>(checks, DiagnosticsJsonContext.Default.IReadOnlyListDiagnosticCheck));
         File.WriteAllLines(Path.Combine(folder, "diagnostic_status.txt"), checks.Select(x => $"{x.Status}\t{x.Id}\t{x.Detail}"));
         File.WriteAllText(Path.Combine(folder, "summary.txt"),
             $"Glide {snapshot.Version}\n{snapshot.Release}\n{snapshot.TimestampUtc:O}\n{snapshot.Framework}\n{snapshot.OS}\nSettings={snapshot.SettingsSchemaCount}\n" +
             $"Structural PASS={checks.Count(x => x.Status == "PASS")} FAIL={checks.Count(x => x.Status == "FAIL")} SKIP={checks.Count(x => x.Status == "SKIP")} WARN={checks.Count(x => x.Status == "WARN")}\n");
         File.WriteAllLines(Path.Combine(folder, "architecture_invariants.txt"), snapshot.Invariants);
-        File.WriteAllText(Path.Combine(folder, "settings_schema.json"), JsonSerializer.Serialize(SettingsCatalog.All, jsonOptions));
+        File.WriteAllText(Path.Combine(folder, "settings_schema.json"), new System.Text.Json.Nodes.JsonArray(SettingsCatalog.All.Select(x => (System.Text.Json.Nodes.JsonNode?)x.ToString()).ToArray()).ToJsonString(DiagnosticsJsonContext.Indented));
         // Keep capability truth independently inspectable: the registry is recognition/routing
         // breadth, while DecodeEnabled only means a core decoder or verified live provider exists.
         // Exporting this table must never trigger provider discovery or native loads.
-        var capabilities = CodecCapabilityRegistry.All.Select(x => new
+        var capabilities = new System.Text.Json.Nodes.JsonArray(CodecCapabilityRegistry.All.Select(x => (System.Text.Json.Nodes.JsonNode?)new System.Text.Json.Nodes.JsonObject
         {
-            extension = x.Extension,
-            tier = x.Tier.ToString(),
-            provider = x.Provider,
-            decodeEnabled = x.DecodeEnabled,
-            progressive = x.Progressive,
-            animated = x.Animated,
-            rawMetadata = x.RawMetadata
-        }).ToArray();
-        File.WriteAllText(Path.Combine(folder, "codec_capabilities.json"), JsonSerializer.Serialize(new
+            ["extension"] = x.Extension,
+            ["tier"] = x.Tier.ToString(),
+            ["provider"] = x.Provider,
+            ["decodeEnabled"] = x.DecodeEnabled,
+            ["progressive"] = x.Progressive,
+            ["animated"] = x.Animated,
+            ["rawMetadata"] = x.RawMetadata
+        }).ToArray());
+        File.WriteAllText(Path.Combine(folder, "codec_capabilities.json"), new System.Text.Json.Nodes.JsonObject
         {
-            recognizedAndRouted = CodecCapabilityRegistry.Extensions.Count,
-            protectedCore = ImageFormatRegistry.CoreFastPathExtensions.Count,
-            guaranteedDecode = CodecCapabilityRegistry.DecodeEnabledExtensions.Count,
-            capabilities
-        }, jsonOptions));
+            ["recognizedAndRouted"] = CodecCapabilityRegistry.Extensions.Count,
+            ["protectedCore"] = ImageFormatRegistry.CoreFastPathExtensions.Count,
+            ["guaranteedDecode"] = CodecCapabilityRegistry.DecodeEnabledExtensions.Count,
+            ["capabilities"] = capabilities
+        }.ToJsonString(DiagnosticsJsonContext.Indented));
         File.WriteAllText(Path.Combine(folder, "codec_providers.json"), JsonSerializer.Serialize(
             CodecProviderRuntime.IsSharedCreated
                 ? CodecProviderRuntime.Shared.Artifacts
-                : Array.Empty<CodecProviderArtifact>(), jsonOptions));
+                : Array.Empty<CodecProviderArtifact>(), DiagnosticsJsonContext.Default.IReadOnlyListCodecProviderArtifact));
         File.WriteAllText(Path.Combine(folder, "README.txt"),
             "Glide 4.5.0 evidence bundle. PASS means a named assertion actually ran. SKIP means the owning subsystem is absent or the check requires a live UI. codec_capabilities.json separates recognised/routed suffixes from guaranteed decode; codec_providers.json reports only providers already indexed/verified in this process and never wakes optional providers during export. When exported from Settings > Developer Options, Glide.App appends immediate/settled screenshots, logical-control geometry/layout audit, settings-effect coverage, current settings, capability/provider inventory and a live behaviour event trace. Do not infer UI parity from headless structural PASS.\n");
         output.WriteLine($"Diagnostics exported to: {Path.GetFullPath(folder)}");
@@ -448,6 +447,8 @@ public static class DiagnosticRunner
                     output.WriteLine($"    Trace breakdown: entry={trace.ProcessEntryMs:F1}ms -> avalonia={trace.AvaloniaStartMs:F1}ms -> ctor={trace.MainWindowCtorMs:F1}ms -> bitmap={trace.BitmapAssignedMs:F1}ms -> painted={trace.FirstFramePaintedMs:F1}ms (route: {trace.DecodeRoute})");
                 }
 
+                // Sync benchmark harness: each iteration spawns a real GUI process, so pacing stays a
+                // blocking sleep. No async context or UI thread exists here to free with Task.Delay.
                 if (i < iterations) Thread.Sleep(150);
             }
 

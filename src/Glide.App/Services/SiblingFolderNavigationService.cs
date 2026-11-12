@@ -251,7 +251,7 @@ public static class SiblingFolderNavigationService
         return last;
     }
 
-    private static string[] EnumerateChildDirectories(string parent, SiblingFolderNavigationOptions options, string? includePath)
+    internal static string[] EnumerateChildDirectories(string parent, SiblingFolderNavigationOptions options, string? includePath)
     {
         try
         {
@@ -303,88 +303,19 @@ public static class SiblingFolderNavigationService
     /// Matches Windows Explorer's logical/natural ordering on Windows (e.g. 2 before 10).
     /// A deterministic token-aware fallback is used outside Windows and if shell comparison fails.
     /// </summary>
-    private sealed class WindowsLogicalStringComparer : IComparer<string>
+    internal sealed class WindowsLogicalStringComparer : IComparer<string>
     {
         public static WindowsLogicalStringComparer Instance { get; } = new();
 
-        public int Compare(string? x, string? y)
-        {
-            x ??= string.Empty;
-            y ??= string.Empty;
-            if (ReferenceEquals(x, y)) return 0;
-
-            if (OperatingSystem.IsWindows())
-            {
-                try
-                {
-                    var result = StrCmpLogicalW(x, y);
-                    if (result != 0) return result;
-                }
-                catch { }
-            }
-
-            return NaturalCompare(x, y);
-        }
-
-        private static int NaturalCompare(string a, string b)
-        {
-            var ia = 0;
-            var ib = 0;
-            while (ia < a.Length && ib < b.Length)
-            {
-                var ca = a[ia];
-                var cb = b[ib];
-                if (char.IsDigit(ca) && char.IsDigit(cb))
-                {
-                    var sa = ia;
-                    var sb = ib;
-                    while (ia < a.Length && char.IsDigit(a[ia])) ia++;
-                    while (ib < b.Length && char.IsDigit(b[ib])) ib++;
-
-                    var za = sa;
-                    var zb = sb;
-                    while (za < ia && a[za] == '0') za++;
-                    while (zb < ib && b[zb] == '0') zb++;
-
-                    var lena = ia - za;
-                    var lenb = ib - zb;
-                    if (lena != lenb) return lena.CompareTo(lenb);
-
-                    var numeric = string.Compare(a, za, b, zb, lena, StringComparison.Ordinal);
-                    if (numeric != 0) return numeric;
-
-                    var rawLenA = ia - sa;
-                    var rawLenB = ib - sb;
-                    if (rawLenA != rawLenB) return rawLenA.CompareTo(rawLenB);
-                    continue;
-                }
-
-                var upperA = char.ToUpperInvariant(ca);
-                var upperB = char.ToUpperInvariant(cb);
-                if (upperA != upperB) return upperA.CompareTo(upperB);
-                ia++;
-                ib++;
-            }
-
-            if (ia != a.Length || ib != b.Length)
-                return (a.Length - ia).CompareTo(b.Length - ib);
-
-            return string.Compare(a, b, StringComparison.OrdinalIgnoreCase);
-        }
-
-        [DllImport("shlwapi.dll", CharSet = CharSet.Unicode)]
-        private static extern int StrCmpLogicalW(string psz1, string psz2);
+        public int Compare(string? x, string? y) => Glide.Core.NaturalStringComparer.Instance.Compare(x, y);
     }
 
     private static string[]? EnumerateImages(string folder, Func<string, bool> isSupported)
     {
         try
         {
-            return Directory.EnumerateFiles(folder)
-                .Where(isSupported)
-                .OrderBy(path => Path.GetFileName(path), StringComparer.OrdinalIgnoreCase)
-                .ThenBy(path => path, StringComparer.OrdinalIgnoreCase)
-                .ToArray();
+            // Same order as the open folder itself (Explorer-style natural name order by default).
+            return Glide.Core.ImageSortOrder.Sort(Directory.EnumerateFiles(folder).Where(isSupported), Glide.Core.ImageSortOrder.CreateComparer());
         }
         catch { return null; }
     }

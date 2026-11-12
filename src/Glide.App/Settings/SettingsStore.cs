@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Glide.Core.Commands;
+using Glide.Core.Settings;
 
 namespace Glide.App.Settings;
 
@@ -20,7 +21,7 @@ public static class SettingsStore
     /// complete settings load runs in parallel with Avalonia startup and is adopted non-blockingly.
     /// </summary>
     private const int LaunchPolicySchema = 4;
-    private const int CurrentSettingsSchema = 5;
+    private const int CurrentSettingsSchema = 6;
 
     public readonly record struct LaunchPolicy(bool ReuseSingleInstance, string ExternalOpenBehavior);
 
@@ -55,7 +56,7 @@ public static class SettingsStore
         }
     }
 
-    private sealed record LaunchPolicyCache(
+    internal sealed record LaunchPolicyCache(
         int Schema,
         long SettingsLength,
         long SettingsLastWriteUtcTicks,
@@ -100,7 +101,7 @@ public static class SettingsStore
             if (File.Exists(cachePath))
             {
                 var identity = SettingsFileIdentity.Capture(settingsPath);
-                var cached = JsonSerializer.Deserialize<LaunchPolicyCache>(File.ReadAllText(cachePath));
+                var cached = JsonSerializer.Deserialize(File.ReadAllText(cachePath), AppJsonContext.Default.LaunchPolicyCache);
                 if (cached is not null && cached.Schema == LaunchPolicySchema &&
                     cached.SettingsLength == identity.Length &&
                     cached.SettingsLastWriteUtcTicks == identity.LastWriteUtcTicks &&
@@ -142,13 +143,13 @@ public static class SettingsStore
 
         var theme = S(root, nameof(GlideSettingsState.ThemeChoice), string.Empty);
         if (string.IsNullOrWhiteSpace(theme))
-            theme = B(root, nameof(GlideSettingsState.LightTheme), false) ? "Light" : d.ThemeChoice;
-        theme = theme is "Dark" or "Neutral" or "Light" ? theme : d.ThemeChoice;
+            theme = B(root, nameof(GlideSettingsState.LightTheme), false) ? SettingChoiceNames.Light : d.ThemeChoice;
+        theme = theme is SettingChoiceNames.Dark or SettingChoiceNames.Neutral or SettingChoiceNames.Light ? theme : d.ThemeChoice;
 
         var quality = S(root, nameof(GlideSettingsState.InitialImageQuality), d.InitialImageQuality);
-        if (quality is not ("Maximum speed" or "Balanced" or "Maximum quality")) quality = d.InitialImageQuality;
+        if (quality is not (SettingChoiceNames.MaximumSpeed or SettingChoiceNames.Balanced or SettingChoiceNames.MaximumQuality)) quality = d.InitialImageQuality;
         var viewMode = S(root, nameof(GlideSettingsState.DefaultViewMode), d.DefaultViewMode);
-        if (viewMode is not ("Fit image" or "Fit width" or "Fit height" or "100%")) viewMode = d.DefaultViewMode;
+        if (viewMode is not ("Fit image" or "Fit width" or "Fit height" or "Fit to window" or "100%")) viewMode = d.DefaultViewMode;
         var externalOpen = S(root, nameof(GlideSettingsState.ExternalOpenBehavior), d.ExternalOpenBehavior);
         if (externalOpen is not ("Open in new tab" or "Open new window" or "Overwrite existing tab")) externalOpen = d.ExternalOpenBehavior;
 
@@ -237,7 +238,7 @@ public static class SettingsStore
         {
             var cache = new LaunchPolicyCache(LaunchPolicySchema, settingsFile.Length, settingsFile.LastWriteUtcTicks, policy);
             var path = GetLaunchPolicyPath();
-            var json = JsonSerializer.Serialize(cache);
+            var json = JsonSerializer.Serialize(cache, AppJsonContext.Default.LaunchPolicyCache);
             if (File.Exists(path) && string.Equals(File.ReadAllText(path), json, StringComparison.Ordinal)) return;
             AtomicWriteAllText(path, json);
         }
@@ -290,6 +291,8 @@ public static class SettingsStore
 
     public static string GetSettingsDirectory() => Path.GetDirectoryName(GetSettingsPath())!;
 
+    internal static bool MigrateWheelDirection(int sourceSchema, bool invert) => sourceSchema >= 6 && invert;
+
     public static GlideSettingsState Load()
     {
         try
@@ -304,7 +307,10 @@ public static class SettingsStore
             if (document.RootElement.TryGetProperty(nameof(GlideSettingsState.SettingsSchemaVersion), out var schemaNode) &&
                 schemaNode.ValueKind == JsonValueKind.Number && schemaNode.TryGetInt32(out var persistedSchema))
                 sourceSchema = persistedSchema;
-            var loaded = document.RootElement.Deserialize<GlideSettingsState>(JsonOptions()) ?? new GlideSettingsState();
+            var loaded = document.RootElement.Deserialize(AppJsonContext.Default.GlideSettingsState) ?? new GlideSettingsState();
+            // Before schema 6 the wheel mapping was backwards, so "reverse" on meant the natural direction.
+            // Clearing it keeps that direction now that the mapping is fixed.
+            loaded.InvertWheelDirection = MigrateWheelDirection(sourceSchema, loaded.InvertWheelDirection);
             // ThemeChoice supersedes the historical LightTheme Boolean. When loading an older file
             // that only recorded LightTheme=true, preserve that choice. New Neutral/Dark/Light files
             // keep ThemeChoice authoritative while LightTheme remains a compatibility mirror.
@@ -400,6 +406,12 @@ public static class SettingsStore
             loaded.PrefetchSiblingFolderImageCount = Math.Clamp(loaded.PrefetchSiblingFolderImageCount, 1, 30);
             loaded.StatusBarGlobalScalePercent = Math.Clamp(loaded.StatusBarGlobalScalePercent, 60, 160);
             loaded.StatusBarMaximizedBoostPercent = Math.Clamp(loaded.StatusBarMaximizedBoostPercent, 0, 30);
+            loaded.SlideshowLeftClickAction = Glide.Core.Settings.SlideshowLeftClickActions.Normalize(loaded.SlideshowLeftClickAction);
+            loaded.NavigationSortOrder = Glide.Core.ImageSortOrder.NormalizeDisplayName(loaded.NavigationSortOrder);
+            // Activate the chosen order before any folder is enumerated.
+            Glide.Core.ImageSortOrder.Current = new Glide.Core.ImageSortSpec(Glide.Core.ImageSortOrder.ParseKey(loaded.NavigationSortOrder), loaded.NavigationSortDescending);
+            loaded.SelectionBufferWindowedPercent = Math.Clamp(loaded.SelectionBufferWindowedPercent, 0, 100);
+            loaded.SelectionBufferMaximizedPercent = Math.Clamp(loaded.SelectionBufferMaximizedPercent, 0, 100);
             loaded.Hotkeys ??= HotkeyCatalog.CreateDefaultMap();
             foreach (var action in HotkeyCatalog.All)
                 if (!loaded.Hotkeys.ContainsKey(action.Id)) loaded.Hotkeys[action.Id] = action.DefaultShortcuts.ToList();
@@ -461,7 +473,7 @@ public static class SettingsStore
         {
             settings.SettingsSchemaVersion = CurrentSettingsSchema;
             var path = GetSettingsPath();
-            AtomicWriteAllText(path, JsonSerializer.Serialize(settings, JsonOptions()));
+            AtomicWriteAllText(path, JsonSerializer.Serialize(settings, AppJsonContext.Default.GlideSettingsState));
             SaveLaunchPolicyCache(settings);
         }
         catch
@@ -535,9 +547,4 @@ public static class SettingsStore
         return value;
     }
 
-    private static JsonSerializerOptions JsonOptions() => new()
-    {
-        WriteIndented = true,
-        PropertyNameCaseInsensitive = true
-    };
 }

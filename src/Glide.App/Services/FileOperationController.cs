@@ -9,9 +9,13 @@ public sealed class FileOperationController
     public bool TryOpenContainingFolder(string? path)
     {
         if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return false;
+        // Reject quote/CRLF so a crafted file name cannot break out of explorer quoting.
+        if (path.IndexOfAny(new[] { '"', '\r', '\n' }) >= 0) return false;
         try
         {
-            Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{path}\"") { UseShellExecute = true });
+            var psi = new ProcessStartInfo("explorer.exe") { UseShellExecute = true };
+            psi.Arguments = "/select,\"" + path + "\"";
+            Process.Start(psi);
             return true;
         }
         catch { return false; }

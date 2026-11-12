@@ -86,8 +86,7 @@ public static class PrintSettingsStore
             var path = GetPath();
             if (!File.Exists(path)) return new PrintDocumentSettings();
             var json = File.ReadAllText(path);
-            var loaded = JsonSerializer.Deserialize<PrintDocumentSettings>(json,
-                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            var loaded = JsonSerializer.Deserialize(json, AppJsonContext.Default.PrintDocumentSettings);
             return (loaded ?? new PrintDocumentSettings()).Normalized();
         }
         catch { return new PrintDocumentSettings(); }
@@ -100,8 +99,7 @@ public static class PrintSettingsStore
             var path = GetPath();
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
             var tmp = path + ".tmp";
-            File.WriteAllText(tmp, JsonSerializer.Serialize(settings.Normalized(),
-                new JsonSerializerOptions { WriteIndented = true }));
+            File.WriteAllText(tmp, JsonSerializer.Serialize(settings.Normalized(), AppJsonContext.Default.PrintDocumentSettings));
             File.Move(tmp, path, true);
         }
         catch { /* persistence must never break printing */ }

@@ -33,6 +33,32 @@ public sealed class StatusChromeLayoutContractTests
     }
 
     [Fact]
+    public void Collapse_keeps_the_same_button_as_the_expand_affordance_and_never_closes()
+    {
+        var statusChrome = ReadSource("src", "Glide.App", "MainWindow.StatusChrome.cs").Replace("\r\n", "\n");
+        var visibility = MethodBody(statusChrome, "private void ApplyStatusVisibility()");
+        // Collapsed windowed bar stays visible as a collapsed-only surface, not a hidden bar
+        // restored by a separate corner arrow.
+        Assert.Contains("collapsedOnly", visibility, StringComparison.Ordinal);
+        Assert.Contains("(expanded || collapsedOnly) && ImageView.IsVisible", visibility, StringComparison.Ordinal);
+        Assert.Contains("ApplyCollapsedStatusChrome()", visibility, StringComparison.Ordinal);
+        var collapsed = MethodBody(statusChrome, "private void ApplyCollapsedStatusChrome()");
+        Assert.Contains("StatusControlsPanel.IsVisible = !collapsedOnly", collapsed, StringComparison.Ordinal);
+        Assert.Contains("StatusCloseButton.IsVisible = !collapsedOnly", collapsed, StringComparison.Ordinal);
+        // The collapsed bar is just the button (no empty strip), pinned to the collapse button's spot.
+        Assert.Contains("PinCollapsedSurface(ViewerStatusSurface", collapsed, StringComparison.Ordinal);
+        Assert.Contains("ApplyStatusSurfaceAlignment(ViewerStatusSurface)", collapsed, StringComparison.Ordinal);
+        Assert.DoesNotContain("Close()", collapsed, StringComparison.Ordinal);
+
+        var viewerChrome = ReadSource("src", "Glide.App", "MainWindow.ViewerChrome.cs").Replace("\r\n", "\n");
+        var collapse = MethodBody(viewerChrome, "private void CollapseStatusClicked(");
+        // Collapse toggles via _statusCollapsed only; closing Glide is the separate X path.
+        Assert.DoesNotContain("Close()", collapse, StringComparison.Ordinal);
+        Assert.DoesNotContain("CloseStatusClicked", collapse, StringComparison.Ordinal);
+        Assert.Contains("RestoreStatusClicked(sender, e)", collapse, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Auto_resize_setting_exists_and_is_toggleable_from_the_status_bar_menu()
     {
         var catalog = ReadSource("src", "Glide.Core", "Settings", "SettingsCatalog.cs");
@@ -69,7 +95,7 @@ public sealed class StatusChromeLayoutContractTests
         while (directory is not null)
         {
             var candidate = Path.Combine(new[] { directory.FullName }.Concat(segments).ToArray());
-            if (File.Exists(candidate)) return File.ReadAllText(candidate);
+            if (File.Exists(candidate)) return SourceText.Read(candidate);
             directory = directory.Parent;
         }
         throw new FileNotFoundException("Could not locate source file.", Path.Combine(segments));

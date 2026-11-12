@@ -43,6 +43,7 @@ public static class HotkeyCatalog
         new("view.fit", "Fit image", "Viewing", GlideCommand.FitImage, ["Shift+W"]),
         new("view.fitWidth", "Fit width", "Viewing", GlideCommand.FitWidth, ["2"]),
         new("view.fitHeight", "Fit height", "Viewing", GlideCommand.FitHeight, ["1"]),
+        new("view.fitWindow", "Fit to window (enlarge or shrink)", "Viewing", GlideCommand.FitWindow, ["4"]),
         new("view.actual", "Actual size / 100%", "Viewing", GlideCommand.ActualSize, ["3", "Ctrl+H"]),
         new("view.toggleFitActual", "Toggle Fit / 100%", "Viewing", GlideCommand.ToggleFitActual, []),
         new("view.zoomIn", "Zoom in", "Viewing", GlideCommand.ZoomIn, ["+", "="] ),

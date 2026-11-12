@@ -25,8 +25,6 @@ internal sealed record ThumbnailSettings(
 /// </summary>
 internal static class ThumbnailSettingsStore
 {
-    private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
-
     public static string SettingsPath =>
         Path.Combine(Path.GetDirectoryName(Settings.SettingsStore.GetSettingsPath()) ?? AppContext.BaseDirectory,
                      "thumbnail.settings.json");
@@ -36,7 +34,7 @@ internal static class ThumbnailSettingsStore
         try
         {
             if (!File.Exists(SettingsPath)) return ThumbnailSettings.Default;
-            var settings = JsonSerializer.Deserialize<ThumbnailSettings>(File.ReadAllText(SettingsPath), JsonOptions);
+            var settings = JsonSerializer.Deserialize(File.ReadAllText(SettingsPath), AppJsonContext.Default.ThumbnailSettings);
             return Normalize(settings);
         }
         catch { return ThumbnailSettings.Default; }
@@ -48,7 +46,7 @@ internal static class ThumbnailSettingsStore
         {
             var directory = Path.GetDirectoryName(SettingsPath);
             if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
-            File.WriteAllText(SettingsPath, JsonSerializer.Serialize(Normalize(settings), JsonOptions));
+            File.WriteAllText(SettingsPath, JsonSerializer.Serialize(Normalize(settings), AppJsonContext.Default.ThumbnailSettings));
         }
         catch { /* Persistence is best-effort; the registry is the source of truth at runtime. */ }
     }

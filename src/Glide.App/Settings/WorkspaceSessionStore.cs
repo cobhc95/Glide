@@ -13,14 +13,14 @@ public static class WorkspaceSessionStore
     private const int SchemaVersion = 1;
     private const string FileName = "glide.workspace-session.json";
 
-    private sealed class SessionDocument
+    internal sealed class SessionDocument
     {
         public int Schema { get; set; } = SchemaVersion;
         public int ActiveIndex { get; set; }
         public List<SessionTab> Tabs { get; set; } = new();
     }
 
-    private sealed class SessionTab
+    internal sealed class SessionTab
     {
         public string Kind { get; set; } = "Home";
         public string Path { get; set; } = string.Empty;
@@ -55,7 +55,7 @@ public static class WorkspaceSessionStore
             Directory.CreateDirectory(SettingsStore.GetSettingsDirectory());
             var path = Path.Combine(SettingsStore.GetSettingsDirectory(), FileName);
             var temp = path + ".tmp";
-            File.WriteAllText(temp, JsonSerializer.Serialize(doc, Options()));
+            File.WriteAllText(temp, JsonSerializer.Serialize(doc, AppJsonContext.Default.SessionDocument));
             File.Move(temp, path, true);
             if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("workspace_session_write_end", $"tabs={doc.Tabs.Count}");
         }
@@ -69,7 +69,7 @@ public static class WorkspaceSessionStore
         {
             var path = Path.Combine(SettingsStore.GetSettingsDirectory(), FileName);
             if (!File.Exists(path)) return null;
-            var doc = JsonSerializer.Deserialize<SessionDocument>(File.ReadAllText(path), Options());
+            var doc = JsonSerializer.Deserialize(File.ReadAllText(path), AppJsonContext.Default.SessionDocument);
             if (doc is null || doc.Schema != SchemaVersion) return null;
             var tabs = new List<TabState>();
             var restoredActiveIndex = -1;
@@ -95,5 +95,4 @@ public static class WorkspaceSessionStore
         catch { if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("workspace_session_read_failed"); return null; }
     }
 
-    private static JsonSerializerOptions Options() => new() { WriteIndented = true, PropertyNameCaseInsensitive = true };
 }

@@ -21,7 +21,7 @@ public static class TitleBarButtonCatalog
         new("window.alwaysOnTop", "Always on top", "AlwaysOnTop", GlideCommand.ToggleAlwaysOnTop),
         new("file.open", "Open file", "Open", GlideCommand.OpenFile),
         new("file.print", "Print", "Print", GlideCommand.Print),
-        new("file.locate", "Navigate to folder", "FolderLocate", GlideCommand.OpenContainingFolder),
+        new("file.locate", "Show in File Explorer (select current image)", "FolderLocate", GlideCommand.OpenContainingFolder),
         new("folder.previous", "Previous folder", "FolderPrevious", GlideCommand.PreviousFolder),
         new("folder.next", "Next folder", "FolderNext", GlideCommand.NextFolder),
         new("home", "Home", "Home", GlideCommand.Home),
@@ -40,6 +40,22 @@ public static class TitleBarButtonCatalog
         new("slideshow.toggle", "Slideshow play / pause", "Play", GlideCommand.StartPauseSlideshow),
         new("window.transparency", "Window transparency", "WindowOpacity", GlideCommand.ToggleTransparency),
         new("settings", "Settings", "Settings", GlideCommand.Settings),
+    };
+
+    /// <summary>Display order of the groups used to organise the button list in the customiser.</summary>
+    public static readonly string[] Categories =
+    [
+        "Window", "Files and folders", "Images and tabs", "View", "Overlay and slideshow", "App"
+    ];
+
+    public static string CategoryOf(string id) => id switch
+    {
+        "window.alwaysOnTop" or "window.transparency" or "view.fullscreen" => "Window",
+        "file.open" or "file.print" or "file.locate" or "folder.previous" or "folder.next" => "Files and folders",
+        "home" or "tab.new" or "image.previous" or "image.next" or "image.first" or "image.last" => "Images and tabs",
+        "view.fit" or "view.actual" or "view.zoomIn" or "view.zoomOut" or "image.info" => "View",
+        "overlay.add" or "slideshow.toggle" => "Overlay and slideshow",
+        _ => "App"
     };
 
     private static readonly Dictionary<string, TitleBarButtonDefinition> ById =

@@ -23,13 +23,15 @@ public sealed class MinimizeBehaviorContractTests
     }
 
     [Fact]
-    public void Standby_requires_an_available_tray_icon()
+    public void Standby_requires_the_speed_boost_tray_host_but_not_a_visible_icon()
     {
         var mainWindow = ReadSource("src", "Glide.App", "MainWindow.axaml.cs").Replace("\r\n", "\n");
         var app = ReadSource("src", "Glide.App", "App.axaml.cs").Replace("\r\n", "\n");
 
         Assert.Contains("_settings.SpeedBoostEnabled && App.IsTrayIconAvailable", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("internal static bool IsTrayIconAvailable", app, StringComparison.Ordinal);
+        Assert.Contains("internal static bool IsTrayIconAvailable => TrayIconInstance is not null;", app, StringComparison.Ordinal);
+        // The icon may be hidden ("Never" / "Only while Glide is closed"); relaunching wakes standby.
+        Assert.Contains("EffectiveTrayIconMode", app, StringComparison.Ordinal);
     }
 
     private static string ReadSource(params string[] segments)
@@ -38,7 +40,7 @@ public sealed class MinimizeBehaviorContractTests
         while (directory is not null)
         {
             var candidate = Path.Combine(new[] { directory.FullName }.Concat(segments).ToArray());
-            if (File.Exists(candidate)) return File.ReadAllText(candidate);
+            if (File.Exists(candidate)) return SourceText.Read(candidate);
             directory = directory.Parent;
         }
         throw new FileNotFoundException("Could not locate source file.", Path.Combine(segments));

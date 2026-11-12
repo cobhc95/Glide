@@ -127,13 +127,13 @@ public static class ImageDiagnosticFixtures
                 : new[] { "status,result", "SKIP,Performance corpus was not generated on this platform" });
         }
         File.WriteAllText(Path.Combine(directory, "performance_corpus_status.json"),
-            System.Text.Json.JsonSerializer.Serialize(new
+            new System.Text.Json.Nodes.JsonObject
             {
-                corpus = "navigation-stress-240",
-                generated = performanceCorpusGenerated,
-                status = performanceCorpusGenerated ? "PENDING_LIVE_RUN" : "SKIP_PLATFORM_DEPENDENCY",
-                evidence = performanceResult
-            }, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+                ["corpus"] = "navigation-stress-240",
+                ["generated"] = performanceCorpusGenerated,
+                ["status"] = performanceCorpusGenerated ? "PENDING_LIVE_RUN" : "SKIP_PLATFORM_DEPENDENCY",
+                ["evidence"] = performanceResult
+            }.ToJsonString(DiagnosticsJsonContext.Indented));
 
         // If the authoritative legacy real-format corpus is packaged beside the source, stage it too.
         // This retains actual AVIF/WebP/TIFF/GIF/etc payloads instead of synthesising false support.

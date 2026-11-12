@@ -21,6 +21,8 @@ public static class OverlayGesturePolicy
             GestureCatalog.ResetOverlayZoom => OverlayGestureAction.ResetZoom,
             GestureCatalog.ZoomIn => OverlayGestureAction.ZoomIn,
             GestureCatalog.ZoomOut => OverlayGestureAction.ZoomOut,
+            GestureCatalog.ZoomWheel => deltaY > 0 ? OverlayGestureAction.ZoomIn : OverlayGestureAction.ZoomOut,
+            GestureCatalog.ZoomWheelReversed => deltaY > 0 ? OverlayGestureAction.ZoomOut : OverlayGestureAction.ZoomIn,
             _ => deltaY > 0 ? OverlayGestureAction.ZoomIn : OverlayGestureAction.ZoomOut
         };
     }

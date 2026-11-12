@@ -195,7 +195,7 @@ internal static class UiDiagnosticCapture
             : x).ToArray();
         File.WriteAllLines(path, lines);
         File.WriteAllText(Path.Combine(Path.GetDirectoryName(path)!, "settings_current.json"),
-            System.Text.Json.JsonSerializer.Serialize(state, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+            System.Text.Json.JsonSerializer.Serialize(state, AppJsonContext.Default.GlideSettingsState));
     }
 
     private static bool IsOutsideScrollViewport(Control control, Control root)

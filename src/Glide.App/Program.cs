@@ -267,9 +267,10 @@ internal static class Program
             // This process is now the elected UI/broker owner. Start the crash breadcrumb file only
             // here so short-lived forwarding helper processes cannot overwrite the live owner trace.
             if (diagnosticTraceRequested)
-                LiveDiagnosticTrace.Initialize("4.5.0-diagnostic");
+                LiveDiagnosticTrace.Initialize(AppVersion.DiagnosticTag);
             AppDomain.CurrentDomain.UnhandledException += (_, eventArgs) =>
             {
+                AppendCrashLog("unhandled_exception", eventArgs.ExceptionObject?.ToString());
                 if (eventArgs.ExceptionObject is Exception fatal)
                     LiveDiagnosticTrace.WriteException("process", "unhandled_exception", fatal, new { eventArgs.IsTerminating });
                 else
@@ -307,6 +308,17 @@ internal static class Program
     }
 
 
+    internal static void AppendCrashLog(string kind, string? detail)
+    {
+        try
+        {
+            var root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Glide");
+            Directory.CreateDirectory(root);
+            File.AppendAllText(Path.Combine(root, "crash.log"), $"[{DateTime.UtcNow:O}] {kind} v{AppVersion.DiagnosticTag}{Environment.NewLine}{detail}{Environment.NewLine}{Environment.NewLine}");
+        }
+        catch { }
+    }
+
     private static void WriteStartupCrashLog(Exception ex)
     {
         try
@@ -333,7 +345,8 @@ internal static class Program
     public static AppBuilder BuildAvaloniaApp()
     {
         var builder = AppBuilder.Configure<App>()
-            .UsePlatformDetect()
+            .UseWin32()
+            .UseSkia()
             .With(new SkiaOptions
             {
                 MaxGpuResourceSizeBytes = GlideGpuResourceCacheBytes

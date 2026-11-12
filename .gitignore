@@ -13,10 +13,12 @@ diagnostics-out/
 *.zip
 *.log
 *-output.txt
-*MANIFESTO*
-*HANDOFF*
-*handover*
-*Handover*
+# Historical handoff/manifesto snapshots live under Archive/ (git-ignored). The canonical
+# GLIDE_MANIFESTO_AND_HANDOFF.md at the repo root stays tracked.
+Archive/*MANIFESTO*
+Archive/*HANDOFF*
+Archive/*handover*
+Archive/*Handover*
 diagnostic_corpus/
 
 # Generated Avalonia XAML compiler caches and versioned release deliverables
@@ -26,3 +28,12 @@ Glide Setup.exe
 
 # Generated lazy codec routing index (shipped inside the published app, not source)
 codecs/codecs.index.json
+
+# Fetched by tools/fetch-ffmpeg.ps1 (pinned + hash-verified); never committed
+native/third_party/ffmpeg/
+
+# Build symbols, test results and local editor state (never committed)
+*.pdb
+TestResults/
+coverage/
+.vscode/

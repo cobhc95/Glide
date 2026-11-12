@@ -14,7 +14,7 @@ public static class ProfileStore
 
     public sealed record UserProfile(Guid Id, string Name, GlideSettingsState Settings);
 
-    private sealed class ProfileDocument
+    internal sealed class ProfileDocument
     {
         public int Schema { get; set; } = SchemaVersion;
         public List<StoredProfile> Profiles { get; set; } = new();
@@ -22,7 +22,7 @@ public static class ProfileStore
         public Dictionary<string, GlideSettingsState>? Slots { get; set; }
     }
 
-    private sealed class StoredProfile
+    internal sealed class StoredProfile
     {
         public Guid Id { get; set; } = Guid.NewGuid();
         public string Name { get; set; } = "Profile 1";
@@ -89,7 +89,7 @@ public static class ProfileStore
             var path = Path.Combine(SettingsStore.GetSettingsDirectory(), FileName);
             if (!File.Exists(path)) return NewDocument();
             var json = File.ReadAllText(path);
-            var document = JsonSerializer.Deserialize<ProfileDocument>(json, Options()) ?? NewDocument();
+            var document = JsonSerializer.Deserialize(json, AppJsonContext.Default.ProfileDocument) ?? NewDocument();
             document.Profiles ??= new();
             if (document.Schema == 1 || (document.Profiles.Count == 0 && document.Slots is { Count: > 0 }))
             {
@@ -144,12 +144,11 @@ public static class ProfileStore
             var path = Path.Combine(SettingsStore.GetSettingsDirectory(), FileName);
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
             var temp = path + ".tmp";
-            File.WriteAllText(temp, JsonSerializer.Serialize(document, Options()));
+            File.WriteAllText(temp, JsonSerializer.Serialize(document, AppJsonContext.Default.ProfileDocument));
             File.Move(temp, path, true);
             if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("profile_write_end", $"count={document.Profiles.Count}");
         }
         catch { if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("profile_write_failed"); /* Profile persistence is non-fatal. */ }
     }
 
-    private static JsonSerializerOptions Options() => new() { WriteIndented = true, PropertyNameCaseInsensitive = true };
 }

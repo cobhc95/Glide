@@ -74,7 +74,13 @@
     <Setter Property="FontFamily" Value="Segoe UI"/>
   </Style>
   <Style Selector="TextBlock"><Setter Property="FontFamily" Value="Segoe UI"/></Style>
-  <Style Selector="Button"><Setter Property="FontFamily" Value="Segoe UI"/></Style>
+  <Style Selector="Button">
+    <Setter Property="FontFamily" Value="Segoe UI"/>
+    <!-- Without these, labels hug the top-left of fixed-size buttons (Cancel / Apply / OK, dialog buttons).
+         Buttons that need another alignment set it locally, which still wins over this style. -->
+    <Setter Property="HorizontalContentAlignment" Value="Center"/>
+    <Setter Property="VerticalContentAlignment" Value="Center"/>
+  </Style>
 
   <!-- Vector glyph sizing. -->
   <Style Selector="controls|GlideIconView.toolbarGlyph">
@@ -130,6 +136,7 @@
   <Style Selector="Button.fullscreenCornerHit"><Setter Property="Background" Value="Transparent"/><Setter Property="BorderThickness" Value="0"/><Setter Property="Padding" Value="0"/></Style>
   <Style Selector="Button.fullscreenCornerHit:pointerover"><Setter Property="Background" Value="Transparent"/></Style>
   <Style Selector="Button.fullscreenCornerHit:pressed"><Setter Property="Background" Value="Transparent"/></Style>
+  <Style Selector="controls|GlideIconView.captionGlyph"><Setter Property="IconBrush" Value="#D9FFFFFF"/><Setter Property="StrokeWidth" Value="1.2"/><Setter Property="Width" Value="14"/><Setter Property="Height" Value="14"/><Setter Property="HorizontalAlignment" Value="Center"/><Setter Property="VerticalAlignment" Value="Center"/></Style>
   <Style Selector="TextBlock.captionGlyph"><Setter Property="Foreground" Value="#D9FFFFFF"/><Setter Property="Opacity" Value="0.92"/><Setter Property="VerticalAlignment" Value="Center"/><Setter Property="HorizontalAlignment" Value="Center"/></Style>
   <Style Selector="TextBlock.modernSettingsGlyph"><Setter Property="Foreground" Value="{DynamicResource BrushAccent}"/><Setter Property="Opacity" Value="0.96"/><Setter Property="VerticalAlignment" Value="Center"/><Setter Property="HorizontalAlignment" Value="Center"/></Style>
   <Style Selector="TextBlock.modernTitleSettingsGlyph"><Setter Property="Foreground" Value="{DynamicResource BrushText}"/><Setter Property="Opacity" Value="0.96"/><Setter Property="VerticalAlignment" Value="Center"/><Setter Property="HorizontalAlignment" Value="Center"/></Style>
@@ -185,6 +192,9 @@
   <Style Selector="Button.legacyStatusIcon"><Setter Property="Width" Value="46"/><Setter Property="Height" Value="46"/><Setter Property="CornerRadius" Value="7"/></Style>
   <Style Selector="Border.legacyViewerStatus"><Setter Property="Height" Value="58"/><Setter Property="MaxWidth" Value="1080"/></Style>
   <Style Selector="TextBlock.statusStats"><Setter Property="MaxWidth" Value="250"/><Setter Property="FontSize" Value="13.5"/></Style>
+  <Style Selector="Border.legacyViewerStatus.statusTiny"><Setter Property="Height" Value="34"/><Setter Property="MaxWidth" Value="640"/></Style>
+  <Style Selector="Border.legacyViewerStatus.statusTiny Button.legacyStatusIcon"><Setter Property="Width" Value="26"/><Setter Property="Height" Value="26"/><Setter Property="CornerRadius" Value="4"/></Style>
+  <Style Selector="Border.legacyViewerStatus.statusTiny TextBlock.statusStats"><Setter Property="MaxWidth" Value="140"/><Setter Property="FontSize" Value="12"/></Style>
   <Style Selector="Border.legacyViewerStatus.statusVerySmall"><Setter Property="Height" Value="40"/><Setter Property="MaxWidth" Value="780"/></Style>
   <Style Selector="Border.legacyViewerStatus.statusSmall"><Setter Property="Height" Value="48"/><Setter Property="MaxWidth" Value="930"/></Style>
   <Style Selector="Border.legacyViewerStatus.statusMedium"><Setter Property="Height" Value="58"/><Setter Property="MaxWidth" Value="1080"/></Style>
@@ -204,6 +214,10 @@
   <Style Selector="Border.statusGroup"><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="7"/><Setter Property="Padding" Value="2"/></Style>
   <Style Selector="Border.statusGroup.viewGroup"><Setter Property="Background" Value="#164EA3D8"/><Setter Property="BorderBrush" Value="#554EA3D8"/></Style>
   <Style Selector="Border.statusGroup.overlayGroup"><Setter Property="Background" Value="#17A86AE3"/><Setter Property="BorderBrush" Value="#58A86AE3"/></Style>
+  <Style Selector="Border.statusGroup.moreGroup"><Setter Property="Background" Value="#14FFFFFF"/><Setter Property="BorderBrush" Value="#33FFFFFF"/></Style>
+  <Style Selector="Border.statusGroup.fileGroup"><Setter Property="Background" Value="#1620C9B0"/><Setter Property="BorderBrush" Value="#5520C9B0"/></Style>
+  <Style Selector="Border.statusGroup.fileGroup controls|GlideIconView.statusGlyph"><Setter Property="IconBrush" Value="#5EE6CF"/></Style>
+  <Style Selector="Border.statusGroup.fileGroup Button:disabled controls|GlideIconView.statusGlyph"><Setter Property="Opacity" Value="0.38"/></Style>
   <Style Selector="Border.statusGroup.slideshowGroup"><Setter Property="Background" Value="#18D7963A"/><Setter Property="BorderBrush" Value="#58D7963A"/></Style>
   <Style Selector="Border.statusGroup.navGroup"><Setter Property="Background" Value="#173AAE75"/><Setter Property="BorderBrush" Value="#583AAE75"/></Style>
   <Style Selector="Border.statusGroup.viewGroup controls|GlideIconView.statusGlyph"><Setter Property="IconBrush" Value="#67C8FF"/></Style>
@@ -286,6 +300,11 @@
   <Style Selector="ListBoxItem.browserItem:pointerover"><Setter Property="Background" Value="{DynamicResource BrushSurfaceHover}"/></Style>
 
 
+  <!-- Fluent defaults (0.5 s to expand, 2 s to collapse) feel sluggish, especially in Settings. -->
+  <Style Selector="ScrollBar">
+    <Setter Property="ShowDelay" Value="0:0:0.1"/>
+    <Setter Property="HideDelay" Value="0:0:0.6"/>
+  </Style>
   <!-- Viewer scrollbars stay visually subordinate to direct pan gestures. -->
   <Style Selector="ScrollBar.viewportScroll">
     <Setter Property="Opacity" Value="0.62"/>

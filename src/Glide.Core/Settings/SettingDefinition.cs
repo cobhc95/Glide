@@ -22,3 +22,17 @@ public enum SettingKind
     Text,
     Action
 }
+
+/// <summary>
+/// Shared choice literals (theme / quality). Single source for the magic strings validated in
+/// <c>Glide.App.Settings.SettingsStore</c> and the performance-profile UI.
+/// </summary>
+public static class SettingChoiceNames
+{
+    public const string Dark = "Dark";
+    public const string Neutral = "Neutral";
+    public const string Light = "Light";
+    public const string MaximumSpeed = "Maximum speed";
+    public const string Balanced = "Balanced";
+    public const string MaximumQuality = "Maximum quality";
+}

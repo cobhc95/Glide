@@ -125,6 +125,9 @@ internal static class WindowsClipboard
         for (var attempt = 0; attempt < 5; attempt++)
         {
             if (OpenClipboard(IntPtr.Zero)) return true;
+            // Sync-only retry: callers (TrySetFileDrop/TrySetBitmap) are synchronous, so awaiting
+            // Task.Delay would ripple async through the Win32 clipboard handoff. This brief sleep
+            // only paces clipboard-contention retries, never the UI render loop.
             Thread.Sleep(10);
         }
         return false;

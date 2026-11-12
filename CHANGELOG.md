@@ -4,6 +4,86 @@ All notable changes to Glide Image Viewer are documented here. The format is bas
 [Keep a Changelog](https://keepachangelog.com/), and the project uses dotted feature releases with
 hyphenated follow-up corrections (for example `4.2.0-1`).
 
+## [4.7.0] - 2026-11-12
+
+Most of this release comes from a detailed 21-point report by [@vertigo220](https://github.com/vertigo220) ([issue #1](https://github.com/cobhc95/Glide/issues/1)). Thank you; community feedback like this is what makes Glide better.
+
+### Added
+
+- **Animated GIFs play.** A managed GIF decoder composites every frame (disposal, transparency, interlacing) off the UI thread and the viewer swaps frames without touching zoom or pan. New setting: *Play animated GIFs* (Viewing & Appearance, on by default).
+- **Fit to window.** Enlarges or shrinks the image to the largest size that fits the window, next to the existing shrink-only *Fit image*. Status-bar button, context menu, hotkey `4`, and a *Default view for new images* choice.
+- **Right button + wheel.** New gesture slot *Wheel while holding the right button*, with direction-aware *Zoom in/out* and *Previous/next image* actions. When it acts, releasing the right button no longer opens the context menu.
+- **Middle-click closes tab** setting, and **Ctrl+Tab switching order** (*Tab order* or *Most recently used*; hold Ctrl and press Tab repeatedly to go further back).
+- **File name in the status bar** (full path when *Show full path in title* is on), with the full path as its tooltip. Tabs show the full path when that option is on, and the tab tooltip always shows it.
+- **Status bar position.** Right-click the status bar to place it at the *Center* (default), *Left* or *Right*; also in Settings (*Status bar position*). Right-clicking the Home status bar now opens the same menu.
+- **Collapsed status button in the corner.** New setting, also in the status-bar right-click menu (on by default): the collapsed bar parks its expand button in the lower-right corner, away from the image. Turn it off to keep the button where the collapse button was.
+- **Speed Boost tray icon** setting: *Always*, *Only while Glide is closed*, or *Never*. Standby no longer needs a visible icon; launching Glide again wakes it.
+
+### Changed
+
+- **Home** shows only the Recent list (with an empty state and an *Open image…* button). The feature cards, the *Home quick tips* setting and the *Move Recent* / *Reset layout* buttons are gone.
+- A collapsed status bar is now only its expand button, with no empty strip left behind.
+- The status-bar collapse button turns into the expand arrow on the hover-revealed bar; the separate corner arrow is now only used in fullscreen. With hover reveal off, collapse simply hides the bar (*View and present → Show status bar* brings it back, and is no longer ticked while collapsed).
+- The title-bar *Navigate to folder* button is now labelled *Show in File Explorer (select current image)*, which is what it does.
+- The gesture matrix spells out what *Default* does for each slot.
+- Tooltips open beside their control (above the status bar, below the title bar) instead of under the pointer.
+- Scrollbars expand and collapse faster (0.1 s / 0.6 s).
+
+### Fixed
+
+- A right-click menu could stay on screen as a ghost after clicking; owned menus now close after an item is chosen, on any click elsewhere in the window, when Glide loses focus and when the window moves.
+- "End of folder — no next image" no longer replaces the status-bar image info permanently.
+- Tooltips covered toolbar buttons and blocked clicks until the pointer left the toolbar.
+- *New tab opens* and *Home page* reverted after choosing the hidden, removed *Explorer tab* / *Browser page* options; those options are gone.
+- *Open last session* lost the session when Glide was closed with the caption X while Speed Boost was on, and the tray *Exit* could overwrite the session with an empty one.
+- Tab tooltips listed middle/double-click to close regardless of the settings.
+- Many tabs overlapped; tabs now stop at a usable width, the strip scrolls (arrows or wheel), and the active tab is kept in view.
+- Rename: the name part is pre-selected (Right Arrow lands before the extension), Enter renames and Escape cancels.
+- Settings *Cancel* closed noticeably slower than *OK*; it now closes at once and only rolls back a preview if one was applied.
+- The *Mouse & keyboard* settings page opened scrolled down on first visit, and returning to Settings with Alt+Tab scrolled back to the last-clicked option.
+- With *Double-click exits fullscreen* on, a fullscreen double-click also advanced to the next image; single clicks now wait out the double-click interval first.
+
+## [4.6.3] - 2026-11-12
+
+### Fixed
+
+- **Crash after opening a second window.** The per-window taskbar identity used a source-generated COM wrapper whose finalizer threw `NullReferenceException` on the finalizer thread, which NativeAOT turns into a process fast-fail. It now calls the property store's vtable directly.
+- **Menus buried under "Always on top: Hard".** The hard re-raise now backs off while any popup window is open or any Glide window is in a native move/size loop.
+- Window placement is saved once at the end of a move instead of on every position change; the move handler can no longer throw.
+- Unhandled exceptions are always written to `%LOCALAPPDATA%\Glide\crash.log`; the overlay worker thread logs per-frame errors instead of ending the process.
+
+## [4.6.2] - 2026-11-05
+
+### Changed
+
+- **No .NET required.** Glide now ships as a NativeAOT build, so no separate runtime is needed. This also removes the .NET prompt that Setup could wait on invisibly on PCs without .NET.
+- **Smaller downloads.** The installer goes from 54.7 MB to 17.3 MB and the portable archive from 70.9 MB to about 22.5 MB. Release builds use only the Windows Avalonia packages.
+- **FFmpeg is an optional download.** Videos use Windows codecs first. If Windows can't play a video, Glide offers to download the decoder once (51 MB) to `%LOCALAPPDATA%\Glide\ffmpeg-9.0.2`, after checking a pinned SHA-256 hash.
+- Diagnostic trace and event logs record extra data as plain text instead of structured JSON.
+
+### Fixed
+
+- **Mouse wheel direction.** Scroll down now goes to the next image and scroll up to the previous one; on default settings the wheel was backwards in 4.6.0 and 4.6.1. Settings schema 6 clears "Reverse mouse-wheel direction" once, which keeps the direction for anyone who had enabled it to compensate.
+- **Window buttons and icons.** Caption buttons are drawn as vectors, and other icons fall back to Segoe MDL2 Assets, so they no longer depend on the Windows 11 icon font.
+- **Diagnostics self-test.** Registered the two 4.6.1 folder-counter settings in the effect registry, which stops the crash, and updated the expected settings count to 204.
+
+### Developer
+
+- JSON persistence uses source generation, and COM interop uses generated interfaces.
+- Building Glide now requires the Visual Studio C++ tools. `tools/package-ffmpeg-pack.ps1` builds the optional decoder pack.
+
+## [4.6.1] - 2026-11-01
+
+### Added
+
+- **Folder position counter:** Optionally show the current folder's position among its siblings beneath the image counter. It is off by default and follows the configured sibling-folder order and hidden-folder setting. A second option adds the parent folder's position within the grandparent, for example `5/50/4`.
+- Both folder-counter options can be found through Settings search. A search-coverage audit and project rule help keep future settings discoverable.
+
+### Fixed
+
+- **Navigate to folder:** Corrected the Windows Explorer command so it opens the current image's location instead of falling back to Documents.
+- Centralized release version information so the app, diagnostics, build scripts and installer derive their version from `Directory.Build.props`.
+
 ## [4.6.0] - 2026-11-01
 
 Everything since the published 4.5.0 release, including the 4.5.1 and 4.5.2 work that was never released separately.

@@ -53,6 +53,22 @@ public sealed class NativeOverlayWindowRendererContractTests
         Assert.Contains("ShowWindow(item.Hwnd, SW_HIDE)", source, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void OverlayWindowClassHasAVisibleCursorSoRightClickMenusNeverHideThePointer()
+    {
+        // Regression: the class was registered without a cursor. HTTRANSPARENT does not forward to
+        // the UI thread's window, so when Windows asked an overlay window for the cursor (right-click
+        // opening the context menu) the pointer disappeared over overlays.
+        var source = Source("src/Glide.App/Controls/NativeOverlayWindowRenderer.cs");
+        Assert.Contains("Cursor = LoadCursorW(IntPtr.Zero, IdcArrow)", source, StringComparison.Ordinal);
+        Assert.Contains("IdcArrow = new(32512)", source, StringComparison.Ordinal);
+
+        // The overlay context menu itself states an arrow cursor for its items.
+        var manager = Source("src/Glide.App/Controls/WindowInWindowOverlayManager.cs");
+        Assert.Contains("menu.Cursor = MenuCursor;", manager, StringComparison.Ordinal);
+        Assert.Contains("MenuCursor = new(StandardCursorType.Arrow)", manager, StringComparison.Ordinal);
+    }
+
 
     [Fact]
     public void RendererFollowsOwnerWithoutGlobalTopmostAndKeepsHotLoopAllocationLight()
@@ -86,13 +102,13 @@ public sealed class NativeOverlayWindowRendererContractTests
         for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
         {
             var candidate = Path.Combine(directory.FullName, relativePath);
-            if (File.Exists(candidate)) return File.ReadAllText(candidate);
+            if (File.Exists(candidate)) return SourceText.Read(candidate);
         }
 
         for (var directory = new DirectoryInfo(Directory.GetCurrentDirectory()); directory is not null; directory = directory.Parent)
         {
             var candidate = Path.Combine(directory.FullName, relativePath);
-            if (File.Exists(candidate)) return File.ReadAllText(candidate);
+            if (File.Exists(candidate)) return SourceText.Read(candidate);
         }
 
         throw new FileNotFoundException($"Could not locate repository source file '{relativePath}'.");

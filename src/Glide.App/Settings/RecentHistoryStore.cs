@@ -24,7 +24,7 @@ public static class RecentHistoryStore
     internal static void ResetForTests() { lock (Gate) { _debounce?.Cancel(); _debounce = null; _loadTask = null; _maintenanceTask = null; _lastPersistenceError = null; _clearBeforeLoad = false; _flushPendingUntilInitialized = false; _activeLimit = null; Items.Clear(); } }
 
     public sealed record Entry(string Kind, string Path, DateTimeOffset LastOpenedUtc);
-    private sealed class Document { public int Schema { get; set; } = 1; public List<Entry> Items { get; set; } = new(); }
+    internal sealed class Document { public int Schema { get; set; } = 1; public List<Entry> Items { get; set; } = new(); }
 
     /// <summary>Raised when background or close-time persistence fails. The exception is also retained in LastPersistenceError.</summary>
     public static event Action<Exception>? PersistenceFailed;
@@ -111,7 +111,7 @@ public static class RecentHistoryStore
         try
         {
             var path = StoragePath();
-            if (File.Exists(path)) document = JsonSerializer.Deserialize<Document>(await File.ReadAllTextAsync(path).ConfigureAwait(false), Options());
+            if (File.Exists(path)) document = JsonSerializer.Deserialize(await File.ReadAllTextAsync(path).ConfigureAwait(false), AppJsonContext.Default.Document);
         }
         catch (Exception ex) { ReportFailure(ex); }
         lock (Gate)
@@ -180,7 +180,7 @@ public static class RecentHistoryStore
                 if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("history_persist_end", "items=0");
                 return;
             }
-            await File.WriteAllTextAsync(temp, JsonSerializer.Serialize(new Document { Items = items.ToList() }, Options())).ConfigureAwait(false);
+            await File.WriteAllTextAsync(temp, JsonSerializer.Serialize(new Document { Items = items.ToList() }, AppJsonContext.Default.Document)).ConfigureAwait(false);
             File.Move(temp, path, true);
             lock (Gate) _lastPersistenceError = null;
             if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("history_persist_end", $"items={items.Length}");
@@ -199,5 +199,4 @@ public static class RecentHistoryStore
     private static string Key(Entry x) => x.Kind + "\u001f" + x.Path;
     private static void MergeNewest(Dictionary<string, Entry> map, Entry item) { var key = Key(item); if (!map.TryGetValue(key, out var old) || item.LastOpenedUtc > old.LastOpenedUtc) map[key] = item; }
     private static string StoragePath() => TestStoragePathOverride?.Invoke() ?? Path.Combine(SettingsStore.GetSettingsDirectory(), FileName);
-    private static JsonSerializerOptions Options() => new() { WriteIndented = true, PropertyNameCaseInsensitive = true };
 }

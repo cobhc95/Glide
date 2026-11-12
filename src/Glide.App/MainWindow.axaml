@@ -4,7 +4,7 @@
         xmlns:platform="using:Glide.App.Platform"
         x:Class="Glide.App.MainWindow"
         Width="1064" Height="687" MinWidth="180" MinHeight="360"
-    Title="Glide 4.5.0 — Home"
+    Title="Glide 4.6.2 — Home"
         Icon="/Assets/Glide.ico"
         SystemDecorations="None"
         ExtendClientAreaToDecorationsHint="False"
@@ -53,15 +53,15 @@
         <StackPanel x:Name="CaptionButtonHost" Grid.Column="2" Orientation="Horizontal" Spacing="0" Height="44" VerticalAlignment="Top">
           <!-- Browser-style Windows controls: like Firefox/Chromium, Glide owns the visual buttons
                but exposes their rectangles to Win32 as HTMINBUTTON/HTMAXBUTTON/HTCLOSE.
-               Segoe Fluent Icons is the Windows 11 system icon font, avoiding hand-drawn glyphs. -->
+               The icons are vectors so they render on every Windows version; Segoe Fluent Icons is Windows 11 only. -->
           <Button x:Name="CaptionMinimizeButton" Classes="captionButton" Width="46" Height="44" Click="CaptionMinimizeClicked" ToolTip.Tip="Minimize">
-            <TextBlock Text="&#xE921;" FontFamily="Segoe Fluent Icons" FontSize="10" Classes="captionGlyph"/>
+            <controls:GlideIconView Kind="Minimize" Classes="captionGlyph"/>
           </Button>
           <Button x:Name="CaptionMaximizeButton" Classes="captionButton" Width="46" Height="44" Click="CaptionMaximizeClicked" ToolTip.Tip="Maximize">
-            <TextBlock x:Name="CaptionMaximizeIcon" Text="&#xE922;" FontFamily="Segoe Fluent Icons" FontSize="10" Classes="captionGlyph"/>
+            <controls:GlideIconView x:Name="CaptionMaximizeIcon" Kind="Maximize" Classes="captionGlyph"/>
           </Button>
           <Button x:Name="CaptionCloseButton" Classes="captionButton close" Width="46" Height="44" Click="CaptionCloseClicked" ToolTip.Tip="Close">
-            <TextBlock Text="&#xE8BB;" FontFamily="Segoe Fluent Icons" FontSize="10" Classes="captionGlyph"/>
+            <controls:GlideIconView Kind="Close" Classes="captionGlyph"/>
           </Button>
         </StackPanel>
       </Grid>
@@ -90,10 +90,13 @@
         <ScrollBar x:Name="ViewportVScroll" Classes="viewportScroll" Orientation="Vertical"
                    HorizontalAlignment="Right" VerticalAlignment="Stretch" Margin="0,8,5,18" Width="9" IsVisible="False"/>
         <Border x:Name="CornerCounterHost" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,28,15,0" IsHitTestVisible="False">
+          <StackPanel>
           <Grid>
             <TextBlock x:Name="CornerCounterShadowText" Text="[0/0]" Margin="1,1,0,0" Foreground="#CC000000" FontSize="13" FontWeight="SemiBold"/>
             <TextBlock x:Name="CornerCounterText" Text="[0/0]" Foreground="#D9FFFFFF" FontSize="13" FontWeight="SemiBold"/>
           </Grid>
+          <TextBlock x:Name="FolderCounterText" HorizontalAlignment="Right"/>
+          </StackPanel>
         </Border>
 
 
@@ -119,7 +122,7 @@
                 Background="#B51B1E23" BorderBrush="#7FFFFFFF" BorderThickness="1"
                 CornerRadius="7" Padding="9,6" Opacity="0.82">
           <StackPanel Orientation="Horizontal" Spacing="6">
-            <TextBlock Text="&#xE823;" FontFamily="Segoe Fluent Icons" FontSize="13" Foreground="White" VerticalAlignment="Center"/>
+            <TextBlock Text="&#xE823;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="13" Foreground="White" VerticalAlignment="Center"/>
             <TextBlock x:Name="NavigationRateLimitNoticeText" Text="Wait 0 ms" FontSize="12.5" FontWeight="SemiBold" Foreground="White" VerticalAlignment="Center"/>
           </StackPanel>
         </Border>
@@ -136,46 +139,61 @@
 
 
         <Border x:Name="ViewerStatusSurface" Classes="statusSurface legacyViewerStatus" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="14,0,14,14" ZIndex="400">
-          <Grid ColumnDefinitions="Auto,*" Margin="10,3,4,3" ColumnSpacing="8">
-            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+          <Grid x:Name="StatusLayoutGrid" ColumnDefinitions="Auto,*,Auto" RowDefinitions="Auto,Auto" Margin="10,3,4,3" ColumnSpacing="8" RowSpacing="4">
+            <StackPanel x:Name="StatusStatsHost" Grid.Row="0" Grid.Column="0" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
               <TextBlock x:Name="StatusStatsText" Classes="statusStats" Text="Ready" FontWeight="SemiBold" Foreground="{DynamicResource BrushMuted}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
             </StackPanel>
-            <!-- Narrow-window contract: controls always flow left-to-right, then wrap onto a second/third
-                 horizontal row. Never rotate the controls into one vertical tower. Small independent
-                 groups keep any one group from establishing a large minimum width. -->
-            <WrapPanel x:Name="StatusControlsPanel" Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Left" VerticalAlignment="Center">
-              <Border Classes="statusGroup viewGroup"><StackPanel x:Name="ZoomGroup" Orientation="Horizontal" Spacing="2">
+            <!-- Adaptive layout contract (see ArrangeStatusControls): wide windows keep stats, every icon
+                 group and the window buttons on one row. Narrower windows move the stats to a header line
+                 beside the window buttons and spread whole groups over one or two balanced rows. When even
+                 that cannot fit, the lowest-priority groups move into the "..." menu. Groups never split,
+                 and the controls never rotate into a vertical tower. -->
+            <StackPanel x:Name="StatusControlsPanel" Grid.Row="0" Grid.Column="1" Orientation="Vertical" Spacing="4" HorizontalAlignment="Left" VerticalAlignment="Center">
+            <StackPanel x:Name="StatusRow1" Orientation="Horizontal" Spacing="4">
+              <Border x:Name="ZoomGroupBorder" Classes="statusGroup viewGroup"><StackPanel x:Name="ZoomGroup" Orientation="Horizontal" Spacing="2">
                 <Button x:Name="StatusZoomOutButton" Classes="statusIcon legacyStatusIcon" Click="ZoomOutClicked" ToolTip.Tip="Zoom out"><controls:GlideIconView Kind="ZoomOut" Classes="statusGlyph"/></Button>
                 <Button x:Name="StatusZoomInButton" Classes="statusIcon legacyStatusIcon" Click="ZoomInClicked" ToolTip.Tip="Zoom in"><controls:GlideIconView Kind="ZoomIn" Classes="statusGlyph"/></Button>
               </StackPanel></Border>
-              <Border Classes="statusGroup viewGroup"><StackPanel x:Name="FitGroup" Orientation="Horizontal" Spacing="2">
+              <Border x:Name="FitGroupBorder" Classes="statusGroup viewGroup"><StackPanel x:Name="FitGroup" Orientation="Horizontal" Spacing="2">
                 <Button x:Name="StatusFitImageButton" Classes="statusIcon legacyStatusIcon" Click="FitImageClicked" ToolTip.Tip="Fit image"><controls:GlideIconView Kind="Fit" Classes="statusGlyph"/></Button>
+                <Button x:Name="StatusFitWindowButton" Classes="statusIcon legacyStatusIcon" Click="FitWindowClicked" ToolTip.Tip="Fit to window"><controls:GlideIconView Kind="FitWindow" Classes="statusGlyph"/></Button>
                 <Button x:Name="StatusFitWidthButton" Classes="statusIcon legacyStatusIcon" Click="FitWidthClicked" ToolTip.Tip="Fit width"><controls:GlideIconView Kind="FitWidth" Classes="statusGlyph"/></Button>
                 <Button x:Name="StatusFitHeightButton" Classes="statusIcon legacyStatusIcon" Click="FitHeightClicked" ToolTip.Tip="Fit height"><controls:GlideIconView Kind="FitHeight" Classes="statusGlyph"/></Button>
               </StackPanel></Border>
-              <Border Classes="statusGroup viewGroup"><StackPanel x:Name="InfoGroup" Orientation="Horizontal"><Button x:Name="StatusInfoButton" Classes="statusIcon legacyStatusIcon" Click="InfoClicked" ToolTip.Tip="Image information"><controls:GlideIconView Kind="Info" Classes="statusGlyph"/></Button></StackPanel></Border>
-              <Border Classes="statusGroup viewGroup"><StackPanel x:Name="OptionsGroup" Orientation="Horizontal"><Button x:Name="StatusOptionsButton" Classes="statusIcon legacyStatusIcon" Click="SettingsClicked" ToolTip.Tip="Settings"><TextBlock Text="&#xE713;" FontFamily="Segoe Fluent Icons" FontSize="18" Classes="modernSettingsGlyph"/></Button></StackPanel></Border>
-              <Border Classes="statusGroup overlayGroup"><WrapPanel x:Name="OverlayGroup" Orientation="Horizontal">
+              <Border x:Name="InfoGroupBorder" Classes="statusGroup viewGroup"><StackPanel x:Name="InfoGroup" Orientation="Horizontal"><Button x:Name="StatusInfoButton" Classes="statusIcon legacyStatusIcon" Click="InfoClicked" ToolTip.Tip="Image information"><controls:GlideIconView Kind="Info" Classes="statusGlyph"/></Button></StackPanel></Border>
+              <Border x:Name="OptionsGroupBorder" Classes="statusGroup viewGroup"><StackPanel x:Name="OptionsGroup" Orientation="Horizontal"><Button x:Name="StatusOptionsButton" Classes="statusIcon legacyStatusIcon" Click="SettingsClicked" ToolTip.Tip="Settings"><TextBlock Text="&#xE713;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="18" Classes="modernSettingsGlyph"/></Button></StackPanel></Border>
+              <Border x:Name="SaveGroupBorder" Classes="statusGroup fileGroup"><StackPanel x:Name="SaveGroup" Orientation="Horizontal" Spacing="2">
+                <Button x:Name="StatusSaveButton" Classes="statusIcon legacyStatusIcon" Click="SaveImageClicked" IsEnabled="False" ToolTip.Tip="Save (Ctrl+S): write the current rotation/flip into the file. Does nothing until the picture has been edited."><controls:GlideIconView Kind="SaveFile" Classes="statusGlyph"/></Button>
+                <Button x:Name="StatusSaveAsButton" Classes="statusIcon legacyStatusIcon" Click="SaveImageAsClicked" ToolTip.Tip="Save as... (Ctrl+Alt+S): save a copy under a new name or format"><controls:GlideIconView Kind="SaveAs" Classes="statusGlyph"/></Button>
+              </StackPanel></Border>
+              <Border x:Name="OverlayGroupBorder" Classes="statusGroup overlayGroup"><WrapPanel x:Name="OverlayGroup" Orientation="Horizontal">
                 <Button x:Name="OverlaySaveButton" Classes="statusIcon legacyStatusIcon" Click="OverlaySaveClicked" ToolTip.Tip="Save overlay layout"><controls:GlideIconView Kind="OverlaySave" Classes="statusGlyph"/></Button>
                 <Button x:Name="OverlayClearButton" Classes="statusIcon legacyStatusIcon" Click="OverlayClearClicked" ToolTip.Tip="Clear all overlays"><controls:GlideIconView Kind="Close" Classes="statusGlyph"/></Button>
                 <Button x:Name="OverlayAddButton" Classes="statusIcon legacyStatusIcon" Click="OverlayAddClicked" ToolTip.Tip="Add Window-in-Window overlay"><controls:GlideIconView Kind="OverlayAdd" Classes="statusGlyph"/></Button>
                 <Button x:Name="OverlayLoadButton" Classes="statusIcon legacyStatusIcon" Click="OverlayLoadClicked" ToolTip.Tip="Load overlay layout"><controls:GlideIconView Kind="OverlayLoad" Classes="statusGlyph"/></Button>
                 <Slider x:Name="OverlayOpacitySlider" IsVisible="False" Minimum="10" Maximum="100" Value="100" Width="1"/>
               </WrapPanel></Border>
-              <Border Classes="statusGroup slideshowGroup"><StackPanel x:Name="SlideshowGroup" Orientation="Horizontal" Spacing="2">
+              <Border x:Name="SlideshowGroupBorder" Classes="statusGroup slideshowGroup"><StackPanel x:Name="SlideshowGroup" Orientation="Horizontal" Spacing="2">
                 <Button x:Name="SlideshowButton" Classes="statusIcon legacyStatusIcon" ToolTip.Tip="Start slideshow"><controls:GlideIconView x:Name="SlideshowIcon" Kind="Play" Classes="statusGlyph"/></Button>
                 <Button x:Name="SlideshowStopButton" Classes="statusIcon legacyStatusIcon" Click="SlideshowStopClicked" ToolTip.Tip="Stop slideshow session" IsVisible="False"><controls:GlideIconView Kind="Stop" Classes="statusGlyph"/></Button>
               </StackPanel></Border>
-              <Border Classes="statusGroup navGroup"><WrapPanel x:Name="NavigationGroup" Orientation="Horizontal">
+              <Border x:Name="NavGroupBorder" Classes="statusGroup navGroup"><WrapPanel x:Name="NavigationGroup" Orientation="Horizontal">
                 <Button x:Name="StatusFirstButton" Classes="statusIcon legacyStatusIcon nav" Click="FirstClicked" ToolTip.Tip="First image"><controls:GlideIconView Kind="First" Classes="statusGlyph"/></Button>
                 <Button x:Name="StatusPreviousButton" Classes="statusIcon legacyStatusIcon nav" Click="PreviousClicked" ToolTip.Tip="Previous image"><controls:GlideIconView Kind="Previous" Classes="statusGlyph"/></Button>
                 <Button x:Name="StatusNextButton" Classes="statusIcon legacyStatusIcon nav" Click="NextClicked" ToolTip.Tip="Next image"><controls:GlideIconView Kind="Next" Classes="statusGlyph"/></Button>
                 <Button x:Name="StatusLastButton" Classes="statusIcon legacyStatusIcon nav" Click="LastClicked" ToolTip.Tip="Last image"><controls:GlideIconView Kind="Last" Classes="statusGlyph"/></Button>
               </WrapPanel></Border>
+              <Border x:Name="MoreGroupBorder" Classes="statusGroup moreGroup" IsVisible="False"><StackPanel x:Name="MoreGroup" Orientation="Horizontal">
+                <Button x:Name="StatusMoreButton" Classes="statusIcon legacyStatusIcon" Click="StatusMoreClicked" ToolTip.Tip="More tools: everything that does not fit in this window"><controls:GlideIconView Kind="More" Classes="statusGlyph"/></Button>
+              </StackPanel></Border>
+            </StackPanel>
+            <StackPanel x:Name="StatusRow2" Orientation="Horizontal" Spacing="4" IsVisible="False"/>
+            </StackPanel>
+            <StackPanel x:Name="StatusWindowControls" Grid.Row="0" Grid.Column="2" Orientation="Horizontal" Spacing="2" VerticalAlignment="Top">
               <Button x:Name="StatusCollapseButton" Classes="statusIcon legacyStatusIcon" Click="CollapseStatusClicked" ToolTip.Tip="Collapse status bar"><controls:GlideIconView Kind="Collapse" Classes="statusGlyph"/></Button>
               <Button x:Name="StatusCloseButton" Classes="statusIcon legacyStatusIcon" Click="CloseStatusClicked" ToolTip.Tip="Close status bar"><controls:GlideIconView Kind="Close" Classes="statusGlyph"/></Button>
               <Button x:Name="StatusActualButton" IsVisible="False" Click="ActualSizeClicked"/>
-            </WrapPanel>
+            </StackPanel>
           </Grid>
         </Border>
       </Grid>

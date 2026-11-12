@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Net;
 using System.Net.Sockets;
 using System.Security;
@@ -137,6 +138,79 @@ public static class SecureImageFetcher
     }
 
     /// <summary>
+    /// Test helper: parses obscure numeric IP forms that URL parsers may normalize to
+    /// loopback/private addresses (e.g. "2130706433" == 127.0.0.1, "0x7f.0.0.1").
+    /// No behavior change: the socket-layer ConnectCallback already blocks whatever IP
+    /// DNS resolves to; this only gives tests a deterministic parser for those spellings.
+    /// </summary>
+    public static bool TryParseNumericIp(string? host, out IPAddress? address)
+    {
+        address = null;
+        if (string.IsNullOrWhiteSpace(host))
+            return false;
+        host = host.Trim().Trim('[', ']');
+        // Fast path: standard dotted/IPv6 parsing already handles the common cases.
+        if (IPAddress.TryParse(host, out var direct))
+        {
+            address = direct;
+            return true;
+        }
+        try
+        {
+            // Single decimal integer (e.g. "2130706433" == 0x7F000001 == 127.0.0.1).
+            if (host.All(char.IsDigit) && uint.TryParse(host, out var single))
+            {
+                var bytes = new[] { (byte)(single >> 24), (byte)(single >> 16), (byte)(single >> 8), (byte)single };
+                address = new IPAddress(bytes);
+                return true;
+            }
+            // Single hex integer (e.g. "0x7F000001").
+            if (host.StartsWith("0x", StringComparison.OrdinalIgnoreCase) && !host.Contains('.') &&
+                uint.TryParse(host[2..], System.Globalization.NumberStyles.HexNumber, null, out var singleHex))
+            {
+                var bytes = new[] { (byte)(singleHex >> 24), (byte)(singleHex >> 16), (byte)(singleHex >> 8), (byte)singleHex };
+                address = new IPAddress(bytes);
+                return true;
+            }
+            // Dotted parts each allowing decimal, octal (leading 0), or hex (0x prefix).
+            if (host.Contains('.'))
+            {
+                var parts = host.Split('.');
+                if (parts.Length == 4)
+                {
+                    var bytes = new byte[4];
+                    for (var i = 0; i < 4; i++)
+                    {
+                        var p = parts[i].Trim();
+                        int value;
+                        if (p.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+                        {
+                            if (!int.TryParse(p[2..], System.Globalization.NumberStyles.HexNumber, null, out value))
+                                return false;
+                        }
+                        else if (p.Length > 1 && p[0] == '0' && p.All(c => c >= '0' && c <= '7'))
+                        {
+                            value = Convert.ToInt32(p, 8); // Octal e.g. "0177" == 127.
+                        }
+                        else
+                        {
+                            if (!int.TryParse(p, out value))
+                                return false;
+                        }
+                        if (value < 0 || value > 255)
+                            return false;
+                        bytes[i] = (byte)value;
+                    }
+                    address = new IPAddress(bytes);
+                    return true;
+                }
+            }
+        }
+        catch { return false; }
+        return false;
+    }
+
+    /// <summary>
     /// Creates a hardened HttpClient utilizing SocketsHttpHandler with a custom ConnectCallback.
     /// The ConnectCallback resolves DNS and validates the destination IP before initiating the socket,
     /// defeating Time-Of-Check to Time-Of-Use (TOCTOU) DNS rebinding attacks.
@@ -215,7 +289,7 @@ public static class SecureImageFetcher
             cancellationToken.ThrowIfCancellationRequested();
 
             using var request = new HttpRequestMessage(HttpMethod.Get, currentUri);
-            request.Headers.Add("User-Agent", "GlideImageViewer/3.5 (SecurityHardened)");
+            request.Headers.Add("User-Agent", AppVersion.UserAgent + " (SecurityHardened)");
             request.Headers.Add("Accept", "image/*,*/*;q=0.8");
 
             using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
@@ -249,22 +323,30 @@ public static class SecureImageFetcher
 
             await using var contentStream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
             using var ms = new MemoryStream();
-            var buffer = new byte[81920];
-            long totalRead = 0;
-
-            while (true)
+            // Pooled buffer: avoids an 80 KB allocation per download (GC pressure on galleries).
+            var buffer = ArrayPool<byte>.Shared.Rent(81920);
+            try
             {
-                var read = await contentStream.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken).ConfigureAwait(false);
-                if (read <= 0) break;
+                long totalRead = 0;
 
-                totalRead += read;
-                if (totalRead > maxDownloadBytes)
+                while (true)
                 {
-                    throw new InvalidDataException(
-                        $"Download exceeded the maximum allowed size limit of {maxDownloadBytes} bytes.");
-                }
+                    var read = await contentStream.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken).ConfigureAwait(false);
+                    if (read <= 0) break;
 
-                ms.Write(buffer, 0, read);
+                    totalRead += read;
+                    if (totalRead > maxDownloadBytes)
+                    {
+                        throw new InvalidDataException(
+                            $"Download exceeded the maximum allowed size limit of {maxDownloadBytes} bytes.");
+                    }
+
+                    ms.Write(buffer, 0, read);
+                }
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(buffer);
             }
 
             return ms.ToArray();

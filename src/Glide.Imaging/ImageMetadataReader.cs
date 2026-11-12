@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Globalization;
 using System.IO.Compression;
 using System.Text;
@@ -150,6 +151,36 @@ public static class ImageMetadataReader
         }
         return new ImageMetadata(make, model, ParseDate(date), FrameCount: frames, Width: width, Height: height);
     }
+    private const int MaxInflatedTextBytes = 1024 * 1024;
+    private const int InflateBudgetSlackBytes = 8 * 1024;
+
+    // Fix (PNG text bomb): budgeted inflate stops at 1MB+slack instead of unbounded CopyTo
+    // followed by a post-check. Keeps the total-file 64MB cap enforced by the caller.
+    private static bool TryInflateBounded(ZLibStream zlib, out byte[] result)
+    {
+        result = Array.Empty<byte>();
+        using var output = new MemoryStream();
+        var rented = ArrayPool<byte>.Shared.Rent(4096);
+        try
+        {
+            long total = 0;
+            int read;
+            while ((read = zlib.Read(rented, 0, rented.Length)) > 0)
+            {
+                total += read;
+                if (total > (long)MaxInflatedTextBytes + InflateBudgetSlackBytes) return false;
+                output.Write(rented, 0, read);
+            }
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(rented);
+        }
+        if (output.Length > MaxInflatedTextBytes) return false;
+        result = output.ToArray();
+        return true;
+    }
+
     private static (string Key, string Value)? ParsePngText(byte[] data, int offset, int length, string type)
     {
         if (length <= 0 || offset < 0 || offset > data.Length - length) return null;
@@ -160,7 +191,7 @@ public static class ImageMetadataReader
         if (type == "zTXt")
         {
             if (nul + 2 > payload.Length || payload[nul + 1] != 0) return null;
-            try { using var input = new MemoryStream(payload[(nul + 2)..].ToArray()); using var zlib = new ZLibStream(input, CompressionMode.Decompress); using var output = new MemoryStream(); zlib.CopyTo(output); if (output.Length > 1024 * 1024) return null; return (key, Encoding.Latin1.GetString(output.ToArray())); }
+            try { using var input = new MemoryStream(payload[(nul + 2)..].ToArray()); using var zlib = new ZLibStream(input, CompressionMode.Decompress); if (!TryInflateBounded(zlib, out var inflated)) return null; return (key, Encoding.Latin1.GetString(inflated)); }
             catch { return null; }
         }
         // iTXt: keyword, compression flag, compression method, language tag, translated keyword, text.
@@ -170,7 +201,7 @@ public static class ImageMetadataReader
         try
         {
             var text = payload[p..].ToArray();
-            if (compressed) using (var input = new MemoryStream(text)) using (var zlib = new ZLibStream(input, CompressionMode.Decompress)) using (var output = new MemoryStream()) { zlib.CopyTo(output); if (output.Length > 1024 * 1024) return null; text = output.ToArray(); }
+            if (compressed) using (var input = new MemoryStream(text)) using (var zlib = new ZLibStream(input, CompressionMode.Decompress)) { if (!TryInflateBounded(zlib, out var inflated)) return null; text = inflated; }
             return (key, Encoding.UTF8.GetString(text));
         }
         catch { return null; }

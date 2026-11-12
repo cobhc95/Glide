@@ -1,6 +1,6 @@
-# Glide 4.6.0
+# Glide 4.7.0
 
-> **Glide 4.6.0 is available:** Download the [installer or portable archive](https://github.com/cobhc95/Glide/releases/tag/v4.6.0). The source currently on GitHub remains at 4.5.0.
+> **Glide 4.7.0 is available:** Download the [installer or portable archive](https://github.com/cobhc95/Glide/releases/tag/v4.7.0). The source in this repository matches 4.7.0.
 
 ## Fast. Multi-tabbed. Multi-window. Highly customizable.
 
@@ -8,9 +8,21 @@
 
 **Glide 4.6.0 is a high-performance Windows image viewer built around instant-feeling image opening, a compact installer, multi-tab and multi-window workflows, live folder refresh, Save / Save As with format conversion, transparent overlays, deep mouse/keyboard customization, Launch Speed Boost, complete image printing, native SVG/vector support, Photoshop PSD/PSB viewing, automatic Windows Open With integration, Windows Explorer thumbnails, and recognition/routing for 196 image and document filename extensions.**
 
-## What's new in 4.6.0
+## What's new in 4.7.0
 
-* **Video overlays:** play videos in Window-in-Window overlays with transport controls, volume, looping and automatic next video. Windows Media Foundation is backed by a bundled FFmpeg decoder. Videos remain separate from image navigation.
+Thanks to [@vertigo220](https://github.com/vertigo220) for the detailed report ([#1](https://github.com/cobhc95/Glide/issues/1)) behind this release.
+
+* **Animated GIFs play**, and a new **Fit to window** mode (key `4`) scales images up or down to the largest size that fits.
+* **Tabs:** Ctrl+Tab in most-recently-used order, an option to turn off middle-click close, no more overlapping tabs, and full file path in tooltips.
+* **Status bar:** shows the file name, can be placed Left / Center / Right (right-click it), and collapses to just an expand button that can be parked in the lower-right corner.
+* **Right button + wheel** gesture, a simpler Home page, Speed Boost tray icon choices, and many settings and rename-dialog fixes.
+* **Fixed** a right-click menu that could stay on screen after clicking.
+
+See the [4.7.0 release notes](release-notes-4.7.0.md) and [changelog](CHANGELOG.md) for the full list.
+
+## Previously in 4.6.0
+
+* **Video overlays:** play videos in Window-in-Window overlays with transport controls, volume, looping and automatic next video. Glide uses Windows codecs first; if Windows can't play a video, it offers to download an optional FFmpeg decoder. Videos remain separate from image navigation.
 * **A clearer Settings window:** 14 categories are reorganised into eight, with improved search, shortcut filtering and faster updates.
 * **Adaptive status bar and menus:** controls rearrange as the window narrows, with an overflow menu, a new Tiny size, Save and Save As buttons, and grouped menus with icons.
 * **More control over viewing:** choose image sort order, set a selection buffer around the picture, configure slideshow clicks and draw a custom animation area for overlays.

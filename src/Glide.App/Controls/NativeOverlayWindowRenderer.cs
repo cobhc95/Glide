@@ -45,6 +45,7 @@ internal sealed class NativeOverlayWindowRenderer : IDisposable
         public int Z, Hz, NativeX, NativeY, NativeWidth, NativeHeight, AppliedZ = int.MinValue;
         public long Revision, VisualRevision, RenderedVisualRevision;
         public OverlayChromeSelection Chrome;
+        public OverlayVideoChrome? Video;
         public Color Accent;
         public double PreviousX, PreviousY;
         public bool IsShown;
@@ -85,7 +86,7 @@ internal sealed class NativeOverlayWindowRenderer : IDisposable
             catch { SelectObject(dc, previous); DeleteObject(bitmap); DeleteDC(dc); return null; }
         }
 
-        public void Rasterize(byte[] source, int sourceWidth, int sourceHeight, Rect sourceRect, double opacity, double scale, OverlayChromeSelection chrome, Color accent)
+        public void Rasterize(byte[] source, int sourceWidth, int sourceHeight, Rect sourceRect, double opacity, double scale, OverlayChromeSelection chrome, Color accent, OverlayVideoChrome? video = null)
         {
             Array.Clear(_pixels, 0, _pixels.Length);
             if (sourceWidth > 0 && sourceHeight > 0 && source.Length >= (long)sourceWidth * sourceHeight * 4)
@@ -94,42 +95,51 @@ internal sealed class NativeOverlayWindowRenderer : IDisposable
                 var sy = Math.Clamp(sourceRect.Y, 0, Math.Max(0, sourceHeight - 1));
                 var sw = Math.Clamp(sourceRect.Width, 1.0, sourceWidth - sx);
                 var sh = Math.Clamp(sourceRect.Height, 1.0, sourceHeight - sy);
-                var imageOpacity = Math.Clamp(opacity, 0, 1);
+                // Bilinear sampling with per-column tables and 8-bit fixed-point weights. Video
+                // overlays rasterize every frame, so the per-pixel work must stay integer-only.
+                var imageOpacity = (int)Math.Round(Math.Clamp(opacity, 0, 1) * 256);
+                var columnX0 = new int[_width]; var columnX1 = new int[_width]; var columnTx = new int[_width];
+                for (var x = 0; x < _width; x++)
+                {
+                    var sourceX = sx + (x + .5) * sw / _width - .5;
+                    var x0 = Math.Clamp((int)Math.Floor(sourceX), 0, sourceWidth - 1);
+                    columnX0[x] = x0 * 4;
+                    columnX1[x] = Math.Clamp(x0 + 1, 0, sourceWidth - 1) * 4;
+                    columnTx[x] = (int)Math.Round((sourceX - Math.Floor(sourceX)) * 256);
+                }
                 for (var y = 0; y < _height; y++)
                 {
                     var sourceY = sy + (y + .5) * sh / _height - .5;
                     var y0 = Math.Clamp((int)Math.Floor(sourceY), 0, sourceHeight - 1);
                     var y1 = Math.Clamp(y0 + 1, 0, sourceHeight - 1);
-                    var ty = sourceY - Math.Floor(sourceY);
-                    for (var x = 0; x < _width; x++)
+                    var ty = (int)Math.Round((sourceY - Math.Floor(sourceY)) * 256);
+                    var row0 = y0 * sourceWidth * 4;
+                    var row1 = y1 * sourceWidth * 4;
+                    var destinationOffset = y * _width * 4;
+                    for (var x = 0; x < _width; x++, destinationOffset += 4)
                     {
-                        var sourceX = sx + (x + .5) * sw / _width - .5;
-                        var x0 = Math.Clamp((int)Math.Floor(sourceX), 0, sourceWidth - 1);
-                        var x1 = Math.Clamp(x0 + 1, 0, sourceWidth - 1);
-                        var tx = sourceX - Math.Floor(sourceX);
-                        var p00 = (y0 * sourceWidth + x0) * 4;
-                        var p10 = (y0 * sourceWidth + x1) * 4;
-                        var p01 = (y1 * sourceWidth + x0) * 4;
-                        var p11 = (y1 * sourceWidth + x1) * 4;
-                        var destinationOffset = (y * _width + x) * 4;
+                        var tx = columnTx[x];
+                        var p00 = row0 + columnX0[x]; var p10 = row0 + columnX1[x];
+                        var p01 = row1 + columnX0[x]; var p11 = row1 + columnX1[x];
                         for (var channel = 0; channel < 4; channel++)
                         {
-                            var top = source[p00 + channel] + (source[p10 + channel] - source[p00 + channel]) * tx;
-                            var bottom = source[p01 + channel] + (source[p11 + channel] - source[p01 + channel]) * tx;
-                            _pixels[destinationOffset + channel] = (byte)Math.Clamp((int)Math.Round((top + (bottom - top) * ty) * imageOpacity), 0, 255);
+                            var top = source[p00 + channel] * (256 - tx) + source[p10 + channel] * tx;
+                            var bottom = source[p01 + channel] * (256 - tx) + source[p11 + channel] * tx;
+                            var value = ((top * (256 - ty) + bottom * ty + 32768) >> 16) * imageOpacity + 128 >> 8;
+                            _pixels[destinationOffset + channel] = (byte)Math.Min(255, value);
                         }
                     }
                 }
             }
             if ((chrome & OverlayChromeSelection.Controls) != 0)
-                DrawChrome(scale, opacity, accent, (chrome & OverlayChromeSelection.Active) != 0);
+                DrawChrome(scale, opacity, accent, (chrome & OverlayChromeSelection.Active) != 0, video);
             Marshal.Copy(_pixels, 0, Bits, _pixels.Length);
         }
 
         private static (byte B, byte G, byte R, byte A) C(byte r, byte g, byte b, byte a) =>
             ((byte)(b * a / 255), (byte)(g * a / 255), (byte)(r * a / 255), a);
 
-        private void DrawChrome(double scale, double opacity, Color accent, bool showGlow)
+        private void DrawChrome(double scale, double opacity, Color accent, bool showGlow, OverlayVideoChrome? video)
         {
             scale = Math.Max(.1, scale);
             var p = (double dip) => Math.Max(1, (int)Math.Round(dip * scale));
@@ -153,9 +163,75 @@ internal sealed class NativeOverlayWindowRenderer : IDisposable
             Line(hcx, hcy - p(6), hcx, hcy + p(6), white, p(2));
             Line(hcx, hcy - p(6), hcx - p(4), hcy - p(2), white, p(2)); Line(hcx, hcy - p(6), hcx + p(4), hcy - p(2), white, p(2));
             Line(hcx, hcy + p(6), hcx - p(4), hcy + p(2), white, p(2)); Line(hcx, hcy + p(6), hcx + p(4), hcy + p(2), white, p(2));
-            var sliderHeight = Math.Min(130.0, Math.Max(70.0, h - 80)); var sliderTop = Math.Max(0, (h - sliderHeight) / 2); RectFill(p(8), p(sliderTop), p(22), p(sliderHeight), glass); Line(p(19), p(sliderTop + 10), p(19), p(sliderTop + sliderHeight - 10), white, p(2)); Ellipse(p(19), p(sliderTop + sliderHeight - 10 - (sliderHeight - 20) * Math.Clamp(opacity, .1, 1)), p(5), a);
-            var minusX = Math.Max(p(4), p(w / 2 - 36)); var plusX = Math.Max(p(4), p(w / 2 + 6)); RectFill(minusX, p(h - 38), p(30), p(30), glass); Border(minusX, p(h - 38), minusX + p(29), p(h - 9), a, p(1)); RectFill(plusX, p(h - 38), p(30), p(30), glass); Border(plusX, p(h - 38), plusX + p(29), p(h - 9), a, p(1));
-            Line(minusX + p(5), p(h - 23), minusX + p(25), p(h - 23), white, p(2)); Line(plusX + p(5), p(h - 23), plusX + p(25), p(h - 23), white, p(2)); Line(plusX + p(15), p(h - 28), plusX + p(15), p(h - 18), white, p(2));
+            var isVideo = video is not null;
+            var sliderRect = Glide.Core.OverlayVideoChromeLayout.OpacitySlider(w, h, isVideo);
+            var sliderHeight = sliderRect.Height; var sliderTop = sliderRect.Y; RectFill(p(8), p(sliderTop), p(22), p(sliderHeight), glass); Line(p(19), p(sliderTop + 10), p(19), p(sliderTop + sliderHeight - 10), white, p(2)); Ellipse(p(19), p(sliderTop + sliderHeight - 10 - (sliderHeight - 20) * Math.Clamp(opacity, .1, 1)), p(5), a);
+            var zoomTop = Glide.Core.OverlayVideoChromeLayout.ZoomOut(w, h, isVideo).Y;
+            var minusX = Math.Max(p(4), p(w / 2 - 36)); var plusX = Math.Max(p(4), p(w / 2 + 6)); RectFill(minusX, p(zoomTop), p(30), p(30), glass); Border(minusX, p(zoomTop), minusX + p(29), p(zoomTop + 29), a, p(1)); RectFill(plusX, p(zoomTop), p(30), p(30), glass); Border(plusX, p(zoomTop), plusX + p(29), p(zoomTop + 29), a, p(1));
+            Line(minusX + p(5), p(zoomTop + 15), minusX + p(25), p(zoomTop + 15), white, p(2)); Line(plusX + p(5), p(zoomTop + 15), plusX + p(25), p(zoomTop + 15), white, p(2)); Line(plusX + p(15), p(zoomTop + 10), plusX + p(15), p(zoomTop + 20), white, p(2));
+            if (video is { } v) DrawVideoBar(p, w, h, v, a, white, glass);
+        }
+
+        // Pixel twin of OverlayVideoChromePainter (same layout, same shapes).
+        private void DrawVideoBar(Func<double, int> p, double w, double h, OverlayVideoChrome video,
+            (byte B, byte G, byte R, byte A) accent, (byte B, byte G, byte R, byte A) white, (byte B, byte G, byte R, byte A) glass)
+        {
+            var bar = Glide.Core.OverlayVideoChromeLayout.NavigationBar(w, h);
+            RectFill(p(bar.X), p(bar.Y), p(bar.Width), p(bar.Height), glass);
+
+            var play = Glide.Core.OverlayVideoChromeLayout.PlayPauseButton(w, h);
+            Border(p(play.X), p(play.Y), p(play.Right), p(play.Bottom), accent, p(1));
+            var cx = play.CenterX; var cy = play.CenterY;
+            if (video.Playing)
+            {
+                RectFill(p(cx - 5.5), p(cy - 7), p(3), p(14), white);
+                RectFill(p(cx + 2.5), p(cy - 7), p(3), p(14), white);
+            }
+            else
+            {
+                for (var dx = 0.0; dx <= 12; dx += .5) { var half = 7 * (1 - dx / 12.0); Line(p(cx - 5 + dx), p(cy - half), p(cx - 5 + dx), p(cy + half), white, 1); }
+            }
+
+            foreach (var (rect, forward) in new[] { (Glide.Core.OverlayVideoChromeLayout.PreviousButton(w, h), false), (Glide.Core.OverlayVideoChromeLayout.NextButton(w, h), true) })
+            {
+                if (rect is not { } button) continue;
+                Border(p(button.X), p(button.Y), p(button.Right), p(button.Bottom), accent, p(1));
+                var direction = forward ? 1 : -1;
+                for (var dx = 0.0; dx <= 8; dx += .5) { var half = 6 * (1 - dx / 8.0); var x = button.CenterX - direction * 5 + direction * dx; Line(p(x), p(button.CenterY - half), p(x), p(button.CenterY + half), white, 1); }
+                RectFill(p(button.CenterX + direction * 5 - 1), p(button.CenterY - 6), p(2), p(12), white);
+            }
+
+            if (Glide.Core.OverlayVideoChromeLayout.VolumeTrack(w, h) is { } volumeTrack)
+            {
+                var vy = volumeTrack.CenterY;
+                var levelX = volumeTrack.X + volumeTrack.Width * (video.Muted ? 0 : Math.Clamp(video.Volume, 0, 1));
+                RectFill(p(volumeTrack.X), p(vy - 1.5), Math.Max(1, p(volumeTrack.Width)), p(3), C(255, 255, 255, 110));
+                if (levelX > volumeTrack.X) RectFill(p(volumeTrack.X), p(vy - 1.5), Math.Max(1, p(levelX - volumeTrack.X)), p(3), accent);
+                Ellipse(p(levelX), p(vy), p(5), accent);
+            }
+
+            var track = Glide.Core.OverlayVideoChromeLayout.SeekTrack(w, h);
+            var ty = track.CenterY;
+            var progressX = track.X + track.Width * Math.Clamp(video.Progress, 0, 1);
+            RectFill(p(track.X), p(ty - 1.5), Math.Max(1, p(track.Width)), p(3), C(255, 255, 255, 110));
+            if (progressX > track.X) RectFill(p(track.X), p(ty - 1.5), Math.Max(1, p(progressX - track.X)), p(3), accent);
+            Ellipse(p(progressX), p(ty), p(6), accent);
+
+            var mute = Glide.Core.OverlayVideoChromeLayout.MuteButton(w, h);
+            Border(p(mute.X), p(mute.Y), p(mute.Right), p(mute.Bottom), accent, p(1));
+            var mx = mute.CenterX; var my = mute.CenterY;
+            RectFill(p(mx - 8), p(my - 3), p(4), p(6), white);
+            for (var dx = 0.0; dx <= 5; dx += .5) Line(p(mx - 4 + dx), p(my - 3 - dx), p(mx - 4 + dx), p(my + 3 + dx), white, 1);
+            if (video.Muted || video.Volume <= 0.001)
+            {
+                Line(p(mx + 3), p(my - 4), p(mx + 9), p(my + 4), white, p(2));
+                Line(p(mx + 9), p(my - 4), p(mx + 3), p(my + 4), white, p(2));
+            }
+            else
+            {
+                Line(p(mx + 4), p(my - 3), p(mx + 4), p(my + 3), white, p(1.6));
+                if (video.Volume > 0.5) Line(p(mx + 7), p(my - 6), p(mx + 7), p(my + 6), white, p(1.6));
+            }
         }
 
         private void Border(int left, int top, int right, int bottom, (byte B, byte G, byte R, byte A) c, int thickness) { Line(left, top, right, top, c, thickness); Line(left, bottom, right, bottom, c, thickness); Line(left, top, left, bottom, c, thickness); Line(right, top, right, bottom, c, thickness); }
@@ -274,7 +350,8 @@ internal sealed class NativeOverlayWindowRenderer : IDisposable
                     }
                     item.SourceToken = source.Bitmap; item.VisualRevision++;
                 }
-                if (item.SourceRect != source.SourceRect || Math.Abs(item.Width - source.DestinationRect.Width) > .0001 || Math.Abs(item.Height - source.DestinationRect.Height) > .0001 || Math.Abs(item.Opacity - source.Opacity) > .0001 || item.Chrome != source.Chrome || item.Accent != snapshot.AccentColor) item.VisualRevision++;
+                if (item.SourceRect != source.SourceRect || Math.Abs(item.Width - source.DestinationRect.Width) > .0001 || Math.Abs(item.Height - source.DestinationRect.Height) > .0001 || Math.Abs(item.Opacity - source.Opacity) > .0001 || item.Chrome != source.Chrome || item.Accent != snapshot.AccentColor || item.Video != source.Video) item.VisualRevision++;
+                item.Video = source.Video;
                 item.SourceRect = source.SourceRect; item.Opacity = Math.Clamp(source.Opacity, 0, 1); item.Chrome = source.Chrome; item.Accent = snapshot.AccentColor; item.Width = source.DestinationRect.Width; item.Height = source.DestinationRect.Height;
                 var wasRunning = item.Running; var motionChanged = item.Revision != source.MotionRevision;
                 // Match the compositor ownership model: while native animation is running, the
@@ -312,6 +389,7 @@ internal sealed class NativeOverlayWindowRenderer : IDisposable
             var lastTick = Stopwatch.GetTimestamp();
             while (!_stop.IsCancellationRequested)
             {
+                try {
                 var tickNow = Stopwatch.GetTimestamp();
                 var tickInterval = tickNow - lastTick; lastTick = tickNow;
                 var gcPauseTicks = GC.GetTotalPauseDuration().Ticks;
@@ -339,6 +417,12 @@ internal sealed class NativeOverlayWindowRenderer : IDisposable
                 }
 
                 var hz = 60; foreach (var item in _frameItems) if (item.Running && item.Hz > hz) hz = item.Hz; var period = Math.Max(1L, (long)Math.Round(Stopwatch.Frequency / (double)Math.Clamp(hz, 1, 360))); var deadline = start + period; WaitForNextFrame(deadline);
+                } catch (Exception ex) when (ex is not ThreadAbortException)
+                {
+                    // A worker-thread exception would fast-fail the whole process; log it and keep the loop alive.
+                    Glide.App.Program.AppendCrashLog("overlay_worker_frame_exception", ex.ToString());
+                    Thread.Sleep(16);
+                }
             }
         }
         finally { EndMmcss(); DestroyAllWindowsOnWorker(); if (_classRegistered) UnregisterClassW(_windowClassName, GetModuleHandleW(null)); timeEndPeriod(1); }
@@ -379,7 +463,7 @@ internal sealed class NativeOverlayWindowRenderer : IDisposable
             OverlayNavigationTrace.Mark(OverlayNavigationTrace.Kind.SurfaceRecreated, item.Id, a: width, b: height);
         }
         if (item.Surface is null || item.RenderedVisualRevision == item.VisualRevision) return;
-        item.Surface.Rasterize(item.SourcePixels, item.SourceWidth, item.SourceHeight, item.SourceRect, item.Opacity, scale, item.Chrome, item.Accent); var size = new NativeSize { Width = item.Surface.Width, Height = item.Surface.Height }; var source = new NativePoint(); var blend = new NativeBlendFunction { BlendOp = 0, SourceConstantAlpha = 255, AlphaFormat = 1 }; // A null destination point preserves the position set by worker-owned SetWindowPos.
+        item.Surface.Rasterize(item.SourcePixels, item.SourceWidth, item.SourceHeight, item.SourceRect, item.Opacity, scale, item.Chrome, item.Accent, item.Video); var size = new NativeSize { Width = item.Surface.Width, Height = item.Surface.Height }; var source = new NativePoint(); var blend = new NativeBlendFunction { BlendOp = 0, SourceConstantAlpha = 255, AlphaFormat = 1 }; // A null destination point preserves the position set by worker-owned SetWindowPos.
         var ulwStart = OverlayNavigationTrace.Now();
         UpdateLayeredWindow(item.Hwnd, IntPtr.Zero, IntPtr.Zero, ref size, item.Surface.Dc, ref source, 0, ref blend, ULW_ALPHA);
         OverlayNavigationTrace.Duration(OverlayNavigationTrace.Kind.UpdateLayeredWindow, ulwStart, item.Id, a: width, b: height);
@@ -505,7 +589,11 @@ internal sealed class NativeOverlayWindowRenderer : IDisposable
         var className = Marshal.StringToHGlobalUni(_windowClassName);
         try
         {
-            var registration = new NativeWindowClass { Size = (uint)Marshal.SizeOf<NativeWindowClass>(), WindowProc = Marshal.GetFunctionPointerForDelegate(WindowProcedure), Instance = GetModuleHandleW(null), ClassName = className };
+            // A class cursor is required even though these windows are click-through: HTTRANSPARENT
+            // only forwards input to windows on the same thread, and Glide's main window lives on the
+            // UI thread. Whenever Windows asks an overlay window for the cursor (e.g. while a context
+            // menu takes over the mouse after a right-click), a null class cursor hides the pointer.
+            var registration = new NativeWindowClass { Size = (uint)Marshal.SizeOf<NativeWindowClass>(), WindowProc = Marshal.GetFunctionPointerForDelegate(WindowProcedure), Instance = GetModuleHandleW(null), Cursor = LoadCursorW(IntPtr.Zero, IdcArrow), ClassName = className };
             if (RegisterClassExW(ref registration) != 0) { _classRegistered = true; return true; }
             if (Marshal.GetLastWin32Error() == ERROR_CLASS_ALREADY_EXISTS) { _classRegistered = true; return true; }
             return false;
@@ -625,6 +713,8 @@ internal sealed class NativeOverlayWindowRenderer : IDisposable
     [StructLayout(LayoutKind.Sequential)] private struct NativeMessage { public IntPtr Hwnd; public uint Message; public IntPtr WParam, LParam; public uint Time; public NativePoint Point; public uint Private; }
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate IntPtr WindowProc(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);
     [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)] private static extern ushort RegisterClassExW(ref NativeWindowClass windowClass);
+    private static readonly IntPtr IdcArrow = new(32512);
+    [DllImport("user32.dll")] private static extern IntPtr LoadCursorW(IntPtr instance, IntPtr cursorName);
     [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)] private static extern bool UnregisterClassW(string className, IntPtr instance);
     [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)] private static extern IntPtr CreateWindowExW(int exStyle, string className, string? title, int style, int x, int y, int width, int height, IntPtr parent, IntPtr menu, IntPtr instance, IntPtr parameter);
     [DllImport("user32.dll", SetLastError = true)] private static extern bool DestroyWindow(IntPtr hwnd);

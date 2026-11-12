@@ -29,6 +29,7 @@ namespace Glide.App.Settings;
 public partial class SettingsWindow : Window
 {
     private readonly Action<GlideSettingsState, bool> _apply;
+    private bool _previewDirty;
     private GlideSettingsState _committed;
     private bool _loadingControls;
     private bool _closeWithoutRollback;
@@ -51,6 +52,56 @@ public partial class SettingsWindow : Window
     private string _pendingSearchQuery = string.Empty;
     private static readonly List<string> EmptyShortcutList = new();
     private string _activeCategory = "General";
+
+    /// <summary>One navigation entry that shows several of the original panels, each under its own heading.</summary>
+    private sealed record CategoryGroup(string Key, string Title, string Subtitle, string[] Members);
+
+    private static readonly CategoryGroup[] CategoryGroups =
+    {
+        new("General", "General & startup", "Application behaviour, history, navigation, startup and new-tab preferences, plus profiles and presets", new[] { "General", "Profiles" }),
+        new("Appearance", "Appearance & viewing", "Themes, colours, image presentation, zoom behaviour and viewport options", new[] { "Appearance", "Viewing" }),
+        new("Interface", "Interface & window", "Window behaviour, fullscreen, folder traversal, caption buttons, navigation buttons and window interactions", new[] { "Interface" }),
+        new("Tabs", "Tabs & status bar", "Tab sizing, detach and attach behaviour, closed-tab history, and the controls shown on the status bar", new[] { "Tabs", "Status" }),
+        new("Mouse", "Mouse & keyboard", "Mouse gestures, selection, zoom and panning, fullscreen interaction and every keyboard shortcut", new[] { "Mouse", "Hotkeys" }),
+        new("Slideshow", "Slideshow & overlays", "Slideshow timing and controls, and Window-in-Window overlay behaviour", new[] { "Slideshow", "Overlays" }),
+        new("Performance", "Performance", "Cold start, decode quality, prefetch, refinement and memory controls", new[] { "Performance" }),
+        new("Windows", "Windows & developer", "Native Windows integration, Open With registration, thumbnails and developer diagnostics", new[] { "Windows", "Developer" })
+    };
+
+    private static readonly Dictionary<string, string> PanelHeadings = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["Profiles"] = "Profiles and presets", ["Viewing"] = "Viewing",
+        ["Status"] = "Status bar", ["Hotkeys"] = "Keyboard shortcuts",
+        ["Overlays"] = "Window in Window overlays", ["Developer"] = "Developer options"
+    };
+
+    private readonly Dictionary<string, TextBlock> _panelHeadings = new(StringComparer.OrdinalIgnoreCase);
+
+    private static CategoryGroup GroupOf(string key)
+        => CategoryGroups.FirstOrDefault(g => string.Equals(g.Key, key, StringComparison.OrdinalIgnoreCase) ||
+                                              g.Members.Contains(key, StringComparer.OrdinalIgnoreCase)) ?? CategoryGroups[0];
+
+    /// <summary>Catalog category names (kept stable for profiles and diagnostics) mapped to the visible group title.</summary>
+    private static string GroupTitleForCatalogCategory(string catalogCategory)
+    {
+        foreach (var group in CategoryGroups)
+            foreach (var member in group.Members)
+                if (string.Equals(DisplayCategory(member), catalogCategory, StringComparison.OrdinalIgnoreCase)) return group.Title;
+        return catalogCategory;
+    }
+
+    private void BuildPanelHeadings()
+    {
+        foreach (var group in CategoryGroups)
+            foreach (var member in group.Members.Skip(1))
+            {
+                var panel = _panels[member];
+                if (panel.Parent is not Panel parent) continue;
+                var heading = new TextBlock { Text = PanelHeadings[member], FontSize = 18, FontWeight = FontWeight.SemiBold, Margin = new Thickness(0, 20, 0, 2), IsVisible = false };
+                parent.Children.Insert(parent.Children.IndexOf(panel), heading);
+                _panelHeadings[member] = heading;
+            }
+    }
     private readonly Dictionary<string, Control> _settingControls = new(StringComparer.OrdinalIgnoreCase);
     // Global-search index per setting. Built once from catalog metadata plus the on-screen wording
     // of the mapped control, so users can find settings by the text they actually see in the UI.
@@ -58,9 +109,9 @@ public partial class SettingsWindow : Window
     private readonly Dictionary<string, ComboBox> _gestureEditors = new(StringComparer.OrdinalIgnoreCase);
     private Dictionary<string, string> _workingGestures = GestureCatalog.CreateDefaultMap();
     private List<string> _workingTitleBarButtons = TitleBarButtonCatalog.DefaultButtonIds.ToList();
-    private string _workingCustomAccentHex = "#38A9F5";
-    private string _workingCustomGlowHex = "#38A9F5";
-    private string _workingCustomMainBackgroundHex = "#101214";
+    private string _workingCustomAccentHex = Glide.App.ThemePalette.GlideBlue;
+    private string _workingCustomGlowHex = Glide.App.ThemePalette.GlideBlue;
+    private string _workingCustomMainBackgroundHex = Glide.App.ThemePalette.FallbackBackground;
     private string _workingLastProfileDirectory = string.Empty;
     private bool _gestureMatrixBuilt;
     private bool _hotkeyRowsBuilt;
@@ -72,14 +123,14 @@ public partial class SettingsWindow : Window
         "escape.resetRememberedClose" // disabled while the remembered Escape close choice is "Ask"
     };
 
-    private sealed class SettingsTransferDocument
+    internal sealed class SettingsTransferDocument
     {
         public int Schema { get; set; } = SettingsTransferSchema;
         public GlideSettingsState Settings { get; set; } = new();
         public IReadOnlyList<CodecProviderArtifact> ProviderInventory { get; set; } = Array.Empty<CodecProviderArtifact>();
     }
 
-    private sealed class ProfileTransferDocument
+    internal sealed class ProfileTransferDocument
     {
         public int Schema { get; set; } = 1;
         public string Name { get; set; } = "Profile";
@@ -99,7 +150,7 @@ public partial class SettingsWindow : Window
             .OfType<System.Reflection.AssemblyInformationalVersionAttribute>()
             .FirstOrDefault()?.InformationalVersion;
         var version = string.IsNullOrWhiteSpace(informational)
-            ? assembly.GetName().Version?.ToString(3) ?? "4.5.0"
+            ? assembly.GetName().Version?.ToString(3) ?? Glide.Core.AppVersion.Fallback
             : informational;
         return "Glide " + version;
     }
@@ -107,7 +158,9 @@ public partial class SettingsWindow : Window
     public SettingsWindow(GlideSettingsState current, Action<GlideSettingsState, bool> apply)
     {
         _committed = current.CloneState();
-        _apply = apply;
+        // Track whether a live preview has been pushed to the viewer since the last commit. Cancel
+        // only needs the (expensive) full rollback re-apply when something was actually previewed.
+        _apply = (state, commit) => { _previewDirty = !commit; apply(state, commit); };
         _evidenceTemp = Path.Combine(Path.GetTempPath(), "Glide2-UIEvidence-" + Guid.NewGuid().ToString("N"));
         try { Directory.CreateDirectory(_evidenceTemp); } catch { /* Diagnostics must never block Settings. */ }
 
@@ -140,12 +193,14 @@ public partial class SettingsWindow : Window
             ["Developer"] = DeveloperPanel
         };
 
+        BuildPanelHeadings();
         BuildSettingControlMap();
         _hotkeyCaptureFlashTimer.Tick += (_, _) => ToggleHotkeyCaptureFlash();
         _searchDebounceTimer.Tick += (_, _) =>
         {
             _searchDebounceTimer.Stop();
-            RunSearchRebuild(_pendingSearchQuery);
+            // Progressive: result cards are built a few at a time so typing and clicking stay responsive.
+            RunSearchRebuildCore(_pendingSearchQuery, progressive: true);
         };
         LoadControls(_committed);
         // IMPORTANT: controls can canonicalize legacy/derived settings while loading (for example a
@@ -162,7 +217,25 @@ public partial class SettingsWindow : Window
         Opened += SettingsOpened;
         PopupPlacementStore.Track(this, "settings");
         Closing += SettingsClosing;
-        Closed += (_, _) => { _hotkeyCaptureFlashTimer.Stop(); _searchDebounceTimer.Stop(); };
+        // ContentScroll no longer scrolls to whichever control regains focus (window re-activation
+        // used to yank the page back to the last-clicked option). Keyboard Tab navigation still
+        // needs to reveal the focused control, so do that one case explicitly.
+        ContentScroll.AddHandler(GotFocusEvent, (_, e) =>
+        {
+            if (e.NavigationMethod == NavigationMethod.Tab && e.Source is Control focused) focused.BringIntoView();
+        });
+        // A list inside the page (the shortcut list auto-selects its first row when the Mouse &
+        // keyboard page is built) scrolls its own selection into view. That request must stop at
+        // the list instead of also dragging the whole Settings page down to it.
+        if (ContentScroll.Content is Control pageContent)
+        {
+            pageContent.AddHandler(RequestBringIntoViewEvent, (_, e) =>
+            {
+                if (e.TargetObject is Visual target && (target is ListBox || target.FindAncestorOfType<ListBox>() is not null))
+                    e.Handled = true;
+            });
+        }
+        Closed += (_, _) => { _hotkeyCaptureFlashTimer.Stop(); _searchDebounceTimer.Stop(); _previewDisposed = true; _searchRenderVersion++; };
     }
 
     private void SettingsSurfacePointerPressed(object? sender, PointerPressedEventArgs e)
@@ -242,6 +315,7 @@ public partial class SettingsWindow : Window
         try
         {
             RecentHistoryCheck.IsChecked = s.RecentHistoryEnabled;
+            SearchShowRelatedCheck.IsChecked = s.SearchShowRelatedResults;
             HistorySizeBox.Value = s.HistorySize;
             RememberPlacementCheck.IsChecked = s.RememberWindowPlacement;
             ReuseSingleInstanceCheck.IsChecked = s.ReuseSingleInstance;
@@ -264,12 +338,11 @@ public partial class SettingsWindow : Window
             SelectByText(ExplorerThemeCombo, string.IsNullOrWhiteSpace(s.ExplorerThemeChoice) ? "Follow Glide theme" : s.ExplorerThemeChoice);
             SelectByText(AccentCombo, s.AccentChoice);
             SelectByText(GlowCombo, string.IsNullOrWhiteSpace(s.GlowChoice) ? "Follow accent" : s.GlowChoice);
-            _workingCustomAccentHex = string.IsNullOrWhiteSpace(s.CustomAccentHex) ? "#38A9F5" : s.CustomAccentHex;
+            _workingCustomAccentHex = string.IsNullOrWhiteSpace(s.CustomAccentHex) ? Glide.App.ThemePalette.GlideBlue : s.CustomAccentHex;
             _workingCustomGlowHex = string.IsNullOrWhiteSpace(s.CustomGlowHex) ? _workingCustomAccentHex : s.CustomGlowHex;
-            _workingCustomMainBackgroundHex = string.IsNullOrWhiteSpace(s.CustomMainBackgroundHex) ? "#101214" : s.CustomMainBackgroundHex;
+            _workingCustomMainBackgroundHex = string.IsNullOrWhiteSpace(s.CustomMainBackgroundHex) ? Glide.App.ThemePalette.FallbackBackground : s.CustomMainBackgroundHex;
             SelectByText(MainBackgroundCombo, string.IsNullOrWhiteSpace(s.MainBackgroundChoice) ? "Follow theme" : s.MainBackgroundChoice);
             GlowIntensityBox.Value = Math.Clamp(s.GlowIntensityPercent, 0, 100);
-            HomeTipsCheck.IsChecked = s.ShowHomeTips;
             ShowRecentOnHomeCheck.IsChecked = s.ShowRecentOnHome;
             ConfirmDiscardSettingsCheck.IsChecked = s.ConfirmDiscardSettingsChanges;
             SelectByText(StartupActionCombo, string.Equals(s.StartupAction, "Explorer tab", StringComparison.OrdinalIgnoreCase) || string.IsNullOrWhiteSpace(s.StartupAction) ? "Welcome tab" : s.StartupAction);
@@ -319,6 +392,7 @@ public partial class SettingsWindow : Window
             AutoCenterWindowOnRestoreCheck.IsChecked = s.AutoCenterWindowOnRestore;
             SelectByText(FullscreenExitBehaviorCombo, string.IsNullOrWhiteSpace(s.FullscreenExitBehavior) ? "Restore size and location" : s.FullscreenExitBehavior);
             SelectByText(DefaultViewCombo, s.DefaultViewMode);
+            AnimateGifsCheck.IsChecked = s.AnimateGifs;
             PointerZoomCheck.IsChecked = s.PointerZoom;
             PreserveZoomCheck.IsChecked = s.PreserveManualZoomOnNavigate;
             ViewportZoomStepBox.Value = Math.Clamp(s.ViewportZoomStepPercent, 1, 100);
@@ -343,6 +417,10 @@ public partial class SettingsWindow : Window
             SelectByText(RightDragBehaviorCombo, string.IsNullOrWhiteSpace(s.RightDragBehavior) ? "Smart (pan image / move window)" : s.RightDragBehavior);
             SelectionClickZoomCheck.IsChecked = s.SelectionClickZoom;
             SelectionRightZoomCheck.IsChecked = s.SelectionRightClickZoomOut;
+            SelectionBufferCheck.IsChecked = s.SelectionBufferEnabled;
+            SelectionBufferWindowedBox.Value = Math.Clamp(s.SelectionBufferWindowedPercent, 0, 100);
+            SelectionBufferMaximizedBox.Value = Math.Clamp(s.SelectionBufferMaximizedPercent, 0, 100);
+            SelectionBufferAllModesCheck.IsChecked = s.SelectionBufferAllModes;
             ReverseSelectionZoomOutScaleCheck.IsChecked = s.ReverseSelectionZoomOutScale;
             BackgroundDragCheck.IsChecked = s.BackgroundDragWindow;
             CtrlWheelZoomCheck.IsChecked = s.CtrlWheelZoom;
@@ -357,6 +435,7 @@ public partial class SettingsWindow : Window
             SelectByText(InitialQualityCombo, s.InitialImageQuality);
             SelectByText(InteractivePanQualityCombo, string.IsNullOrWhiteSpace(s.InteractivePanQuality) ? "Full quality" : s.InteractivePanQuality);
             SpeedBoostCheck.IsChecked = s.SpeedBoostEnabled;
+            SelectByText(SpeedBoostTrayIconCombo, App.EffectiveTrayIconMode(s));
             StartWithWindowsInBackgroundCheck.IsChecked = s.StartWithWindowsInBackground;
             AdaptiveFastPreviewCheck.IsChecked = s.AdaptiveFastPreview;
             AdaptivePreviewDelayBox.Value = s.AdaptivePreviewDelayMs;
@@ -376,7 +455,8 @@ public partial class SettingsWindow : Window
             ProgressiveColorCheck.IsChecked = s.ProgressiveColorFirstPreview;
 
             StatusNavigationCheck.IsChecked = s.StatusShowNavigation;
-            SelectByText(StatusBarSizeCombo, string.IsNullOrWhiteSpace(s.StatusBarSize) ? "Medium" : s.StatusBarSize);
+            SelectByText(StatusBarSizeCombo, string.IsNullOrWhiteSpace(s.StatusBarSize) ? "Small" : s.StatusBarSize);
+            SelectByText(StatusBarAlignmentCombo, string.IsNullOrWhiteSpace(s.StatusBarAlignment) ? "Center" : s.StatusBarAlignment);
             StatusGlobalScaleBox.Value = Math.Clamp(s.StatusBarGlobalScalePercent, 60, 160);
             StatusAutoFitCheck.IsChecked = s.StatusBarAutoFit;
             StatusMaximizedBoostBox.Value = Math.Clamp(s.StatusBarMaximizedBoostPercent, 0, 30);
@@ -388,11 +468,13 @@ public partial class SettingsWindow : Window
             StatusInfoCheck.IsChecked = s.StatusShowInfo;
             StatusOptionsCheck.IsChecked = s.StatusShowOptions;
             StatusCloseCheck.IsChecked = s.StatusShowClose;
+            StatusCollapsedCornerCheck.IsChecked = s.StatusCollapsedToCorner;
             StatIndexCheck.IsChecked = s.StatusStatIndex;
             StatResolutionCheck.IsChecked = s.StatusStatResolution;
             StatZoomCheck.IsChecked = s.StatusStatZoom;
             StatFileSizeCheck.IsChecked = s.StatusStatFileSize;
             StatFormatCheck.IsChecked = s.StatusStatFormat;
+            StatFileNameCheck.IsChecked = s.StatusStatFileName;
 
             SlideshowIntervalBox.Value = s.SlideshowIntervalMs;
             SlideshowLoopCheck.IsChecked = s.SlideshowLoop;
@@ -402,6 +484,9 @@ public partial class SettingsWindow : Window
             SlideshowStartFullscreenCheck.IsChecked = s.SlideshowStartFullscreen;
             SlideshowPauseInactiveCheck.IsChecked = s.SlideshowPauseWhenInactive;
             SlideshowRightClickStopsCheck.IsChecked = s.SlideshowRightClickStops;
+            SelectByText(SlideshowLeftClickCombo, Glide.Core.Settings.SlideshowLeftClickActions.Normalize(s.SlideshowLeftClickAction));
+            SelectByText(NavigationSortOrderCombo, Glide.Core.ImageSortOrder.NormalizeDisplayName(s.NavigationSortOrder));
+            NavigationSortDescendingCheck.IsChecked = s.NavigationSortDescending;
             SlideshowQualityIndicatorCheck.IsChecked = s.SlideshowShowQualityIndicator;
 
             TabMinWidthBox.Value = s.TabMinWidth;
@@ -413,9 +498,13 @@ public partial class SettingsWindow : Window
             CloseEmptyAfterDetachCheck.IsChecked = s.CloseEmptyWindowAfterDetach;
             DetachedHomeTabCheck.IsChecked = s.DetachedWindowHomeTab;
             DoubleClickTabCloseCheck.IsChecked = s.DoubleClickTabCloses;
+            MiddleClickTabCloseCheck.IsChecked = s.MiddleClickTabCloses;
+            SelectByText(TabCycleOrderCombo, string.Equals(s.TabCycleOrder, "Most recently used", StringComparison.OrdinalIgnoreCase) ? "Most recently used" : "Tab order");
             SelectByText(LastTabBehaviorCombo, string.IsNullOrWhiteSpace(s.LastTabCloseBehavior) ? "Open home page" : s.LastTabCloseBehavior);
             ConfirmCloseMultipleTabsCheck.IsChecked = s.ConfirmCloseMultipleTabs;
             SelectByText(HomePageCombo, string.Equals(s.HomePageMode, "Browser page", StringComparison.OrdinalIgnoreCase) ? "Welcome page" : s.HomePageMode);
+            ShowFolderCounterCheck.IsChecked = s.ShowFolderCounter;
+            FolderCounterGrandparentCheck.IsChecked = s.FolderCounterIncludeGrandparent;
             FolderNavGroupCheck.IsChecked = s.FolderNavShowGroup;
             FolderNavPreviousCheck.IsChecked = s.FolderNavShowPrevious;
             FolderNavNextCheck.IsChecked = s.FolderNavShowNext;
@@ -475,6 +564,7 @@ public partial class SettingsWindow : Window
     {
         var state = _committed.CloneState();
         state.RecentHistoryEnabled = RecentHistoryCheck.IsChecked == true;
+        state.SearchShowRelatedResults = SearchShowRelatedCheck.IsChecked == true;
         state.HistorySize = (int)(HistorySizeBox.Value ?? 8);
         state.RememberWindowPlacement = RememberPlacementCheck.IsChecked == true;
         state.ReuseSingleInstance = ReuseSingleInstanceCheck.IsChecked == true;
@@ -502,7 +592,6 @@ public partial class SettingsWindow : Window
         state.CustomGlowHex = _workingCustomGlowHex;
         state.CustomMainBackgroundHex = _workingCustomMainBackgroundHex;
         state.GlowIntensityPercent = (int)(GlowIntensityBox.Value ?? 55);
-        state.ShowHomeTips = HomeTipsCheck.IsChecked == true;
         state.ShowRecentOnHome = ShowRecentOnHomeCheck.IsChecked == true;
         state.ConfirmDiscardSettingsChanges = ConfirmDiscardSettingsCheck.IsChecked == true;
         state.StartupAction = SelectedText(StartupActionCombo, "Welcome tab") is "Explorer tab" ? "Welcome tab" : SelectedText(StartupActionCombo, "Welcome tab");
@@ -537,6 +626,7 @@ public partial class SettingsWindow : Window
         state.AutoCenterWindowOnRestore = AutoCenterWindowOnRestoreCheck.IsChecked == true;
         state.FullscreenExitBehavior = SelectedText(FullscreenExitBehaviorCombo, "Restore size and location");
         state.DefaultViewMode = SelectedText(DefaultViewCombo, "Fit image");
+        state.AnimateGifs = AnimateGifsCheck.IsChecked == true;
         state.PointerZoom = PointerZoomCheck.IsChecked == true;
         state.PreserveManualZoomOnNavigate = PreserveZoomCheck.IsChecked == true;
         state.ViewportZoomStepPercent = (int)(ViewportZoomStepBox.Value ?? 10);
@@ -561,6 +651,10 @@ public partial class SettingsWindow : Window
         state.RightDragPan = !string.Equals(state.RightDragBehavior, "Do nothing", StringComparison.OrdinalIgnoreCase);
         state.SelectionClickZoom = SelectionClickZoomCheck.IsChecked == true;
         state.SelectionRightClickZoomOut = SelectionRightZoomCheck.IsChecked == true;
+        state.SelectionBufferEnabled = SelectionBufferCheck.IsChecked == true;
+        state.SelectionBufferWindowedPercent = Math.Clamp((int)(SelectionBufferWindowedBox.Value ?? 33), 0, 100);
+        state.SelectionBufferMaximizedPercent = Math.Clamp((int)(SelectionBufferMaximizedBox.Value ?? 100), 0, 100);
+        state.SelectionBufferAllModes = SelectionBufferAllModesCheck.IsChecked == true;
         state.ReverseSelectionZoomOutScale = ReverseSelectionZoomOutScaleCheck.IsChecked == true;
         state.BackgroundDragWindow = BackgroundDragCheck.IsChecked == true;
         state.CtrlWheelZoom = CtrlWheelZoomCheck.IsChecked == true;
@@ -573,6 +667,8 @@ public partial class SettingsWindow : Window
         state.PerformanceUserCustom = string.Equals(state.InitialImageQuality, "User custom", StringComparison.OrdinalIgnoreCase);
         state.InteractivePanQuality = SelectedText(InteractivePanQualityCombo, "Full quality");
         state.SpeedBoostEnabled = SpeedBoostCheck.IsChecked == true;
+        state.SpeedBoostTrayIcon = SelectedText(SpeedBoostTrayIconCombo, "Always");
+        state.ShowTrayIcon = !string.Equals(state.SpeedBoostTrayIcon, "Never", StringComparison.OrdinalIgnoreCase);
         state.StartWithWindowsInBackground = StartWithWindowsInBackgroundCheck.IsChecked == true;
         state.AdaptiveFastPreview = AdaptiveFastPreviewCheck.IsChecked == true;
         state.AdaptivePreviewDelayMs = (int)(AdaptivePreviewDelayBox.Value ?? 20);
@@ -592,7 +688,8 @@ public partial class SettingsWindow : Window
         state.ProgressiveColorFirstPreview = ProgressiveColorCheck.IsChecked == true;
 
         state.StatusShowNavigation = StatusNavigationCheck.IsChecked == true;
-        state.StatusBarSize = SelectedText(StatusBarSizeCombo, "Medium");
+        state.StatusBarSize = SelectedText(StatusBarSizeCombo, "Small");
+        state.StatusBarAlignment = SelectedText(StatusBarAlignmentCombo, "Center");
         state.StatusBarGlobalScalePercent = Math.Clamp((int)(StatusGlobalScaleBox.Value ?? 100), 60, 160);
         state.StatusBarAutoFit = StatusAutoFitCheck.IsChecked == true;
         state.StatusBarMaximizedBoostPercent = Math.Clamp((int)(StatusMaximizedBoostBox.Value ?? 15), 0, 30);
@@ -604,11 +701,13 @@ public partial class SettingsWindow : Window
         state.StatusShowInfo = StatusInfoCheck.IsChecked == true;
         state.StatusShowOptions = StatusOptionsCheck.IsChecked == true;
         state.StatusShowClose = StatusCloseCheck.IsChecked == true;
+        state.StatusCollapsedToCorner = StatusCollapsedCornerCheck.IsChecked == true;
         state.StatusStatIndex = StatIndexCheck.IsChecked == true;
         state.StatusStatResolution = StatResolutionCheck.IsChecked == true;
         state.StatusStatZoom = StatZoomCheck.IsChecked == true;
         state.StatusStatFileSize = StatFileSizeCheck.IsChecked == true;
         state.StatusStatFormat = StatFormatCheck.IsChecked == true;
+        state.StatusStatFileName = StatFileNameCheck.IsChecked == true;
 
         state.SlideshowIntervalMs = (int)(SlideshowIntervalBox.Value ?? 3000);
         state.SlideshowLoop = SlideshowLoopCheck.IsChecked == true;
@@ -618,6 +717,9 @@ public partial class SettingsWindow : Window
         state.SlideshowStartFullscreen = SlideshowStartFullscreenCheck.IsChecked == true;
         state.SlideshowPauseWhenInactive = SlideshowPauseInactiveCheck.IsChecked == true;
         state.SlideshowRightClickStops = SlideshowRightClickStopsCheck.IsChecked == true;
+        state.SlideshowLeftClickAction = Glide.Core.Settings.SlideshowLeftClickActions.Normalize(SelectedText(SlideshowLeftClickCombo, Glide.Core.Settings.SlideshowLeftClickActions.PauseResume));
+        state.NavigationSortOrder = Glide.Core.ImageSortOrder.NormalizeDisplayName(SelectedText(NavigationSortOrderCombo, Glide.Core.ImageSortOrder.NameDisplay));
+        state.NavigationSortDescending = NavigationSortDescendingCheck.IsChecked == true;
         state.SlideshowShowQualityIndicator = SlideshowQualityIndicatorCheck.IsChecked == true;
 
         state.TabMinWidth = (int)(TabMinWidthBox.Value ?? 120);
@@ -629,10 +731,14 @@ public partial class SettingsWindow : Window
         state.CloseEmptyWindowAfterDetach = CloseEmptyAfterDetachCheck.IsChecked == true;
         state.DetachedWindowHomeTab = DetachedHomeTabCheck.IsChecked == true;
         state.DoubleClickTabCloses = DoubleClickTabCloseCheck.IsChecked == true;
+        state.MiddleClickTabCloses = MiddleClickTabCloseCheck.IsChecked == true;
+        state.TabCycleOrder = SelectedText(TabCycleOrderCombo, "Tab order");
         state.LastTabCloseBehavior = SelectedText(LastTabBehaviorCombo, "Open home page");
         state.ConfirmCloseMultipleTabs = ConfirmCloseMultipleTabsCheck.IsChecked == true;
         if (state.ConfirmCloseMultipleTabs) state.RememberedMultiTabCloseChoice = "Ask";
         state.HomePageMode = SelectedText(HomePageCombo, "Welcome page") is "Browser page" ? "Welcome page" : SelectedText(HomePageCombo, "Welcome page");
+        state.ShowFolderCounter = ShowFolderCounterCheck.IsChecked == true;
+        state.FolderCounterIncludeGrandparent = FolderCounterGrandparentCheck.IsChecked == true;
         state.FolderNavShowGroup = FolderNavGroupCheck.IsChecked == true;
         state.FolderNavShowPrevious = FolderNavPreviousCheck.IsChecked == true;
         state.FolderNavShowNext = FolderNavNextCheck.IsChecked == true;
@@ -718,6 +824,33 @@ public partial class SettingsWindow : Window
 
         if (IsPerformanceTuningControl(sender)) DetectPerformanceProfileFromControls();
 
+        // Reading ~200 controls, applying the whole preview to the live app and re-diffing the state is
+        // heavy; doing it inside the click made the control look unresponsive. Let the control repaint
+        // first, and coalesce a burst of changes (spinner, typing) into one pass.
+        ScheduleLivePreview();
+    }
+
+    private bool _previewScheduled;
+    private bool _previewDisposed;
+
+    private void ScheduleLivePreview()
+    {
+        if (_previewScheduled) return;
+        _previewScheduled = true;
+        Dispatcher.UIThread.Post(RunLivePreview, DispatcherPriority.Background);
+    }
+
+    /// <summary>Runs any pending deferred preview now (before Apply/OK read state, and in tests).</summary>
+    internal void FlushPendingPreview()
+    {
+        if (_previewScheduled) RunLivePreview();
+    }
+
+    private void RunLivePreview()
+    {
+        if (!_previewScheduled) return;
+        _previewScheduled = false;
+        if (_previewDisposed || _loadingControls) return;
         var preview = ReadControls();
         _apply(preview, false);
         UpdateDirtyState(preview);
@@ -989,7 +1122,8 @@ public partial class SettingsWindow : Window
     private void ShowCategory(string key, bool clearSearch)
     {
         if (!_panels.ContainsKey(key)) return;
-        _activeCategory = key;
+        var group = GroupOf(key);
+        _activeCategory = group.Key;
         if (clearSearch && !string.IsNullOrEmpty(SearchBox.Text))
         {
             _loadingControls = true;
@@ -997,34 +1131,34 @@ public partial class SettingsWindow : Window
             _loadingControls = false;
         }
         SearchPanel.IsVisible = false;
-        foreach (var pair in _panels) pair.Value.IsVisible = pair.Key == key;
+        foreach (var pair in _panels) pair.Value.IsVisible = group.Members.Contains(pair.Key, StringComparer.OrdinalIgnoreCase);
+        foreach (var pair in _panelHeadings) pair.Value.IsVisible = group.Members.Contains(pair.Key, StringComparer.OrdinalIgnoreCase);
         foreach (var child in NavigationRail.Children.OfType<Button>())
         {
             child.Classes.Remove("selected");
-            if (Equals(child.Tag, key)) child.Classes.Add("selected");
+            if (Equals(child.Tag, group.Key)) child.Classes.Add("selected");
         }
 
-        PageTitle.Text = DisplayCategory(key);
-        PageSubtitle.Text = key switch
-        {
-            "General" => "Application behavior, history, navigation and startup/new-tab preferences",
-            "Appearance" => "Themes, colours, sizing and visual styling without changing interaction behavior",
-            "Viewing" => "Image presentation, viewport scaling, zoom behavior, scrollbars, text overlay HUD and overlays",
-            "Interface" => "Window behavior, folder traversal, tab layout, caption controls, navigation buttons and window interactions",
-            "Mouse" => "Mouse gestures, selection, zoom, panning and fullscreen interaction",
-            "Performance" => "Cold-start, decode quality, prefetch, refinement and memory controls",
-            "Status" => "Choose the controls and information shown on Glide's status surface",
-            "Slideshow" => "Timing, looping, shuffling and cross-folder slideshow behavior",
-            "Hotkeys" => "Search, sort and customize every keyboard shortcut",
-            "Tabs" => "Tab sizing, detach/attach behavior and closed-tab history",
-            "Overlays" => "Overlay controls, opacity, remembered folders and Window-in-Window behavior",
-            "Profiles" => "Whole-program presets, dynamic named profiles and portable import/export",
-            "Windows" => "Native Windows integration and Open With registration",
-            _ => "Diagnostics and developer-only troubleshooting tools"
-        };
-        if (key == "Hotkeys") { _hotkeyRowsBuilt = true; BuildHotkeyRows(); }
-        if (key == "Mouse" && !_gestureMatrixBuilt) { BuildGestureMatrix(); LoadGestureEditorsFromWorkingMap(); }
+        PageTitle.Text = group.Title;
+        PageSubtitle.Text = group.Subtitle;
+        if (group.Members.Contains("Hotkeys")) { _hotkeyRowsBuilt = true; BuildHotkeyRows(HotkeyFilterBox?.Text); }
+        if (group.Members.Contains("Mouse") && !_gestureMatrixBuilt) { BuildGestureMatrix(); LoadGestureEditorsFromWorkingMap(); }
         ContentScroll.Offset = new Vector(ContentScroll.Offset.X, 0);
+        // Deep links (for example "Open" next to a shortcut result) land on their own section.
+        if (!string.Equals(key, group.Key, StringComparison.OrdinalIgnoreCase) && _panelHeadings.TryGetValue(key, out var heading))
+            Dispatcher.UIThread.Post(() => heading.BringIntoView(), DispatcherPriority.Loaded);
+        else
+        {
+            // Pages built lazily on first visit (the Mouse gesture matrix, the hotkey rows) grow after
+            // this call; re-pin the page to the top once that layout has settled so the first visit
+            // does not open part-way down.
+            var category = _activeCategory;
+            Dispatcher.UIThread.Post(() =>
+            {
+                if (string.Equals(category, _activeCategory, StringComparison.Ordinal) && !SearchPanel.IsVisible)
+                    ContentScroll.Offset = new Vector(ContentScroll.Offset.X, 0);
+            }, DispatcherPriority.Loaded);
+        }
     }
 
     private static string DisplayCategory(string key) => key switch
@@ -1099,12 +1233,30 @@ public partial class SettingsWindow : Window
           .Append(setting.Category).Append(' ')
           .Append(setting.Description);
         foreach (var term in setting.SearchTerms) sb.Append(' ').Append(term);
-        if (_settingControls.TryGetValue(setting.Id, out var control)) AppendControlSearchText(sb, control);
+        if (_settingControls.TryGetValue(setting.Id, out var control))
+        {
+            AppendControlSearchText(sb, control);
+            AppendRowSearchContext(sb, control);
+        }
+        // Every advanced gesture matrix slot is fully searchable: index its slot label/context,
+        // its default behaviour and every action label offered for that slot (merged wheel pairs
+        // included), even before the lazy matrix editors have been built.
+        if (setting.Id.StartsWith("gesture.", StringComparison.OrdinalIgnoreCase))
+        {
+            var slotId = setting.Id["gesture.".Length..];
+            var slot = GestureCatalog.Slots.FirstOrDefault(x => string.Equals(x.Id, slotId, StringComparison.OrdinalIgnoreCase));
+            if (slot is not null)
+            {
+                sb.Append(' ').Append(slot.Id).Append(' ').Append(slot.Label).Append(' ').Append(slot.Context);
+                if (GestureCatalog.DefaultBehavior.TryGetValue(slot.Id, out var behaviour)) sb.Append(' ').Append(behaviour);
+                foreach (var action in GestureCatalog.ActionsForSlot(slot.Id)) sb.Append(' ').Append(action.Label).Append(' ').Append(action.Id);
+            }
+        }
         // Visible mirror controls write the same value but carry different on-screen wording.
         switch (setting.Id)
         {
-            case "status.visible": AppendControlSearchText(sb, StatusVisibleMirrorCheck); break;
-            case "status.hoverWhenClosed": AppendControlSearchText(sb, StatusHoverMirrorCheck); break;
+            case "status.visible": AppendControlSearchText(sb, StatusVisibleMirrorCheck); AppendRowSearchContext(sb, StatusVisibleMirrorCheck); break;
+            case "status.hoverWhenClosed": AppendControlSearchText(sb, StatusHoverMirrorCheck); AppendRowSearchContext(sb, StatusHoverMirrorCheck); break;
         }
         cached = sb.ToString();
         _searchHaystackCache[setting.Id] = cached;
@@ -1140,9 +1292,120 @@ public partial class SettingsWindow : Window
         }
     }
 
-    private void RunSearchRebuild(string query)
+    /// <summary>
+    /// Everything a user can read around a setting's control, so search matches what is on screen and
+    /// not just the control itself: the other text and tooltips anywhere in the control's row (labels
+    /// carrying their own tooltip, trailing hints), the options inside a drop-down, a note line placed
+    /// directly under the row, and the title and description of the section the row belongs to.
+    /// </summary>
+    private void AppendRowSearchContext(StringBuilder builder, Control control)
+    {
+        static void AddText(StringBuilder b, string? text)
+        {
+            if (!string.IsNullOrWhiteSpace(text)) b.Append(' ').Append(text);
+        }
+
+        static bool IsSectionLabel(Control c) => c is TextBlock t && t.Classes.Contains("settingsSectionLabel");
+        static bool IsNote(Control c) => c is TextBlock t && t.Classes.Contains("phaseNote");
+
+        static void AddControlTexts(StringBuilder b, Control c)
+        {
+            if (ToolTip.GetTip(c) is string tip) AddText(b, tip);
+            switch (c)
+            {
+                case TextBlock text: AddText(b, text.Text); break;
+                case ContentControl { Content: string content }: AddText(b, content); break;
+            }
+            if (c is ItemsControl items)
+            {
+                foreach (var item in items.Items)
+                {
+                    if (item is string option) AddText(b, option);
+                    else if (item is ContentControl { Content: string optionContent }) AddText(b, optionContent);
+                }
+            }
+        }
+
+        // The row is the direct child of the page panel (the panel that also holds section titles).
+        Control row = control;
+        for (var depth = 0; depth < 8 && row.GetVisualParent() is Panel parent; depth++)
+        {
+            // The row is a direct child of its page panel; never climb into the page itself, or a page
+            // without section labels would index its whole text into every one of its settings.
+            if (parent.Children.Any(IsSectionLabel) || _panels.Values.Any(p => ReferenceEquals(p, parent))) break;
+            row = parent;
+        }
+
+        AddControlTexts(builder, row);
+        foreach (var descendant in Avalonia.LogicalTree.LogicalExtensions.GetLogicalDescendants(row).OfType<Control>())
+            AddControlTexts(builder, descendant);
+
+        if (row.GetVisualParent() is not Panel page) return;
+        var children = page.Children;
+        var index = children.IndexOf(row);
+        if (index < 0) return;
+
+        // A note placed directly under the row describes it.
+        for (var i = index + 1; i < children.Count && IsNote(children[i]); i++) AddControlTexts(builder, children[i]);
+
+        // The section's title and its description notes apply to every setting in the section.
+        for (var i = index - 1; i >= 0; i--)
+        {
+            if (!IsSectionLabel(children[i])) continue;
+            AddControlTexts(builder, children[i]);
+            for (var n = i + 1; n < children.Count && IsNote(children[n]); n++) AddControlTexts(builder, children[n]);
+            break;
+        }
+    }
+
+    private int _searchRenderVersion;
+
+    /// <summary>Synchronous rebuild: every matching card exists when this returns (diagnostics, tests).</summary>
+    private void RunSearchRebuild(string query) => RunSearchRebuildCore(query, progressive: false);
+
+    private readonly Dictionary<string, string> _searchDirectCache = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The words a user actually reads as this setting's name: its catalogue title plus the on-screen
+    /// label of its editor. Everything else in <see cref="SearchHaystackFor"/> (descriptions, tooltips,
+    /// search terms, section text) is only a related match.
+    /// </summary>
+    private string SearchDirectHaystackFor(SettingDefinition setting)
+    {
+        if (_searchDirectCache.TryGetValue(setting.Id, out var cached)) return cached;
+        var sb = new StringBuilder(setting.Label);
+        void Wording(Control? control)
+        {
+            if (control is null) return;
+            if (control is ContentControl { Content: string content } && !string.IsNullOrWhiteSpace(content))
+            {
+                sb.Append(' ').Append(content);
+                return;
+            }
+            if (control.GetVisualParent() is not Panel parent) return;
+            var siblings = parent.Children;
+            for (var i = siblings.IndexOf(control) - 1; i >= 0; i--)
+            {
+                if (siblings[i] is TextBlock label && !string.IsNullOrWhiteSpace(label.Text)) { sb.Append(' ').Append(label.Text); return; }
+                if (siblings[i] is not TextBlock) return;
+            }
+        }
+        if (_settingControls.TryGetValue(setting.Id, out var editor)) Wording(editor);
+        switch (setting.Id)
+        {
+            case "status.visible": Wording(StatusVisibleMirrorCheck); break;
+            case "status.hoverWhenClosed": Wording(StatusHoverMirrorCheck); break;
+        }
+        cached = sb.ToString();
+        _searchDirectCache[setting.Id] = cached;
+        return cached;
+    }
+
+    private void RunSearchRebuildCore(string query, bool progressive)
     {
         if (_loadingControls || string.IsNullOrEmpty(query)) return;
+        // Gesture slot editors are lazy; build them so search results can proxy the real combos.
+        if (!_gestureMatrixBuilt) { BuildGestureMatrix(); LoadGestureEditorsFromWorkingMap(); }
 
         foreach (var panel in _panels.Values) panel.IsVisible = false;
         foreach (var child in NavigationRail.Children.OfType<Button>()) child.Classes.Remove("selected");
@@ -1152,14 +1415,40 @@ public partial class SettingsWindow : Window
         var categoryFilter = ActiveSearchCategory();
         var allCategories = string.Equals(categoryFilter, "All categories", StringComparison.OrdinalIgnoreCase);
         var matches = SettingsCatalog.All.Where(setting =>
-            (allCategories || string.Equals(setting.Category, categoryFilter, StringComparison.OrdinalIgnoreCase)) &&
+            (allCategories || string.Equals(GroupTitleForCatalogCategory(setting.Category), categoryFilter, StringComparison.OrdinalIgnoreCase)) &&
             words.All(word => SearchHaystackFor(setting).Contains(word, StringComparison.OrdinalIgnoreCase))).ToList();
+        // Title matches first; settings that match only through a description, tooltip or search term
+        // are "related" and listed after them (and can be hidden with the Settings option).
+        var direct = matches.Where(setting => words.All(word => SearchDirectHaystackFor(setting).Contains(word, StringComparison.OrdinalIgnoreCase))).ToList();
+        var related = matches.Except(direct).ToList();
+        var showRelated = SearchShowRelatedCheck.IsChecked == true;
+        if (!showRelated) matches = direct;
 
         // Legacy Settings search is not a read-only index: the user can change matching values here.
-        foreach (var setting in matches)
-            SearchPanel.Children.Add(BuildSearchResult(setting));
+        // Each result is a live editor, so cards are queued and built in small batches (see AddBatch).
+        var builders = new List<Func<Control>>();
+        foreach (var setting in direct)
+        {
+            var captured = setting;
+            builders.Add(() => BuildSearchResult(captured));
+        }
+        if (showRelated && related.Count > 0)
+        {
+            builders.Add(() => new TextBlock
+            {
+                Text = "Related settings",
+                FontSize = 15,
+                FontWeight = FontWeight.SemiBold,
+                Margin = new Thickness(2, 10, 0, 1)
+            });
+            foreach (var setting in related)
+            {
+                var captured = setting;
+                builders.Add(() => BuildSearchResult(captured));
+            }
+        }
 
-        var includeHotkeys = allCategories || string.Equals(categoryFilter, "Hotkeys", StringComparison.OrdinalIgnoreCase);
+        var includeHotkeys = allCategories || string.Equals(categoryFilter, GroupOf("Hotkeys").Title, StringComparison.OrdinalIgnoreCase);
         var hotkeyMatches = includeHotkeys ? HotkeyCatalog.All.Where(h => words.All(word =>
             h.Label.Contains(word, StringComparison.OrdinalIgnoreCase) ||
             h.Category.Contains(word, StringComparison.OrdinalIgnoreCase) ||
@@ -1169,18 +1458,34 @@ public partial class SettingsWindow : Window
             _workingHotkeys.GetValueOrDefault(h.Id, EmptyShortcutList).Any(k => k.Contains(word, StringComparison.OrdinalIgnoreCase)))).ToList() : new List<HotkeyActionDefinition>();
         if (hotkeyMatches.Count > 0)
         {
-            SearchPanel.Children.Add(new TextBlock
+            builders.Add(() => new TextBlock
             {
                 Text = "Hotkeys",
                 FontSize = 15,
                 FontWeight = FontWeight.SemiBold,
                 Margin = new Thickness(2, 7, 0, 1)
             });
-            foreach (var action in hotkeyMatches.Take(18)) SearchPanel.Children.Add(BuildHotkeySearchResult(action));
+            foreach (var action in hotkeyMatches.Take(18))
+            {
+                var captured = action;
+                builders.Add(() => BuildHotkeySearchResult(captured));
+            }
         }
 
         if (matches.Count == 0 && hotkeyMatches.Count == 0)
             SearchPanel.Children.Add(new TextBlock { Text = "No matching Glide setting.", Margin = new Thickness(6, 12), Foreground = SearchMutedBrush() });
+
+        // A newer query bumps the version, which silently ends any batch still waiting for its turn.
+        var version = ++_searchRenderVersion;
+        void AddBatch(int from)
+        {
+            if (version != _searchRenderVersion) return;
+            var to = progressive ? Math.Min(builders.Count, from + 4) : builders.Count;
+            for (var i = from; i < to; i++) SearchPanel.Children.Add(builders[i]());
+            if (to < builders.Count)
+                Dispatcher.UIThread.Post(() => AddBatch(to), DispatcherPriority.Background);
+        }
+        AddBatch(0);
 
         SearchPanel.IsVisible = true;
         PageTitle.Text = "Search results";
@@ -1346,6 +1651,11 @@ public partial class SettingsWindow : Window
             b.Click += (_, _) => click(b);
             return b;
         }
+        if ((id ?? "").StartsWith("gesture.", StringComparison.OrdinalIgnoreCase))
+        {
+            yield return B("Open", b => ShowCategory("Mouse", clearSearch: true));
+            yield break;
+        }
         switch (id)
         {
             case "windows.external1": yield return B("Browse...", b => { b.Tag = "1"; BrowseExternalClicked(b, new RoutedEventArgs()); }); break;
@@ -1480,8 +1790,13 @@ public partial class SettingsWindow : Window
                 HorizontalAlignment = HorizontalAlignment.Left,
                 Tag = slot.Id
             };
-            foreach (var action in GestureCatalog.Actions)
-                combo.Items.Add(new ComboBoxItem { Content = action.Label, Tag = action.Id });
+            foreach (var action in GestureCatalog.ActionsForSlot(slot.Id))
+            {
+                var label = action.Id == GestureCatalog.Default && GestureCatalog.DefaultBehavior.TryGetValue(slot.Id, out var behavior)
+                    ? $"Default ({behavior})"
+                    : action.Label;
+                combo.Items.Add(new ComboBoxItem { Content = label, Tag = action.Id });
+            }
             combo.SelectionChanged += GestureEditorSelectionChanged;
             ToolTip.SetTip(combo, slot.Label);
             ToolTip.SetShowDelay(combo, 650);
@@ -1493,6 +1808,11 @@ public partial class SettingsWindow : Window
             row.Children.Add(combo);
             GestureMatrixHost.Children.Add(row);
         }
+        // Register every gesture slot editor for Settings search (see BuildSettingControlMap).
+        foreach (var slot in GestureCatalog.Slots)
+            if (_gestureEditors.TryGetValue(slot.Id, out var gestureEditor)) _settingControls["gesture." + slot.Id] = gestureEditor;
+        _searchHaystackCache.Clear();
+        _searchDirectCache.Clear();
     }
 
     private void LoadGestureEditorsFromWorkingMap()
@@ -1548,50 +1868,57 @@ public partial class SettingsWindow : Window
     private void BuildSettingControlMap()
     {
         void M(string id, Control control) => _settingControls[id] = control;
-        M("general.recentHistory", RecentHistoryCheck); M("general.historySize", HistorySizeBox); M("windows.rememberPlacement", RememberPlacementCheck); M("general.openFileDefaultDirectory", OpenFileDefaultDirectoryBox);
+        M("general.recentHistory", RecentHistoryCheck); M("search.showRelatedResults", SearchShowRelatedCheck); M("general.historySize", HistorySizeBox); M("windows.rememberPlacement", RememberPlacementCheck); M("general.openFileDefaultDirectory", OpenFileDefaultDirectoryBox);
         M("general.singleInstance", ReuseSingleInstanceCheck); M("navigation.siblingFolders", ContinueSiblingFoldersCheck); M("navigation.hierarchicalFolders", HierarchicalFolderTraversalCheck); M("navigation.confirmHierarchicalBoundary", ConfirmHierarchicalFolderTraversalCheck); M("navigation.hierarchicalPreviousEntry", HierarchicalPreviousFolderEntryCombo); M("navigation.rateLimitMs", NavigationRateLimitMsBox); M("navigation.rateLimitInput", NavigationRateLimitInputCombo); M("navigation.rateLimitIndicator", NavigationRateLimitIndicatorCheck); M("navigation.rateLimitIndicatorPosition", NavigationRateLimitIndicatorPositionCombo); M("navigation.rateLimitWindowed", NavigationRateLimitWindowedCheck); M("navigation.rateLimitFullscreen", NavigationRateLimitFullscreenCheck); M("navigation.rateLimitSlideshow", NavigationRateLimitSlideshowCheck); M("general.lastOpenLocation", RememberLastOpenCheck); M("general.newExplorerTabLastLocation", NewExplorerTabLastLocationCheck); M("general.newExplorerTabDefaultDirectory", NewExplorerTabDefaultDirectoryBox);
         M("appearance.theme", ThemeCombo); M("appearance.explorerTheme", ExplorerThemeCombo); M("appearance.accent", AccentCombo); M("appearance.glowColor", GlowCombo); M("appearance.background", MainBackgroundCombo); M("appearance.glowIntensity", GlowIntensityBox);
-        M("appearance.homeTips", HomeTipsCheck); M("general.showRecentOnHome", ShowRecentOnHomeCheck); M("general.confirmDiscardSettings", ConfirmDiscardSettingsCheck);
+        M("general.showRecentOnHome", ShowRecentOnHomeCheck); M("general.confirmDiscardSettings", ConfirmDiscardSettingsCheck);
         M("general.startupAction", StartupActionCombo); M("general.startupCustomPath", StartupCustomPathBox); M("general.newTabAction", NewTabActionCombo); M("general.newTabCustomPath", NewTabCustomPathBox); M("titlebar.customize", CustomizeTitleBarButton); M("escape.resetRememberedClose", ResetEscChoiceButton);
         M("status.visible", StatusCheck); M("status.hoverWhenClosed", StatusHoverWhenClosedCheck); M("view.scrollbars", ShowScrollbarsCheck); M("window.fullPathTitle", FullPathTitleCheck); M("fullscreen.hideCursor", HideCursorFullscreenCheck); M("fullscreen.hideCursorDelay", FullscreenHideCursorDelayBox);
         M("fullscreen.autoHideChrome", AutoHideFullscreenChromeCheck); M("fullscreen.keepTabBarOpen", FullscreenKeepTabBarOpenCheck); M("tabs.enabled", TabsCheck); M("tabs.navigateToFolderBehavior", NavigateToFolderBehaviorCombo); M("tabs.showBackButton", TabBarBackButtonCheck); M("tabs.showForwardButton", TabBarForwardButtonCheck); M("fullscreen.statusAlways", FullscreenStatusAlwaysCheck);
         M("caption.windowedMinimize", CaptionWindowedMinimizeCombo); M("caption.windowedMaximize", CaptionWindowedMaximizeCombo); M("caption.windowedClose", CaptionWindowedCloseCombo);
         M("caption.fullscreenMinimize", CaptionFullscreenMinimizeCombo); M("caption.fullscreenMaximize", CaptionFullscreenMaximizeCombo); M("caption.fullscreenClose", CaptionFullscreenCloseCombo);
-        M("windows.alwaysOnTop", AlwaysOnTopCheck); M("windows.alwaysOnTopMode", AlwaysOnTopModeCombo); M("fullscreen.exitBehavior", FullscreenExitBehaviorCombo); M("windows.sameImageBehavior", SameImageBehaviorCombo); M("window.centerOnDisplay", AutoCenterWindowOnRestoreCheck); M("view.defaultMode", DefaultViewCombo); M("view.pointerZoom", PointerZoomCheck); M("view.keepZoom", PreserveZoomCheck);
+        M("windows.alwaysOnTop", AlwaysOnTopCheck); M("windows.alwaysOnTopMode", AlwaysOnTopModeCombo); M("fullscreen.exitBehavior", FullscreenExitBehaviorCombo); M("windows.sameImageBehavior", SameImageBehaviorCombo); M("window.centerOnDisplay", AutoCenterWindowOnRestoreCheck); M("view.defaultMode", DefaultViewCombo); M("view.animateGifs", AnimateGifsCheck); M("view.pointerZoom", PointerZoomCheck); M("view.keepZoom", PreserveZoomCheck);
         M("view.zoomStep", ViewportZoomStepBox); M("view.upscaleSmallImages", UpscaleSmallImagesCheck); M("view.subpixelRendering", SubpixelRenderingCheck); M("view.showLoadingIndicator", ShowLoadingIndicatorCheck);
         M("keyboard.tabFocusNavigation", TabFocusNavigationCheck);
         M("escape.stopSlideshow", EscStopsSlideshowCheck); M("escape.exitFullscreen", EscExitsFullscreenCheck); M("escape.confirmWindowedClose", EscWindowedConfirmCheck);
         M("mouse.doubleClickFullscreen", DoubleClickFullscreenCheck); M("mouse.doubleClickExitFullscreen", DoubleClickExitFullscreenCheck); M("mouse.fullscreenClicks", FullscreenClicksCheck);
         M("mouse.windowedWheelZoom", WindowedWheelZoomCheck); M("mouse.invertWheel", InvertWheelCheck); M("mouse.leftDrag", LeftDragModeCombo); M("mouse.leftWindowDrag", LeftWindowDragBehaviorCombo); M("mouse.rightDragPan", RightDragBehaviorCombo);
+        M("selection.buffer", SelectionBufferCheck); M("selection.bufferWindowedPercent", SelectionBufferWindowedBox);
+        M("selection.bufferMaximizedPercent", SelectionBufferMaximizedBox); M("selection.bufferAllModes", SelectionBufferAllModesCheck);
         M("selection.clickZoom", SelectionClickZoomCheck); M("selection.rightClickZoomOut", SelectionRightZoomCheck); M("developer.reverseSelectionZoomOut", ReverseSelectionZoomOutScaleCheck); M("mouse.backgroundWindowDrag", BackgroundDragCheck);
         M("mouse.ctrlWheelZoom", CtrlWheelZoomCheck); M("mouse.middleDragPan", MiddleDragPanCheck);
         M("performance.initialQuality", InitialQualityCombo); M("performance.saveCustomPreset", SaveUserPerformancePresetButton); M("performance.adaptivePreview", AdaptiveFastPreviewCheck); M("performance.previewDelay", AdaptivePreviewDelayBox);
         M("performance.interactivePanQuality", InteractivePanQualityCombo);
         M("performance.sequentialReads", SequentialReadCheck); M("performance.prefetch", PrefetchCheck); M("performance.backgroundRefinement", BackgroundRefinementCheck);
-        M("performance.speedBoost", SpeedBoostCheck); M("performance.startWithWindowsInBackground", StartWithWindowsInBackgroundCheck);
+        M("performance.speedBoost", SpeedBoostCheck); M("performance.speedBoostTrayIcon", SpeedBoostTrayIconCombo); M("performance.startWithWindowsInBackground", StartWithWindowsInBackgroundCheck);
         M("performance.purgeOnMinimize", PurgeCacheCheck); M("developer.startupDiagnostics", StartupDiagnosticsCheck); M("performance.prefetchDepth", PrefetchDepthBox);
         M("performance.prefetchSiblingFolders", PrefetchSiblingFoldersCheck); M("performance.prefetchSiblingFolderCount", PrefetchSiblingFolderCountBox);
         M("performance.cacheItems", CacheItemsBox); M("performance.compressedCacheMb", CompressedCacheMbBox); M("performance.decodedCacheMb", DecodedCacheMbBox); M("performance.rapidPreviewSize", RapidPreviewBox); M("performance.rapidBrowsePreviewSize", RapidBrowsePreviewBox); M("performance.progressiveColor", ProgressiveColorCheck);
         M("overlay.wholeAppAlwaysStart", WholeAppOverlayAlwaysStartCheck); M("overlay.wholeAppWindowedInteractions", WholeAppOverlayWindowedInteractionsCheck);
-        M("status.size", StatusBarSizeCombo); M("status.navigation", StatusNavigationCheck); M("status.zoom", StatusZoomCheck); M("status.slideshow", StatusSlideshowCheck); M("status.fit", StatusFitCheck);
+        M("status.size", StatusBarSizeCombo); M("status.alignment", StatusBarAlignmentCombo); M("status.navigation", StatusNavigationCheck); M("status.zoom", StatusZoomCheck); M("status.slideshow", StatusSlideshowCheck); M("status.fit", StatusFitCheck);
         M("status.fitScope", StatusFitScopeCombo);
         M("status.autoResize", StatusAutoFitCheck);
-        M("status.info", StatusInfoCheck); M("status.options", StatusOptionsCheck); M("status.close", StatusCloseCheck); M("status.statIndex", StatIndexCheck);
-        M("status.statResolution", StatResolutionCheck); M("status.statZoom", StatZoomCheck); M("status.statFileSize", StatFileSizeCheck); M("status.statFormat", StatFormatCheck);
-        M("slideshow.interval", SlideshowIntervalBox); M("slideshow.loop", SlideshowLoopCheck); M("slideshow.rightClickStops", SlideshowRightClickStopsCheck); M("slideshow.showQualityIndicator", SlideshowQualityIndicatorCheck); M("slideshow.crossFolders", SlideshowCrossFoldersCheck); M("slideshow.shuffle", SlideshowShuffleCheck);
+        M("status.info", StatusInfoCheck); M("status.options", StatusOptionsCheck); M("status.close", StatusCloseCheck); M("status.collapsedCorner", StatusCollapsedCornerCheck); M("status.statIndex", StatIndexCheck);
+        M("status.statResolution", StatResolutionCheck); M("status.statZoom", StatZoomCheck); M("status.statFileSize", StatFileSizeCheck); M("status.statFormat", StatFormatCheck); M("status.statFileName", StatFileNameCheck);
+        M("slideshow.interval", SlideshowIntervalBox); M("slideshow.loop", SlideshowLoopCheck); M("slideshow.rightClickStops", SlideshowRightClickStopsCheck); M("slideshow.leftClickAction", SlideshowLeftClickCombo); M("navigation.sortOrder", NavigationSortOrderCombo); M("navigation.sortDescending", NavigationSortDescendingCheck); M("slideshow.showQualityIndicator", SlideshowQualityIndicatorCheck); M("slideshow.crossFolders", SlideshowCrossFoldersCheck); M("slideshow.shuffle", SlideshowShuffleCheck);
         M("slideshow.direction", SlideshowDirectionCombo); M("slideshow.startFullscreen", SlideshowStartFullscreenCheck); M("slideshow.pauseInactive", SlideshowPauseInactiveCheck);
         M("tabs.minWidth", TabMinWidthBox); M("tabs.maxWidth", TabMaxWidthBox); M("tabs.overflowArrows", TabOverflowArrowsCheck); M("tabs.detach", TabDetachCheck); M("tabs.attach", TabAttachCheck); M("tabs.closedHistory", ClosedHistoryBox);
-        M("tabs.closeEmptyAfterDetach", CloseEmptyAfterDetachCheck); M("tabs.detachedHome", DetachedHomeTabCheck); M("tabs.doubleClickClose", DoubleClickTabCloseCheck);
+        M("tabs.closeEmptyAfterDetach", CloseEmptyAfterDetachCheck); M("tabs.detachedHome", DetachedHomeTabCheck); M("tabs.doubleClickClose", DoubleClickTabCloseCheck); M("tabs.middleClickClose", MiddleClickTabCloseCheck); M("tabs.cycleOrder", TabCycleOrderCombo);
         M("tabs.lastTabBehavior", LastTabBehaviorCombo); M("tabs.confirmCloseMultiple", ConfirmCloseMultipleTabsCheck); M("tabs.homePage", HomePageCombo); M("folderNav.group", FolderNavGroupCheck); M("folderNav.previous", FolderNavPreviousCheck);
+        M("folderNav.showCounter", ShowFolderCounterCheck); M("folderNav.counterGrandparent", FolderCounterGrandparentCheck);
         M("folderNav.next", FolderNavNextCheck); M("folderNav.explore", FolderNavExploreCheck); M("folderNav.skipEmpty", FolderNavSkipEmptyCheck); M("folderNav.includeHidden", FolderNavIncludeHiddenCheck); M("folderNav.wrap", FolderNavWrapCheck); M("folderNav.openFirst", FolderNavFirstImageCheck); M("folderNav.order", FolderNavOrderCombo);
         M("overlay.pictureCounter", PictureCounterCheck); M("overlay.pictureTemplate", PictureTemplateBox); M("overlay.pictureFontSize", PictureFontSizeBox);
         M("overlay.pictureBold", PictureBoldCheck); M("overlay.pictureOpacity", PictureOpacityBox); M("overlay.picturePosition", PicturePositionCombo);
         M("overlay.pictureColor", PictureColorCombo); M("overlay.pictureShadow", PictureShadowCheck); M("overlay.defaultOpacity", OverlayOpacityBox); M("overlay.zoomStep", OverlayZoomStepBox);
         M("overlay.rememberFolder", OverlayRememberFolderCheck); M("overlay.scaleWithWindow", OverlayScaleWithWindowCheck); M("overlay.animationRegion", OverlayAnimationRegionCombo); M("overlay.animationSpeedDipsPerSecond", OverlayAnimationSpeedBox); M("overlay.animationTurnIntervalMs", OverlayAnimationTurnIntervalBox); M("overlay.animationTurnAngleDegrees", OverlayAnimationTurnAngleBox); M("overlay.animationPauseWhileInteracting", OverlayAnimationPauseCheck); M("overlay.animationAvoidOverlap", OverlayAnimationAvoidOverlapCheck); M("overlay.animationRefreshRateHz", OverlayAnimationRefreshRateCombo); M("overlay.defaultDirectory", OverlayDefaultDirectoryBox); M("profiles.defaultDirectory", ProfileDefaultDirectoryBox); M("overlay.persistSession", OverlayPersistSessionCheck); M("overlay.keyboardZoom", OverlayKeyboardZoomCheck); M("overlay.wheelZoom", OverlayWheelZoomCheck); M("overlay.highlightSelected", OverlayHighlightCheck); M("overlay.rememberZoom", OverlayRememberZoomCheck); M("overlay.rightDragPan", OverlayRightDragCheck);
         M("windows.externalOpenBehavior", ExternalOpenBehaviorCombo); M("windows.external1", External1Box); M("windows.external2", External2Box); M("windows.external3", External3Box);
-        M("windows.explorerThumbnails", ExplorerThumbnailsCheck); M("windows.thumbnailMode", ThumbnailModeCombo); M("windows.thumbnailQuality", ThumbnailQualityCombo); M("windows.thumbnailPreferEmbedded", ThumbnailPreferEmbeddedCheck);
+        M("windows.explorerThumbnails", ExplorerThumbnailsCheck); M("windows.thumbnailMode", ThumbnailModeCombo); M("windows.thumbnailQuality", ThumbnailQualityCombo); M("windows.thumbnailMaxSource", ThumbnailMaxSourceCombo); M("windows.thumbnailPreferEmbedded", ThumbnailPreferEmbeddedCheck);
         M("hotkeys.preset", HotkeyPresetCombo); M("profiles.presets", PresetCombo);
         M("developer.statusGlobalScale", StatusGlobalScaleBox); M("developer.statusMaximizedBoost", StatusMaximizedBoostBox); M("developer.overlayAbsoluteCoordinates", OverlayAbsoluteCoordinatesCheck);
+        // Advanced gesture matrix editors are built lazily (BuildGestureMatrix) to keep Settings
+        // opening fast; that builder registers each slot editor here under "gesture.<slotId>".
+        foreach (var slot in GestureCatalog.Slots)
+            if (_gestureEditors.TryGetValue(slot.Id, out var gestureEditor)) M("gesture." + slot.Id, gestureEditor);
     }
 
     private void ApplySettingsTooltips()
@@ -1616,7 +1943,26 @@ public partial class SettingsWindow : Window
         ToolTip.SetTip(AddShortcutButton, "Add another shortcut to the selected action without replacing existing shortcuts.");
         ToolTip.SetTip(RemoveShortcutButton, "Remove the selected shortcut from this action.");
         ToolTip.SetTip(ResetHotkeysButton, "Restore all keyboard shortcuts to Glide defaults.");
-        ToolTip.SetTip(CustomizeTitleBarButton, "Choose, add, remove and reorder any of 20 title/tab-bar utility buttons.");
+        ToolTip.SetTip(CustomizeTitleBarButton, "Choose, add, remove and reorder any of the 22 title/tab-bar utility buttons.");
+    }
+
+    private DispatcherTimer? _hotkeyFilterTimer;
+
+    private void HotkeyFilterChanged(object? sender, TextChangedEventArgs e)
+    {
+        if (_loadingControls) return;
+        // Short debounce so typing never rebuilds the list on every keystroke.
+        _hotkeyFilterTimer ??= new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(140) };
+        _hotkeyFilterTimer.Stop();
+        _hotkeyFilterTimer.Tick -= HotkeyFilterTick;
+        _hotkeyFilterTimer.Tick += HotkeyFilterTick;
+        _hotkeyFilterTimer.Start();
+    }
+
+    private void HotkeyFilterTick(object? sender, EventArgs e)
+    {
+        _hotkeyFilterTimer?.Stop();
+        BuildHotkeyRows(HotkeyFilterBox?.Text);
     }
 
     private void BuildHotkeyRows(string? filter = null)
@@ -1625,13 +1971,15 @@ public partial class SettingsWindow : Window
         UpdateExternalProgramHotkeyLabels();
         if (HotkeyList is null) return;
         var rows = new List<ListBoxItem>();
+        var words = (filter ?? string.Empty).Split(new[] { ' ', '	' }, StringSplitOptions.RemoveEmptyEntries);
         foreach (var action in HotkeyCatalog.All)
         {
             var shortcuts = _workingHotkeys.TryGetValue(action.Id, out var values) ? values : new List<string>();
-            if (!string.IsNullOrWhiteSpace(filter) &&
-                !action.Label.Contains(filter, StringComparison.OrdinalIgnoreCase) &&
-                !action.Category.Contains(filter, StringComparison.OrdinalIgnoreCase) &&
-                !shortcuts.Any(x => x.Contains(filter, StringComparison.OrdinalIgnoreCase))) continue;
+            if (words.Length > 0)
+            {
+                var haystack = action.Label + " " + action.Category + " " + string.Join(" ", shortcuts);
+                if (!words.All(w => haystack.Contains(w, StringComparison.OrdinalIgnoreCase))) continue;
+            }
 
             if (shortcuts.Count == 0) rows.Add(CreateHotkeyRow(action, ""));
             else foreach (var shortcut in shortcuts) rows.Add(CreateHotkeyRow(action, shortcut));
@@ -1922,9 +2270,19 @@ public partial class SettingsWindow : Window
         var changes = GetNetChanges();
         if (changes.Count > 0 && _committed.ConfirmDiscardSettingsChanges &&
             !await ConfirmChangesAsync("Discard settings changes?", "These net changes will be discarded:", changes, "Close Anyway", allowDontRemind: true)) return;
-        _apply(_committed.CloneState(), false);
         _closeWithoutRollback = true;
+        // Close first so the dialog disappears immediately (as it does for OK), then restore the
+        // committed state behind it only if a preview was actually applied.
         Close();
+        RollbackPreviewDeferred();
+    }
+
+    private void RollbackPreviewDeferred()
+    {
+        if (!_previewDirty) return;
+        var committed = _committed.CloneState();
+        _previewDirty = false;
+        Dispatcher.UIThread.Post(() => _apply(committed, false), DispatcherPriority.Background);
     }
 
     private void CommitState(GlideSettingsState next)
@@ -1945,17 +2303,17 @@ public partial class SettingsWindow : Window
         var changes = GetNetChanges();
         if (changes.Count == 0)
         {
-            _apply(_committed.CloneState(), false);
             _closeWithoutRollback = true;
+            RollbackPreviewDeferred();
             return;
         }
 
         e.Cancel = true;
         if (_committed.ConfirmDiscardSettingsChanges &&
             !await ConfirmChangesAsync("Discard settings changes?", "Settings has unapplied net changes:", changes, "Close Anyway", allowDontRemind: true)) return;
-        _apply(_committed.CloneState(), false);
         _closeWithoutRollback = true;
         Close();
+        RollbackPreviewDeferred();
     }
 
     private async Task<bool> ConfirmChangesAsync(string title, string intro, IReadOnlyList<SettingChange> changes, string confirmLabel, bool allowDontRemind = false)
@@ -1978,12 +2336,12 @@ public partial class SettingsWindow : Window
         buttons.Children.Add(back);
         buttons.Children.Add(confirm);
         var root = new StackPanel { Margin = new Thickness(22), Spacing = 14 };
-        var warningBrush = new SolidColorBrush(Color.Parse("#E5B53B"));
+        var warningBrush = new SolidColorBrush(Color.Parse(Glide.App.ThemePalette.Warning));
         var warningGlyph = new Border
         {
             Width = 34, Height = 30, CornerRadius = new CornerRadius(5),
             BorderBrush = warningBrush, BorderThickness = new Thickness(2),
-            Background = new SolidColorBrush(Color.Parse("#1AE5B53B")),
+            Background = new SolidColorBrush(Color.Parse(Glide.App.ThemePalette.WarningWash)),
             Child = new TextBlock
             {
                 Text = "!", Foreground = warningBrush, FontSize = 19, FontWeight = FontWeight.Bold,
@@ -2252,7 +2610,7 @@ public partial class SettingsWindow : Window
         try
         {
             var doc = new ProfileTransferDocument { Name = profile.Name, Settings = state.CloneState() };
-            await File.WriteAllTextAsync(path, JsonSerializer.Serialize(doc, new JsonSerializerOptions { WriteIndented = true }));
+            await File.WriteAllTextAsync(path, JsonSerializer.Serialize(doc, AppJsonContext.Default.ProfileTransferDocument));
             DirtyText.Text = $"Saved {profile.Name} to {Path.GetFileName(path)}";
         }
         catch (Exception ex) { DirtyText.Text = $"Profile save failed: {ex.Message}"; }
@@ -2274,11 +2632,11 @@ public partial class SettingsWindow : Window
         try
         {
             var json = await File.ReadAllTextAsync(path);
-            var doc = JsonSerializer.Deserialize<ProfileTransferDocument>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            var doc = JsonSerializer.Deserialize(json, AppJsonContext.Default.ProfileTransferDocument);
             GlideSettingsState? state = doc?.Settings;
             string? importedName = doc?.Name;
             // Compatibility: accept a plain GlideSettingsState JSON file as a profile file too.
-            state ??= JsonSerializer.Deserialize<GlideSettingsState>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            state ??= JsonSerializer.Deserialize(json, AppJsonContext.Default.GlideSettingsState);
             if (state is null) throw new InvalidDataException("Profile file did not contain Glide settings.");
             ProfileStore.Replace(id, importedName, state);
             LoadControls(state);
@@ -2372,11 +2730,10 @@ public partial class SettingsWindow : Window
         try
         {
             var json = await File.ReadAllTextAsync(path);
-            var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
             GlideSettingsState? imported = null;
             try
             {
-                var document = JsonSerializer.Deserialize<SettingsTransferDocument>(json, options);
+                var document = JsonSerializer.Deserialize(json, AppJsonContext.Default.SettingsTransferDocument);
                 if (document is not null && document.Settings is not null)
                 {
                     if (document.Schema != SettingsTransferSchema)
@@ -2390,7 +2747,7 @@ public partial class SettingsWindow : Window
             catch (JsonException) { }
 
             // Backward-compatible import for the earlier raw-state JSON format.
-            imported ??= JsonSerializer.Deserialize<GlideSettingsState>(json, options);
+            imported ??= JsonSerializer.Deserialize(json, AppJsonContext.Default.GlideSettingsState);
             if (imported is null) return;
             NormalizeImportedState(imported);
             LoadControls(imported);
@@ -2410,7 +2767,7 @@ public partial class SettingsWindow : Window
         {
             var path = Path.Combine(WindowsKnownFolders.Downloads(), $"Glide Settings {DateTime.Now:yyyy-MM-dd_HHmmss}.json");
             var document = new SettingsTransferDocument { Settings = ReadControls().CloneState(), ProviderInventory = CodecProviderRuntime.Shared.Artifacts };
-            await File.WriteAllTextAsync(path, JsonSerializer.Serialize(document, new JsonSerializerOptions { WriteIndented = true }));
+            await File.WriteAllTextAsync(path, JsonSerializer.Serialize(document, AppJsonContext.Default.SettingsTransferDocument));
             DirtyText.Text = $"Exported to Downloads: {Path.GetFileName(path)}";
         }
         catch
@@ -2582,11 +2939,11 @@ public partial class SettingsWindow : Window
     {
         var temp = Path.Combine(reportFolder, "performance_fixtures");
         Directory.CreateDirectory(temp);
-        var rows = new List<object>();
+        var rows = new System.Text.Json.Nodes.JsonArray();
         var text = new List<string>();
         void Add(string id, bool pass, string detail)
         {
-            rows.Add(new { id, status = pass ? "PASS" : "FAIL", detail });
+            rows.Add((System.Text.Json.Nodes.JsonNode)new System.Text.Json.Nodes.JsonObject { ["id"] = id, ["status"] = pass ? "PASS" : "FAIL", ["detail"] = detail });
             text.Add($"{(pass ? "PASS" : "FAIL")} {id}: {detail}");
         }
 
@@ -2674,7 +3031,7 @@ public partial class SettingsWindow : Window
 
         File.WriteAllLines(Path.Combine(reportFolder, "performance_effect_results.txt"), text);
         File.WriteAllText(Path.Combine(reportFolder, "performance_effect_results.json"),
-            JsonSerializer.Serialize(rows, new JsonSerializerOptions { WriteIndented = true }));
+            rows.ToJsonString(AppJsonContext.Indented));
     }
 
     private static void WriteDiagnosticBmp(string path, int width, int height)
@@ -2754,7 +3111,7 @@ public partial class SettingsWindow : Window
 
         using var loader = new Glide.Imaging.ImageLoadCoordinator { WarmCacheItemLimit = 64, SequentialReadEnabled = true };
         var rows = new List<string> { "extension,file,bytes,width,height,cold_decode_ms,warm_decode_ms,warm_cache_hit,native_probe_ok,native_width,native_height,native_frames,status,error" };
-        var jsonResults = new List<object>();
+        var jsonResults = new System.Text.Json.Nodes.JsonArray();
         foreach (var extension in Glide.Diagnostics.ImageDiagnosticFixtures.Extensions)
         {
             var path = Path.Combine(fixtureFolder, "fixture" + extension);
@@ -2797,21 +3154,21 @@ public partial class SettingsWindow : Window
             rows.Add(string.Join(",", Csv(extension), Csv(Path.GetFileName(path)), fixtureBytes, width, height,
                 coldMs.ToString("F3", System.Globalization.CultureInfo.InvariantCulture), warmMs.ToString("F3", System.Globalization.CultureInfo.InvariantCulture),
                 cacheHit ? "true" : "false", nativeProbeOk ? "true" : "false", nativeWidth, nativeHeight, nativeFrames, status, Csv(error)));
-            jsonResults.Add(new
+            jsonResults.Add((System.Text.Json.Nodes.JsonNode)new System.Text.Json.Nodes.JsonObject
             {
-                extension, file = Path.GetFileName(path), bytes = fixtureBytes, width, height,
-                coldDecodeMs = Math.Round(coldMs, 3), warmDecodeMs = Math.Round(warmMs, 3), warmCacheHit = cacheHit,
-                nativeWicProbe = new { available = nativeProbeOk, width = nativeWidth, height = nativeHeight, frames = nativeFrames },
-                status, error
+                ["extension"] = extension, ["file"] = Path.GetFileName(path), ["bytes"] = fixtureBytes, ["width"] = width, ["height"] = height,
+                ["coldDecodeMs"] = Math.Round(coldMs, 3), ["warmDecodeMs"] = Math.Round(warmMs, 3), ["warmCacheHit"] = cacheHit,
+                ["nativeWicProbe"] = new System.Text.Json.Nodes.JsonObject { ["available"] = nativeProbeOk, ["width"] = nativeWidth, ["height"] = nativeHeight, ["frames"] = nativeFrames },
+                ["status"] = status, ["error"] = error
             });
         }
         File.WriteAllLines(Path.Combine(reportFolder, "image_fixture_decode_results.csv"), rows);
         File.WriteAllText(Path.Combine(reportFolder, "image_fixture_decode_results.json"),
-            JsonSerializer.Serialize(jsonResults, new JsonSerializerOptions { WriteIndented = true }));
+            jsonResults.ToJsonString(AppJsonContext.Indented));
         File.WriteAllText(Path.Combine(reportFolder, "image_fixture_decode_summary.txt"),
             $"Routed extensions: {Glide.Core.ImageFormatRegistry.Extensions.Count}\nCore real-fixture extensions: {Glide.Diagnostics.ImageDiagnosticFixtures.Extensions.Count}\nFixture source: {fixtureSource}\nThe ten protected core suffixes have real encoded fixtures, cold/warm decode checks and native WIC probes. All 196 routed suffixes also have physical routing probes. Navigation corpus: status={performanceCorpusStatus}, generated={performanceCorpusGenerated}, genuine JPEG files={performanceCorpusFileCount}; the count is reported from performance_corpus_status.json and the generated directory, never assumed from its name. The packaged legacy real-format corpus is staged when available. A routing probe is deliberately not claimed as an independently decodable format.\nTIFF additionally records bounded native preview, full-resolution refinement dimensions and malformed-input rejection in tiff_wic_results.json.\nSee image_fixture_decode_results.csv, image_fixture_decode_results.json and tiff_wic_results.json.\n");
 
-        var tiffResults = new Dictionary<string, object?>();
+        var tiffResults = new System.Text.Json.Nodes.JsonObject();
         var tiffPath = Path.Combine(fixtureFolder, "fixture.tiff");
         if (File.Exists(tiffPath))
         {
@@ -2837,8 +3194,8 @@ public partial class SettingsWindow : Window
                 var wicUnavailable = !previewOk && !fullOk;
                 tiffResults["status"] = wicUnavailable ? "SKIP" : (bounded && refined && malformedRejected ? "PASS" : "FAIL");
                 tiffResults["availability"] = wicUnavailable ? "WIC_UNAVAILABLE" : "WIC_AVAILABLE";
-                tiffResults["preview"] = new { available = previewOk, width = previewWidth, height = previewHeight, maxLongestSide = 1, bounded };
-                tiffResults["fullResolution"] = new { available = fullOk, width = fullWidth, height = fullHeight, refined };
+                tiffResults["preview"] = new System.Text.Json.Nodes.JsonObject { ["available"] = previewOk, ["width"] = previewWidth, ["height"] = previewHeight, ["maxLongestSide"] = 1, ["bounded"] = bounded };
+                tiffResults["fullResolution"] = new System.Text.Json.Nodes.JsonObject { ["available"] = fullOk, ["width"] = fullWidth, ["height"] = fullHeight, ["refined"] = refined };
                 tiffResults["malformedRejected"] = wicUnavailable ? (bool?)null : malformedRejected;
             }
             catch (Exception ex)
@@ -2852,7 +3209,7 @@ public partial class SettingsWindow : Window
             tiffResults["status"] = "SKIP";
             tiffResults["availability"] = "FIXTURE_UNAVAILABLE";
         }
-        File.WriteAllText(Path.Combine(reportFolder, "tiff_wic_results.json"), JsonSerializer.Serialize(tiffResults, new JsonSerializerOptions { WriteIndented = true }));
+        File.WriteAllText(Path.Combine(reportFolder, "tiff_wic_results.json"), tiffResults.ToJsonString(AppJsonContext.Indented));
     }
 
     private async Task CaptureAllSettingsPagesAsync(string reportFolder)
@@ -3049,15 +3406,15 @@ public partial class SettingsWindow : Window
             "Teal" => "#30C7B5",
             "Violet" => "#A98CFF",
             "Amber" => "#E0A54A",
-            _ => "#38A9F5"
+            _ => Glide.App.ThemePalette.GlideBlue
         };
         return new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse(accent));
     }
 
     private Avalonia.Media.IBrush SearchMutedBrush()
     {
-        var light = string.Equals(SelectedText(ThemeCombo), "Light", StringComparison.OrdinalIgnoreCase);
-        return new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse(light ? "#56616B" : "#AAB5C2"));
+        var light = string.Equals(SelectedText(ThemeCombo), Glide.Core.Settings.SettingChoiceNames.Light, StringComparison.OrdinalIgnoreCase);
+        return new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse(light ? Glide.App.ThemePalette.MutedLight : Glide.App.ThemePalette.MutedDark));
     }
 
     private static string SelectedText(ComboBox combo, string fallback = "") =>

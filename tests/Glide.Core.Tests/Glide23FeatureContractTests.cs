@@ -91,7 +91,7 @@ public sealed class Glide23FeatureContractTests
     {
         var source = Source("src/Glide.App/Platform/WindowsExplorerHost.cs");
         Assert.Contains("NativeControlHost", source, StringComparison.Ordinal);
-        Assert.Contains("ComImport", source, StringComparison.Ordinal);
+        Assert.Contains("GeneratedComInterface", source, StringComparison.Ordinal);
         Assert.Contains("FileActivated", source, StringComparison.Ordinal);
         Assert.Contains("CreateNativeControlCore", source, StringComparison.Ordinal);
     }
@@ -117,9 +117,14 @@ public sealed class Glide23FeatureContractTests
         Assert.Equal("Below tips", state.WelcomeRecentPosition);
         Assert.Equal("Normal", state.WelcomeRecentSize);
         var source = Source("src/Glide.App/MainWindow.axaml.cs");
-        Assert.Contains("MoveRecentHistoryClicked", source, StringComparison.Ordinal);
         Assert.Contains("ResizeRecentHistoryClicked", source, StringComparison.Ordinal);
-        Assert.Contains("ResetWelcomeLayoutClicked", source, StringComparison.Ordinal);
+        Assert.Contains("ClearRecentHistoryClicked", source, StringComparison.Ordinal);
+        // 4.6.4: Home no longer carries feature/tip cards; it is the Recent list plus an empty state.
+        var home = Source("src/Glide.App/Controls/HomeSurface.axaml");
+        Assert.DoesNotContain("HomeTipsGrid", home, StringComparison.Ordinal);
+        Assert.DoesNotContain("homeCard", home, StringComparison.Ordinal);
+        Assert.Contains("RecentHistoryPanel", home, StringComparison.Ordinal);
+        Assert.Contains("HomeEmptyState", home, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -187,14 +192,14 @@ public sealed class Glide23FeatureContractTests
         for (var directory = start; directory is not null; directory = directory.Parent)
         {
             var candidate = Path.Combine(directory.FullName, relativePath);
-            if (File.Exists(candidate)) return File.ReadAllText(candidate);
+            if (File.Exists(candidate)) return SourceText.Read(candidate);
         }
 
         var current = new DirectoryInfo(Directory.GetCurrentDirectory());
         for (var directory = current; directory is not null; directory = directory.Parent)
         {
             var candidate = Path.Combine(directory.FullName, relativePath);
-            if (File.Exists(candidate)) return File.ReadAllText(candidate);
+            if (File.Exists(candidate)) return SourceText.Read(candidate);
         }
 
         throw new FileNotFoundException($"Could not locate repository source file '{relativePath}'.");

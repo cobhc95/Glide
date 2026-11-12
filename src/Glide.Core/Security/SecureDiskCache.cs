@@ -79,8 +79,15 @@ public sealed class SecureDiskCache
 
         try
         {
-            await File.WriteAllBytesAsync(tempPath, data, cancellationToken).ConfigureAwait(false);
-            File.Move(tempPath, targetPath, overwrite: true);
+            // WriteThrough + atomic Move: bytes reach stable storage before the entry becomes
+            // visible, so a crash/power loss cannot leave a torn partial file at targetPath.
+            await using (var fs = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None,
+                bufferSize: 4096, FileOptions.Asynchronous | FileOptions.WriteThrough))
+            {
+                await fs.WriteAsync(data, cancellationToken).ConfigureAwait(false);
+                await fs.FlushAsync(cancellationToken).ConfigureAwait(false);
+            }
+            File.Move(tempPath, targetPath, overwrite: true); // Atomic publish within same directory.
         }
         finally
         {

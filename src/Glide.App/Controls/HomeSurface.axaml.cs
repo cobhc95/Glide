@@ -11,8 +11,7 @@ namespace Glide.App.Controls;
 /// </summary>
 public partial class HomeSurface : UserControl
 {
-    public event EventHandler? ResetLayoutRequested;
-    public event EventHandler? MoveRecentRequested;
+    public event EventHandler? OpenFileRequested;
     public event EventHandler? ResizeRecentRequested;
     public event EventHandler? ClearRecentRequested;
     public event EventHandler? CloseRecentRequested;
@@ -24,19 +23,20 @@ public partial class HomeSurface : UserControl
 
     public TextBlock HeadingText => HomeHeadingText;
     public TextBlock SubtitleText => HomeSubtitleText;
-    public Grid TipsGrid => HomeTipsGrid;
+    public StackPanel EmptyState => HomeEmptyState;
+    public TextBlock EmptyText => HomeEmptyText;
     public Border RecentPanel => RecentHistoryPanel;
     public ScrollViewer RecentScroll => RecentHistoryScroll;
     public StackPanel RecentHost => RecentHistoryHost;
-    public GlideIconView RecentMove => RecentMoveIcon;
     public GlideIconView RecentResize => RecentResizeIcon;
     public Button RecentResizeButtonControl => RecentResizeButton;
     public Border StatusSurface => HomeStatusSurface;
+    public TextBlock StatusText => HomeStatusText;
+    public StackPanel StatusControlsPanel => HomeStatusControlsPanel;
     public Button OptionsButton => HomeOptionsButton;
     public Button StatusCollapseButton => HomeStatusCollapseButton;
 
-    private void ResetWelcomeLayoutClicked(object? s, RoutedEventArgs e) => ResetLayoutRequested?.Invoke(this, EventArgs.Empty);
-    private void MoveRecentHistoryClicked(object? s, RoutedEventArgs e) => MoveRecentRequested?.Invoke(this, EventArgs.Empty);
+    private void OpenFileClicked(object? s, RoutedEventArgs e) => OpenFileRequested?.Invoke(this, EventArgs.Empty);
     private void ResizeRecentHistoryClicked(object? s, RoutedEventArgs e) => ResizeRecentRequested?.Invoke(this, EventArgs.Empty);
     private void ClearRecentHistoryClicked(object? s, RoutedEventArgs e) => ClearRecentRequested?.Invoke(this, EventArgs.Empty);
     private void CloseRecentHistoryClicked(object? s, RoutedEventArgs e) => CloseRecentRequested?.Invoke(this, EventArgs.Empty);

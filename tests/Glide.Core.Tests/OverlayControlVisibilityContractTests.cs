@@ -50,7 +50,7 @@ public sealed class OverlayControlVisibilityContractTests
         while (directory is not null)
         {
             var candidate = Path.Combine(new[] { directory.FullName }.Concat(segments).ToArray());
-            if (File.Exists(candidate)) return File.ReadAllText(candidate);
+            if (File.Exists(candidate)) return SourceText.Read(candidate);
             directory = directory.Parent;
         }
         throw new FileNotFoundException("Could not locate source file.", Path.Combine(segments));

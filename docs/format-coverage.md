@@ -11,7 +11,7 @@ crashing. This document records the routes and compares them with IrfanView's fo
    - `SvgDecoder` — SVG and gzip-compressed SVGZ, rasterised with `Svg.Skia` at the requested
      resolution (preview bounded; full capped to 4096 px longest side). Transparency preserved.
    - `BuiltInRasterDecoder` — compact managed decoders for legacy/simple raster formats:
-     TGA/TARGA/ICB/VDA/VST, PCX, PNM (PBM/PGM/PPM/PAM), QOI, Radiance HDR/RGBE, WBMP, XBM, XPM, SGI.
+     TGA/TARGA/ICB/VDA/VST, PCX, PNM (PBM/PGM/PPM/PAM), QOI, Radiance HDR/RGBE, WBMP, XBM, XPM, SGI, plus Photoshop PSD/PSB/PDD (flattened composite; layers are not re-composited).
 2. **Native Windows WIC** (`Glide.Native` → WIC): JPEG aliases, PNG/APNG, BMP/DIB, GIF, TIFF,
    ICO/CUR, JPEG-XR/HDP/WDP, DDS, and any other content whose bytes a WIC codec understands
    (including HEIC/AVIF/RAW when the matching Windows codec extension is installed).
@@ -36,12 +36,12 @@ crashes, hangs or fabricates pixels.
 | JPEG-XR / DDS | .jxr .wdp .hdp .dds | WIC | ✅ |
 | Icons/cursors | .cur | WIC | ✅ |
 | **Vector** | **.svg .svgz** | **built-in Svg.Skia** | ✅ |
-| **Legacy raster** | **.tga .targa .icb .vda .vst .pcx .pnm .ppm .pgm .pbm .pam .qoi .hdr .rgbe .wbmp .xbm .xpm .sgi .rgb .rgba .bw** | **built-in managed decoders** | ✅ |
+| **Legacy raster + Photoshop** | **.tga .targa .icb .vda .vst .pcx .pnm .ppm .pgm .pbm .pam .qoi .hdr .rgbe .wbmp .xbm .xpm .sgi .rgb .rgba .bw .psd .psb .pdd** | **built-in managed decoders** | ✅ |
 | JPEG-container stills | .mpo .jps .pns | WIC/Skia (first frame) | ✅ |
 | HEIC/HEIF/AVIF | .heic .heif .heics .heifs .hif .avif .avifs | WIC (if Windows HEIF/AV1 extension installed) → Shell | ⚠️ optional codec |
 | JPEG XL / JPEG 2000 / EXR | .jxl .jp2 .j2k .j2c .jpc .jpx .jpf .jpm .mj2 .exr | provider / Shell | ⚠️ optional codec |
 | Camera RAW | .dng .cr2 .cr3 .crw .nef .nrw .arw .srf .sr2 .raf .orf .ori .rw2 .rwl .pef .ptx .3fr .fff .iiq .cap .eip .mef .mos .mrw .x3f .erf .kdc .dcr .k25 .bay .srw .rwz .gpr .mdc .raw .r3d .ari .cinema .dcs .drf .dsc .r2d .rw1 | WIC RAW extension → Shell | ⚠️ optional codec |
-| Layered editors | .psd .psb .pdd .xcf .ora .kra .afphoto .afdesign .afpub .clip .csp .pdn .psp .pspimage .pxr | provider / Shell | ⚠️ optional codec |
+| Layered editors | .xcf .ora .kra .afphoto .afdesign .afpub .clip .csp .pdn .psp .pspimage .pxr | provider / Shell | ⚠️ optional codec |
 | Medical | .dcm .dicom .ima .nii .nii.gz .mha .mhd .nrrd .ndpi .svs .vms .vmu .scn .mrxs .bif .czi .lif .lsm .ome.tif .ome.tiff .vsi | provider | ⚠️ optional codec |
 | Documents / CAD | .pdf .eps .epsf .ai .cdr .cmx .cpt .dwg .dxf .skp .emf .wmf .emz .wmz | Shell (if handler installed) | ⚠️ optional codec |
 | GPU textures | .ktx .ktx2 .pvr .astc .basis .tex .vtf .wal .spr .dpx .cin | provider / Shell | ⚠️ optional codec |

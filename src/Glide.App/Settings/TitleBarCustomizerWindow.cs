@@ -45,14 +45,14 @@ public sealed class TitleBarCustomizerWindow : Window
         heading.Children.Add(new TextBlock { Text = "Customize title/tab-bar buttons", FontSize = 21, FontWeight = FontWeight.SemiBold });
         heading.Children.Add(new TextBlock
         {
-            Text = "Choose from 20 real Glide actions. Add, remove and reorder them; changes are saved in the same settings profile.",
+            Text = $"Choose from {TitleBarButtonCatalog.All.Count} real Glide actions, grouped by purpose. Add, remove and reorder them; changes are saved in the same settings profile.",
             TextWrapping = TextWrapping.Wrap,
             Foreground = new SolidColorBrush(Color.Parse("#AAB5C2"))
         });
         Grid.SetColumnSpan(heading, 3);
         root.Children.Add(heading);
 
-        var availablePanel = ListPanel("Available buttons (20)", _availableList);
+        var availablePanel = ListPanel($"Available buttons ({TitleBarButtonCatalog.All.Count})", _availableList);
         Grid.SetRow(availablePanel, 1);
         root.Children.Add(availablePanel);
 
@@ -110,7 +110,7 @@ public sealed class TitleBarCustomizerWindow : Window
         {
             var settingsGlyph = new TextBlock
             {
-                Text = "\uE713", FontFamily = new FontFamily("Segoe Fluent Icons"), FontSize = 19,
+                Text = "\uE713", FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"), FontSize = 19,
                 VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center
             };
             settingsGlyph.Classes.Add("modernTitleSettingsGlyph");
@@ -133,8 +133,22 @@ public sealed class TitleBarCustomizerWindow : Window
     private void RebuildLists(string? selectShown = null)
     {
         _availableList.Items.Clear();
-        foreach (var definition in TitleBarButtonCatalog.All)
-            if (!_shown.Contains(definition.Id, StringComparer.OrdinalIgnoreCase)) _availableList.Items.Add(Row(definition));
+        // Available buttons are grouped under non-selectable category headings.
+        foreach (var category in TitleBarButtonCatalog.Categories)
+        {
+            var inCategory = TitleBarButtonCatalog.All
+                .Where(d => string.Equals(TitleBarButtonCatalog.CategoryOf(d.Id), category, StringComparison.Ordinal) &&
+                            !_shown.Contains(d.Id, StringComparer.OrdinalIgnoreCase))
+                .ToList();
+            if (inCategory.Count == 0) continue;
+            _availableList.Items.Add(new ListBoxItem
+            {
+                IsEnabled = false,
+                Focusable = false,
+                Content = new TextBlock { Text = category, FontWeight = FontWeight.SemiBold, FontSize = 12, Foreground = new SolidColorBrush(Color.Parse("#8E9AA8")), Margin = new Thickness(4, 8, 0, 2) }
+            });
+            foreach (var definition in inCategory) _availableList.Items.Add(Row(definition));
+        }
 
         _shownList.Items.Clear();
         foreach (var id in _shown)

@@ -40,6 +40,14 @@ public static class SettingsPresetCatalog
         s.RightDragPan = defaults.RightDragPan;
         s.SelectionClickZoom = defaults.SelectionClickZoom;
         s.SelectionRightClickZoomOut = defaults.SelectionRightClickZoomOut;
+        s.SlideshowLeftClickAction = defaults.SlideshowLeftClickAction;
+        s.SearchShowRelatedResults = defaults.SearchShowRelatedResults;
+        s.NavigationSortOrder = defaults.NavigationSortOrder;
+        s.NavigationSortDescending = defaults.NavigationSortDescending;
+        s.SelectionBufferEnabled = defaults.SelectionBufferEnabled;
+        s.SelectionBufferWindowedPercent = defaults.SelectionBufferWindowedPercent;
+        s.SelectionBufferMaximizedPercent = defaults.SelectionBufferMaximizedPercent;
+        s.SelectionBufferAllModes = defaults.SelectionBufferAllModes;
         s.BackgroundDragWindow = defaults.BackgroundDragWindow;
         s.CtrlWheelZoom = defaults.CtrlWheelZoom;
         s.MiddleDragPan = defaults.MiddleDragPan;
