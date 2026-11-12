@@ -1,12 +1,20 @@
-# Glide 4.7.0
+# Glide 4.7.1
 
-> **Glide 4.7.0 is available:** Download the [installer or portable archive](https://github.com/cobhc95/Glide/releases/tag/v4.7.0). The source in this repository matches 4.7.0.
+> **Glide 4.7.1 is available:** Download the [installer or portable archive](https://github.com/cobhc95/Glide/releases/tag/v4.7.1). The source in this repository matches 4.7.1.
 
 ## Fast. Multi-tabbed. Multi-window. Highly customizable.
 
 ![Glide main user interface](docs/screenshots/4.6/hero.jpg)
 
 **Glide 4.6.0 is a high-performance Windows image viewer built around instant-feeling image opening, a compact installer, multi-tab and multi-window workflows, live folder refresh, Save / Save As with format conversion, transparent overlays, deep mouse/keyboard customization, Launch Speed Boost, complete image printing, native SVG/vector support, Photoshop PSD/PSB viewing, automatic Windows Open With integration, Windows Explorer thumbnails, and recognition/routing for 196 image and document filename extensions.**
+
+## What's new in 4.7.1
+
+* The collapsed status bar is just the expand button, with no panel around it.
+* When the title bar runs out of room, the buttons nearest the window controls (such as Settings) stay and the leftmost ones hide first.
+* Right-click the **Always on top** title-bar button to pick Hard or Soft mode.
+
+See the [4.7.1 release notes](release-notes-4.7.1.md).
 
 ## What's new in 4.7.0
 

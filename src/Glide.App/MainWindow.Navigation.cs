@@ -1579,7 +1579,7 @@ public partial class MainWindow
         if (ChromeLayout is null || _wholeAppOverlayMode) return;
         var width = Bounds.Width > 0 ? Bounds.Width : Width;
         // Title-bar utility actions yield one icon at a time as the window narrows (starting from
-        // the last configured position) and return one at a time as it widens, instead of the whole
+        // the first configured position, furthest from the caption controls) and return one at a time as it widens, instead of the whole
         // strip disappearing at a single threshold. Tabs keep the remaining space; the Windows
         // caption buttons stay protected as one unit.
         var order = _settings.TitleBarButtons;
@@ -1592,9 +1592,11 @@ public partial class MainWindow
         var visibleActions = actionCount == 0
             ? 0
             : Math.Clamp((int)Math.Floor((availableForActions + 1) / perActionButton), 0, actionCount);
+        // Buttons nearest the caption controls (the end of the list, e.g. Settings) have priority;
+        // the ones furthest from them (the start of the list) are the first to drop out.
         for (var i = 0; i < actionCount; i++)
             if (_titleBarButtons.TryGetValue(order[i], out var button))
-                button.IsVisible = i < visibleActions;
+                button.IsVisible = i >= actionCount - visibleActions;
         TitleActionHost.IsVisible = visibleActions > 0;
         TabNavigationHost.IsVisible = false;
         // Caption controls are protected as one Windows-standard unit. At narrow widths tabs keep

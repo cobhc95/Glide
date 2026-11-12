@@ -14,7 +14,7 @@ public sealed class StatusChromeLayoutContractTests
         var compact = MethodBody(mainWindow, "private void ApplyCompactChromeLayout()");
 
         Assert.Contains("visibleActions", compact, StringComparison.Ordinal);
-        Assert.Contains("button.IsVisible = i < visibleActions", compact, StringComparison.Ordinal);
+        Assert.Contains("button.IsVisible = i >= actionCount - visibleActions", compact, StringComparison.Ordinal);
         // The old all-or-nothing threshold must not return.
         Assert.DoesNotContain("TitleActionHost.IsVisible = width >= 720", compact, StringComparison.Ordinal);
     }

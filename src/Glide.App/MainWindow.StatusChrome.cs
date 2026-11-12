@@ -94,6 +94,7 @@ public partial class MainWindow
         // exactly where the collapse button was.
         if (collapsedOnly) PinCollapsedSurface(ViewerStatusSurface, StatusCollapseButton, _collapseAnchorViewer);
         else ApplyStatusSurfaceAlignment(ViewerStatusSurface);
+        SetStatusSurfaceChromeless(ViewerStatusSurface, collapsedOnly);
         if (_homeSurface is not null)
         {
             _homeSurface.StatusText.IsVisible = !collapsedOnly;
@@ -101,6 +102,24 @@ public partial class MainWindow
                 button.IsVisible = !collapsedOnly || ReferenceEquals(button, _homeSurface.StatusCollapseButton);
             if (collapsedOnly) PinCollapsedSurface(_homeSurface.StatusSurface, _homeSurface.StatusCollapseButton, _collapseAnchorHome);
             else ApplyStatusSurfaceAlignment(_homeSurface.StatusSurface);
+            SetStatusSurfaceChromeless(_homeSurface.StatusSurface, collapsedOnly);
+        }
+    }
+
+    /// <summary>A collapsed bar shows only its expand button: no panel fill, border or shadow around it.</summary>
+    private static void SetStatusSurfaceChromeless(Border surface, bool chromeless)
+    {
+        if (chromeless)
+        {
+            surface.Background = Brushes.Transparent;
+            surface.BorderBrush = Brushes.Transparent;
+            surface.BoxShadow = default;
+        }
+        else
+        {
+            surface.ClearValue(Border.BackgroundProperty);
+            surface.ClearValue(Border.BorderBrushProperty);
+            surface.ClearValue(Border.BoxShadowProperty);
         }
     }
 

@@ -195,6 +195,21 @@ public partial class MainWindow
             return item;
         }
 
+        if (id == "window.alwaysOnTop")
+        {
+            void SetMode(string mode)
+            {
+                _settings.AlwaysOnTopMode = mode;
+                SaveSettingsAndPublish();
+                ApplyTopmostState(forceNative: true);
+                RebuildTitleActionStrip();
+            }
+            string Tick(string text, bool on) => on ? $"{text}  ✓" : text;
+            items.Add(Item(Tick("Always on top", ActiveAlwaysOnTop), () => AlwaysOnTopClicked(null, new RoutedEventArgs()), true, "AlwaysOnTop"));
+            items.Add(Item(Tick("Hard: stay above every window", HardAlwaysOnTop), () => SetMode("Hard")));
+            items.Add(Item(Tick("Soft: ordinary always on top", !HardAlwaysOnTop), () => SetMode("Soft")));
+            items.Add(new MenuItem { Header = "-" });
+        }
         var current = TitleBarButtonCatalog.Normalize(_settings.TitleBarButtons).ToList();
         var index = current.FindIndex(x => string.Equals(x, id, StringComparison.OrdinalIgnoreCase));
         items.Add(Item("Move left", () => MoveTitleAction(id, -1), index > 0, "Previous"));

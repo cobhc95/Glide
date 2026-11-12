@@ -4,6 +4,19 @@ All notable changes to Glide Image Viewer are documented here. The format is bas
 [Keep a Changelog](https://keepachangelog.com/), and the project uses dotted feature releases with
 hyphenated follow-up corrections (for example `4.2.0-1`).
 
+## [4.7.1] - 2026-11-12
+
+Polish from further community testing of 4.7.0. Thank you again to [@vertigo220](https://github.com/vertigo220) and everyone sending feedback.
+
+### Changed
+
+- **A collapsed status bar shows only its expand button**, with no panel, border or shadow around it.
+- **Title-bar buttons nearest the window controls win when space runs out.** Narrow windows now hide the leftmost title-bar buttons first, so Settings (the last button) stays visible longest.
+
+### Added
+
+- **Always on top button menu.** Right-click the title-bar *Always on top* button to switch it on or off and choose *Hard* or *Soft* mode directly.
+
 ## [4.7.0] - 2026-11-12
 
 Most of this release comes from a detailed 21-point report by [@vertigo220](https://github.com/vertigo220) ([issue #1](https://github.com/cobhc95/Glide/issues/1)). Thank you; community feedback like this is what makes Glide better.
