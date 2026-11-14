@@ -13,6 +13,7 @@ namespace Glide.App;
 /// </summary>
 [JsonSourceGenerationOptions(WriteIndented = true, PropertyNameCaseInsensitive = true)]
 [JsonSerializable(typeof(GlideSettingsState))]
+[JsonSerializable(typeof(Dictionary<string, WindowPlacementState>))]
 [JsonSerializable(typeof(SettingsStore.LaunchPolicyCache))]
 [JsonSerializable(typeof(ProfileStore.ProfileDocument))]
 [JsonSerializable(typeof(RecentHistoryStore.Document))]

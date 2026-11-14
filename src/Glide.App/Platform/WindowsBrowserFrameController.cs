@@ -1,7 +1,6 @@
 using System.Runtime.InteropServices;
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Platform;
 using Avalonia.Threading;
 using Glide.Diagnostics.Runtime;
 
@@ -92,7 +91,6 @@ internal sealed class WindowsBrowserFrameController : IDisposable
     private const uint WsExNoActivate = 0x08000000;
     private const uint SwpShowWindow = 0x0040;
     private const uint SwpHideWindow = 0x0080;
-    private const uint WmSetRedraw = 0x000B;
 
     private readonly Window _window;
     private readonly Button _minimize;

@@ -1,4 +1,3 @@
-using Avalonia.Media;
 using Avalonia.Media.Imaging;
 
 namespace Glide.Imaging;

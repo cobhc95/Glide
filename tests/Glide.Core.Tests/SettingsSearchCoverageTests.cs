@@ -1,11 +1,9 @@
 using System.Reflection;
 using Avalonia.Controls;
-using Avalonia.Headless;
 using Avalonia.LogicalTree;
 using Avalonia.VisualTree;
 using Glide.App.Settings;
 using Glide.Core.Settings;
-using Xunit;
 
 namespace Glide.Core.Tests;
 
@@ -102,11 +100,11 @@ public sealed class SettingsSearchCoverageTests
                 var type = typeof(SettingsWindow);
                 var controls = (Dictionary<string, Control>)type.GetField("_settingControls", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(window)!;
                 var mapped = controls.Values.ToHashSet();
-                // Not settings: the search/filter inputs, lists driven by their own editors, and
-                // mirrors of a mapped control.
+                // Not settings: the search/filter inputs and lists driven by their own editors. (The
+                // card header toggles are ToggleButtons, not settings, and are not matched below.)
                 var exempt = new HashSet<string>(StringComparer.Ordinal)
                 {
-                    "SearchBox", "SearchCategoryCombo", "HotkeyFilterBox", "HotkeyList", "StatusVisibleMirrorCheck", "StatusHoverMirrorCheck",
+                    "SearchBox", "SearchCategoryCombo", "HotkeyFilterBox", "HotkeyList",
                     "FullscreenXCloseCheck"
                 };
                 foreach (var control in window.GetLogicalDescendants().OfType<Control>())
@@ -179,7 +177,10 @@ public sealed class SettingsSearchCoverageTests
                 foreach (var (query, expected) in new[]
                 {
                     ("keep glide on top", "Always on top"), ("exiting fullscreen", "Behavior after exiting fullscreen"),
-                    ("restoring from fullscreen", "Auto-center window on restore"), ("selection buffer", "Selection buffer around the picture")
+                    ("restoring from fullscreen", "Auto-center window on restore"), ("selection buffer", "Selection buffer around the picture"),
+                    // 4.8.0 card layout: the folder position line belongs to the text overlay, and the
+                    // old "status surface" wording still finds the status bar switch.
+                    ("text overlay", "Show folder position line under the text overlay"), ("status surface", "Show status bar")
                 })
                 {
                     run.Invoke(window, new object[] { query });
@@ -253,7 +254,11 @@ public sealed class SettingsSearchCoverageTests
                     "general.newExplorerTabLastLocation",
                     "general.newExplorerTabDefaultDirectory",
                     "appearance.explorerTheme",
-                    "tabs.navigateToFolderBehavior"
+                    // 4.8.0: settings with no effect, removed from the catalogue; their hidden controls
+                    // stay so saved files round-trip.
+                    "tabs.showBackButton",
+                    "tabs.showForwardButton",
+                    "folderNav.explore"
                 };
                 foreach (var mappedId in controls.Keys)
                     if (!catalogIds.Contains(mappedId) && !hiddenLegacyIds.Contains(mappedId))

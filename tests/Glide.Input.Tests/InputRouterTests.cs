@@ -1,5 +1,4 @@
 using Glide.Core.Commands;
-using Glide.Input;
 using Xunit;
 
 namespace Glide.Input.Tests;
@@ -41,6 +40,36 @@ public sealed class InputRouterTests
         Assert.Equal(GlideCommand.ToggleFullscreen, router.ResolveShortcut("Ctrl+Shift+F", bindings));
         Assert.Equal(GlideCommand.None, router.ResolveShortcut("F11", bindings));
     }
+    [Fact]
+    public void Explore_containing_folder_defaults_to_ctrl_e_and_a_user_binding_replaces_it()
+    {
+        var bindings = HotkeyCatalog.CreateDefaultMap();
+        var router = new InputRouter();
+        Assert.Equal(new[] { "Ctrl+E" }, bindings["folder.exploreParent"]);
+        Assert.Equal(GlideCommand.ExploreParentFolder, router.ResolveShortcut("ctrl+e", bindings));
+        Assert.Equal("Explore/Browse containing folder", HotkeyCatalog.Find("folder.exploreParent")!.Label);
+
+        bindings["folder.exploreParent"] = new List<string> { "Ctrl+Alt+E" };
+        Assert.Equal(GlideCommand.ExploreParentFolder, router.ResolveShortcut("ctrl+alt+e", bindings));
+        Assert.Equal(GlideCommand.None, router.ResolveShortcut("ctrl+e", bindings));
+    }
+
+    [Fact]
+    public void Replacing_an_owner_moves_the_shortcut_to_the_new_command_in_the_router()
+    {
+        // The Settings Replace choice (HotkeyConflicts.Assign) must be visible to the runtime lookup immediately.
+        var bindings = HotkeyCatalog.CreateDefaultMap();
+        var router = new InputRouter();
+        Assert.Equal(GlideCommand.ToggleFullscreen, router.ResolveShortcut("F", bindings));
+
+        Assert.Equal(HotkeyAssignOutcome.Declined, HotkeyConflicts.Assign(bindings, "F", "view.zoomIn", null, add: true, replaceOthers: false));
+        Assert.Equal(GlideCommand.ToggleFullscreen, router.ResolveShortcut("F", bindings));
+
+        Assert.Equal(HotkeyAssignOutcome.Assigned, HotkeyConflicts.Assign(bindings, "F", "view.zoomIn", null, add: true, replaceOthers: true));
+        Assert.Equal(GlideCommand.ZoomIn, router.ResolveShortcut("F", bindings));
+        Assert.Equal(GlideCommand.ToggleFullscreen, router.ResolveShortcut("F11", bindings));
+    }
+
     [Fact]
     public void DefaultShortcutOwnership_IsConflictFree()
     {

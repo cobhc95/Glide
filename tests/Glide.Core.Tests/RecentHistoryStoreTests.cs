@@ -1,4 +1,3 @@
-using Xunit;
 using Glide.App.Settings;
 using System.Text.Json;
 

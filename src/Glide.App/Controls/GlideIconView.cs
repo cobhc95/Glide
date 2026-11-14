@@ -68,6 +68,20 @@ public sealed class GlideIconView : Control
 
         switch (Kind)
         {
+            case "Folder":
+                L(3.5, 6.5, 9, 6.5); L(9, 6.5, 11, 8.5); L(11, 8.5, 20.5, 8.5); L(20.5, 8.5, 20.5, 18.5); L(20.5, 18.5, 3.5, 18.5); L(3.5, 18.5, 3.5, 6.5); break;
+            case "Drive":
+                Box(3.5, 9, 17, 7); Circle(17, 12.5, 0.9, true); L(6.5, 12.5, 12, 12.5); break;
+            case "Download":
+                L(12, 4.5, 12, 15); L(7.5, 11, 12, 15.5); L(12, 15.5, 16.5, 11); L(5, 19.5, 19, 19.5); break;
+            case "Document":
+                Box(5.5, 3.5, 13, 17); L(8.5, 8.5, 15.5, 8.5); L(8.5, 12, 15.5, 12); L(8.5, 15.5, 13, 15.5); break;
+            case "Desktop":
+                Box(3.5, 5, 17, 11); L(9, 19.5, 15, 19.5); L(12, 16, 12, 19.5); break;
+            case "Cloud":
+                Arc(8, 14, 3.5, 100, 260); Arc(13, 11, 4.5, 200, 350); Arc(17, 14.5, 3, -90, 90); L(8, 17.5, 17, 17.5); break;
+            case "FileGeneric":
+                Box(5.5, 3.5, 13, 17); L(14, 3.5, 18.5, 8); L(14, 3.5, 14, 8); L(14, 8, 18.5, 8); break;
             case "Home":
                 L(4, 11, 12, 4); L(12, 4, 20, 11); Box(6.5, 10, 11, 9); L(10, 19, 10, 14); L(14, 19, 14, 14); break;
             case "Image":
@@ -84,11 +98,20 @@ public sealed class GlideIconView : Control
                 L(3.5, 8, 8.5, 8); L(8.5, 8, 10.5, 5.5); L(10.5, 5.5, 20, 5.5); L(20, 5.5, 20.5, 18.5); L(3.5, 8, 3.5, 18.5); L(3.5, 18.5, 20.5, 18.5); L(9.5, 10, 14, 14); L(14, 14, 9.5, 18); break;
             case "Up":
                 L(5.5, 13.5, 12, 6.5); L(12, 6.5, 18.5, 13.5); L(12, 6.5, 12, 18.5); break;
+            // Browser-style history Back / Forward (5.0.0): the arrow-with-shaft of Up, turned sideways, so it reads
+            // differently from the Previous / Next image chevrons.
+            case "Back":
+                L(11.5, 5.5, 5, 12); L(5, 12, 11.5, 18.5); L(5, 12, 19, 12); break;
+            case "Forward":
+                L(12.5, 5.5, 19, 12); L(19, 12, 12.5, 18.5); L(5, 12, 19, 12); break;
             case "Down":
                 L(5.5, 10.5, 12, 17.5); L(12, 17.5, 18.5, 10.5); L(12, 5.5, 12, 17.5); break;
             case "Refresh":
                 // Open circular arrow: a clockwise arc with a gap at the top and the head at its end.
                 Arc(12, 12, 7, -50, 250); Head(12 + 7 * Math.Cos(250 * Math.PI / 180), 12 + 7 * Math.Sin(250 * Math.PI / 180), 0.94, -0.34); break;
+            case "Reset":
+                // Open counter-clockwise circular arrow (restore / start fresh): the mirror image of Refresh.
+                Arc(12, 12, 7, 230, -70); Head(12 + 7 * Math.Cos(-70 * Math.PI / 180), 12 + 7 * Math.Sin(-70 * Math.PI / 180), -0.94, -0.34); break;
             case "RotateLeft":
                 Arc(12, 13, 6.5, -70, 200); Head(12 + 6.5 * Math.Cos(-70 * Math.PI / 180), 13 + 6.5 * Math.Sin(-70 * Math.PI / 180), -0.94, -0.34); break;
             case "RotateRight":
@@ -151,12 +174,20 @@ public sealed class GlideIconView : Control
                 L(8, 5, 18, 12); L(18, 12, 8, 19); L(8, 19, 8, 5); break;
             case "Pause":
                 L(9, 5, 9, 19); L(15, 5, 15, 19); break;
+            case "FramePrevious":
+                // Media "step back one frame": bar on the left, triangle pointing left.
+                L(6.5, 6, 6.5, 18); L(18, 6, 9.5, 12); L(9.5, 12, 18, 18); L(18, 18, 18, 6); break;
+            case "FrameNext":
+                L(17.5, 6, 17.5, 18); L(6, 6, 14.5, 12); L(14.5, 12, 6, 18); L(6, 18, 6, 6); break;
             case "History":
                 Circle(12, 12, 8); L(12, 7.5, 12, 12); L(12, 12, 16, 14); break;
             case "Stop":
                 Box(7, 7, 10, 10); break;
             case "Collapse":
                 L(6, 12, 18, 12); break;
+            case "StackLines":
+                // Information line on top (text stroke plus the small window button), a wider button row stacked beneath.
+                L(4.5, 7.5, 13, 7.5); Box(16.5, 5, 3, 5); Box(4.5, 13, 15, 6); break;
             case "Expand":
                 L(7, 15, 12, 10); L(12, 10, 17, 15); break;
             case "Info":
@@ -240,6 +271,17 @@ public sealed class GlideIconView : Control
                 L(9, 7, 4, 12); L(4, 12, 9, 17); L(15, 7, 20, 12); L(20, 12, 15, 17); L(13.5, 5, 10.5, 19); break;
             case "Fullscreen":
                 L(4, 9, 4, 4); L(4, 4, 9, 4); L(20, 9, 20, 4); L(20, 4, 15, 4); L(4, 15, 4, 20); L(4, 20, 9, 20); L(20, 15, 20, 20); L(20, 20, 15, 20); break;
+            case "Search":
+                Circle(10.5, 10.5, 5.5); L(14.5, 14.5, 19.5, 19.5); break;
+            case "Click":
+                // Mouse body with the left button marked: clicks.
+                Box(7, 4, 10, 16); L(12, 4, 12, 10); L(7, 10, 17, 10); break;
+            case "Drag":
+                // Four-way move arrows: drags.
+                L(12, 4, 12, 20); L(4, 12, 20, 12); Head(12, 4, 0, -1, 3); Head(12, 20, 0, 1, 3); Head(4, 12, -1, 0, 3); Head(20, 12, 1, 0, 3); break;
+            case "Wheel":
+                // Mouse with a wheel and up/down arrows: wheel.
+                Box(7, 4, 10, 16); L(12, 7, 12, 11); Head(12, 2.5, 0, -1, 2); Head(12, 21.5, 0, 1, 2); break;
             default:
                 Box(5, 5, 14, 14); break;
         }

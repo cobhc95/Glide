@@ -1,9 +1,7 @@
 using System.Buffers.Binary;
 using System.Runtime.InteropServices;
-using Avalonia;
 using Avalonia.Media.Imaging;
 using Glide.Imaging;
-using Xunit;
 
 namespace Glide.Core.Tests;
 

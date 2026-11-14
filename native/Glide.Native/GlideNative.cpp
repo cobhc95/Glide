@@ -16,6 +16,23 @@ struct GlideImageInfo
     std::uint32_t reserved;
 };
 
+// Decoded-pixel cap (must match DecodeMemoryGuard.MaxTotalPixels in Glide.Imaging): no decode path in this
+// bridge produces a frame larger than 512 MP (~2.05 GB as 32bpp). The managed loader checks the size
+// before decoding whenever a probe can read it; this cap also covers files whose size only WIC can read,
+// so a hostile header can never make the bridge allocate more than this.
+constexpr std::uint64_t GlideMaxDecodePixels = 512'000'000ull;
+
+static bool WithinDecodeCap(std::uint64_t width, std::uint64_t height)
+{
+    return width > 0 && height > 0 && width <= 65536 && height <= 65536 && width * height <= GlideMaxDecodePixels;
+}
+
+// Lets the managed side (and tests) confirm the loaded bridge enforces the cap.
+extern "C" __declspec(dllexport) std::uint64_t __cdecl GlideGetMaxDecodePixels()
+{
+    return GlideMaxDecodePixels;
+}
+
 
 extern "C" __declspec(dllexport) HCURSOR __cdecl GlideCreateZoomCursor(int zoomOut)
 {
@@ -250,7 +267,7 @@ static bool TryDecoderNativePreview(IWICBitmapFrameDecode* frame, UINT requested
     UINT width = requestedWidth;
     UINT height = requestedHeight;
     hr = transform->GetClosestSize(&width, &height);
-    if (FAILED(hr) || width == 0 || height == 0 || width > 65536 || height > 65536)
+    if (FAILED(hr) || !WithinDecodeCap(width, height))
     {
         transform->Release();
         return false;
@@ -399,6 +416,9 @@ static int DecodeImageBoundedW(const wchar_t* path, std::uint32_t maxWidth, std:
     const UINT physicalMaxHeight = rotated ? maxWidth : maxHeight;
     const bool bounded = SUCCEEDED(hr) && physicalMaxWidth > 0 && physicalMaxHeight > 0 &&
                          (width > physicalMaxWidth || height > physicalMaxHeight);
+    // An unbounded (full-resolution) request for a frame beyond the decoded-pixel cap is refused before
+    // any pixel buffer exists. Bounded requests only ever allocate their reduced output (capped below).
+    if (SUCCEEDED(hr) && !bounded && !WithinDecodeCap(width, height)) hr = E_INVALIDARG;
     if (bounded)
     {
         const double ratio = std::min(static_cast<double>(physicalMaxWidth) / static_cast<double>(width),
@@ -436,7 +456,7 @@ static int DecodeImageBoundedW(const wchar_t* path, std::uint32_t maxWidth, std:
                                                        WICBitmapPaletteTypeCustom);
 
         const std::uint64_t sourceBytes64 = static_cast<std::uint64_t>(scaledWidth) * scaledHeight * 4ull;
-        const bool validSource = scaledWidth > 0 && scaledHeight > 0 && scaledWidth <= 65536 && scaledHeight <= 65536 &&
+        const bool validSource = WithinDecodeCap(scaledWidth, scaledHeight) &&
                                  scaledWidth <= std::numeric_limits<UINT>::max() / 4u &&
                                  sourceBytes64 <= std::numeric_limits<UINT>::max();
         if (!validSource) hr = E_INVALIDARG;
@@ -501,6 +521,64 @@ static int DecodeImageBoundedW(const wchar_t* path, std::uint32_t maxWidth, std:
 extern "C" __declspec(dllexport) int __cdecl GlideDecodeImageW(const wchar_t* path, std::uint32_t maxLongestSide, GlideDecodedImage* image)
 {
     return DecodeImageBoundedW(path, maxLongestSide, maxLongestSide, false, true, image);
+}
+
+// Caller-provided destination for a full-resolution decode: returns a writable 32bpp PBGRA surface of
+// width x height pixels and its row stride, or nullptr to abort. Lets the managed side decode straight
+// into the presentation bitmap instead of into a CoTaskMem buffer that is then copied (which doubled the
+// peak memory of every full decode: 2 x 384 MB for a 100 MP frame).
+typedef void* (__cdecl* GlideSurfaceAllocator)(void* context, std::uint32_t width, std::uint32_t height, std::uint32_t* stride);
+
+// Full-resolution decode of frame 0 into a caller surface. Returns 1 on success, 0 on failure, and 2
+// when the image needs an EXIF orientation transform (the caller then uses GlideDecodeImageW, which
+// rotates through an intermediate buffer). Pixels are identical to GlideDecodeImageW(path, 0).
+extern "C" __declspec(dllexport) int __cdecl GlideDecodeImageIntoW(const wchar_t* path, GlideSurfaceAllocator allocate, void* context)
+{
+    if (!path || !allocate) return 0;
+    const HRESULT init = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    const bool mustUninit = SUCCEEDED(init);
+    if (FAILED(init) && init != RPC_E_CHANGED_MODE) return 0;
+
+    IWICImagingFactory* factory = nullptr;
+    IWICBitmapDecoder* decoder = nullptr;
+    IWICBitmapFrameDecode* frame = nullptr;
+    IWICFormatConverter* converter = nullptr;
+    int result = 0;
+
+    HRESULT hr = CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&factory));
+    if (SUCCEEDED(hr)) hr = factory->CreateDecoderFromFilename(path, nullptr, GENERIC_READ,
+                                                               WICDecodeMetadataCacheOnDemand, &decoder);
+    if (SUCCEEDED(hr)) hr = decoder->GetFrame(0, &frame);
+    UINT width = 0, height = 0;
+    if (SUCCEEDED(hr)) hr = frame->GetSize(&width, &height);
+    if (SUCCEEDED(hr) && ReadOrientation(frame) != 1)
+    {
+        result = 2;
+        hr = E_ABORT;
+    }
+    const std::uint64_t minimumStride = static_cast<std::uint64_t>(width) * 4ull;
+    // Decoded-pixel cap before the caller is asked for a surface (R3: the managed side may not know the size).
+    if (SUCCEEDED(hr) && !WithinDecodeCap(width, height)) hr = E_INVALIDARG;
+    if (SUCCEEDED(hr)) hr = factory->CreateFormatConverter(&converter);
+    if (SUCCEEDED(hr)) hr = converter->Initialize(frame, GUID_WICPixelFormat32bppPBGRA,
+                                                   WICBitmapDitherTypeNone, nullptr, 0.0, WICBitmapPaletteTypeCustom);
+    std::uint32_t stride = 0;
+    std::uint8_t* destination = nullptr;
+    if (SUCCEEDED(hr))
+    {
+        destination = static_cast<std::uint8_t*>(allocate(context, width, height, &stride));
+        const std::uint64_t bytes = static_cast<std::uint64_t>(stride) * height;
+        if (!destination || stride < minimumStride || bytes > std::numeric_limits<UINT>::max()) hr = E_OUTOFMEMORY;
+    }
+    if (SUCCEEDED(hr)) hr = converter->CopyPixels(nullptr, stride, static_cast<UINT>(static_cast<std::uint64_t>(stride) * height), destination);
+    if (SUCCEEDED(hr)) result = 1;
+
+    if (converter) converter->Release();
+    if (frame) frame->Release();
+    if (decoder) decoder->Release();
+    if (factory) factory->Release();
+    if (mustUninit) CoUninitialize();
+    return result;
 }
 
 // Compatibility entry point retains the safe colour-first behaviour. New managed callers use the

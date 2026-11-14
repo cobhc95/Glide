@@ -1,4 +1,3 @@
-using System.IO.Compression;
 using System.Text;
 using System.Text.Json;
 using Avalonia;
@@ -11,8 +10,8 @@ using Avalonia.Media;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
-using Glide.App;
-using Glide.App.Diagnostics;
+using Avalonia.LogicalTree;
+using Glide.App.Controls;
 using Glide.App.Platform;
 using Glide.App.Services;
 using Glide.Core.Settings;
@@ -34,7 +33,6 @@ public partial class SettingsWindow : Window
     private bool _loadingControls;
     private bool _closeWithoutRollback;
     private readonly Dictionary<string, StackPanel> _panels;
-    private readonly string _evidenceTemp;
     private Dictionary<string, List<string>> _workingHotkeys = new(StringComparer.OrdinalIgnoreCase);
     private string? _hotkeyCaptureActionId;
     private string _escRememberedChoice = "Ask";
@@ -45,6 +43,11 @@ public partial class SettingsWindow : Window
     private Border? _hotkeyCaptureSearchCard;
     private readonly Dictionary<string, (Border Card, TextBlock Shortcut)> _hotkeySearchRows = new(StringComparer.OrdinalIgnoreCase);
     private bool _hotkeyFlashOn;
+    // Keyboard shortcuts page: staged custom presets, list sort order and the "Search hotkey" capture / result view.
+    private List<CustomHotkeyPreset> _workingCustomPresets = new();
+    private HotkeySortState _hotkeySort = HotkeySortState.Default;
+    private bool _hotkeyLookupCapturing;
+    private string? _hotkeyLookupShortcut;
     private readonly DispatcherTimer _hotkeyCaptureFlashTimer = new() { Interval = TimeSpan.FromMilliseconds(360) };
     // Rebuilding the editable search cards constructs one live editor per match (up to ~200
     // controls). Coalesce rapid typing so the UI thread is not blocked once per keystroke.
@@ -53,60 +56,61 @@ public partial class SettingsWindow : Window
     private static readonly List<string> EmptyShortcutList = new();
     private string _activeCategory = "General";
 
-    /// <summary>One navigation entry that shows several of the original panels, each under its own heading.</summary>
-    private sealed record CategoryGroup(string Key, string Title, string Subtitle, string[] Members);
+    /// <summary>One Settings page: its navigation key (= page panel), visible title and subtitle.
+    /// The title is also the catalogue <see cref="SettingDefinition.Category"/> of every setting on it.
+    /// Listed in navigation-rail order (the search filter and the diagnostic capture use this order).</summary>
+    private sealed record CategoryGroup(string Key, string Title, string Subtitle);
 
     private static readonly CategoryGroup[] CategoryGroups =
     {
-        new("General", "General & startup", "Application behaviour, history, navigation, startup and new-tab preferences, plus profiles and presets", new[] { "General", "Profiles" }),
-        new("Appearance", "Appearance & viewing", "Themes, colours, image presentation, zoom behaviour and viewport options", new[] { "Appearance", "Viewing" }),
-        new("Interface", "Interface & window", "Window behaviour, fullscreen, folder traversal, caption buttons, navigation buttons and window interactions", new[] { "Interface" }),
-        new("Tabs", "Tabs & status bar", "Tab sizing, detach and attach behaviour, closed-tab history, and the controls shown on the status bar", new[] { "Tabs", "Status" }),
-        new("Mouse", "Mouse & keyboard", "Mouse gestures, selection, zoom and panning, fullscreen interaction and every keyboard shortcut", new[] { "Mouse", "Hotkeys" }),
-        new("Slideshow", "Slideshow & overlays", "Slideshow timing and controls, and Window-in-Window overlay behaviour", new[] { "Slideshow", "Overlays" }),
-        new("Performance", "Performance", "Cold start, decode quality, prefetch, refinement and memory controls", new[] { "Performance" }),
-        new("Windows", "Windows & developer", "Native Windows integration, Open With registration, thumbnails and developer diagnostics", new[] { "Windows", "Developer" })
+        new("General", "General & startup", "What opens at launch and in new tabs, history, and saved profiles"),
+        new("Appearance", "Appearance & viewing", "Theme and colours, zoom and fit, image display and the text overlay"),
+        new("Interface", "Window & navigation", "Window and fullscreen behaviour, title-bar buttons, and moving through images and folders"),
+        new("Mouse", "Mouse & keyboard", "Mouse gestures, keyboard shortcuts, and the Escape and Tab keys"),
+        new("Performance", "Performance", "Image quality while browsing, prefetch, fast-browsing previews and memory"),
+        new("Slideshow", "Slideshow & overlays", "Slideshow playback, Window-in-Window overlays and Overlay mode"),
+        new("Tabs", "Tabs & status bar", "How tabs behave and look, and everything about the status bar"),
+        new("Windows", "Windows & developer", "Opening from Explorer, background start, Explorer thumbnails, external programs and diagnostics")
     };
 
-    private static readonly Dictionary<string, string> PanelHeadings = new(StringComparer.OrdinalIgnoreCase)
+    /// <summary>
+    /// Deep links to the panels that existed before the card layout (4.8.0). Each now opens its page
+    /// and expands/reveals the card that holds that content.
+    /// </summary>
+    private static readonly Dictionary<string, (string Page, string CardId)> LegacyPageAliases = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["Profiles"] = "Profiles and presets", ["Viewing"] = "Viewing",
-        ["Status"] = "Status bar", ["Hotkeys"] = "Keyboard shortcuts",
-        ["Overlays"] = "Window in Window overlays", ["Developer"] = "Developer options"
+        ["Viewing"] = ("Appearance", "appearance-zoom-fit"),
+        ["Status"] = ("Tabs", "tabs-status-bar"),
+        ["Hotkeys"] = ("Mouse", "mouse-shortcuts"),
+        ["Overlays"] = ("Slideshow", "slideshow-wiw"),
+        ["Profiles"] = ("General", "general-profiles"),
+        ["Developer"] = ("Windows", "windows-diagnostics")
     };
 
-    private readonly Dictionary<string, TextBlock> _panelHeadings = new(StringComparer.OrdinalIgnoreCase);
-
-    private static CategoryGroup GroupOf(string key)
-        => CategoryGroups.FirstOrDefault(g => string.Equals(g.Key, key, StringComparison.OrdinalIgnoreCase) ||
-                                              g.Members.Contains(key, StringComparer.OrdinalIgnoreCase)) ?? CategoryGroups[0];
-
-    /// <summary>Catalog category names (kept stable for profiles and diagnostics) mapped to the visible group title.</summary>
-    private static string GroupTitleForCatalogCategory(string catalogCategory)
+    private static CategoryGroup? FindGroup(string key)
     {
-        foreach (var group in CategoryGroups)
-            foreach (var member in group.Members)
-                if (string.Equals(DisplayCategory(member), catalogCategory, StringComparison.OrdinalIgnoreCase)) return group.Title;
-        return catalogCategory;
+        if (LegacyPageAliases.TryGetValue(key, out var alias)) key = alias.Page;
+        return CategoryGroups.FirstOrDefault(g => string.Equals(g.Key, key, StringComparison.OrdinalIgnoreCase));
     }
 
-    private void BuildPanelHeadings()
-    {
-        foreach (var group in CategoryGroups)
-            foreach (var member in group.Members.Skip(1))
-            {
-                var panel = _panels[member];
-                if (panel.Parent is not Panel parent) continue;
-                var heading = new TextBlock { Text = PanelHeadings[member], FontSize = 18, FontWeight = FontWeight.SemiBold, Margin = new Thickness(0, 20, 0, 2), IsVisible = false };
-                parent.Children.Insert(parent.Children.IndexOf(panel), heading);
-                _panelHeadings[member] = heading;
-            }
-    }
+    private static CategoryGroup GroupOf(string key) => FindGroup(key) ?? CategoryGroups[0];
+
+    // Card map (built once in the constructor, before the gesture panel moves its secondary options).
+    private readonly Dictionary<string, SettingsCard> _settingCard = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, Control> _settingAnchors = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, List<SettingsCard>> _cardsByPage = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, SettingsCard> _cardById = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<SettingsCard, string> _pageOfCard = new();
+    // Rows hidden in XAML (legacy controls kept only so saved files round-trip). Never counted.
+    private readonly HashSet<string> _hiddenSettingIds = new(StringComparer.OrdinalIgnoreCase);
+    // Editor value of every catalogued setting after loading a default GlideSettingsState.
+    private readonly Dictionary<string, object?> _defaultValue = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly Dictionary<string, List<string>> DefaultHotkeyMap = HotkeyCatalog.CreateDefaultMap();
     private readonly Dictionary<string, Control> _settingControls = new(StringComparer.OrdinalIgnoreCase);
     // Global-search index per setting. Built once from catalog metadata plus the on-screen wording
     // of the mapped control, so users can find settings by the text they actually see in the UI.
     private readonly Dictionary<string, string> _searchHaystackCache = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, ComboBox> _gestureEditors = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, GestureActionPicker> _gestureEditors = new(StringComparer.OrdinalIgnoreCase);
     private Dictionary<string, string> _workingGestures = GestureCatalog.CreateDefaultMap();
     private List<string> _workingTitleBarButtons = TitleBarButtonCatalog.DefaultButtonIds.ToList();
     private string _workingCustomAccentHex = Glide.App.ThemePalette.GlideBlue;
@@ -161,14 +165,14 @@ public partial class SettingsWindow : Window
         // Track whether a live preview has been pushed to the viewer since the last commit. Cancel
         // only needs the (expensive) full rollback re-apply when something was actually previewed.
         _apply = (state, commit) => { _previewDirty = !commit; apply(state, commit); };
-        _evidenceTemp = Path.Combine(Path.GetTempPath(), "Glide2-UIEvidence-" + Guid.NewGuid().ToString("N"));
-        try { Directory.CreateDirectory(_evidenceTemp); } catch { /* Diagnostics must never block Settings. */ }
 
         // XAML controls such as ComboBox can raise SelectionChanged while InitializeComponent is
         // still constructing the tree. Treat that phase exactly like a settings load so early events
         // cannot dereference panel/control maps that are intentionally built immediately afterwards.
         _loadingControls = true;
+        Glide.Core.GlidePerformanceTrace.Mark("settings_ctor_start");
         InitializeComponent();
+        Glide.Core.GlidePerformanceTrace.Mark("settings_xaml_ready");
         // Single-source the visible product version from assembly metadata (Directory.Build.props), so
         // the About/footer label can never drift behind the actual build again.
         AboutVersionText.Text = ProductVersionLabel();
@@ -179,43 +183,75 @@ public partial class SettingsWindow : Window
         {
             ["General"] = GeneralPanel,
             ["Appearance"] = AppearancePanel,
-            ["Viewing"] = ViewingPanel,
             ["Interface"] = InterfacePanel,
-            ["Mouse"] = MousePanel,
-            ["Performance"] = PerformancePanel,
-            ["Status"] = StatusPanel,
-            ["Slideshow"] = SlideshowPanel,
-            ["Hotkeys"] = HotkeysPanel,
             ["Tabs"] = TabsPanel,
-            ["Overlays"] = OverlaysPanel,
-            ["Profiles"] = ProfilesPanel,
-            ["Windows"] = WindowsPanel,
-            ["Developer"] = DeveloperPanel
+            ["Mouse"] = MousePanel,
+            ["Slideshow"] = SlideshowPanel,
+            ["Performance"] = PerformancePanel,
+            ["Windows"] = WindowsPanel
         };
 
-        BuildPanelHeadings();
+        // One source of page titles: the search filter lists exactly the navigation pages.
+        SearchCategoryCombo.Items.Clear();
+        SearchCategoryCombo.Items.Add(new ComboBoxItem { Content = "All categories" });
+        foreach (var group in CategoryGroups) SearchCategoryCombo.Items.Add(new ComboBoxItem { Content = group.Title });
+        SearchCategoryCombo.SelectedIndex = 0;
+
         BuildSettingControlMap();
+        InitializeResetCard();
+        Glide.Core.GlidePerformanceTrace.Mark("settings_control_map_ready");
+        InitializeResponsiveLayout();
+        // The card map must exist before BuildGestureMatrix moves the gesture secondary options out
+        // of their XAML host (afterwards only the selected area's options are in the tree).
+        BuildCardMap();
         _hotkeyCaptureFlashTimer.Tick += (_, _) => ToggleHotkeyCaptureFlash();
+        HotkeyPresetCombo.SelectionChanged += (_, _) => UpdateHotkeyPresetButtons();
         _searchDebounceTimer.Tick += (_, _) =>
         {
             _searchDebounceTimer.Stop();
             // Progressive: result cards are built a few at a time so typing and clicking stay responsive.
             RunSearchRebuildCore(_pendingSearchQuery, progressive: true);
         };
+        // "N changed" badges compare against the editors' values for a default state. Capture them by
+        // loading defaults first (no live-preview handlers are wired yet and _loadingControls guards the
+        // XAML handlers); the real load below overwrites every editor and working field.
+        Glide.Core.GlidePerformanceTrace.Mark("settings_card_map_ready");
+        CaptureDefaultSnapshot();
+        Glide.Core.GlidePerformanceTrace.Mark("settings_defaults_captured");
         LoadControls(_committed);
+        Glide.Core.GlidePerformanceTrace.Mark("settings_controls_loaded");
         // IMPORTANT: controls can canonicalize legacy/derived settings while loading (for example a
         // compatibility boolean that is now represented by a policy ComboBox). That normalization is
         // not a user edit. Establish the clean comparison baseline from the fully loaded controls so
         // merely opening Settings can never manufacture a phantom "change" / restart prompt.
         _committed = ReadControls().CloneState();
+        Glide.Core.GlidePerformanceTrace.Mark("settings_controls_read");
         BuildProfileRows();
         WireLivePreview();
         ApplySettingsTooltips();
+        Glide.Core.GlidePerformanceTrace.Mark("settings_wired");
         KeyDown += SettingsKeyDown;
+        // While a shortcut is being captured (Change / Add / Search hotkey) the pressed key must reach the capture
+        // first: on the bubble route alone, Avalonia's focus navigation consumed Tab and the arrow keys (so Tab,
+        // Ctrl+Shift+Left... could not be assigned or looked up). Only the capture modes use the tunnel route, so
+        // Escape in a combo box drop-down still closes the drop-down rather than Settings.
+        AddHandler(KeyDownEvent, (sender, e) =>
+        {
+            if (_hotkeyLookupCapturing || _hotkeyCaptureActionId is not null) SettingsKeyDown(sender, e);
+        }, Avalonia.Interactivity.RoutingStrategies.Tunnel);
+        var startPage = GroupOf(_activeCategory);
+        PageTitle.Text = startPage.Title;
+        PageSubtitle.Text = startPage.Subtitle;
+        UpdateExpandCollapseButtons();
         UpdateDirtyState();
 
         Opened += SettingsOpened;
-        PopupPlacementStore.Track(this, "settings");
+        // Settings keeps its own (Cancel-rollback aware) placement code in SettingsWindow.Placement.cs; it shares the
+        // resolver and the per-window store (key "settings") with every other window (WindowPlacementCatalog).
+        WindowStartupLocation = WindowStartupLocation.CenterOwner;
+        // Remember the size and position the user sets: restored here, saved by the owner when the window closes.
+        RestoreSavedPlacement(current);
+        TrackNormalPlacement();
         Closing += SettingsClosing;
         // ContentScroll no longer scrolls to whichever control regains focus (window re-activation
         // used to yank the page back to the last-clicked option). Keyboard Tab navigation still
@@ -253,7 +289,11 @@ public partial class SettingsWindow : Window
             // A pending hotkey capture must never trap the user inside Settings. Any mouse interaction
             // means they are trying to do something else, so cancel capture and let the original click
             // continue to its intended control. Successfully assigned shortcuts remain untouched.
-            EndHotkeyCapture("Shortcut capture cancelled because you clicked elsewhere.", refreshSearch: false);
+            EndHotkeyCapture("Shortcut capture cancelled because you clicked elsewhere.");
+        }
+        else if (_hotkeyLookupCapturing && !(e.Source is Control lookupSource && IsDescendantOf(lookupSource, SearchHotkeyButton)))
+        {
+            EndHotkeyLookupCapture("Hotkey search cancelled because you clicked elsewhere.");
         }
 
         if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed) return;
@@ -298,15 +338,11 @@ public partial class SettingsWindow : Window
 
     private void SettingsOpened(object? sender, EventArgs e)
     {
+        FitToScreenOnOpen();
         // Never schedule diagnostic rendering on the first-interaction path. The old implementation
         // captured multiple RenderTargetBitmaps at +40 ms/+260 ms, making an already-visible Settings
         // window temporarily unresponsive. Diagnostics can explicitly request screenshots instead.
         Dispatcher.UIThread.Post(() => { if (SearchBox is not null) SearchBox.Focusable = true; }, DispatcherPriority.Background);
-    }
-
-    private void CaptureEvidence(string fileName, Control control)
-    {
-        UiDiagnosticCapture.TryCapture(control, Path.Combine(_evidenceTemp, fileName), out _);
     }
 
     private void LoadControls(GlideSettingsState s)
@@ -347,34 +383,22 @@ public partial class SettingsWindow : Window
             ConfirmDiscardSettingsCheck.IsChecked = s.ConfirmDiscardSettingsChanges;
             SelectByText(StartupActionCombo, string.Equals(s.StartupAction, "Explorer tab", StringComparison.OrdinalIgnoreCase) || string.IsNullOrWhiteSpace(s.StartupAction) ? "Welcome tab" : s.StartupAction);
             StartupCustomPathBox.Text = s.StartupCustomPath ?? string.Empty;
-            SelectByText(NewTabActionCombo, string.Equals(s.NewTabAction, "Explorer tab", StringComparison.OrdinalIgnoreCase) || string.IsNullOrWhiteSpace(s.NewTabAction) ? "Welcome tab" : s.NewTabAction);
+            SelectByText(NewTabActionCombo, string.IsNullOrWhiteSpace(s.NewTabAction) ? "Welcome tab" : s.NewTabAction);
             NewTabCustomPathBox.Text = s.NewTabCustomPath ?? string.Empty;
 
             StatusCheck.IsChecked = s.ShowStatusSurface;
-            StatusVisibleMirrorCheck.IsChecked = s.ShowStatusSurface;
             StatusHoverWhenClosedCheck.IsChecked = s.StatusShowOnHoverWhenClosed;
-            StatusHoverMirrorCheck.IsChecked = s.StatusShowOnHoverWhenClosed;
             ShowScrollbarsCheck.IsChecked = s.ShowScrollbars;
             FullPathTitleCheck.IsChecked = s.FullPathInTitle;
             HideCursorFullscreenCheck.IsChecked = s.HideCursorFullscreen;
             AutoHideFullscreenChromeCheck.IsChecked = s.AutoHideFullscreenChrome;
             TabsCheck.IsChecked = s.TabsEnabled;
-            SelectByText(NavigateToFolderBehaviorCombo, "Windows Explorer");
+            SelectByText(ShowInExplorerTargetCombo, ShowInExplorerTargets.Normalize(s.ShowInExplorerTarget));
             TabBarBackButtonCheck.IsChecked = s.TabBarShowBackButton;
             TabBarForwardButtonCheck.IsChecked = s.TabBarShowForwardButton;
             SelectByText(ExternalOpenBehaviorCombo, string.IsNullOrWhiteSpace(s.ExternalOpenBehavior) ? "Open in new tab" : s.ExternalOpenBehavior);
             var thumbnails = Glide.App.Platform.ThumbnailSettingsStore.Load();
-            ExplorerThumbnailsCheck.IsChecked = thumbnails.Enabled;
-            SelectByText(ThumbnailModeCombo, thumbnails.Mode switch
-            {
-                Glide.App.Platform.ThumbnailProviderMode.UnsupportedOnly => "Glide for unsupported formats only",
-                Glide.App.Platform.ThumbnailProviderMode.All => "Glide for all supported formats",
-                Glide.App.Platform.ThumbnailProviderMode.Custom => "Custom",
-                _ => "Recommended"
-            });
-            SelectByText(ThumbnailQualityCombo, thumbnails.Quality);
-            SelectByText(ThumbnailMaxSourceCombo, thumbnails.MaxSourceSize switch { 512 => "512 px", 1024 => "1024 px", 2048 => "2048 px", _ => "Automatic" });
-            ThumbnailPreferEmbeddedCheck.IsChecked = thumbnails.PreferEmbedded;
+            LoadThumbnailControls(thumbnails);
             ThumbnailDiagnosticsText.Text = Glide.App.Platform.ThumbnailSettingsStore.Describe(thumbnails);
             SelectByText(SameImageBehaviorCombo, string.IsNullOrWhiteSpace(s.SameImageAlreadyOpenBehavior) ? "Open new instance" : s.SameImageAlreadyOpenBehavior);
             FullscreenXCloseCheck.IsChecked = s.FullscreenXClosesApp;
@@ -395,7 +419,7 @@ public partial class SettingsWindow : Window
             AnimateGifsCheck.IsChecked = s.AnimateGifs;
             PointerZoomCheck.IsChecked = s.PointerZoom;
             PreserveZoomCheck.IsChecked = s.PreserveManualZoomOnNavigate;
-            ViewportZoomStepBox.Value = Math.Clamp(s.ViewportZoomStepPercent, 1, 100);
+            ViewportZoomStepBox.Value = Glide.Core.ZoomStepPolicy.Clamp(s.ViewportZoomStepPercent);
             UpscaleSmallImagesCheck.IsChecked = s.UpscaleSmallImages;
             SubpixelRenderingCheck.IsChecked = s.HighPrecisionSubpixelRendering;
             ShowLoadingIndicatorCheck.IsChecked = s.ShowImageLoadingIndicator;
@@ -407,30 +431,19 @@ public partial class SettingsWindow : Window
             _escRememberedChoice = string.IsNullOrWhiteSpace(s.EscWindowedRememberedChoice) ? "Ask" : s.EscWindowedRememberedChoice;
             ResetEscChoiceButton.IsEnabled = !string.Equals(_escRememberedChoice, "Ask", StringComparison.OrdinalIgnoreCase);
 
-            DoubleClickFullscreenCheck.IsChecked = s.DoubleClickFullscreen;
-            DoubleClickExitFullscreenCheck.IsChecked = s.DoubleClickExitFullscreen;
-            FullscreenClicksCheck.IsChecked = s.FullscreenClickNavigation;
-            WindowedWheelZoomCheck.IsChecked = s.WindowedWheelZoom;
             InvertWheelCheck.IsChecked = s.InvertWheelDirection;
-            SelectByText(LeftDragModeCombo, s.LeftDragMode);
             SelectByText(LeftWindowDragBehaviorCombo, string.IsNullOrWhiteSpace(s.LeftWindowDragBehavior) ? "Smart (normal window only)" : s.LeftWindowDragBehavior);
             SelectByText(RightDragBehaviorCombo, string.IsNullOrWhiteSpace(s.RightDragBehavior) ? "Smart (pan image / move window)" : s.RightDragBehavior);
-            SelectionClickZoomCheck.IsChecked = s.SelectionClickZoom;
-            SelectionRightZoomCheck.IsChecked = s.SelectionRightClickZoomOut;
             SelectionBufferCheck.IsChecked = s.SelectionBufferEnabled;
             SelectionBufferWindowedBox.Value = Math.Clamp(s.SelectionBufferWindowedPercent, 0, 100);
             SelectionBufferMaximizedBox.Value = Math.Clamp(s.SelectionBufferMaximizedPercent, 0, 100);
             SelectionBufferAllModesCheck.IsChecked = s.SelectionBufferAllModes;
             ReverseSelectionZoomOutScaleCheck.IsChecked = s.ReverseSelectionZoomOutScale;
             BackgroundDragCheck.IsChecked = s.BackgroundDragWindow;
-            CtrlWheelZoomCheck.IsChecked = s.CtrlWheelZoom;
-            MiddleDragPanCheck.IsChecked = s.MiddleDragPan;
             _workingGestures = (s.Gestures ?? GestureCatalog.CreateDefaultMap()).ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase);
-            foreach (var slot in GestureCatalog.Slots)
-            {
-                if (!_gestureEditors.TryGetValue(slot.Id, out var editor)) continue;
-                SelectGestureAction(editor, GestureCatalog.ResolveAction(slot.Id, _workingGestures));
-            }
+            _workingCustomGestures = GestureCatalog.NormalizeCustomGestures(s.CustomGestures);
+            _workingRecentGestureActions = (s.GestureRecentActions ?? new()).ToList();
+            RefreshGesturePanel();
 
             SelectByText(InitialQualityCombo, s.InitialImageQuality);
             SelectByText(InteractivePanQualityCombo, string.IsNullOrWhiteSpace(s.InteractivePanQuality) ? "Full quality" : s.InteractivePanQuality);
@@ -469,6 +482,10 @@ public partial class SettingsWindow : Window
             StatusOptionsCheck.IsChecked = s.StatusShowOptions;
             StatusCloseCheck.IsChecked = s.StatusShowClose;
             StatusCollapsedCornerCheck.IsChecked = s.StatusCollapsedToCorner;
+            StatusAutoHideCheck.IsChecked = s.StatusAutoHide;
+            StatusRevealZoneExpandBox.Value = Glide.Core.StatusBarAutoHide.NormalizeRevealZoneExpand(s.StatusRevealZoneExpand);
+            StatusReserveFitSpaceCheck.IsChecked = s.StatusReserveFitSpace;
+            StatusStackInfoLineCheck.IsChecked = s.StatusStackInfoLine;
             StatIndexCheck.IsChecked = s.StatusStatIndex;
             StatResolutionCheck.IsChecked = s.StatusStatResolution;
             StatZoomCheck.IsChecked = s.StatusStatZoom;
@@ -483,8 +500,6 @@ public partial class SettingsWindow : Window
             SelectByText(SlideshowDirectionCombo, string.IsNullOrWhiteSpace(s.SlideshowDirection) ? "Forward" : s.SlideshowDirection);
             SlideshowStartFullscreenCheck.IsChecked = s.SlideshowStartFullscreen;
             SlideshowPauseInactiveCheck.IsChecked = s.SlideshowPauseWhenInactive;
-            SlideshowRightClickStopsCheck.IsChecked = s.SlideshowRightClickStops;
-            SelectByText(SlideshowLeftClickCombo, Glide.Core.Settings.SlideshowLeftClickActions.Normalize(s.SlideshowLeftClickAction));
             SelectByText(NavigationSortOrderCombo, Glide.Core.ImageSortOrder.NormalizeDisplayName(s.NavigationSortOrder));
             NavigationSortDescendingCheck.IsChecked = s.NavigationSortDescending;
             SlideshowQualityIndicatorCheck.IsChecked = s.SlideshowShowQualityIndicator;
@@ -497,11 +512,14 @@ public partial class SettingsWindow : Window
             ClosedHistoryBox.Value = s.ClosedTabHistoryLimit;
             CloseEmptyAfterDetachCheck.IsChecked = s.CloseEmptyWindowAfterDetach;
             DetachedHomeTabCheck.IsChecked = s.DetachedWindowHomeTab;
-            DoubleClickTabCloseCheck.IsChecked = s.DoubleClickTabCloses;
-            MiddleClickTabCloseCheck.IsChecked = s.MiddleClickTabCloses;
             SelectByText(TabCycleOrderCombo, string.Equals(s.TabCycleOrder, "Most recently used", StringComparison.OrdinalIgnoreCase) ? "Most recently used" : "Tab order");
+            SelectByText(TabToolTipTextSizeCombo, s.TabToolTipTextSize is "Small" or "Large" ? s.TabToolTipTextSize : "Medium");
+            SelectByText(ExplorerDefaultViewCombo, ExplorerDefaultViews.Normalize(s.ExplorerDefaultView));
+            ExplorerShowHiddenFilesCheck.IsChecked = s.ExplorerShowHiddenFiles;
+            ExplorerShowOnlyImagesCheck.IsChecked = s.ExplorerShowOnlyImages;
             SelectByText(LastTabBehaviorCombo, string.IsNullOrWhiteSpace(s.LastTabCloseBehavior) ? "Open home page" : s.LastTabCloseBehavior);
             ConfirmCloseMultipleTabsCheck.IsChecked = s.ConfirmCloseMultipleTabs;
+            // Legacy "Browser page" (removed in 4.7.0) stays migrated to Welcome; 4.8.0 stores "Explorer page".
             SelectByText(HomePageCombo, string.Equals(s.HomePageMode, "Browser page", StringComparison.OrdinalIgnoreCase) ? "Welcome page" : s.HomePageMode);
             ShowFolderCounterCheck.IsChecked = s.ShowFolderCounter;
             FolderCounterGrandparentCheck.IsChecked = s.FolderCounterIncludeGrandparent;
@@ -530,10 +548,8 @@ public partial class SettingsWindow : Window
             WholeAppOverlayAlwaysStartCheck.IsChecked = s.AlwaysStartWholeAppOverlayMode;
             WholeAppOverlayWindowedInteractionsCheck.IsChecked = s.WholeAppOverlayUseWindowedInteractions;
             OverlayKeyboardZoomCheck.IsChecked = s.OverlayKeyboardZoom;
-            OverlayWheelZoomCheck.IsChecked = s.OverlayWheelZoom;
             OverlayHighlightCheck.IsChecked = s.OverlaySelectedHighlight;
             OverlayRememberZoomCheck.IsChecked = s.OverlayRememberZoom;
-            OverlayRightDragCheck.IsChecked = s.OverlayRightDragPan;
             OverlayScaleWithWindowCheck.IsChecked = s.OverlayScaleWithWindow;
             SelectByText(OverlayAnimationRegionCombo, s.OverlayAnimationRegion ?? "Anywhere");
             OverlayAnimationSpeedBox.Value = s.OverlayAnimationSpeedDipsPerSecond;
@@ -551,6 +567,8 @@ public partial class SettingsWindow : Window
             External2Box.Text = s.ExternalProgram2;
             External3Box.Text = s.ExternalProgram3;
             _workingHotkeys = s.Hotkeys.ToDictionary(kv => kv.Key, kv => kv.Value.ToList(), StringComparer.OrdinalIgnoreCase);
+            _workingCustomPresets = (s.CustomHotkeyPresets ?? new()).Select(p => p.Clone()).ToList();
+            RebuildHotkeyPresetCombo();
             UpdateExternalProgramHotkeyLabels();
             if (_hotkeyRowsBuilt) BuildHotkeyRows();
         }
@@ -596,17 +614,17 @@ public partial class SettingsWindow : Window
         state.ConfirmDiscardSettingsChanges = ConfirmDiscardSettingsCheck.IsChecked == true;
         state.StartupAction = SelectedText(StartupActionCombo, "Welcome tab") is "Explorer tab" ? "Welcome tab" : SelectedText(StartupActionCombo, "Welcome tab");
         state.StartupCustomPath = StartupCustomPathBox.Text?.Trim() ?? string.Empty;
-        state.NewTabAction = SelectedText(NewTabActionCombo, "Welcome tab") is "Explorer tab" ? "Welcome tab" : SelectedText(NewTabActionCombo, "Welcome tab");
+        state.NewTabAction = SelectedText(NewTabActionCombo, "Welcome tab");
         state.NewTabCustomPath = NewTabCustomPathBox.Text?.Trim() ?? string.Empty;
 
         state.ShowStatusSurface = StatusCheck.IsChecked == true;
-        state.StatusShowOnHoverWhenClosed = StatusHoverWhenClosedCheck.IsChecked == true || StatusHoverMirrorCheck.IsChecked == true;
+        state.StatusShowOnHoverWhenClosed = StatusHoverWhenClosedCheck.IsChecked == true;
         state.ShowScrollbars = ShowScrollbarsCheck.IsChecked == true;
         state.FullPathInTitle = FullPathTitleCheck.IsChecked == true;
         state.HideCursorFullscreen = HideCursorFullscreenCheck.IsChecked == true;
         state.AutoHideFullscreenChrome = AutoHideFullscreenChromeCheck.IsChecked == true;
         state.TabsEnabled = TabsCheck.IsChecked == true;
-        state.NavigateToFolderBehavior = "Windows Explorer";
+        state.ShowInExplorerTarget = ShowInExplorerTargets.Normalize(SelectedText(ShowInExplorerTargetCombo, ShowInExplorerTargets.GlideTab));
         state.TabBarShowBackButton = TabBarBackButtonCheck.IsChecked == true;
         state.TabBarShowForwardButton = TabBarForwardButtonCheck.IsChecked == true;
         state.ExternalOpenBehavior = SelectedText(ExternalOpenBehaviorCombo, "Open in new tab");
@@ -629,7 +647,7 @@ public partial class SettingsWindow : Window
         state.AnimateGifs = AnimateGifsCheck.IsChecked == true;
         state.PointerZoom = PointerZoomCheck.IsChecked == true;
         state.PreserveManualZoomOnNavigate = PreserveZoomCheck.IsChecked == true;
-        state.ViewportZoomStepPercent = (int)(ViewportZoomStepBox.Value ?? 10);
+        state.ViewportZoomStepPercent = Glide.Core.ZoomStepPolicy.Clamp((int)(ViewportZoomStepBox.Value ?? Glide.Core.ZoomStepPolicy.DefaultStepPercent));
         state.UpscaleSmallImages = UpscaleSmallImagesCheck.IsChecked == true;
         state.HighPrecisionSubpixelRendering = SubpixelRenderingCheck.IsChecked == true;
         state.ShowImageLoadingIndicator = ShowLoadingIndicatorCheck.IsChecked == true;
@@ -640,30 +658,21 @@ public partial class SettingsWindow : Window
         state.EscWindowedConfirm = EscWindowedConfirmCheck.IsChecked == true;
         state.EscWindowedRememberedChoice = _escRememberedChoice;
 
-        state.DoubleClickFullscreen = DoubleClickFullscreenCheck.IsChecked == true;
-        state.DoubleClickExitFullscreen = DoubleClickExitFullscreenCheck.IsChecked == true;
-        state.FullscreenClickNavigation = FullscreenClicksCheck.IsChecked == true;
-        state.WindowedWheelZoom = WindowedWheelZoomCheck.IsChecked == true;
         state.InvertWheelDirection = InvertWheelCheck.IsChecked == true;
-        state.LeftDragMode = SelectedText(LeftDragModeCombo, "Create selection (Glide)");
         state.LeftWindowDragBehavior = SelectedText(LeftWindowDragBehaviorCombo, "Smart (normal window only)");
         state.RightDragBehavior = SelectedText(RightDragBehaviorCombo, "Smart (pan image / move window)");
         state.RightDragPan = !string.Equals(state.RightDragBehavior, "Do nothing", StringComparison.OrdinalIgnoreCase);
-        state.SelectionClickZoom = SelectionClickZoomCheck.IsChecked == true;
-        state.SelectionRightClickZoomOut = SelectionRightZoomCheck.IsChecked == true;
         state.SelectionBufferEnabled = SelectionBufferCheck.IsChecked == true;
         state.SelectionBufferWindowedPercent = Math.Clamp((int)(SelectionBufferWindowedBox.Value ?? 33), 0, 100);
         state.SelectionBufferMaximizedPercent = Math.Clamp((int)(SelectionBufferMaximizedBox.Value ?? 100), 0, 100);
         state.SelectionBufferAllModes = SelectionBufferAllModesCheck.IsChecked == true;
         state.ReverseSelectionZoomOutScale = ReverseSelectionZoomOutScaleCheck.IsChecked == true;
         state.BackgroundDragWindow = BackgroundDragCheck.IsChecked == true;
-        state.CtrlWheelZoom = CtrlWheelZoomCheck.IsChecked == true;
-        state.MiddleDragPan = MiddleDragPanCheck.IsChecked == true;
         state.Gestures = _workingGestures.ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase);
-        foreach (var kv in _gestureEditors)
-            state.Gestures[kv.Key] = (kv.Value.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? GestureCatalog.Default;
+        state.CustomGestures = _workingCustomGestures.Select(x => x.Clone()).ToList();
+        state.GestureRecentActions = _workingRecentGestureActions.ToList();
 
-        state.InitialImageQuality = SelectedText(InitialQualityCombo, "Balanced");
+        state.InitialImageQuality = SelectedText(InitialQualityCombo, "Maximum quality");
         state.PerformanceUserCustom = string.Equals(state.InitialImageQuality, "User custom", StringComparison.OrdinalIgnoreCase);
         state.InteractivePanQuality = SelectedText(InteractivePanQualityCombo, "Full quality");
         state.SpeedBoostEnabled = SpeedBoostCheck.IsChecked == true;
@@ -702,6 +711,10 @@ public partial class SettingsWindow : Window
         state.StatusShowOptions = StatusOptionsCheck.IsChecked == true;
         state.StatusShowClose = StatusCloseCheck.IsChecked == true;
         state.StatusCollapsedToCorner = StatusCollapsedCornerCheck.IsChecked == true;
+        state.StatusAutoHide = StatusAutoHideCheck.IsChecked == true;
+        state.StatusRevealZoneExpand = Glide.Core.StatusBarAutoHide.NormalizeRevealZoneExpand((int)(StatusRevealZoneExpandBox.Value ?? Glide.Core.StatusBarAutoHide.DefaultRevealZoneExpand));
+        state.StatusReserveFitSpace = StatusReserveFitSpaceCheck.IsChecked == true;
+        state.StatusStackInfoLine = StatusStackInfoLineCheck.IsChecked == true;
         state.StatusStatIndex = StatIndexCheck.IsChecked == true;
         state.StatusStatResolution = StatResolutionCheck.IsChecked == true;
         state.StatusStatZoom = StatZoomCheck.IsChecked == true;
@@ -716,8 +729,6 @@ public partial class SettingsWindow : Window
         state.SlideshowDirection = SelectedText(SlideshowDirectionCombo, "Forward");
         state.SlideshowStartFullscreen = SlideshowStartFullscreenCheck.IsChecked == true;
         state.SlideshowPauseWhenInactive = SlideshowPauseInactiveCheck.IsChecked == true;
-        state.SlideshowRightClickStops = SlideshowRightClickStopsCheck.IsChecked == true;
-        state.SlideshowLeftClickAction = Glide.Core.Settings.SlideshowLeftClickActions.Normalize(SelectedText(SlideshowLeftClickCombo, Glide.Core.Settings.SlideshowLeftClickActions.PauseResume));
         state.NavigationSortOrder = Glide.Core.ImageSortOrder.NormalizeDisplayName(SelectedText(NavigationSortOrderCombo, Glide.Core.ImageSortOrder.NameDisplay));
         state.NavigationSortDescending = NavigationSortDescendingCheck.IsChecked == true;
         state.SlideshowShowQualityIndicator = SlideshowQualityIndicatorCheck.IsChecked == true;
@@ -730,9 +741,11 @@ public partial class SettingsWindow : Window
         state.ClosedTabHistoryLimit = (int)(ClosedHistoryBox.Value ?? 20);
         state.CloseEmptyWindowAfterDetach = CloseEmptyAfterDetachCheck.IsChecked == true;
         state.DetachedWindowHomeTab = DetachedHomeTabCheck.IsChecked == true;
-        state.DoubleClickTabCloses = DoubleClickTabCloseCheck.IsChecked == true;
-        state.MiddleClickTabCloses = MiddleClickTabCloseCheck.IsChecked == true;
         state.TabCycleOrder = SelectedText(TabCycleOrderCombo, "Tab order");
+        state.TabToolTipTextSize = SelectedText(TabToolTipTextSizeCombo, "Medium");
+        state.ExplorerDefaultView = ExplorerDefaultViews.Normalize(SelectedText(ExplorerDefaultViewCombo, ExplorerDefaultViews.Default));
+        state.ExplorerShowHiddenFiles = ExplorerShowHiddenFilesCheck.IsChecked == true;
+        state.ExplorerShowOnlyImages = ExplorerShowOnlyImagesCheck.IsChecked == true;
         state.LastTabCloseBehavior = SelectedText(LastTabBehaviorCombo, "Open home page");
         state.ConfirmCloseMultipleTabs = ConfirmCloseMultipleTabsCheck.IsChecked == true;
         if (state.ConfirmCloseMultipleTabs) state.RememberedMultiTabCloseChoice = "Ask";
@@ -764,10 +777,8 @@ public partial class SettingsWindow : Window
         state.AlwaysStartWholeAppOverlayMode = WholeAppOverlayAlwaysStartCheck.IsChecked == true;
         state.WholeAppOverlayUseWindowedInteractions = WholeAppOverlayWindowedInteractionsCheck.IsChecked == true;
         state.OverlayKeyboardZoom = OverlayKeyboardZoomCheck.IsChecked == true;
-        state.OverlayWheelZoom = OverlayWheelZoomCheck.IsChecked == true;
         state.OverlaySelectedHighlight = OverlayHighlightCheck.IsChecked == true;
         state.OverlayRememberZoom = OverlayRememberZoomCheck.IsChecked == true;
-        state.OverlayRightDragPan = OverlayRightDragCheck.IsChecked == true;
         state.OverlayScaleWithWindow = OverlayScaleWithWindowCheck.IsChecked == true;
         state.OverlayAnimationRegion = SelectedText(OverlayAnimationRegionCombo, "Anywhere");
         state.OverlayAnimationSpeedDipsPerSecond = Math.Clamp((int)(OverlayAnimationSpeedBox.Value ?? 90), 10, 2000);
@@ -785,19 +796,18 @@ public partial class SettingsWindow : Window
         state.ExternalProgram2 = External2Box.Text ?? string.Empty;
         state.ExternalProgram3 = External3Box.Text ?? string.Empty;
         state.Hotkeys = _workingHotkeys.ToDictionary(kv => kv.Key, kv => kv.Value.ToList(), StringComparer.OrdinalIgnoreCase);
+        state.CustomHotkeyPresets = _workingCustomPresets.Select(p => p.Clone()).ToList();
         return state;
     }
 
     private void WireLivePreview()
     {
         // Subscribe from the authoritative setting->editor map so newly added editable settings cannot
-        // silently bypass live preview or exact net-change tracking. The mirrored Status checkbox is
-        // the one intentional extra editor that maps to the same underlying state property.
-        var controls = _settingControls.Values
-            .Append<Control>(StatusVisibleMirrorCheck)
-            .Distinct()
-            .ToArray();
-        foreach (var control in controls) control.PropertyChanged += ValueControlChanged;
+        // silently bypass live preview or exact net-change tracking. Every setting has exactly one
+        // editor (4.8.0 removed the mirrored status-bar checkboxes).
+        // The Reset Glide tick boxes only choose what a confirmation lists; they are not settings, so no preview pass.
+        foreach (var pair in _settingControls.Where(x => !x.Key.StartsWith("reset.", StringComparison.OrdinalIgnoreCase)).ToArray())
+            pair.Value.PropertyChanged += ValueControlChanged;
     }
 
     private void ValueControlChanged(object? sender, AvaloniaPropertyChangedEventArgs e)
@@ -808,19 +818,6 @@ public partial class SettingsWindow : Window
                        e.Property == NumericUpDown.ValueProperty ||
                        e.Property == TextBox.TextProperty;
         if (!relevant) return;
-
-        if (ReferenceEquals(sender, StatusCheck))
-        {
-            _loadingControls = true;
-            StatusVisibleMirrorCheck.IsChecked = StatusCheck.IsChecked;
-            _loadingControls = false;
-        }
-        else if (ReferenceEquals(sender, StatusVisibleMirrorCheck))
-        {
-            _loadingControls = true;
-            StatusCheck.IsChecked = StatusVisibleMirrorCheck.IsChecked;
-            _loadingControls = false;
-        }
 
         if (IsPerformanceTuningControl(sender)) DetectPerformanceProfileFromControls();
 
@@ -840,12 +837,6 @@ public partial class SettingsWindow : Window
         Dispatcher.UIThread.Post(RunLivePreview, DispatcherPriority.Background);
     }
 
-    /// <summary>Runs any pending deferred preview now (before Apply/OK read state, and in tests).</summary>
-    internal void FlushPendingPreview()
-    {
-        if (_previewScheduled) RunLivePreview();
-    }
-
     private void RunLivePreview()
     {
         if (!_previewScheduled) return;
@@ -855,7 +846,6 @@ public partial class SettingsWindow : Window
         _apply(preview, false);
         UpdateDirtyState(preview);
     }
-
 
     private bool IsPerformanceTuningControl(object? sender) => sender is not null && sender != InitialQualityCombo &&
             new Control[] { InteractivePanQualityCombo, AdaptiveFastPreviewCheck, AdaptivePreviewDelayBox, SequentialReadCheck, PrefetchCheck, PrefetchDepthBox,
@@ -912,6 +902,7 @@ public partial class SettingsWindow : Window
         saved.UserCustomRapidBrowsePreviewSize = (int)(RapidBrowsePreviewBox.Value ?? 1440);
         saved.UserCustomProgressiveColor = ProgressiveColorCheck.IsChecked == true;
         _committed = saved;
+        WindowPlacementService.ApplyTo(_committed);
         SettingsStore.Save(_committed);
 
         _loadingControls = true;
@@ -938,7 +929,7 @@ public partial class SettingsWindow : Window
     private void PerformanceProfileChanged(object? sender, SelectionChangedEventArgs e)
     {
         if (_loadingControls) return;
-        var profileName = SelectedText(InitialQualityCombo, "Balanced");
+        var profileName = SelectedText(InitialQualityCombo, "Maximum quality");
         if (string.Equals(profileName, "User custom", StringComparison.OrdinalIgnoreCase))
         {
             if (_committed.PerformanceUserCustomSaved)
@@ -1002,89 +993,9 @@ public partial class SettingsWindow : Window
         UpdateDirtyState(preview);
     }
 
-    private sealed record SettingChange(string Name, string Before, string After);
-
-    private List<SettingChange> GetNetChanges(GlideSettingsState? current = null)
-    {
-        current ??= ReadControls();
-
-        // Canonical semantic guard: opening Settings, cloning staged state, or changing a value and
-        // changing it back must never make the window dirty. ContentEquals compares the mutable
-        // settings collections by value, not by List/Dictionary object identity.
-        if (_committed.ContentEquals(current)) return new List<SettingChange>();
-
-        var changes = new List<SettingChange>();
-        foreach (var property in typeof(GlideSettingsState).GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance))
-        {
-            if (!property.CanRead || property.Name is nameof(GlideSettingsState.Hotkeys) or nameof(GlideSettingsState.Gestures)) continue;
-            var before = property.GetValue(_committed);
-            var after = property.GetValue(current);
-            if (SettingValuesEqual(before, after)) continue;
-            changes.Add(new SettingChange(HumanizeSettingName(property.Name), FormatSettingValue(before), FormatSettingValue(after)));
-        }
-
-        if (!DictionaryOfListsEqual(_committed.Hotkeys, current.Hotkeys))
-            changes.Add(new SettingChange("Keyboard shortcuts", "Previous assignments", "Modified assignments"));
-        if (!DictionaryEqual(_committed.Gestures, current.Gestures))
-            changes.Add(new SettingChange("Mouse gesture matrix", "Previous assignments", "Modified assignments"));
-        return changes;
-    }
-
-    private static bool DictionaryOfListsEqual(Dictionary<string, List<string>> a, Dictionary<string, List<string>> b)
-    {
-        if (a.Count != b.Count) return false;
-        foreach (var pair in a)
-            if (!b.TryGetValue(pair.Key, out var values) || !pair.Value.SequenceEqual(values, StringComparer.OrdinalIgnoreCase)) return false;
-        return true;
-    }
-
-    private static bool DictionaryEqual(Dictionary<string, string> a, Dictionary<string, string> b)
-    {
-        if (a.Count != b.Count) return false;
-        foreach (var pair in a)
-            if (!b.TryGetValue(pair.Key, out var value) || !string.Equals(pair.Value, value, StringComparison.OrdinalIgnoreCase)) return false;
-        return true;
-    }
-
-    private static string HumanizeSettingName(string name)
-    {
-        var chars = new List<char>(name.Length + 8);
-        for (var i = 0; i < name.Length; i++)
-        {
-            if (i > 0 && char.IsUpper(name[i]) && !char.IsUpper(name[i - 1])) chars.Add(' ');
-            chars.Add(name[i]);
-        }
-        return new string(chars.ToArray()).Replace("Ms", "ms", StringComparison.Ordinal);
-    }
-
-    private static bool SettingValuesEqual(object? before, object? after)
-    {
-        if (ReferenceEquals(before, after)) return true;
-        if (before is null || after is null) return false;
-
-        // SettingsState intentionally contains mutable collection properties (currently TitleBarButtons).
-        // CloneState creates a new List instance, so object.Equals would report a false change every time
-        // Settings opens even when the ordered contents are identical. Compare string sequences by value.
-        if (before is IEnumerable<string> beforeStrings && after is IEnumerable<string> afterStrings)
-            return beforeStrings.SequenceEqual(afterStrings, StringComparer.OrdinalIgnoreCase);
-
-        return Equals(before, after);
-    }
-
-    private static string FormatSettingValue(object? value) => value switch
-    {
-        null => "(none)",
-        bool flag => flag ? "On" : "Off",
-        string text when string.IsNullOrWhiteSpace(text) => "(empty)",
-        IEnumerable<string> values => FormatStringSequence(values),
-        _ => value.ToString() ?? "(none)"
-    };
-
-    private static string FormatStringSequence(IEnumerable<string> values)
-    {
-        var materialized = values.Where(value => !string.IsNullOrWhiteSpace(value)).ToArray();
-        return materialized.Length == 0 ? "(none)" : string.Join(", ", materialized);
-    }
+    /// <summary>Net changes between the committed state and the staged controls (see <see cref="SettingsChangeSet"/>).</summary>
+    private List<SettingChange> GetNetChanges(GlideSettingsState? current = null) =>
+        SettingsChangeSet.Compute(_committed, current ?? ReadControls());
 
     private void UpdateDirtyState(GlideSettingsState? current = null)
     {
@@ -1102,6 +1013,159 @@ public partial class SettingsWindow : Window
         ToolTip.SetTip(DirtySummaryHost, changeTip);
         ToolTip.SetTip(DirtyText, changeTip);
         ToolTip.SetTip(DirtyHintText, changeTip);
+        UpdateCardBadges();
+    }
+
+    // ---- Cards: map, defaults snapshot and "N changed" badges ---------------------------------
+
+    /// <summary>
+    /// Maps every setting id to the <see cref="SettingsCard"/> that hosts it: mapped editors by their
+    /// logical ancestor card, action entries through the <c>SettingsCard.SettingIds</c> anchors, and
+    /// every generated gesture entry to the card holding the gesture panel.
+    /// </summary>
+    private void BuildCardMap()
+    {
+        foreach (var pair in _panels)
+        {
+            var cards = pair.Value.GetLogicalDescendants().OfType<SettingsCard>().ToList();
+            _cardsByPage[pair.Key] = cards;
+            foreach (var card in cards)
+            {
+                if (!string.IsNullOrWhiteSpace(card.CardId)) _cardById[card.CardId!] = card;
+                _pageOfCard[card] = pair.Key;
+                card.ExpandedChanged += (_, _) => UpdateExpandCollapseButtons();
+                foreach (var anchor in card.Body.GetLogicalDescendants().OfType<Control>().Prepend(card.Body))
+                    foreach (var id in SettingsCard.GetSettingIdList(anchor))
+                    {
+                        _settingCard[id] = card;
+                        _settingAnchors[id] = anchor;
+                    }
+            }
+        }
+
+        foreach (var pair in _settingControls)
+        {
+            if (pair.Value.FindLogicalAncestorOfType<SettingsCard>() is not { } card) continue;
+            _settingCard[pair.Key] = card;
+            if (IsHiddenInCard(pair.Value, card)) _hiddenSettingIds.Add(pair.Key);
+        }
+
+        if (GestureMatrixHost.FindLogicalAncestorOfType<SettingsCard>() is { } gestureCard)
+            foreach (var setting in SettingsCatalog.All)
+                if (setting.Id.StartsWith("gesture.", StringComparison.OrdinalIgnoreCase)) _settingCard[setting.Id] = gestureCard;
+    }
+
+    /// <summary>True when the control or any of its parents below the card body is hidden in XAML.</summary>
+    private static bool IsHiddenInCard(Control control, SettingsCard card)
+    {
+        for (Control? current = control; current is not null && !ReferenceEquals(current, card.Body); current = current.GetLogicalParent() as Control)
+            if (!current.IsVisible) return true;
+        return false;
+    }
+
+    private static object? EditorValue(Control control) => control switch
+    {
+        CheckBox check => check.IsChecked,
+        ComboBox combo => SelectedText(combo),
+        NumericUpDown number => number.Value,
+        TextBox box => box.Text?.Trim() ?? string.Empty,
+        _ => null
+    };
+
+    /// <summary>A push button that edits a setting through a dialog/action (CheckBox derives from Button too).</summary>
+    private static bool IsActionButton(Control control) => control is Button and not ToggleButton;
+
+    private void CaptureDefaultSnapshot()
+    {
+        LoadControls(new GlideSettingsState());
+        // Explorer thumbnail settings live in their own store (not GlideSettingsState), so LoadControls
+        // shows the stored values; their default is the thumbnail store's own default.
+        _loadingControls = true;
+        try { LoadThumbnailControls(Glide.App.Platform.ThumbnailSettings.Default); }
+        finally { _loadingControls = false; }
+        foreach (var setting in SettingsCatalog.All)
+            if (_settingControls.TryGetValue(setting.Id, out var control) && !IsActionButton(control))
+                _defaultValue[setting.Id] = EditorValue(control);
+    }
+
+    /// <summary>Settings that never count toward a card's "N changed" badge.</summary>
+    private bool CountsTowardBadge(SettingDefinition setting) =>
+        setting.Kind != SettingKind.Action &&
+        setting.Id is not ("profiles.presets" or "hotkeys.preset") &&
+        !_hiddenSettingIds.Contains(setting.Id) &&
+        _settingControls.TryGetValue(setting.Id, out var control) && !IsActionButton(control) &&
+        _defaultValue.ContainsKey(setting.Id);
+
+    private void UpdateCardBadges()
+    {
+        if (_cardById.Count == 0) return;
+        var changed = new Dictionary<SettingsCard, List<string>>();
+        void Add(string cardId, string title)
+        {
+            if (!_cardById.TryGetValue(cardId, out var target)) return;
+            if (!changed.TryGetValue(target, out var list)) changed[target] = list = new List<string>();
+            list.Add(title);
+        }
+
+        foreach (var setting in SettingsCatalog.All)
+        {
+            if (!CountsTowardBadge(setting) || !_settingCard.TryGetValue(setting.Id, out var card)) continue;
+            if (Equals(EditorValue(_settingControls[setting.Id]), _defaultValue[setting.Id])) continue;
+            if (!changed.TryGetValue(card, out var list)) changed[card] = list = new List<string>();
+            list.Add(setting.Label);
+        }
+
+        // Gesture rows (works before the lazy matrix is built) and custom gestures.
+        foreach (var slot in GestureCatalog.Slots)
+            if (IsGestureChanged(slot.Id)) Add("mouse-gestures", $"{GestureCatalog.AreaLabel(slot.Area)}: {slot.InputLabel}");
+        foreach (var custom in _workingCustomGestures) Add("mouse-gestures", CustomGestureTitle(custom));
+
+        // Keyboard shortcuts: one per action whose shortcuts differ from the Glide defaults.
+        foreach (var action in HotkeyCatalog.All)
+        {
+            var working = _workingHotkeys.GetValueOrDefault(action.Id, EmptyShortcutList);
+            var defaults = DefaultHotkeyMap.GetValueOrDefault(action.Id, EmptyShortcutList);
+            if (!working.SequenceEqual(defaults, StringComparer.OrdinalIgnoreCase)) Add("mouse-shortcuts", "Shortcut: " + action.Label);
+        }
+
+        // Title-bar utility buttons (edited in their own dialog).
+        if (!TitleBarButtonCatalog.Normalize(_workingTitleBarButtons).SequenceEqual(TitleBarButtonCatalog.DefaultButtonIds, StringComparer.OrdinalIgnoreCase))
+            Add("window-title-bar", "Title-bar utility buttons");
+
+        foreach (var card in _cardById.Values)
+        {
+            var titles = changed.GetValueOrDefault(card);
+            var count = titles?.Count ?? 0;
+            card.ChangedCount = count;
+            card.ChangedTip = count == 0 ? null
+                : "Changed from default:\n" + string.Join("\n", titles!.Take(20)) + (count > 20 ? $"\n… and {count - 20} more" : string.Empty);
+        }
+    }
+
+    // ---- Expand all / Collapse all -------------------------------------------------------------
+
+    private IReadOnlyList<SettingsCard> ActivePageCards() => _cardsByPage.GetValueOrDefault(_activeCategory) ?? new List<SettingsCard>();
+
+    private void ExpandAllCardsClicked(object? sender, RoutedEventArgs e) => SetActivePageCardsExpanded(true);
+
+    private void CollapseAllCardsClicked(object? sender, RoutedEventArgs e) => SetActivePageCardsExpanded(false);
+
+    private void SetActivePageCardsExpanded(bool expanded)
+    {
+        foreach (var card in ActivePageCards()) card.IsExpanded = expanded;
+        UpdateExpandCollapseButtons();
+    }
+
+    /// <summary>The buttons act on the visible page only: hidden during search, disabled when nothing would change.</summary>
+    private void UpdateExpandCollapseButtons()
+    {
+        if (ExpandAllCardsButton is null || CollapseAllCardsButton is null) return;
+        var searching = SearchPanel.IsVisible;
+        ExpandAllCardsButton.IsVisible = !searching;
+        CollapseAllCardsButton.IsVisible = !searching;
+        var cards = ActivePageCards();
+        ExpandAllCardsButton.IsEnabled = cards.Any(c => !c.IsExpanded);
+        CollapseAllCardsButton.IsEnabled = cards.Any(c => c.IsExpanded);
     }
 
     private void ResetEscChoiceClicked(object? sender, RoutedEventArgs e)
@@ -1116,14 +1180,36 @@ public partial class SettingsWindow : Window
     private void CategoryClicked(object? sender, RoutedEventArgs e)
     {
         if (sender is not Button button || button.Tag is not string key || !_panels.ContainsKey(key)) return;
-        ShowCategory(key, clearSearch: true);
+        ShowCategory(key, clearSearch: true, restoreScroll: true);
     }
 
-    private void ShowCategory(string key, bool clearSearch)
+    // Per-page vertical scroll memory for the lifetime of this Settings window only: a freshly
+    // opened window starts every page at the top. Only plain page switches (the navigation rail,
+    // leaving search) restore; search "Open" and deep links still land on their target.
+    private readonly Dictionary<string, double> _categoryScrollOffsets = new(StringComparer.OrdinalIgnoreCase);
+
+    private void RememberCategoryScroll()
     {
-        if (!_panels.ContainsKey(key)) return;
-        var group = GroupOf(key);
+        if (SearchPanel.IsVisible || string.IsNullOrEmpty(_activeCategory)) return;
+        _categoryScrollOffsets[_activeCategory] = ContentScroll.Offset.Y;
+    }
+
+    /// <summary>
+    /// Shows one page. <paramref name="key"/> is a page key or a legacy deep link (Viewing, Status,
+    /// Hotkeys, Overlays, Profiles, Developer), which expands and reveals the card that now holds that
+    /// content. <paramref name="revealTarget"/> is scrolled into view once the page has laid out
+    /// (one Loaded-priority post, so it cannot race the page's own scroll reset).
+    /// </summary>
+    private void ShowCategory(string key, bool clearSearch, bool restoreScroll = false, Control? revealTarget = null)
+    {
+        if (FindGroup(key) is not { } group) return;
+        SettingsCard? aliasCard = null;
+        if (LegacyPageAliases.TryGetValue(key, out var alias)) _cardById.TryGetValue(alias.CardId, out aliasCard);
+        RememberCategoryScroll();
         _activeCategory = group.Key;
+        var plainSwitch = aliasCard is null && revealTarget is null;
+        var restoreOffset = restoreScroll && plainSwitch &&
+            _categoryScrollOffsets.TryGetValue(group.Key, out var remembered) ? remembered : 0;
         if (clearSearch && !string.IsNullOrEmpty(SearchBox.Text))
         {
             _loadingControls = true;
@@ -1131,8 +1217,7 @@ public partial class SettingsWindow : Window
             _loadingControls = false;
         }
         SearchPanel.IsVisible = false;
-        foreach (var pair in _panels) pair.Value.IsVisible = group.Members.Contains(pair.Key, StringComparer.OrdinalIgnoreCase);
-        foreach (var pair in _panelHeadings) pair.Value.IsVisible = group.Members.Contains(pair.Key, StringComparer.OrdinalIgnoreCase);
+        foreach (var pair in _panels) pair.Value.IsVisible = string.Equals(pair.Key, group.Key, StringComparison.OrdinalIgnoreCase);
         foreach (var child in NavigationRail.Children.OfType<Button>())
         {
             child.Classes.Remove("selected");
@@ -1141,41 +1226,169 @@ public partial class SettingsWindow : Window
 
         PageTitle.Text = group.Title;
         PageSubtitle.Text = group.Subtitle;
-        if (group.Members.Contains("Hotkeys")) { _hotkeyRowsBuilt = true; BuildHotkeyRows(HotkeyFilterBox?.Text); }
-        if (group.Members.Contains("Mouse") && !_gestureMatrixBuilt) { BuildGestureMatrix(); LoadGestureEditorsFromWorkingMap(); }
-        ContentScroll.Offset = new Vector(ContentScroll.Offset.X, 0);
-        // Deep links (for example "Open" next to a shortcut result) land on their own section.
-        if (!string.Equals(key, group.Key, StringComparison.OrdinalIgnoreCase) && _panelHeadings.TryGetValue(key, out var heading))
-            Dispatcher.UIThread.Post(() => heading.BringIntoView(), DispatcherPriority.Loaded);
-        else
+        if (string.Equals(group.Key, "Mouse", StringComparison.OrdinalIgnoreCase))
         {
-            // Pages built lazily on first visit (the Mouse gesture matrix, the hotkey rows) grow after
-            // this call; re-pin the page to the top once that layout has settled so the first visit
-            // does not open part-way down.
-            var category = _activeCategory;
-            Dispatcher.UIThread.Post(() =>
-            {
-                if (string.Equals(category, _activeCategory, StringComparison.Ordinal) && !SearchPanel.IsVisible)
-                    ContentScroll.Offset = new Vector(ContentScroll.Offset.X, 0);
-            }, DispatcherPriority.Loaded);
+            _hotkeyRowsBuilt = true;
+            BuildHotkeyRows(HotkeyFilterBox?.Text);
+            if (!_gestureMatrixBuilt) { BuildGestureMatrix(); LoadGestureEditorsFromWorkingMap(); }
         }
+        if (aliasCard is not null)
+        {
+            aliasCard.IsExpanded = true;
+            revealTarget ??= aliasCard;
+        }
+        UpdateExpandCollapseButtons();
+        ContentScroll.Offset = new Vector(ContentScroll.Offset.X, 0);
+
+        // Pages built lazily on first visit (the Mouse gesture matrix, the hotkey rows) grow after
+        // this call; re-pin the page once that layout has settled so the first visit does not open
+        // part-way down. A revisit in the same window restores its remembered offset instead,
+        // clamped to the page's current maximum. Deep links and search "Open" land on their target.
+        var category = _activeCategory;
+        var target = revealTarget;
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (!string.Equals(category, _activeCategory, StringComparison.Ordinal) || SearchPanel.IsVisible) return;
+            if (target is not null) ScrollToReveal(target);
+            else
+                ContentScroll.Offset = new Vector(ContentScroll.Offset.X,
+                    Math.Clamp(restoreOffset, 0, Math.Max(0, ContentScroll.ScrollBarMaximum.Y)));
+        }, DispatcherPriority.Loaded);
     }
 
-    private static string DisplayCategory(string key) => key switch
+    /// <summary>Distance between the top of the page viewport and a revealed row.</summary>
+    private const double RevealTopMargin = 72;
+
+    private void ScrollToReveal(Control target)
     {
-        "Appearance" => "Themes & Colours",
-        "Viewing" => "Viewing & Appearance",
-        "Interface" => "Interface & Behavior",
-        "Mouse" => "Mouse & Fullscreen",
-        "Performance" => "Performance & Startup",
-        "Status" => "Status Bar",
-        "Tabs" => "Tabs & Workspace",
-        "Overlays" => "Window in Window",
-        "Profiles" => "Profiles & Presets",
-        "Windows" => "Windows Integration",
-        "Developer" => "Developer Options",
-        _ => key
-    };
+        if (ContentScroll.Content is not Visual content) return;
+        var point = target.TranslatePoint(new Point(0, 0), content);
+        if (point is null) { target.BringIntoView(); return; }
+        var y = Math.Clamp(point.Value.Y - RevealTopMargin, 0, Math.Max(0, ContentScroll.ScrollBarMaximum.Y));
+        ContentScroll.Offset = new Vector(ContentScroll.Offset.X, y);
+    }
+
+    // ---- Search "Open": reveal a setting on its page --------------------------------------------
+
+    private Control? _revealHighlightTarget;
+    private Border? _revealHighlight;
+    private DispatcherTimer? _revealHighlightTimer;
+
+    /// <summary>The direct child of the card body that contains <paramref name="control"/> (null when detached).</summary>
+    private static Control? RowInCard(SettingsCard card, Control control)
+    {
+        for (Control? current = control; current is not null; current = current.GetLogicalParent() as Control)
+            if (ReferenceEquals(current.GetLogicalParent(), card.Body)) return current;
+        return null;
+    }
+
+    /// <summary>Breadcrumb "Page > Card" of a setting, or its catalogue category when it has no card.</summary>
+    private string SettingLocation(SettingDefinition setting)
+    {
+        if (_settingCard.TryGetValue(setting.Id, out var card) && _pageOfCard.TryGetValue(card, out var page))
+            return $"{GroupOf(page).Title} > {card.Title}";
+        return setting.Category;
+    }
+
+    /// <summary>
+    /// Search "Open": switch to the setting's page, expand its card, scroll the row to about 72 px below
+    /// the top, highlight it briefly and focus its editor. Gesture entries open their gesture row.
+    /// </summary>
+    private void RevealSetting(string id)
+    {
+        if (id.StartsWith("gesture.", StringComparison.OrdinalIgnoreCase))
+        {
+            OpenGestureRow(id["gesture.".Length..]);
+            return;
+        }
+        if (!_settingCard.TryGetValue(id, out var card) || !_pageOfCard.TryGetValue(card, out var page)) return;
+        var editor = _settingControls.GetValueOrDefault(id) ?? _settingAnchors.GetValueOrDefault(id);
+        card.IsExpanded = true;
+
+        // Gesture-panel secondary options (Tag="gestureArea:<area>") live in their area pane once the
+        // panel is built: open that area and reveal the option there.
+        if (editor is not null && GestureOptionOf(editor) is { } option)
+        {
+            OpenGestureArea(((string)option.Tag!)["gestureArea:".Length..], option);
+            HighlightRevealedRow(option);
+            FocusRevealedEditor(editor, card);
+            return;
+        }
+
+        var row = editor is null || _hiddenSettingIds.Contains(id) ? null : RowInCard(card, editor);
+        Control target = row ?? card.Header;
+        ShowCategory(page, clearSearch: true, revealTarget: target);
+        HighlightRevealedRow(target);
+        FocusRevealedEditor(row is null ? null : editor, card);
+    }
+
+    private static Control? GestureOptionOf(Control control)
+    {
+        for (Control? current = control; current is not null; current = current.GetLogicalParent() as Control)
+            if (current.Tag is string tag && tag.StartsWith("gestureArea:", StringComparison.Ordinal)) return current;
+        return null;
+    }
+
+    private void FocusRevealedEditor(Control? editor, SettingsCard card)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            static bool CanFocus(Control c) => c.Focusable && c.IsEffectivelyVisible && c.IsEffectivelyEnabled;
+            Control focusTarget = card.Header;
+            if (editor is not null)
+            {
+                if (CanFocus(editor)) focusTarget = editor;
+                else if (editor.GetLogicalDescendants().OfType<Control>().FirstOrDefault(CanFocus) is { } inner) focusTarget = inner;
+            }
+            focusTarget.Focus();
+        }, DispatcherPriority.Loaded);
+    }
+
+    /// <summary>Accent outline over the revealed row for ~2.5 s, then a short fade (class "fading").</summary>
+    private void HighlightRevealedRow(Control row)
+    {
+        ClearRevealHighlight();
+        var highlight = new Border { IsHitTestVisible = false };
+        highlight.Classes.Add(SettingsCard.RevealHighlightClass);
+        AdornerLayer.SetAdorner(row, highlight);
+        _revealHighlightTarget = row;
+        _revealHighlight = highlight;
+        var fading = false;
+        _revealHighlightTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(2500) };
+        _revealHighlightTimer.Tick += (_, _) =>
+        {
+            if (!fading)
+            {
+                fading = true;
+                highlight.Classes.Add("fading");
+                _revealHighlightTimer!.Interval = TimeSpan.FromMilliseconds(350);
+                return;
+            }
+            ClearRevealHighlight();
+        };
+        _revealHighlightTimer.Start();
+    }
+
+    private void ClearRevealHighlight()
+    {
+        _revealHighlightTimer?.Stop();
+        _revealHighlightTimer = null;
+        if (_revealHighlightTarget is not null && ReferenceEquals(AdornerLayer.GetAdorner(_revealHighlightTarget), _revealHighlight))
+            AdornerLayer.SetAdorner(_revealHighlightTarget, null);
+        _revealHighlightTarget = null;
+        _revealHighlight = null;
+    }
+
+    /// <summary>Hotkey search "Open": reveal the shortcut table and select the action's row.</summary>
+    private void RevealHotkey(string actionId)
+    {
+        RevealSetting("hotkeys.registry");
+        if (HotkeyList.ItemsSource is not IEnumerable<ListBoxItem> rows) return;
+        var item = rows.FirstOrDefault(r => r.Tag is HotkeyRowTag tag && string.Equals(tag.ActionId, actionId, StringComparison.OrdinalIgnoreCase));
+        if (item is null) return;
+        HotkeyList.SelectedItem = item;
+        Dispatcher.UIThread.Post(() => HotkeyList.ScrollIntoView(item), DispatcherPriority.Background);
+    }
 
     private void SearchCategoryChanged(object? sender, SelectionChangedEventArgs e)
     {
@@ -1195,8 +1408,10 @@ public partial class SettingsWindow : Window
             _pendingSearchQuery = string.Empty;
             _hotkeySearchRows.Clear();
             SearchPanel.Children.Clear();
+            // ShowCategory hides the search panel itself; it must still be visible on entry so the
+            // search results' scroll offset is not remembered as the page's own offset.
+            ShowCategory(_activeCategory, clearSearch: false, restoreScroll: true);
             SearchPanel.IsVisible = false;
-            ShowCategory(_activeCategory, clearSearch: false);
             return;
         }
 
@@ -1228,9 +1443,10 @@ public partial class SettingsWindow : Window
     {
         if (_searchHaystackCache.TryGetValue(setting.Id, out var cached)) return cached;
         var sb = new StringBuilder(160);
+        // The catalogue category (a page title such as "Mouse & keyboard") is deliberately not indexed:
+        // it would make every setting on that page a related match for words like "keyboard".
         sb.Append(setting.Id).Append(' ')
           .Append(setting.Label).Append(' ')
-          .Append(setting.Category).Append(' ')
           .Append(setting.Description);
         foreach (var term in setting.SearchTerms) sb.Append(' ').Append(term);
         if (_settingControls.TryGetValue(setting.Id, out var control))
@@ -1251,12 +1467,6 @@ public partial class SettingsWindow : Window
                 if (GestureCatalog.DefaultBehavior.TryGetValue(slot.Id, out var behaviour)) sb.Append(' ').Append(behaviour);
                 foreach (var action in GestureCatalog.ActionsForSlot(slot.Id)) sb.Append(' ').Append(action.Label).Append(' ').Append(action.Id);
             }
-        }
-        // Visible mirror controls write the same value but carry different on-screen wording.
-        switch (setting.Id)
-        {
-            case "status.visible": AppendControlSearchText(sb, StatusVisibleMirrorCheck); AppendRowSearchContext(sb, StatusVisibleMirrorCheck); break;
-            case "status.hoverWhenClosed": AppendControlSearchText(sb, StatusHoverMirrorCheck); AppendRowSearchContext(sb, StatusHoverMirrorCheck); break;
         }
         cached = sb.ToString();
         _searchHaystackCache[setting.Id] = cached;
@@ -1326,13 +1536,15 @@ public partial class SettingsWindow : Window
             }
         }
 
-        // The row is the direct child of the page panel (the panel that also holds section titles).
+        static bool IsCardBody(Panel p) => p.Classes.Contains(SettingsCard.BodyClass);
+
+        // The row is the direct child of its card body (or of the panel that also holds section titles).
         Control row = control;
         for (var depth = 0; depth < 8 && row.GetVisualParent() is Panel parent; depth++)
         {
-            // The row is a direct child of its page panel; never climb into the page itself, or a page
-            // without section labels would index its whole text into every one of its settings.
-            if (parent.Children.Any(IsSectionLabel) || _panels.Values.Any(p => ReferenceEquals(p, parent))) break;
+            // Never climb into the card body or the page itself, or a card/page without section labels
+            // would index its whole text into every one of its settings.
+            if (IsCardBody(parent) || parent.Children.Any(IsSectionLabel) || _panels.Values.Any(p => ReferenceEquals(p, parent))) break;
             row = parent;
         }
 
@@ -1355,6 +1567,15 @@ public partial class SettingsWindow : Window
             AddControlTexts(builder, children[i]);
             for (var n = i + 1; n < children.Count && IsNote(children[n]); n++) AddControlTexts(builder, children[n]);
             break;
+        }
+
+        // Inside a card: the card's title and subtitle, and the notes that open its body, describe
+        // every row of the card (related matches only). The header itself is never a setting row.
+        if (IsCardBody(page) && page.FindLogicalAncestorOfType<SettingsCard>() is { } card)
+        {
+            AddText(builder, card.Title);
+            AddText(builder, card.Subtitle);
+            for (var i = 0; i < children.Count && i < index && IsNote(children[i]); i++) AddControlTexts(builder, children[i]);
         }
     }
 
@@ -1391,11 +1612,6 @@ public partial class SettingsWindow : Window
             }
         }
         if (_settingControls.TryGetValue(setting.Id, out var editor)) Wording(editor);
-        switch (setting.Id)
-        {
-            case "status.visible": Wording(StatusVisibleMirrorCheck); break;
-            case "status.hoverWhenClosed": Wording(StatusHoverMirrorCheck); break;
-        }
         cached = sb.ToString();
         _searchDirectCache[setting.Id] = cached;
         return cached;
@@ -1411,11 +1627,13 @@ public partial class SettingsWindow : Window
         foreach (var child in NavigationRail.Children.OfType<Button>()) child.Classes.Remove("selected");
         SearchPanel.Children.Clear();
         _hotkeySearchRows.Clear();
+        _gestureSearchPickers.Clear();
         var words = query.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         var categoryFilter = ActiveSearchCategory();
         var allCategories = string.Equals(categoryFilter, "All categories", StringComparison.OrdinalIgnoreCase);
+        // Catalogue categories are the page titles, so the filter compares them directly.
         var matches = SettingsCatalog.All.Where(setting =>
-            (allCategories || string.Equals(GroupTitleForCatalogCategory(setting.Category), categoryFilter, StringComparison.OrdinalIgnoreCase)) &&
+            (allCategories || string.Equals(setting.Category, categoryFilter, StringComparison.OrdinalIgnoreCase)) &&
             words.All(word => SearchHaystackFor(setting).Contains(word, StringComparison.OrdinalIgnoreCase))).ToList();
         // Title matches first; settings that match only through a description, tooltip or search term
         // are "related" and listed after them (and can be hidden with the Settings option).
@@ -1431,6 +1649,13 @@ public partial class SettingsWindow : Window
         {
             var captured = setting;
             builders.Add(() => BuildSearchResult(captured));
+        }
+        // Every custom gesture is its own result card (they are dynamic, so not catalogue entries).
+        var customMatches = CustomGestureSearchMatches(words).ToList();
+        foreach (var index in customMatches)
+        {
+            var captured = index;
+            builders.Add(() => BuildCustomGestureSearchCard(captured));
         }
         if (showRelated && related.Count > 0)
         {
@@ -1448,11 +1673,12 @@ public partial class SettingsWindow : Window
             }
         }
 
-        var includeHotkeys = allCategories || string.Equals(categoryFilter, GroupOf("Hotkeys").Title, StringComparison.OrdinalIgnoreCase);
+        var includeHotkeys = allCategories || string.Equals(categoryFilter, GroupOf("Mouse").Title, StringComparison.OrdinalIgnoreCase);
         var hotkeyMatches = includeHotkeys ? HotkeyCatalog.All.Where(h => words.All(word =>
             h.Label.Contains(word, StringComparison.OrdinalIgnoreCase) ||
             h.Category.Contains(word, StringComparison.OrdinalIgnoreCase) ||
             h.Id.Contains(word, StringComparison.OrdinalIgnoreCase) ||
+            (h.SearchTerms?.Any(term => term.Contains(word, StringComparison.OrdinalIgnoreCase)) ?? false) ||
             word.Contains("hotkey", StringComparison.OrdinalIgnoreCase) ||
             word.Contains("shortcut", StringComparison.OrdinalIgnoreCase) ||
             _workingHotkeys.GetValueOrDefault(h.Id, EmptyShortcutList).Any(k => k.Contains(word, StringComparison.OrdinalIgnoreCase)))).ToList() : new List<HotkeyActionDefinition>();
@@ -1472,7 +1698,26 @@ public partial class SettingsWindow : Window
             }
         }
 
-        if (matches.Count == 0 && hotkeyMatches.Count == 0)
+        // Fixed (read-only) shortcuts from the master action registry, e.g. Explorer's Ctrl+C or slideshow Space.
+        var fixedMatches = includeHotkeys ? HotkeyCatalog.FixedShortcuts.Where(f => words.All(word =>
+            f.Label.Contains(word, StringComparison.OrdinalIgnoreCase) ||
+            f.Category.Contains(word, StringComparison.OrdinalIgnoreCase) ||
+            f.Shortcut.Contains(word, StringComparison.OrdinalIgnoreCase) ||
+            f.SearchTerms.Any(term => term.Contains(word, StringComparison.OrdinalIgnoreCase)) ||
+            word.Contains("hotkey", StringComparison.OrdinalIgnoreCase) ||
+            word.Contains("shortcut", StringComparison.OrdinalIgnoreCase))).ToList() : new List<FixedShortcutDefinition>();
+        if (fixedMatches.Count > 0)
+        {
+            if (hotkeyMatches.Count == 0)
+                builders.Add(() => new TextBlock { Text = "Hotkeys", FontSize = 15, FontWeight = FontWeight.SemiBold, Margin = new Thickness(2, 7, 0, 1) });
+            foreach (var fixedShortcut in fixedMatches.Take(8))
+            {
+                var captured = fixedShortcut;
+                builders.Add(() => BuildFixedShortcutSearchResult(captured));
+            }
+        }
+
+        if (matches.Count == 0 && hotkeyMatches.Count == 0 && customMatches.Count == 0 && fixedMatches.Count == 0)
             SearchPanel.Children.Add(new TextBlock { Text = "No matching Glide setting.", Margin = new Thickness(6, 12), Foreground = SearchMutedBrush() });
 
         // A newer query bumps the version, which silently ends any batch still waiting for its turn.
@@ -1487,7 +1732,9 @@ public partial class SettingsWindow : Window
         }
         AddBatch(0);
 
+        RememberCategoryScroll();
         SearchPanel.IsVisible = true;
+        UpdateExpandCollapseButtons();
         PageTitle.Text = "Search results";
         PageSubtitle.Text = allCategories
             ? $"Edit settings matching ‘{query}’ across all categories"
@@ -1495,11 +1742,29 @@ public partial class SettingsWindow : Window
         ContentScroll.Offset = new Vector(ContentScroll.Offset.X, 0);
     }
 
+    /// <summary>A read-only search card for a fixed shortcut (no Change / Add / Clear buttons).</summary>
+    private Control BuildFixedShortcutSearchResult(FixedShortcutDefinition fixedShortcut)
+    {
+        var border = new Border();
+        border.Classes.Add("searchResult");
+        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,210"), ColumnSpacing = 7 };
+        var label = new StackPanel { Spacing = 1, VerticalAlignment = VerticalAlignment.Center };
+        label.Children.Add(new TextBlock { Text = fixedShortcut.Label, FontWeight = FontWeight.SemiBold, FontSize = 14.5 });
+        label.Children.Add(new TextBlock { Text = fixedShortcut.Category + " — fixed shortcut, not editable", Foreground = SearchMutedBrush(), FontSize = 12 });
+        grid.Children.Add(label);
+        var keys = new TextBlock { Text = fixedShortcut.Shortcut, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
+        Grid.SetColumn(keys, 1);
+        grid.Children.Add(keys);
+        border.Child = grid;
+        ToolTip.SetTip(border, fixedShortcut.Description);
+        return border;
+    }
+
     private Control BuildHotkeySearchResult(HotkeyActionDefinition action)
     {
         var border = new Border();
         border.Classes.Add("searchResult");
-        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,210,Auto,Auto,Auto"), ColumnSpacing = 7 };
+        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,210,Auto,Auto,Auto,Auto"), ColumnSpacing = 7 };
         var label = new StackPanel { Spacing = 1, VerticalAlignment = VerticalAlignment.Center };
         label.Children.Add(new TextBlock { Text = action.Label, FontWeight = FontWeight.SemiBold, FontSize = 14.5 });
         label.Children.Add(new TextBlock { Text = action.Category, Foreground = SearchMutedBrush(), FontSize = 12 });
@@ -1537,6 +1802,9 @@ public partial class SettingsWindow : Window
             RefreshHotkeySearchDisplay(action.Id);
             PageSubtitle.Text = $"Cleared shortcuts for {action.Label}.";
         }, "Clear every shortcut currently assigned to this action.");
+        var shortcutsCard = _cardById.GetValueOrDefault("mouse-shortcuts");
+        Make("Open", 5, () => RevealHotkey(action.Id),
+            shortcutsCard is null ? "Show this action in the shortcut list" : $"Show in {GroupOf(_pageOfCard[shortcutsCard]).Title} > {shortcutsCard.Title}");
 
         border.Child = grid;
         _hotkeySearchRows[action.Id] = (border, shortcutText);
@@ -1571,17 +1839,33 @@ public partial class SettingsWindow : Window
 
     private Control BuildSearchResult(SettingDefinition setting)
     {
+        if (setting.Id.StartsWith("gesture.", StringComparison.OrdinalIgnoreCase) &&
+            GestureCatalog.FindSlot(setting.Id["gesture.".Length..]) is { } gestureSlot)
+            return BuildGestureSearchCard(setting, gestureSlot);
         var border = new Border();
         border.Classes.Add("searchResult");
         var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), ColumnSpacing = 12 };
         var text = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
         text.Children.Add(new TextBlock { Text = setting.Label, FontWeight = FontWeight.SemiBold, FontSize = 15 });
-        text.Children.Add(new TextBlock { Text = $"{setting.Category}  •  {setting.Description}", TextWrapping = TextWrapping.Wrap, Foreground = SearchMutedBrush(), FontSize = 12.5 });
+        var location = SettingLocation(setting);
+        text.Children.Add(new TextBlock { Text = $"{location}  •  {setting.Description}", TextWrapping = TextWrapping.Wrap, Foreground = SearchMutedBrush(), FontSize = 12.5 });
         grid.Children.Add(text);
 
         Control editor;
         Control? source = null;
         var companions = CreateSearchCompanionButtons(setting.Id).ToList();
+        // Every result can be opened on its page. Results whose companions already offer Open
+        // (gesture rows, the gesture panel, the shortcut table) reuse that button.
+        var openButton = companions.FirstOrDefault(b => string.Equals(b.Content as string, "Open", StringComparison.Ordinal));
+        if (openButton is null)
+        {
+            openButton = new Button { Content = "Open", MinWidth = 64, VerticalAlignment = VerticalAlignment.Center };
+            openButton.Classes.Add("searchOpen");
+            openButton.Click += (_, _) => RevealSetting(setting.Id);
+            companions.Add(openButton);
+        }
+        ToolTip.SetTip(openButton, $"Show in {location}");
+        ToolTip.SetShowDelay(openButton, 450);
         if (setting.FuturePhase is not null)
         {
             editor = new TextBlock
@@ -1595,19 +1879,11 @@ public partial class SettingsWindow : Window
         }
         else if (_settingControls.TryGetValue(setting.Id, out source) && source.IsEnabled)
             editor = CreateSearchProxy(source);
-        else if (companions.Count > 0)
-        {
-            // Action settings own labelled companion buttons (Open/Import/Add/...). Do not also add
-            // the generic category "Open" fallback, which produced two identical Open buttons for the
-            // command registry and gesture matrix.
-            editor = new Panel { Width = 0, Height = 1 };
-        }
         else
         {
-            var open = new Button { Content = "Open", Tag = CategoryKey(setting.Category), VerticalAlignment = VerticalAlignment.Center };
-            open.Classes.Add("searchOpen");
-            open.Click += (_, _) => ShowCategory((string)open.Tag!, clearSearch: true);
-            editor = open;
+            // Action settings own labelled companion buttons (Open/Import/Add/...) and every card has
+            // its Open button, so no editor placeholder is needed.
+            editor = new Panel { Width = 0, Height = 1 };
         }
         var completeEditor = BuildSearchEditorGroup(editor, companions);
         Grid.SetColumn(completeEditor, 1);
@@ -1622,6 +1898,10 @@ public partial class SettingsWindow : Window
             border.AddHandler(InputElement.PointerReleasedEvent, (_, e) =>
             {
                 if (e.InitialPressMouseButton != MouseButton.Left) return;
+                // The card's own buttons (Open, companions) keep their click; they must never also
+                // flip the setting.
+                for (var current = e.Source as Control; current is not null && !ReferenceEquals(current, border); current = current.GetVisualParent() as Control)
+                    if (current is Button) return;
                 var next = sourceCheckBox.IsChecked != true;
                 sourceCheckBox.IsChecked = next;
                 displayCheckBox.IsChecked = next;
@@ -1653,7 +1933,11 @@ public partial class SettingsWindow : Window
         }
         if ((id ?? "").StartsWith("gesture.", StringComparison.OrdinalIgnoreCase))
         {
-            yield return B("Open", b => ShowCategory("Mouse", clearSearch: true));
+            var slotId = id!["gesture.".Length..];
+            var open = B("Open", b => OpenGestureRow(slotId));
+            if (_cardById.TryGetValue("mouse-gestures", out var gestureCard))
+                ToolTip.SetTip(open, $"Show in {GroupOf(_pageOfCard[gestureCard]).Title} > {gestureCard.Title}");
+            yield return open;
             yield break;
         }
         switch (id)
@@ -1687,9 +1971,11 @@ public partial class SettingsWindow : Window
             case "profiles.export": yield return B("Export...", b => ExportSettingsClicked(b, new RoutedEventArgs())); break;
             case "profiles.presets": yield return B("Apply", b => ApplyPresetClicked(b, new RoutedEventArgs())); break;
             case "hotkeys.preset": yield return B("Load", b => LoadHotkeyPresetClicked(b, new RoutedEventArgs())); break;
-            case "hotkeys.reset": yield return B("Reset", b => ResetHotkeysClicked(b, new RoutedEventArgs())); break;
-            case "mouse.gestureMatrix": yield return B("Open", b => ShowCategory("Mouse", clearSearch: true)); break;
-            case "hotkeys.registry": yield return B("Open", b => ShowCategory("Hotkeys", clearSearch: true)); break;
+            case "hotkeys.customPresets": yield return B("Save...", b => SaveHotkeyPresetClicked(b, new RoutedEventArgs())); break;
+            case "hotkeys.searchHotkey": yield return B("Search", b => { RevealSetting("hotkeys.registry"); BeginHotkeyLookupCapture(); }); break;
+            case "mouse.gestureMatrix": yield return B("Open", b => RevealSetting("mouse.gestureMatrix")); break;
+            case "hotkeys.registry": yield return B("Open", b => RevealSetting("hotkeys.registry")); break;
+            case "reset.card": yield return B("Open", b => RevealSetting("reset.card")); break;
             case "developer.diagnostics":
                 yield return B("Run", b => RunDiagnosticsClicked(b, new RoutedEventArgs()));
                 yield return B("Export ZIP", b => ExportDiagnosticsClicked(b, new RoutedEventArgs()));
@@ -1748,123 +2034,6 @@ public partial class SettingsWindow : Window
         }
     }
 
-    private static string CategoryKey(string category) => category switch
-    {
-        "Themes & Colours" => "Appearance",
-        "Viewing & Interface" => "Viewing",
-        "Mouse & Fullscreen" => "Mouse",
-        "Performance & Startup" => "Performance",
-        "Status Bar" => "Status",
-        "Tabs & Workspace" => "Tabs",
-        "Window in Window" => "Overlays",
-        "Profiles & Presets" => "Profiles",
-        "Windows Integration" => "Windows",
-        "Developer Options" => "Developer",
-        _ => category
-    };
-
-    private void BuildGestureMatrix()
-    {
-        _gestureMatrixBuilt = true;
-        GestureMatrixHost.Children.Clear();
-        _gestureEditors.Clear();
-        string? lastContext = null;
-        foreach (var slot in GestureCatalog.Slots)
-        {
-            if (!string.Equals(lastContext, slot.Context, StringComparison.Ordinal))
-            {
-                lastContext = slot.Context;
-                GestureMatrixHost.Children.Add(new TextBlock
-                {
-                    Text = slot.Context,
-                    FontSize = 13,
-                    FontWeight = FontWeight.SemiBold,
-                    Foreground = SearchMutedBrush(),
-                    Margin = new Thickness(2, 7, 0, 1)
-                });
-            }
-
-            var combo = new ComboBox
-            {
-                Width = 255,
-                HorizontalAlignment = HorizontalAlignment.Left,
-                Tag = slot.Id
-            };
-            foreach (var action in GestureCatalog.ActionsForSlot(slot.Id))
-            {
-                var label = action.Id == GestureCatalog.Default && GestureCatalog.DefaultBehavior.TryGetValue(slot.Id, out var behavior)
-                    ? $"Default ({behavior})"
-                    : action.Label;
-                combo.Items.Add(new ComboBoxItem { Content = label, Tag = action.Id });
-            }
-            combo.SelectionChanged += GestureEditorSelectionChanged;
-            ToolTip.SetTip(combo, slot.Label);
-            ToolTip.SetShowDelay(combo, 650);
-            _gestureEditors[slot.Id] = combo;
-
-            var row = new Grid { ColumnDefinitions = new ColumnDefinitions("300,255,*"), Margin = new Thickness(2, 0, 0, 0) };
-            row.Children.Add(new TextBlock { Text = slot.Label, VerticalAlignment = VerticalAlignment.Center, FontSize = 13.5 });
-            Grid.SetColumn(combo, 1);
-            row.Children.Add(combo);
-            GestureMatrixHost.Children.Add(row);
-        }
-        // Register every gesture slot editor for Settings search (see BuildSettingControlMap).
-        foreach (var slot in GestureCatalog.Slots)
-            if (_gestureEditors.TryGetValue(slot.Id, out var gestureEditor)) _settingControls["gesture." + slot.Id] = gestureEditor;
-        _searchHaystackCache.Clear();
-        _searchDirectCache.Clear();
-    }
-
-    private void LoadGestureEditorsFromWorkingMap()
-    {
-        _loadingControls = true;
-        try
-        {
-            foreach (var slot in GestureCatalog.Slots)
-                if (_gestureEditors.TryGetValue(slot.Id, out var combo))
-                    SelectGestureAction(combo, GestureCatalog.ResolveAction(slot.Id, _workingGestures));
-        }
-        finally { _loadingControls = false; }
-    }
-
-    private static void SelectGestureAction(ComboBox combo, string actionId)
-    {
-        foreach (var item in combo.Items.OfType<ComboBoxItem>())
-        {
-            if (string.Equals(item.Tag?.ToString(), actionId, StringComparison.OrdinalIgnoreCase))
-            {
-                combo.SelectedItem = item;
-                return;
-            }
-        }
-        if (combo.Items.Count > 0) combo.SelectedIndex = 0;
-    }
-
-    private void GestureEditorSelectionChanged(object? sender, SelectionChangedEventArgs e)
-    {
-        if (_loadingControls) return;
-        if (sender is ComboBox combo && combo.Tag is string slotId)
-            _workingGestures[slotId] = (combo.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? GestureCatalog.Default;
-        var preview = ReadControls();
-        _apply(preview, false);
-        UpdateDirtyState(preview);
-    }
-
-    private void ResetGestureMatrixClicked(object? sender, RoutedEventArgs e)
-    {
-        _loadingControls = true;
-        try
-        {
-            _workingGestures = GestureCatalog.CreateDefaultMap();
-            foreach (var slot in GestureCatalog.Slots)
-                if (_gestureEditors.TryGetValue(slot.Id, out var combo)) SelectGestureAction(combo, slot.DefaultActionId);
-        }
-        finally { _loadingControls = false; }
-        var preview = ReadControls();
-        _apply(preview, false);
-        UpdateDirtyState(preview);
-    }
-
     private void BuildSettingControlMap()
     {
         void M(string id, Control control) => _settingControls[id] = control;
@@ -1874,19 +2043,17 @@ public partial class SettingsWindow : Window
         M("general.showRecentOnHome", ShowRecentOnHomeCheck); M("general.confirmDiscardSettings", ConfirmDiscardSettingsCheck);
         M("general.startupAction", StartupActionCombo); M("general.startupCustomPath", StartupCustomPathBox); M("general.newTabAction", NewTabActionCombo); M("general.newTabCustomPath", NewTabCustomPathBox); M("titlebar.customize", CustomizeTitleBarButton); M("escape.resetRememberedClose", ResetEscChoiceButton);
         M("status.visible", StatusCheck); M("status.hoverWhenClosed", StatusHoverWhenClosedCheck); M("view.scrollbars", ShowScrollbarsCheck); M("window.fullPathTitle", FullPathTitleCheck); M("fullscreen.hideCursor", HideCursorFullscreenCheck); M("fullscreen.hideCursorDelay", FullscreenHideCursorDelayBox);
-        M("fullscreen.autoHideChrome", AutoHideFullscreenChromeCheck); M("fullscreen.keepTabBarOpen", FullscreenKeepTabBarOpenCheck); M("tabs.enabled", TabsCheck); M("tabs.navigateToFolderBehavior", NavigateToFolderBehaviorCombo); M("tabs.showBackButton", TabBarBackButtonCheck); M("tabs.showForwardButton", TabBarForwardButtonCheck); M("fullscreen.statusAlways", FullscreenStatusAlwaysCheck);
+        M("fullscreen.autoHideChrome", AutoHideFullscreenChromeCheck); M("fullscreen.keepTabBarOpen", FullscreenKeepTabBarOpenCheck); M("tabs.enabled", TabsCheck); M("window.showInExplorerTarget", ShowInExplorerTargetCombo); M("explorer.defaultView", ExplorerDefaultViewCombo); M("explorer.showHidden", ExplorerShowHiddenFilesCheck); M("explorer.onlyImages", ExplorerShowOnlyImagesCheck); M("tabs.showBackButton", TabBarBackButtonCheck); M("tabs.showForwardButton", TabBarForwardButtonCheck); M("fullscreen.statusAlways", FullscreenStatusAlwaysCheck);
         M("caption.windowedMinimize", CaptionWindowedMinimizeCombo); M("caption.windowedMaximize", CaptionWindowedMaximizeCombo); M("caption.windowedClose", CaptionWindowedCloseCombo);
         M("caption.fullscreenMinimize", CaptionFullscreenMinimizeCombo); M("caption.fullscreenMaximize", CaptionFullscreenMaximizeCombo); M("caption.fullscreenClose", CaptionFullscreenCloseCombo);
         M("windows.alwaysOnTop", AlwaysOnTopCheck); M("windows.alwaysOnTopMode", AlwaysOnTopModeCombo); M("fullscreen.exitBehavior", FullscreenExitBehaviorCombo); M("windows.sameImageBehavior", SameImageBehaviorCombo); M("window.centerOnDisplay", AutoCenterWindowOnRestoreCheck); M("view.defaultMode", DefaultViewCombo); M("view.animateGifs", AnimateGifsCheck); M("view.pointerZoom", PointerZoomCheck); M("view.keepZoom", PreserveZoomCheck);
         M("view.zoomStep", ViewportZoomStepBox); M("view.upscaleSmallImages", UpscaleSmallImagesCheck); M("view.subpixelRendering", SubpixelRenderingCheck); M("view.showLoadingIndicator", ShowLoadingIndicatorCheck);
         M("keyboard.tabFocusNavigation", TabFocusNavigationCheck);
         M("escape.stopSlideshow", EscStopsSlideshowCheck); M("escape.exitFullscreen", EscExitsFullscreenCheck); M("escape.confirmWindowedClose", EscWindowedConfirmCheck);
-        M("mouse.doubleClickFullscreen", DoubleClickFullscreenCheck); M("mouse.doubleClickExitFullscreen", DoubleClickExitFullscreenCheck); M("mouse.fullscreenClicks", FullscreenClicksCheck);
-        M("mouse.windowedWheelZoom", WindowedWheelZoomCheck); M("mouse.invertWheel", InvertWheelCheck); M("mouse.leftDrag", LeftDragModeCombo); M("mouse.leftWindowDrag", LeftWindowDragBehaviorCombo); M("mouse.rightDragPan", RightDragBehaviorCombo);
+        M("mouse.invertWheel", InvertWheelCheck); M("mouse.leftWindowDrag", LeftWindowDragBehaviorCombo); M("mouse.rightDragPan", RightDragBehaviorCombo);
         M("selection.buffer", SelectionBufferCheck); M("selection.bufferWindowedPercent", SelectionBufferWindowedBox);
         M("selection.bufferMaximizedPercent", SelectionBufferMaximizedBox); M("selection.bufferAllModes", SelectionBufferAllModesCheck);
-        M("selection.clickZoom", SelectionClickZoomCheck); M("selection.rightClickZoomOut", SelectionRightZoomCheck); M("developer.reverseSelectionZoomOut", ReverseSelectionZoomOutScaleCheck); M("mouse.backgroundWindowDrag", BackgroundDragCheck);
-        M("mouse.ctrlWheelZoom", CtrlWheelZoomCheck); M("mouse.middleDragPan", MiddleDragPanCheck);
+        M("developer.reverseSelectionZoomOut", ReverseSelectionZoomOutScaleCheck); M("mouse.backgroundWindowDrag", BackgroundDragCheck);
         M("performance.initialQuality", InitialQualityCombo); M("performance.saveCustomPreset", SaveUserPerformancePresetButton); M("performance.adaptivePreview", AdaptiveFastPreviewCheck); M("performance.previewDelay", AdaptivePreviewDelayBox);
         M("performance.interactivePanQuality", InteractivePanQualityCombo);
         M("performance.sequentialReads", SequentialReadCheck); M("performance.prefetch", PrefetchCheck); M("performance.backgroundRefinement", BackgroundRefinementCheck);
@@ -1898,23 +2065,27 @@ public partial class SettingsWindow : Window
         M("status.size", StatusBarSizeCombo); M("status.alignment", StatusBarAlignmentCombo); M("status.navigation", StatusNavigationCheck); M("status.zoom", StatusZoomCheck); M("status.slideshow", StatusSlideshowCheck); M("status.fit", StatusFitCheck);
         M("status.fitScope", StatusFitScopeCombo);
         M("status.autoResize", StatusAutoFitCheck);
-        M("status.info", StatusInfoCheck); M("status.options", StatusOptionsCheck); M("status.close", StatusCloseCheck); M("status.collapsedCorner", StatusCollapsedCornerCheck); M("status.statIndex", StatIndexCheck);
+        M("status.info", StatusInfoCheck); M("status.options", StatusOptionsCheck); M("status.close", StatusCloseCheck); M("status.collapsedCorner", StatusCollapsedCornerCheck); M("status.autoHide", StatusAutoHideCheck); M("status.revealZoneExpand", StatusRevealZoneExpandBox); M("status.reserveFitSpace", StatusReserveFitSpaceCheck); M("status.stackInfoLine", StatusStackInfoLineCheck); M("status.statIndex", StatIndexCheck);
         M("status.statResolution", StatResolutionCheck); M("status.statZoom", StatZoomCheck); M("status.statFileSize", StatFileSizeCheck); M("status.statFormat", StatFormatCheck); M("status.statFileName", StatFileNameCheck);
-        M("slideshow.interval", SlideshowIntervalBox); M("slideshow.loop", SlideshowLoopCheck); M("slideshow.rightClickStops", SlideshowRightClickStopsCheck); M("slideshow.leftClickAction", SlideshowLeftClickCombo); M("navigation.sortOrder", NavigationSortOrderCombo); M("navigation.sortDescending", NavigationSortDescendingCheck); M("slideshow.showQualityIndicator", SlideshowQualityIndicatorCheck); M("slideshow.crossFolders", SlideshowCrossFoldersCheck); M("slideshow.shuffle", SlideshowShuffleCheck);
+        M("slideshow.interval", SlideshowIntervalBox); M("slideshow.loop", SlideshowLoopCheck); M("navigation.sortOrder", NavigationSortOrderCombo); M("navigation.sortDescending", NavigationSortDescendingCheck); M("slideshow.showQualityIndicator", SlideshowQualityIndicatorCheck); M("slideshow.crossFolders", SlideshowCrossFoldersCheck); M("slideshow.shuffle", SlideshowShuffleCheck);
         M("slideshow.direction", SlideshowDirectionCombo); M("slideshow.startFullscreen", SlideshowStartFullscreenCheck); M("slideshow.pauseInactive", SlideshowPauseInactiveCheck);
         M("tabs.minWidth", TabMinWidthBox); M("tabs.maxWidth", TabMaxWidthBox); M("tabs.overflowArrows", TabOverflowArrowsCheck); M("tabs.detach", TabDetachCheck); M("tabs.attach", TabAttachCheck); M("tabs.closedHistory", ClosedHistoryBox);
-        M("tabs.closeEmptyAfterDetach", CloseEmptyAfterDetachCheck); M("tabs.detachedHome", DetachedHomeTabCheck); M("tabs.doubleClickClose", DoubleClickTabCloseCheck); M("tabs.middleClickClose", MiddleClickTabCloseCheck); M("tabs.cycleOrder", TabCycleOrderCombo);
+        M("tabs.closeEmptyAfterDetach", CloseEmptyAfterDetachCheck); M("tabs.detachedHome", DetachedHomeTabCheck); M("tabs.cycleOrder", TabCycleOrderCombo); M("tabs.tooltipTextSize", TabToolTipTextSizeCombo);
         M("tabs.lastTabBehavior", LastTabBehaviorCombo); M("tabs.confirmCloseMultiple", ConfirmCloseMultipleTabsCheck); M("tabs.homePage", HomePageCombo); M("folderNav.group", FolderNavGroupCheck); M("folderNav.previous", FolderNavPreviousCheck);
         M("folderNav.showCounter", ShowFolderCounterCheck); M("folderNav.counterGrandparent", FolderCounterGrandparentCheck);
         M("folderNav.next", FolderNavNextCheck); M("folderNav.explore", FolderNavExploreCheck); M("folderNav.skipEmpty", FolderNavSkipEmptyCheck); M("folderNav.includeHidden", FolderNavIncludeHiddenCheck); M("folderNav.wrap", FolderNavWrapCheck); M("folderNav.openFirst", FolderNavFirstImageCheck); M("folderNav.order", FolderNavOrderCombo);
         M("overlay.pictureCounter", PictureCounterCheck); M("overlay.pictureTemplate", PictureTemplateBox); M("overlay.pictureFontSize", PictureFontSizeBox);
         M("overlay.pictureBold", PictureBoldCheck); M("overlay.pictureOpacity", PictureOpacityBox); M("overlay.picturePosition", PicturePositionCombo);
         M("overlay.pictureColor", PictureColorCombo); M("overlay.pictureShadow", PictureShadowCheck); M("overlay.defaultOpacity", OverlayOpacityBox); M("overlay.zoomStep", OverlayZoomStepBox);
-        M("overlay.rememberFolder", OverlayRememberFolderCheck); M("overlay.scaleWithWindow", OverlayScaleWithWindowCheck); M("overlay.animationRegion", OverlayAnimationRegionCombo); M("overlay.animationSpeedDipsPerSecond", OverlayAnimationSpeedBox); M("overlay.animationTurnIntervalMs", OverlayAnimationTurnIntervalBox); M("overlay.animationTurnAngleDegrees", OverlayAnimationTurnAngleBox); M("overlay.animationPauseWhileInteracting", OverlayAnimationPauseCheck); M("overlay.animationAvoidOverlap", OverlayAnimationAvoidOverlapCheck); M("overlay.animationRefreshRateHz", OverlayAnimationRefreshRateCombo); M("overlay.defaultDirectory", OverlayDefaultDirectoryBox); M("profiles.defaultDirectory", ProfileDefaultDirectoryBox); M("overlay.persistSession", OverlayPersistSessionCheck); M("overlay.keyboardZoom", OverlayKeyboardZoomCheck); M("overlay.wheelZoom", OverlayWheelZoomCheck); M("overlay.highlightSelected", OverlayHighlightCheck); M("overlay.rememberZoom", OverlayRememberZoomCheck); M("overlay.rightDragPan", OverlayRightDragCheck);
+        M("overlay.rememberFolder", OverlayRememberFolderCheck); M("overlay.scaleWithWindow", OverlayScaleWithWindowCheck); M("overlay.animationRegion", OverlayAnimationRegionCombo); M("overlay.animationSpeedDipsPerSecond", OverlayAnimationSpeedBox); M("overlay.animationTurnIntervalMs", OverlayAnimationTurnIntervalBox); M("overlay.animationTurnAngleDegrees", OverlayAnimationTurnAngleBox); M("overlay.animationPauseWhileInteracting", OverlayAnimationPauseCheck); M("overlay.animationAvoidOverlap", OverlayAnimationAvoidOverlapCheck); M("overlay.animationRefreshRateHz", OverlayAnimationRefreshRateCombo); M("overlay.defaultDirectory", OverlayDefaultDirectoryBox); M("profiles.defaultDirectory", ProfileDefaultDirectoryBox); M("overlay.persistSession", OverlayPersistSessionCheck); M("overlay.keyboardZoom", OverlayKeyboardZoomCheck); M("overlay.highlightSelected", OverlayHighlightCheck); M("overlay.rememberZoom", OverlayRememberZoomCheck);
         M("windows.externalOpenBehavior", ExternalOpenBehaviorCombo); M("windows.external1", External1Box); M("windows.external2", External2Box); M("windows.external3", External3Box);
         M("windows.explorerThumbnails", ExplorerThumbnailsCheck); M("windows.thumbnailMode", ThumbnailModeCombo); M("windows.thumbnailQuality", ThumbnailQualityCombo); M("windows.thumbnailMaxSource", ThumbnailMaxSourceCombo); M("windows.thumbnailPreferEmbedded", ThumbnailPreferEmbeddedCheck);
         M("hotkeys.preset", HotkeyPresetCombo); M("profiles.presets", PresetCombo);
         M("developer.statusGlobalScale", StatusGlobalScaleBox); M("developer.statusMaximizedBoost", StatusMaximizedBoostBox); M("developer.overlayAbsoluteCoordinates", OverlayAbsoluteCoordinatesCheck);
+        // Reset Glide card: one tick box per item (reset.card itself is anchored on the button bar, see SettingsWindow.Reset.cs).
+        M("reset.allSettings", ResetAllSettingsCheck); M("reset.hotkeysGestures", ResetHotkeysCheck); M("reset.profiles", ResetProfilesCheck); M("reset.windowPlacement", ResetWindowPlacementCheck);
+        M("reset.recentHistory", ResetRecentCheck); M("reset.lastSession", ResetSessionCheck); M("reset.caches", ResetCachesCheck); M("reset.codecPack", ResetCodecPackCheck);
+        M("reset.registry", ResetRegistryCheck); M("reset.startup", ResetStartupCheck);
         // Advanced gesture matrix editors are built lazily (BuildGestureMatrix) to keep Settings
         // opening fast; that builder registers each slot editor here under "gesture.<slotId>".
         foreach (var slot in GestureCatalog.Slots)
@@ -1934,7 +2105,7 @@ public partial class SettingsWindow : Window
         foreach (var nav in NavigationRail.Children.OfType<Button>())
         {
             var key = nav.Tag?.ToString() ?? "";
-            ToolTip.SetTip(nav, $"Open {DisplayCategory(key)} settings");
+            ToolTip.SetTip(nav, $"Open {GroupOf(key).Title} settings");
             ToolTip.SetShowDelay(nav, 650);
         }
         ToolTip.SetTip(SearchBox, "Search Glide settings. Use the category filter to search everywhere or limit results to one section.");
@@ -1945,302 +2116,6 @@ public partial class SettingsWindow : Window
         ToolTip.SetTip(ResetHotkeysButton, "Restore all keyboard shortcuts to Glide defaults.");
         ToolTip.SetTip(CustomizeTitleBarButton, "Choose, add, remove and reorder any of the 22 title/tab-bar utility buttons.");
     }
-
-    private DispatcherTimer? _hotkeyFilterTimer;
-
-    private void HotkeyFilterChanged(object? sender, TextChangedEventArgs e)
-    {
-        if (_loadingControls) return;
-        // Short debounce so typing never rebuilds the list on every keystroke.
-        _hotkeyFilterTimer ??= new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(140) };
-        _hotkeyFilterTimer.Stop();
-        _hotkeyFilterTimer.Tick -= HotkeyFilterTick;
-        _hotkeyFilterTimer.Tick += HotkeyFilterTick;
-        _hotkeyFilterTimer.Start();
-    }
-
-    private void HotkeyFilterTick(object? sender, EventArgs e)
-    {
-        _hotkeyFilterTimer?.Stop();
-        BuildHotkeyRows(HotkeyFilterBox?.Text);
-    }
-
-    private void BuildHotkeyRows(string? filter = null)
-    {
-        _hotkeyRowsBuilt = true;
-        UpdateExternalProgramHotkeyLabels();
-        if (HotkeyList is null) return;
-        var rows = new List<ListBoxItem>();
-        var words = (filter ?? string.Empty).Split(new[] { ' ', '	' }, StringSplitOptions.RemoveEmptyEntries);
-        foreach (var action in HotkeyCatalog.All)
-        {
-            var shortcuts = _workingHotkeys.TryGetValue(action.Id, out var values) ? values : new List<string>();
-            if (words.Length > 0)
-            {
-                var haystack = action.Label + " " + action.Category + " " + string.Join(" ", shortcuts);
-                if (!words.All(w => haystack.Contains(w, StringComparison.OrdinalIgnoreCase))) continue;
-            }
-
-            if (shortcuts.Count == 0) rows.Add(CreateHotkeyRow(action, ""));
-            else foreach (var shortcut in shortcuts) rows.Add(CreateHotkeyRow(action, shortcut));
-        }
-        HotkeyList.ItemsSource = rows;
-        HotkeyList.SelectedIndex = rows.Count > 0 ? 0 : -1;
-        UpdateHotkeyButtonState();
-    }
-
-    private void UpdateExternalProgramHotkeyLabels()
-    {
-        if (External1Label is null || External2Label is null || External3Label is null) return;
-        External1Label.Text = $"External Program 1 ({ExternalProgramShortcutText("external.1")})";
-        External2Label.Text = $"External Program 2 ({ExternalProgramShortcutText("external.2")})";
-        External3Label.Text = $"External Program 3 ({ExternalProgramShortcutText("external.3")})";
-    }
-
-    private string ExternalProgramShortcutText(string actionId)
-    {
-        var shortcuts = _workingHotkeys.GetValueOrDefault(actionId, new List<string>());
-        return shortcuts.Count == 0 ? "Unassigned" : string.Join(" / ", shortcuts);
-    }
-
-    private void LoadHotkeyPresetClicked(object? sender, RoutedEventArgs e)
-    {
-        var preset = SelectedText(HotkeyPresetCombo, "Glide default");
-        _workingHotkeys = HotkeyCatalog.CreatePresetMap(preset);
-        HotkeyCaptureText.Text = $"Loaded {preset} hotkey preset.";
-        BuildHotkeyRows();
-        PreviewHotkeyChange();
-    }
-
-    private ListBoxItem CreateHotkeyRow(HotkeyActionDefinition action, string shortcut)
-    {
-        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("150,260,*") };
-        var shortcutText = new TextBlock { Text = string.IsNullOrWhiteSpace(shortcut) ? "(unassigned)" : shortcut, VerticalAlignment = VerticalAlignment.Center, FontWeight = FontWeight.SemiBold };
-        var actionText = new TextBlock { Text = action.Label, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
-        var categoryText = new TextBlock { Text = action.Category, VerticalAlignment = VerticalAlignment.Center, Foreground = SearchMutedBrush() };
-        Grid.SetColumn(actionText, 1); Grid.SetColumn(categoryText, 2);
-        grid.Children.Add(shortcutText); grid.Children.Add(actionText); grid.Children.Add(categoryText);
-        var item = new ListBoxItem { Content = grid, Tag = new HotkeyRowTag(action.Id, shortcut), HorizontalContentAlignment = HorizontalAlignment.Stretch };
-        item.Classes.Add("hotkeyRow");
-        ToolTip.SetTip(item, $"{action.Label} — double-click to change this shortcut");
-        return item;
-    }
-
-    private void HotkeySelectionChanged(object? sender, SelectionChangedEventArgs e) => UpdateHotkeyButtonState();
-
-    private void UpdateHotkeyButtonState()
-    {
-        var row = (HotkeyList?.SelectedItem as ListBoxItem)?.Tag as HotkeyRowTag;
-        ChangeShortcutButton.IsEnabled = row is not null;
-        AddShortcutButton.IsEnabled = row is not null;
-        RemoveShortcutButton.IsEnabled = row is not null && !string.IsNullOrWhiteSpace(row.Shortcut);
-    }
-
-    private void HotkeyListDoubleTapped(object? sender, TappedEventArgs e) => StartHotkeyCapture(add: false);
-    private void ChangeShortcutClicked(object? sender, RoutedEventArgs e) => StartHotkeyCapture(add: false);
-    private void AddShortcutClicked(object? sender, RoutedEventArgs e) => StartHotkeyCapture(add: true);
-
-    private void StartHotkeyCapture(bool add)
-    {
-        var row = (HotkeyList.SelectedItem as ListBoxItem)?.Tag as HotkeyRowTag;
-        if (row is null) return;
-        StartHotkeyCaptureFor(row.ActionId, row.Shortcut, add, fromSearch: false);
-    }
-
-    private void StartHotkeyCaptureFor(string actionId, string? oldShortcut, bool add, bool fromSearch, Border? searchCard = null)
-    {
-        ClearHotkeyCaptureFlash();
-        _hotkeyCaptureActionId = actionId;
-        _hotkeyCaptureOldShortcut = oldShortcut;
-        _hotkeyCaptureAdd = add;
-        _hotkeyCaptureFromSearch = fromSearch;
-        _hotkeyCaptureSearchCard = searchCard;
-        var action = HotkeyCatalog.Find(actionId);
-        var message = $"Waiting for a new shortcut for {action?.Label ?? actionId}. Press the keyboard shortcut now, press Esc to cancel, or click anywhere else in Settings to leave edit mode.";
-        HotkeyCaptureText.Text = message;
-        if (fromSearch) PageSubtitle.Text = message;
-        SearchBox.IsEnabled = false;
-
-        if (fromSearch && _hotkeyCaptureSearchCard is not null)
-        {
-            _hotkeyFlashOn = true;
-            SetHotkeyCaptureFlash(_hotkeyCaptureSearchCard, true);
-            _hotkeyCaptureFlashTimer.Start();
-        }
-        else if (!fromSearch && HotkeyList.ItemsSource is IEnumerable<ListBoxItem> rows)
-        {
-            _hotkeyCaptureRow = rows.FirstOrDefault(row =>
-            {
-                if (row.Tag is not HotkeyRowTag tag || !string.Equals(tag.ActionId, actionId, StringComparison.OrdinalIgnoreCase)) return false;
-                return add || string.Equals(tag.Shortcut, oldShortcut ?? string.Empty, StringComparison.OrdinalIgnoreCase);
-            }) ?? rows.FirstOrDefault(row => row.Tag is HotkeyRowTag tag && string.Equals(tag.ActionId, actionId, StringComparison.OrdinalIgnoreCase));
-            if (_hotkeyCaptureRow is not null)
-            {
-                _hotkeyFlashOn = true;
-                SetHotkeyCaptureFlash(_hotkeyCaptureRow, true);
-                _hotkeyCaptureFlashTimer.Start();
-            }
-        }
-        Focus();
-    }
-
-    private void RemoveShortcutClicked(object? sender, RoutedEventArgs e)
-    {
-        var row = (HotkeyList.SelectedItem as ListBoxItem)?.Tag as HotkeyRowTag;
-        if (row is null || string.IsNullOrWhiteSpace(row.Shortcut)) return;
-        if (_workingHotkeys.TryGetValue(row.ActionId, out var values))
-            values.RemoveAll(x => string.Equals(x, row.Shortcut, StringComparison.OrdinalIgnoreCase));
-        HotkeyCaptureText.Text = $"Removed {row.Shortcut}.";
-        BuildHotkeyRows();
-        PreviewHotkeyChange();
-    }
-
-    private void ResetHotkeysClicked(object? sender, RoutedEventArgs e)
-    {
-        _workingHotkeys = HotkeyCatalog.CreateDefaultMap();
-        HotkeyCaptureText.Text = "Restored Glide default hotkeys.";
-        BuildHotkeyRows();
-        PreviewHotkeyChange();
-    }
-
-    private void SettingsKeyDown(object? sender, KeyEventArgs e)
-    {
-        if (e.Key == Key.Escape)
-        {
-            e.Handled = true;
-            if (_hotkeyCaptureActionId is not null)
-            {
-                EndHotkeyCapture("Shortcut capture cancelled.");
-                return;
-            }
-
-            // Escape is the keyboard equivalent of Cancel: it uses the same discard-confirmation
-            // and preview-rollback path instead of bypassing unsaved-settings protection.
-            CancelClicked(this, new RoutedEventArgs());
-            return;
-        }
-
-        if (_hotkeyCaptureActionId is null) return;
-        e.Handled = true;
-        var shortcut = CanonicalShortcut(e);
-        if (string.IsNullOrWhiteSpace(shortcut) || IsModifierOnly(e.Key)) return;
-        AssignCapturedShortcut(shortcut);
-    }
-
-    private void AssignCapturedShortcut(string shortcut)
-    {
-        if (_hotkeyCaptureActionId is not { } actionId) return;
-        var action = HotkeyCatalog.Find(actionId);
-
-        // A physical shortcut can have one semantic owner. Reassign it instead of preserving
-        // invisible conflicts. Multiple different shortcuts can still target the same action.
-        string? previousOwner = null;
-        foreach (var pair in _workingHotkeys)
-        {
-            if (pair.Value.RemoveAll(x => string.Equals(x, shortcut, StringComparison.OrdinalIgnoreCase)) > 0 &&
-                !string.Equals(pair.Key, actionId, StringComparison.OrdinalIgnoreCase))
-                previousOwner = HotkeyCatalog.Find(pair.Key)?.Label ?? pair.Key;
-        }
-
-        if (!_workingHotkeys.TryGetValue(actionId, out var assigned))
-            _workingHotkeys[actionId] = assigned = new List<string>();
-        if (!_hotkeyCaptureAdd && !string.IsNullOrWhiteSpace(_hotkeyCaptureOldShortcut))
-            assigned.RemoveAll(x => string.Equals(x, _hotkeyCaptureOldShortcut, StringComparison.OrdinalIgnoreCase));
-        if (!assigned.Any(x => string.Equals(x, shortcut, StringComparison.OrdinalIgnoreCase)))
-            assigned.Add(shortcut);
-
-        var message = previousOwner is null
-            ? $"Assigned {shortcut} to {action?.Label ?? actionId}."
-            : $"Assigned {shortcut} to {action?.Label ?? actionId}; removed it from {previousOwner}.";
-        EndHotkeyCapture(message);
-        BuildHotkeyRows();
-        PreviewHotkeyChange();
-    }
-
-    private void EndHotkeyCapture(string message, bool refreshSearch = true)
-    {
-        var wasSearch = _hotkeyCaptureFromSearch;
-        var actionId = _hotkeyCaptureActionId;
-        ClearHotkeyCaptureFlash();
-        _hotkeyCaptureActionId = null;
-        _hotkeyCaptureOldShortcut = null;
-        _hotkeyCaptureAdd = false;
-        _hotkeyCaptureFromSearch = false;
-        _hotkeyCaptureSearchCard = null;
-        SearchBox.IsEnabled = true;
-        HotkeyCaptureText.Text = message;
-        if (wasSearch)
-        {
-            if (!string.IsNullOrWhiteSpace(actionId)) RefreshHotkeySearchDisplay(actionId);
-            PageSubtitle.Text = message;
-            // Deliberately do not rebuild SearchPanel here: rebuilding destroys focus/flash state and
-            // resets ContentScroll to the top. The visible row is updated in place instead.
-        }
-    }
-
-    private void ToggleHotkeyCaptureFlash()
-    {
-        if (_hotkeyCaptureActionId is null || (_hotkeyCaptureRow is null && _hotkeyCaptureSearchCard is null))
-        {
-            ClearHotkeyCaptureFlash();
-            return;
-        }
-        _hotkeyFlashOn = !_hotkeyFlashOn;
-        if (_hotkeyCaptureRow is not null) SetHotkeyCaptureFlash(_hotkeyCaptureRow, _hotkeyFlashOn);
-        if (_hotkeyCaptureSearchCard is not null) SetHotkeyCaptureFlash(_hotkeyCaptureSearchCard, _hotkeyFlashOn);
-    }
-
-    private static void SetHotkeyCaptureFlash(Control row, bool visible)
-    {
-        if (visible)
-        {
-            if (!row.Classes.Contains("capturePending")) row.Classes.Add("capturePending");
-        }
-        else row.Classes.Remove("capturePending");
-    }
-
-    private void ClearHotkeyCaptureFlash()
-    {
-        _hotkeyCaptureFlashTimer.Stop();
-        if (_hotkeyCaptureRow is not null) SetHotkeyCaptureFlash(_hotkeyCaptureRow, false);
-        if (_hotkeyCaptureSearchCard is not null) SetHotkeyCaptureFlash(_hotkeyCaptureSearchCard, false);
-        _hotkeyCaptureRow = null;
-        _hotkeyCaptureSearchCard = null;
-        _hotkeyFlashOn = false;
-    }
-
-    private void PreviewHotkeyChange()
-    {
-        var preview = ReadControls();
-        _apply(preview, false);
-        UpdateDirtyState(preview);
-    }
-
-    private static bool IsModifierOnly(Key key) => key is Key.LeftCtrl or Key.RightCtrl or Key.LeftShift or Key.RightShift or Key.LeftAlt or Key.RightAlt or Key.LWin or Key.RWin;
-
-    private static string CanonicalShortcut(KeyEventArgs e)
-    {
-        // Keep capture normalization identical to MainWindow runtime lookup.
-        var shiftedOemPlus = e.Key == Key.OemPlus && e.KeyModifiers.HasFlag(KeyModifiers.Shift);
-        var key = e.Key switch
-        {
-            Key.Escape => "Esc", Key.Space => "Space", Key.Enter => "Enter", Key.Tab => "Tab", Key.Back => "Backspace",
-            Key.Left => "Left", Key.Right => "Right", Key.Up => "Up", Key.Down => "Down", Key.PageUp => "PageUp", Key.PageDown => "PageDown",
-            Key.Home => "Home", Key.End => "End", Key.Delete => "Delete",
-            Key.Add => "+", Key.OemPlus when shiftedOemPlus => "+", Key.OemPlus => "=", Key.OemMinus or Key.Subtract => "-",
-            Key.OemComma => ",", Key.OemOpenBrackets => "[", Key.OemCloseBrackets => "]",
-            Key.D0 => "0", Key.D1 => "1", Key.D2 => "2", Key.D3 => "3", Key.D4 => "4", Key.D5 => "5", Key.D6 => "6", Key.D7 => "7", Key.D8 => "8", Key.D9 => "9",
-            _ => e.Key.ToString()
-        };
-        var parts = new List<string>();
-        if (e.KeyModifiers.HasFlag(KeyModifiers.Control)) parts.Add("Ctrl");
-        if (e.KeyModifiers.HasFlag(KeyModifiers.Shift) && !shiftedOemPlus) parts.Add("Shift");
-        if (e.KeyModifiers.HasFlag(KeyModifiers.Alt)) parts.Add("Alt");
-        parts.Add(key);
-        return string.Join("+", parts);
-    }
-
-    private sealed record HotkeyRowTag(string ActionId, string Shortcut);
 
     private void ApplyClicked(object? sender, RoutedEventArgs e)
     {
@@ -2298,7 +2173,6 @@ public partial class SettingsWindow : Window
 
     private async void SettingsClosing(object? sender, WindowClosingEventArgs e)
     {
-        PopupPlacementStore.Save(this, "settings");
         if (_closeWithoutRollback) return;
         var changes = GetNetChanges();
         if (changes.Count == 0)
@@ -2400,86 +2274,6 @@ public partial class SettingsWindow : Window
         PageSubtitle.Text = message;
     }
 
-    private Glide.App.Platform.ThumbnailSettings ReadThumbnailControls() => new(
-        Enabled: ExplorerThumbnailsCheck.IsChecked == true,
-        Mode: SelectedText(ThumbnailModeCombo, "Recommended") switch
-        {
-            "Glide for unsupported formats only" => Glide.App.Platform.ThumbnailProviderMode.UnsupportedOnly,
-            "Glide for all supported formats" => Glide.App.Platform.ThumbnailProviderMode.All,
-            "Custom" => Glide.App.Platform.ThumbnailProviderMode.Custom,
-            _ => Glide.App.Platform.ThumbnailProviderMode.Recommended
-        },
-        Quality: SelectedText(ThumbnailQualityCombo, "Balanced"),
-        PreferEmbedded: ThumbnailPreferEmbeddedCheck.IsChecked == true,
-        MaxSourceSize: SelectedText(ThumbnailMaxSourceCombo, "Automatic") switch
-        {
-            "512 px" => 512,
-            "1024 px" => 1024,
-            "2048 px" => 2048,
-            _ => 0
-        });
-
-    private void ApplyThumbnailSettingsClicked(object? sender, RoutedEventArgs e)
-    {
-        var settings = ReadThumbnailControls();
-        Glide.App.Platform.ThumbnailSettingsStore.Save(settings);
-        Glide.App.Platform.ThumbnailSettingsStore.Apply(settings, out var message);
-        ThumbnailDiagnosticsText.Text = message + "\n" + Glide.App.Platform.ThumbnailSettingsStore.Describe(settings);
-        PageSubtitle.Text = message;
-    }
-
-    private void RestoreThumbnailDefaultsClicked(object? sender, RoutedEventArgs e)
-    {
-        var settings = Glide.App.Platform.ThumbnailSettings.Default;
-        Glide.App.Platform.ThumbnailSettingsStore.Save(settings);
-        Glide.App.Platform.ThumbnailSettingsStore.Apply(settings, out var message);
-        LoadThumbnailControls(settings);
-        ThumbnailDiagnosticsText.Text = message + "\n" + Glide.App.Platform.ThumbnailSettingsStore.Describe(settings);
-        PageSubtitle.Text = message;
-    }
-
-    private void LoadThumbnailControls(Glide.App.Platform.ThumbnailSettings thumbnails)
-    {
-        ExplorerThumbnailsCheck.IsChecked = thumbnails.Enabled;
-        SelectByText(ThumbnailModeCombo, thumbnails.Mode switch
-        {
-            Glide.App.Platform.ThumbnailProviderMode.UnsupportedOnly => "Glide for unsupported formats only",
-            Glide.App.Platform.ThumbnailProviderMode.All => "Glide for all supported formats",
-            Glide.App.Platform.ThumbnailProviderMode.Custom => "Custom",
-            _ => "Recommended"
-        });
-        SelectByText(ThumbnailQualityCombo, thumbnails.Quality);
-        SelectByText(ThumbnailMaxSourceCombo, thumbnails.MaxSourceSize switch { 512 => "512 px", 1024 => "1024 px", 2048 => "2048 px", _ => "Automatic" });
-        ThumbnailPreferEmbeddedCheck.IsChecked = thumbnails.PreferEmbedded;
-    }
-
-    private void RefreshThumbnailsClicked(object? sender, RoutedEventArgs e)
-    {
-        // Windows owns the thumbnail cache. Delete the per-user thumbcache databases (best-effort;
-        // Explorer may hold them open) and ask the shell to rebuild thumbnails.
-        var removed = 0;
-        try
-        {
-            var cacheDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                                              "Microsoft", "Windows", "Explorer");
-            if (Directory.Exists(cacheDirectory))
-            {
-                foreach (var file in Directory.EnumerateFiles(cacheDirectory, "thumbcache_*.db"))
-                {
-                    try { File.Delete(file); removed++; } catch { }
-                }
-            }
-        }
-        catch { }
-        try { SHChangeNotify(0x08000000, 0, IntPtr.Zero, IntPtr.Zero); } catch { }
-        ThumbnailDiagnosticsText.Text = $"Thumbnail cache refresh requested ({removed} cache files removed). " +
-                                        "Restart Explorer if thumbnails still appear stale.";
-        PageSubtitle.Text = "Thumbnail cache refresh requested.";
-    }
-
-    [System.Runtime.InteropServices.DllImport("shell32.dll")]
-    private static extern void SHChangeNotify(uint wEventId, uint uFlags, IntPtr dwItem1, IntPtr dwItem2);
-
     private async void BrowseExternalClicked(object? sender, RoutedEventArgs e)
     {
         if (sender is not Button { Tag: string slot }) return;
@@ -2504,163 +2298,6 @@ public partial class SettingsWindow : Window
         _apply(staged.CloneState(), false);
         UpdateDirtyState(staged);
         DirtyText.Text = $"Preset staged: {preset}";
-    }
-
-    private void BuildProfileRows()
-    {
-        if (ProfileRowsHost is null) return;
-        ProfileRowsHost.Children.Clear();
-        foreach (var profile in ProfileStore.ListProfiles())
-        {
-            var row = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto,Auto"), ColumnSpacing = 8 };
-            var name = new TextBox { Text = profile.Name, Tag = profile.Id, MinWidth = 210, Watermark = "Profile name" };
-            name.LostFocus += ProfileNameLostFocus;
-            name.KeyDown += (_, e) => { if (e.Key == Key.Enter) { CommitProfileRename(name); e.Handled = true; } };
-            ToolTip.SetTip(name, "Rename this profile. Press Enter or click elsewhere to save the new name.");
-            row.Children.Add(name);
-
-            var save = new Button { Content = "Save...", Tag = profile.Id, MinWidth = 82 };
-            save.Classes.Add("secondaryAction");
-            save.Click += SaveProfileClicked;
-            ToolTip.SetTip(save, "Save the current staged Glide settings to this profile and choose a portable profile file location.");
-            Grid.SetColumn(save, 1); row.Children.Add(save);
-
-            var load = new Button { Content = "Load...", Tag = profile.Id, MinWidth = 82 };
-            load.Classes.Add("secondaryAction");
-            load.Click += LoadProfileClicked;
-            ToolTip.SetTip(load, "Choose a Glide profile file in Explorer, load it into this named profile, and stage its settings.");
-            Grid.SetColumn(load, 2); row.Children.Add(load);
-            ProfileRowsHost.Children.Add(row);
-        }
-    }
-
-    private void ProfileNameLostFocus(object? sender, RoutedEventArgs e)
-    {
-        if (sender is TextBox box) CommitProfileRename(box);
-    }
-
-    private void CommitProfileRename(TextBox box)
-    {
-        if (box.Tag is not Guid id) return;
-        box.Text = ProfileStore.Rename(id, box.Text ?? string.Empty);
-    }
-
-    private async void AddProfileClicked(object? sender, RoutedEventArgs e)
-    {
-        var name = await PromptProfileNameAsync();
-        if (string.IsNullOrWhiteSpace(name)) return;
-        ProfileStore.Add(name, ReadControls());
-        BuildProfileRows();
-        DirtyText.Text = $"Created profile ‘{name.Trim()}’.";
-    }
-
-    private async Task<string?> PromptProfileNameAsync()
-    {
-        var box = new TextBox { Watermark = "Profile name", MinWidth = 300, Text = $"Profile {ProfileStore.ListProfiles().Count + 1}" };
-        var ok = new Button { Content = "Create", MinWidth = 90 };
-        ok.Classes.Add("primaryAction");
-        var cancel = new Button { Content = "Cancel", MinWidth = 90 };
-        cancel.Classes.Add("secondaryAction");
-        var root = new StackPanel { Margin = new Thickness(18), Spacing = 12 };
-        root.Children.Add(new TextBlock { Text = "Name the new profile", FontSize = 18, FontWeight = FontWeight.SemiBold });
-        root.Children.Add(box);
-        var actions = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Spacing = 8 };
-        actions.Children.Add(cancel); actions.Children.Add(ok); root.Children.Add(actions);
-        var dialog = new Window
-        {
-            Title = "Add Glide profile",
-            CanResize = false,
-            SizeToContent = SizeToContent.WidthAndHeight,
-            MinWidth = 390,
-            MaxWidth = 560,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            Content = root
-        };
-        try
-        {
-            if (Screens.ScreenFromWindow(this) is { } screen)
-                dialog.MaxHeight = Math.Max(200, screen.WorkingArea.Height / Math.Max(1.0, RenderScaling) - 80);
-        }
-        catch { }
-        PopupPlacementStore.Track(dialog, "profile-add");
-        ok.Click += (_, _) => dialog.Close(box.Text?.Trim());
-        cancel.Click += (_, _) => dialog.Close((string?)null);
-        dialog.Opened += (_, _) => { box.Focus(); box.SelectAll(); };
-        return await dialog.ShowDialog<string?>(this);
-    }
-
-    private async void SaveProfileClicked(object? sender, RoutedEventArgs e)
-    {
-        if (sender is not Button { Tag: Guid id }) return;
-        var profile = ProfileStore.ListProfiles().FirstOrDefault(p => p.Id == id);
-        if (profile is null) return;
-        var state = ReadControls();
-        ProfileStore.Save(id, state);
-        var target = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
-        {
-            Title = $"Save Glide profile — {profile.Name}",
-            SuggestedFileName = SanitizeProfileFileName(profile.Name) + ".glideprofile.json",
-            SuggestedStartLocation = await ResolveProfilePickerFolderAsync(),
-            DefaultExtension = "json",
-            FileTypeChoices = new[] { new FilePickerFileType("Glide profile") { Patterns = new[] { "*.glideprofile.json", "*.json" } } }
-        });
-        var path = target?.TryGetLocalPath();
-        if (string.IsNullOrWhiteSpace(path)) { DirtyText.Text = $"Updated {profile.Name} internally."; return; }
-        _workingLastProfileDirectory = Path.GetDirectoryName(path) ?? _workingLastProfileDirectory;
-        try
-        {
-            var doc = new ProfileTransferDocument { Name = profile.Name, Settings = state.CloneState() };
-            await File.WriteAllTextAsync(path, JsonSerializer.Serialize(doc, AppJsonContext.Default.ProfileTransferDocument));
-            DirtyText.Text = $"Saved {profile.Name} to {Path.GetFileName(path)}";
-        }
-        catch (Exception ex) { DirtyText.Text = $"Profile save failed: {ex.Message}"; }
-    }
-
-    private async void LoadProfileClicked(object? sender, RoutedEventArgs e)
-    {
-        if (sender is not Button { Tag: Guid id }) return;
-        var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
-        {
-            Title = "Load Glide profile",
-            AllowMultiple = false,
-            SuggestedStartLocation = await ResolveProfilePickerFolderAsync(),
-            FileTypeFilter = new[] { new FilePickerFileType("Glide profile") { Patterns = new[] { "*.glideprofile.json", "*.json" } } }
-        });
-        var path = files.FirstOrDefault()?.TryGetLocalPath();
-        if (string.IsNullOrWhiteSpace(path)) return;
-        _workingLastProfileDirectory = Path.GetDirectoryName(path) ?? _workingLastProfileDirectory;
-        try
-        {
-            var json = await File.ReadAllTextAsync(path);
-            var doc = JsonSerializer.Deserialize(json, AppJsonContext.Default.ProfileTransferDocument);
-            GlideSettingsState? state = doc?.Settings;
-            string? importedName = doc?.Name;
-            // Compatibility: accept a plain GlideSettingsState JSON file as a profile file too.
-            state ??= JsonSerializer.Deserialize(json, AppJsonContext.Default.GlideSettingsState);
-            if (state is null) throw new InvalidDataException("Profile file did not contain Glide settings.");
-            ProfileStore.Replace(id, importedName, state);
-            LoadControls(state);
-            _apply(state.CloneState(), false);
-            UpdateDirtyState(state);
-            BuildProfileRows();
-            DirtyText.Text = $"Loaded profile from {Path.GetFileName(path)}";
-        }
-        catch (Exception ex) { DirtyText.Text = $"Profile load failed: {ex.Message}"; }
-    }
-
-    private async Task<IStorageFolder?> ResolveProfilePickerFolderAsync()
-    {
-        var configured = ProfileDefaultDirectoryBox.Text?.Trim();
-        var directory = !string.IsNullOrWhiteSpace(configured) ? configured : _workingLastProfileDirectory;
-        if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory)) return null;
-        try { return await StorageProvider.TryGetFolderFromPathAsync(Path.GetFullPath(directory)); } catch { return null; }
-    }
-
-    private static string SanitizeProfileFileName(string name)
-    {
-        var invalid = Path.GetInvalidFileNameChars();
-        var clean = new string(name.Select(ch => invalid.Contains(ch) ? '_' : ch).ToArray()).Trim();
-        return string.IsNullOrWhiteSpace(clean) ? "Glide-profile" : clean;
     }
 
     private async void BrowseNewExplorerDefaultDirectoryClicked(object? sender, RoutedEventArgs e) => NewExplorerTabDefaultDirectoryBox.Text = await PickCustomFolderAsync("Choose default New Explorer tab directory") ?? NewExplorerTabDefaultDirectoryBox.Text;
@@ -2707,7 +2344,16 @@ public partial class SettingsWindow : Window
 
     private async Task<string?> PickCustomFileAsync(string title)
     {
-        var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions { Title = title, AllowMultiple = false });
+        var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = title,
+            AllowMultiple = false,
+            FileTypeFilter = new[]
+            {
+                new FilePickerFileType("Images") { Patterns = Glide.Core.CodecCapabilityRegistry.RoutedExtensions.Select(x => "*" + x).ToArray() },
+                FilePickerFileTypes.All
+            }
+        });
         return files.FirstOrDefault()?.TryGetLocalPath();
     }
 
@@ -2729,7 +2375,8 @@ public partial class SettingsWindow : Window
         if (string.IsNullOrWhiteSpace(path)) return;
         try
         {
-            var json = await File.ReadAllTextAsync(path);
+            var current = ReadControls();
+            var json = await ReadImportFileAsync(path);
             GlideSettingsState? imported = null;
             try
             {
@@ -2750,10 +2397,12 @@ public partial class SettingsWindow : Window
             imported ??= JsonSerializer.Deserialize(json, AppJsonContext.Default.GlideSettingsState);
             if (imported is null) return;
             NormalizeImportedState(imported);
+            var launchTargetsKept = KeepLocalLaunchTargets(imported, current);
+            var networkFoldersDropped = KeepLocalFolderPaths(imported, current);
             LoadControls(imported);
             _apply(imported.CloneState(), false);
             UpdateDirtyState(imported);
-            DirtyText.Text = "Imported settings staged";
+            DirtyText.Text = "Imported settings staged" + ImportNotes(launchTargetsKept, networkFoldersDropped);
         }
         catch
         {
@@ -2776,618 +2425,16 @@ public partial class SettingsWindow : Window
         }
     }
 
-    private async void RunDiagnosticsClicked(object? sender, RoutedEventArgs e)
-    {
-        var writer = new StringWriter();
-        Glide.Diagnostics.DiagnosticRunner.SelfTest(writer);
-        var dialog = new Window
-        {
-            Width = 620,
-            Height = 360,
-            Title = "Glide Diagnostics",
-            Icon = Icon,
-            Content = new ScrollViewer { Content = new TextBlock { Text = writer.ToString(), Margin = new Thickness(18), TextWrapping = Avalonia.Media.TextWrapping.Wrap } }
-        };
-        PopupPlacementStore.Track(dialog, "diagnostics-results");
-        await dialog.ShowDialog(this);
-    }
-
-    public async Task<string> ExportDiagnosticsAsync(string? targetDir = null, MainWindow? explicitOwner = null)
-    {
-        ExportDiagnosticsButton.IsEnabled = false;
-        try
-        {
-            var customDir = targetDir ?? Environment.GetEnvironmentVariable("GLIDE_DIAGNOSTICS_DIR") ?? Environment.GetEnvironmentVariable("GLIDE_DIAGNOSTICS_EXPORT_DIR");
-            var stamp = DateTime.Now.ToString("yyyy-MM-dd_HHmmss");
-            string reportFolder;
-            string zipPath;
-            bool keepFolder = false;
-
-            if (!string.IsNullOrWhiteSpace(customDir))
-            {
-                Directory.CreateDirectory(customDir);
-                reportFolder = Path.Combine(customDir, $"Glide Diagnostics {stamp}");
-                zipPath = reportFolder + ".zip";
-                keepFolder = true;
-            }
-            else
-            {
-                var downloads = WindowsKnownFolders.Downloads();
-                reportFolder = Path.Combine(downloads, $"Glide Diagnostics {stamp}");
-                zipPath = reportFolder + ".zip";
-            }
-
-            Directory.CreateDirectory(reportFolder);
-            var writer = new StringWriter();
-            Glide.Diagnostics.DiagnosticRunner.Export(reportFolder, writer);
-
-            foreach (var source in Directory.EnumerateFiles(_evidenceTemp, "*.png"))
-                File.Copy(source, Path.Combine(reportFolder, Path.GetFileName(source)), true);
-
-            await CaptureAllSettingsPagesAsync(reportFolder);
-            UiDiagnosticCapture.TryCapture(this, Path.Combine(reportFolder, "settings_export_time.png"), out var settingsCaptureError);
-            // Geometry/layout now audit the responsive Settings root. ScrollViewer off-viewport
-            // descendants are intentionally excluded from outside-root failures.
-            UiDiagnosticCapture.WriteGeometry(ReferenceRoot, Path.Combine(reportFolder, "settings_geometry.txt"));
-            UiDiagnosticCapture.WriteLayoutAudit(ReferenceRoot, Path.Combine(reportFolder, "settings_layout_audit.txt"));
-            UiDiagnosticCapture.WriteControlInventory(ReferenceRoot, Path.Combine(reportFolder, "settings_control_inventory.txt"));
-            var effectiveOwner = (Owner as Control) ?? explicitOwner;
-            if (effectiveOwner is Control owner)
-            {
-                UiDiagnosticCapture.TryCapture(owner, Path.Combine(reportFolder, "main_export_time.png"), out var mainCaptureError);
-                UiDiagnosticCapture.WriteGeometry(owner, Path.Combine(reportFolder, "main_geometry.txt"));
-                UiDiagnosticCapture.WriteLayoutAudit(owner, Path.Combine(reportFolder, "main_layout_audit.txt"));
-                UiDiagnosticCapture.WriteControlInventory(owner, Path.Combine(reportFolder, "main_control_inventory.txt"));
-                if (effectiveOwner is MainWindow mainWindow)
-                {
-                    mainWindow.WriteDiagnosticEvidence(reportFolder);
-                    await mainWindow.CaptureDiagnosticVisualScenariosAsync(reportFolder);
-                }
-                if (!string.IsNullOrWhiteSpace(mainCaptureError)) File.WriteAllText(Path.Combine(reportFolder, "main_capture_warning.txt"), mainCaptureError);
-            }
-            if (!string.IsNullOrWhiteSpace(settingsCaptureError)) File.WriteAllText(Path.Combine(reportFolder, "settings_capture_warning.txt"), settingsCaptureError);
-            UiDiagnosticCapture.WriteSettingsEffectCoverage(ReadControls(), Path.Combine(reportFolder, "settings_effect_coverage.txt"));
-            WriteSettingsControlEffectMap(Path.Combine(reportFolder, "settings_control_effect_map.tsv"));
-            await WritePerformanceEffectDiagnosticsAsync(reportFolder);
-            await WriteImageFixtureDiagnosticsAsync(reportFolder);
-            if (effectiveOwner is MainWindow liveMain)
-            {
-                // Exercise the actual visible viewer over the generated 240-image corpus. This is
-                // intentionally after static/settings capture so navigation cannot contaminate those
-                // baselines. The main window is restored to the user's prior image afterwards.
-                await liveMain.RunLiveDiagnosticNavigationAsync(
-                    Path.Combine(reportFolder, "generated_image_fixtures", "navigation-stress-240"), reportFolder);
-                await liveMain.RunLargeImageFirstPaintDiagnosticAsync(
-                    Path.Combine(reportFolder, "generated_image_fixtures", "legacy-real-format-corpus", "93_large_progressive_portrait_21mp.jpg"), reportFolder);
-                // Refresh evidence after the live exercise. Previously behaviour_events.jsonl was copied
-                // before navigation, so decode-route/native-Explorer events created by the most valuable
-                // part of the audit could be absent from the exported ZIP.
-                liveMain.WriteDiagnosticEvidence(reportFolder);
-            }
-
-            WriteOverallDiagnosticSummary(reportFolder);
-            if (File.Exists(zipPath)) File.Delete(zipPath);
-            ZipFile.CreateFromDirectory(reportFolder, zipPath, CompressionLevel.Fastest, includeBaseDirectory: false);
-            if (!keepFolder)
-            {
-                try { Directory.Delete(reportFolder, true); } catch { }
-            }
-            DirtyText.Text = $"Diagnostics → {Path.GetFileName(zipPath)}";
-            return reportFolder;
-        }
-        catch (Exception ex)
-        {
-            DirtyText.Text = "Diagnostic export failed";
-            try
-            {
-                var targetErrDir = targetDir ?? Environment.GetEnvironmentVariable("GLIDE_DIAGNOSTICS_DIR") ?? Environment.GetEnvironmentVariable("GLIDE_DIAGNOSTICS_EXPORT_DIR") ?? WindowsKnownFolders.Downloads();
-                Directory.CreateDirectory(targetErrDir);
-                File.WriteAllText(Path.Combine(targetErrDir, "Glide Diagnostics Export Error.txt"), ex.ToString());
-            }
-            catch { }
-            throw;
-        }
-        finally
-        {
-            ExportDiagnosticsButton.IsEnabled = true;
-        }
-    }
-
-    private async void ExportDiagnosticsClicked(object? sender, RoutedEventArgs e)
-    {
-        try
-        {
-            await ExportDiagnosticsAsync();
-        }
-        catch { }
-    }
-
-    private static void WriteOverallDiagnosticSummary(string reportFolder)
-    {
-        var failures = new List<string>();
-        var warnings = new List<string>();
-        foreach (var file in Directory.EnumerateFiles(reportFolder, "*.txt", SearchOption.AllDirectories))
-        {
-            var name = Path.GetRelativePath(reportFolder, file);
-            if (name.Equals("summary.txt", StringComparison.OrdinalIgnoreCase) || name.Equals("overall_summary.txt", StringComparison.OrdinalIgnoreCase)) continue;
-            foreach (var raw in File.ReadLines(file))
-            {
-                var line = raw.Trim();
-                if (line.StartsWith("FAIL", StringComparison.OrdinalIgnoreCase) ||
-                    (line.StartsWith("SUMMARY ", StringComparison.OrdinalIgnoreCase) && !line.Contains("FAIL=0", StringComparison.OrdinalIgnoreCase)))
-                    failures.Add($"{name}: {line}");
-                else if (line.StartsWith("WARN", StringComparison.OrdinalIgnoreCase)) warnings.Add($"{name}: {line}");
-            }
-        }
-        var status = failures.Count == 0 ? "PASS" : "FAIL";
-        var lines = new List<string>
-        {
-            $"OVERALL {status}",
-            $"Nested failures={failures.Count} warnings={warnings.Count}",
-            "Overall PASS requires both structural diagnostics and every generated nested suite/layout audit to contain no FAIL evidence."
-        };
-        lines.AddRange(failures.Take(200).Select(x => "FAIL " + x));
-        lines.AddRange(warnings.Take(200).Select(x => "WARN " + x));
-        File.WriteAllLines(Path.Combine(reportFolder, "overall_summary.txt"), lines);
-
-        var structural = Path.Combine(reportFolder, "summary.txt");
-        var previous = File.Exists(structural) ? File.ReadAllText(structural) : string.Empty;
-        File.WriteAllText(structural, $"OVERALL {status} | nested FAIL={failures.Count} WARN={warnings.Count}{Environment.NewLine}" + previous);
-    }
-
-    private async Task WritePerformanceEffectDiagnosticsAsync(string reportFolder)
-    {
-        var temp = Path.Combine(reportFolder, "performance_fixtures");
-        Directory.CreateDirectory(temp);
-        var rows = new System.Text.Json.Nodes.JsonArray();
-        var text = new List<string>();
-        void Add(string id, bool pass, string detail)
-        {
-            rows.Add((System.Text.Json.Nodes.JsonNode)new System.Text.Json.Nodes.JsonObject { ["id"] = id, ["status"] = pass ? "PASS" : "FAIL", ["detail"] = detail });
-            text.Add($"{(pass ? "PASS" : "FAIL")} {id}: {detail}");
-        }
-
-        try
-        {
-            var speed = Glide.Imaging.ImagePerformancePolicy.ForProfile("Maximum speed");
-            var balanced = Glide.Imaging.ImagePerformancePolicy.ForProfile("Balanced");
-            var quality = Glide.Imaging.ImagePerformancePolicy.ForProfile("Maximum quality");
-            Add("profile_coordination",
-                speed.PreviewLongestSide < balanced.PreviewLongestSide && balanced.PreviewLongestSide < quality.PreviewLongestSide &&
-                speed.RefinementDelayMs > balanced.RefinementDelayMs && balanced.RefinementDelayMs > quality.RefinementDelayMs &&
-                !speed.ProgressiveColorFirstPreview && balanced.ProgressiveColorFirstPreview && quality.ProgressiveColorFirstPreview &&
-                speed.FullNeighbourPredecodeCount == 0 && balanced.FullNeighbourPredecodeCount == 0 && quality.FullNeighbourPredecodeCount > balanced.FullNeighbourPredecodeCount &&
-                speed.PrefetchDepth == 3 && balanced.PrefetchDepth == 5 && quality.PrefetchDepth == 15 &&
-                quality.CompressedCacheItems == 20 && quality.CompressedCacheMegabytes == 999 && quality.DecodedCacheMegabytes == 999,
-                $"preview={speed.PreviewLongestSide}/{balanced.PreviewLongestSide}/{quality.PreviewLongestSide}, delay={speed.RefinementDelayMs}/{balanced.RefinementDelayMs}/{quality.RefinementDelayMs}, progressive-colour={speed.ProgressiveColorFirstPreview}/{balanced.ProgressiveColorFirstPreview}/{quality.ProgressiveColorFirstPreview}, full-neighbours={speed.FullNeighbourPredecodeCount}/{balanced.FullNeighbourPredecodeCount}/{quality.FullNeighbourPredecodeCount}, prefetch={speed.PrefetchDepth}/{balanced.PrefetchDepth}/{quality.PrefetchDepth}, cache={quality.CompressedCacheItems}/{quality.CompressedCacheMegabytes}/{quality.DecodedCacheMegabytes}");
-
-            var plan = Glide.Imaging.ImageLoadCoordinator.BuildNeighbourPlan(new[] { "0", "1", "2", "3", "4" }, 2, 1, 2);
-            Add("direction_aware_prefetch", plan.SequenceEqual(new[] { "3", "1", "4", "0" }), string.Join(" -> ", plan));
-
-            var largeBmp = Path.Combine(temp, "large_1600x900.bmp");
-            WriteDiagnosticBmp(largeBmp, 1600, 900);
-            using (var loader = new Glide.Imaging.ImageLoadCoordinator())
-            {
-                loader.Policy = balanced with
-                {
-                    PreviewLongestSide = 480,
-                    RefinementDelayMs = 5,
-                    BackgroundRefinement = true,
-                    PredictivePrefetch = false,
-                    CompressedCacheMegabytes = 32,
-                    DecodedCacheMegabytes = 64
-                };
-                var first = await loader.LoadForegroundAsync(largeBmp);
-                if (first is null) Add("staged_first_frame", false, "Foreground decode returned null.");
-                else
-                {
-                    var firstLongest = Math.Max(first.Bitmap.PixelSize.Width, first.Bitmap.PixelSize.Height);
-                    Add("staged_first_frame", first.IsPreview && firstLongest <= 480 && first.SourceWidth == 1600 && first.SourceHeight == 900,
-                        $"preview={first.Bitmap.PixelSize.Width}x{first.Bitmap.PixelSize.Height}, source={first.SourceWidth}x{first.SourceHeight}, isPreview={first.IsPreview}");
-                    var bounded = await loader.RefineForegroundAsync(first);
-                    Add("viewport_bounded_refinement", bounded is not null && bounded.IsPreview &&
-                        Math.Max(bounded.Bitmap.PixelSize.Width, bounded.Bitmap.PixelSize.Height) > firstLongest &&
-                        Math.Max(bounded.Bitmap.PixelSize.Width, bounded.Bitmap.PixelSize.Height) <= 960,
-                        bounded is null ? "Bounded refinement returned null." : $"bounded={bounded.Bitmap.PixelSize.Width}x{bounded.Bitmap.PixelSize.Height}; contract=viewport-demand, not unconditional full decode");
-                    bounded?.Bitmap.Dispose();
-
-                    loader.SetViewportDemand(largeBmp, new Glide.Imaging.ImageViewportDemand(1600, 900, 1.0, SelectionZoom: false, ExactPixelDemand: true));
-                    var refined = await loader.RefineForegroundAsync(first);
-                    Add("full_resolution_refinement", refined is not null && !refined.IsPreview && refined.Bitmap.PixelSize.Width == 1600 && refined.Bitmap.PixelSize.Height == 900,
-                        refined is null ? "Exact-pixel refinement returned null." : $"final={refined.Bitmap.PixelSize.Width}x{refined.Bitmap.PixelSize.Height}; demand=exact-pixels");
-                    first.Bitmap.Dispose();
-                    refined?.Bitmap.Dispose();
-                }
-
-                // Cache budget and purge use multiple independent identities so LRU eviction is exercised.
-                var cacheFiles = new List<string>();
-                for (var i = 0; i < 10; i++)
-                {
-                    var copy = Path.Combine(temp, $"cache_{i:00}.bmp");
-                    File.Copy(largeBmp, copy, true);
-                    File.SetLastWriteTimeUtc(copy, DateTime.UtcNow.AddSeconds(i));
-                    cacheFiles.Add(copy);
-                }
-                loader.Policy = loader.Policy with { CompressedCacheItems = 64, CompressedCacheMegabytes = 32 };
-                await loader.WarmAsync(cacheFiles);
-                var warm = loader.GetCacheSnapshot();
-                Add("compressed_cache_budget", warm.CompressedBytes <= 32L * 1024 * 1024 && warm.CompressedItems < cacheFiles.Count,
-                    $"items={warm.CompressedItems}, bytes={warm.CompressedBytes}");
-                loader.PurgeCaches();
-                var purged = loader.GetCacheSnapshot();
-                Add("cache_purge_epoch", purged.CompressedItems == 0 && purged.DecodedItems == 0 && purged.CompressedBytes == 0 && purged.DecodedBytes == 0,
-                    $"compressed={purged.CompressedItems}/{purged.CompressedBytes}, decoded={purged.DecodedItems}/{purged.DecodedBytes}");
-
-                loader.Policy = loader.Policy with { SequentialForegroundReads = false, DecoderScaledFirstFrame = false };
-                var randomRead = await loader.LoadForegroundAsync(largeBmp);
-                Add("foreground_read_mode", randomRead is not null && randomRead.Bitmap.PixelSize.Width == 1600, "Decode succeeds with sequential hint disabled; the setting is consumed by foreground stream creation.");
-                randomRead?.Bitmap.Dispose();
-            }
-        }
-        catch (Exception ex)
-        {
-            Add("performance_effect_suite", false, ex.GetType().Name + ": " + ex.Message);
-        }
-
-        File.WriteAllLines(Path.Combine(reportFolder, "performance_effect_results.txt"), text);
-        File.WriteAllText(Path.Combine(reportFolder, "performance_effect_results.json"),
-            rows.ToJsonString(AppJsonContext.Indented));
-    }
-
-    private static void WriteDiagnosticBmp(string path, int width, int height)
-    {
-        var rowBytes = ((width * 3 + 3) / 4) * 4;
-        var pixelBytes = checked(rowBytes * height);
-        var fileBytes = checked(54 + pixelBytes);
-        using var stream = File.Create(path);
-        using var writer = new BinaryWriter(stream);
-        writer.Write((byte)'B'); writer.Write((byte)'M'); writer.Write(fileBytes);
-        writer.Write(0); writer.Write(54);
-        writer.Write(40); writer.Write(width); writer.Write(height); writer.Write((short)1); writer.Write((short)24);
-        writer.Write(0); writer.Write(pixelBytes); writer.Write(2835); writer.Write(2835); writer.Write(0); writer.Write(0);
-        var row = new byte[rowBytes];
-        for (var x = 0; x < width; x++)
-        {
-            row[x * 3] = (byte)(x % 251);
-            row[x * 3 + 1] = (byte)((x * 3) % 251);
-            row[x * 3 + 2] = (byte)((x * 7) % 251);
-        }
-        for (var y = 0; y < height; y++) writer.Write(row);
-    }
-
-    private async Task WriteImageFixtureDiagnosticsAsync(string reportFolder)
-    {
-        var fixtureFolder = Path.Combine(reportFolder, "generated_image_fixtures");
-        var validation = Glide.Diagnostics.ImageDiagnosticFixtures.Validate();
-        if (validation.Count > 0)
-        {
-            File.WriteAllLines(Path.Combine(reportFolder, "image_fixture_validation_failures.txt"), validation);
-            return;
-        }
-
-        var publishedFixtureFolder = Path.Combine(AppContext.BaseDirectory, "diagnostic-fixtures");
-        var publishedFixtureFiles = Glide.Diagnostics.ImageDiagnosticFixtures.Extensions
-            .Select(extension => Path.Combine(publishedFixtureFolder, "fixture" + extension))
-            .ToArray();
-        var fixtureSource = publishedFixtureFiles.All(File.Exists) ? "published-build" : "regenerated-development";
-        if (fixtureSource == "published-build")
-        {
-            Directory.CreateDirectory(fixtureFolder);
-            foreach (var source in Directory.EnumerateFiles(publishedFixtureFolder, "*", SearchOption.AllDirectories))
-            {
-                var relative = Path.GetRelativePath(publishedFixtureFolder, source);
-                var target = Path.Combine(fixtureFolder, relative);
-                Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-                File.Copy(source, target, overwrite: true);
-            }
-        }
-        else
-        {
-            // Keep the generator's returned core-fixture inventory as an explicit artifact. The
-            // generated corpus status is read below; diagnostics must never infer that a 240-file
-            // corpus exists merely because its target directory name is present.
-            _ = Glide.Diagnostics.ImageDiagnosticFixtures.WriteTo(fixtureFolder);
-        }
-
-        var performanceCorpusStatusPath = Path.Combine(fixtureFolder, "performance_corpus_status.json");
-        var performanceCorpusGenerated = false;
-        var performanceCorpusStatus = "SKIP";
-        var performanceCorpusFileCount = 0;
-        try
-        {
-            using var corpusStatus = JsonDocument.Parse(File.ReadAllText(performanceCorpusStatusPath));
-            var root = corpusStatus.RootElement;
-            performanceCorpusGenerated = root.TryGetProperty("generated", out var generated) && generated.GetBoolean();
-            performanceCorpusStatus = root.TryGetProperty("status", out var status) ? status.GetString() ?? "SKIP" : "SKIP";
-            var corpusFolder = Path.Combine(fixtureFolder, "navigation-stress-240");
-            if (Directory.Exists(corpusFolder))
-                performanceCorpusFileCount = Directory.EnumerateFiles(corpusFolder, "*.jpg", SearchOption.TopDirectoryOnly)
-                    .Count(path => !Path.GetFileName(path).StartsWith("_master_", StringComparison.OrdinalIgnoreCase));
-        }
-        catch
-        {
-            performanceCorpusStatus = "SKIP_STATUS_UNAVAILABLE";
-        }
-
-        using var loader = new Glide.Imaging.ImageLoadCoordinator { WarmCacheItemLimit = 64, SequentialReadEnabled = true };
-        var rows = new List<string> { "extension,file,bytes,width,height,cold_decode_ms,warm_decode_ms,warm_cache_hit,native_probe_ok,native_width,native_height,native_frames,status,error" };
-        var jsonResults = new System.Text.Json.Nodes.JsonArray();
-        foreach (var extension in Glide.Diagnostics.ImageDiagnosticFixtures.Extensions)
-        {
-            var path = Path.Combine(fixtureFolder, "fixture" + extension);
-            var status = "PASS";
-            var error = "";
-            var width = 0; var height = 0; var coldMs = 0d; var warmMs = 0d; var cacheHit = false;
-            var nativeProbeOk = false;
-            uint nativeWidth = 0, nativeHeight = 0, nativeFrames = 0;
-            try
-            {
-                loader.PurgeWarmCache();
-                var cold = await loader.LoadForegroundAsync(path);
-                if (cold is null) throw new InvalidOperationException("Cold fixture decode returned no result.");
-                width = cold.Bitmap.PixelSize.Width; height = cold.Bitmap.PixelSize.Height; coldMs = cold.DecodeTime.TotalMilliseconds; cold.Bitmap.Dispose();
-                await loader.WarmAsync(new[] { path });
-                var warm = await loader.LoadForegroundAsync(path);
-                if (warm is null) throw new InvalidOperationException("Warm fixture decode returned no result.");
-                warmMs = warm.DecodeTime.TotalMilliseconds; cacheHit = warm.CacheHit; warm.Bitmap.Dispose();
-                if (!cacheHit) { status = "FAIL"; error = "Warm cache was not used."; }
-
-                nativeProbeOk = Glide.Imaging.NativeImageProbe.TryProbe(path, out var nativeInfo);
-                if (nativeProbeOk)
-                {
-                    nativeWidth = nativeInfo.Width; nativeHeight = nativeInfo.Height; nativeFrames = nativeInfo.FrameCount;
-                    if (nativeWidth != width || nativeHeight != height)
-                    {
-                        status = "FAIL";
-                        error = $"Native WIC probe dimensions {nativeWidth}x{nativeHeight} disagree with Avalonia decode {width}x{height}.";
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                status = "FAIL"; error = ex.GetType().Name + ": " + ex.Message;
-            }
-            static string Csv(string value) => "\"" + value.Replace("\"", "\"\"") + "\"";
-            long fixtureBytes = 0;
-            try { fixtureBytes = File.Exists(path) ? new FileInfo(path).Length : 0; }
-            catch { }
-            rows.Add(string.Join(",", Csv(extension), Csv(Path.GetFileName(path)), fixtureBytes, width, height,
-                coldMs.ToString("F3", System.Globalization.CultureInfo.InvariantCulture), warmMs.ToString("F3", System.Globalization.CultureInfo.InvariantCulture),
-                cacheHit ? "true" : "false", nativeProbeOk ? "true" : "false", nativeWidth, nativeHeight, nativeFrames, status, Csv(error)));
-            jsonResults.Add((System.Text.Json.Nodes.JsonNode)new System.Text.Json.Nodes.JsonObject
-            {
-                ["extension"] = extension, ["file"] = Path.GetFileName(path), ["bytes"] = fixtureBytes, ["width"] = width, ["height"] = height,
-                ["coldDecodeMs"] = Math.Round(coldMs, 3), ["warmDecodeMs"] = Math.Round(warmMs, 3), ["warmCacheHit"] = cacheHit,
-                ["nativeWicProbe"] = new System.Text.Json.Nodes.JsonObject { ["available"] = nativeProbeOk, ["width"] = nativeWidth, ["height"] = nativeHeight, ["frames"] = nativeFrames },
-                ["status"] = status, ["error"] = error
-            });
-        }
-        File.WriteAllLines(Path.Combine(reportFolder, "image_fixture_decode_results.csv"), rows);
-        File.WriteAllText(Path.Combine(reportFolder, "image_fixture_decode_results.json"),
-            jsonResults.ToJsonString(AppJsonContext.Indented));
-        File.WriteAllText(Path.Combine(reportFolder, "image_fixture_decode_summary.txt"),
-            $"Routed extensions: {Glide.Core.ImageFormatRegistry.Extensions.Count}\nCore real-fixture extensions: {Glide.Diagnostics.ImageDiagnosticFixtures.Extensions.Count}\nFixture source: {fixtureSource}\nThe ten protected core suffixes have real encoded fixtures, cold/warm decode checks and native WIC probes. All 196 routed suffixes also have physical routing probes. Navigation corpus: status={performanceCorpusStatus}, generated={performanceCorpusGenerated}, genuine JPEG files={performanceCorpusFileCount}; the count is reported from performance_corpus_status.json and the generated directory, never assumed from its name. The packaged legacy real-format corpus is staged when available. A routing probe is deliberately not claimed as an independently decodable format.\nTIFF additionally records bounded native preview, full-resolution refinement dimensions and malformed-input rejection in tiff_wic_results.json.\nSee image_fixture_decode_results.csv, image_fixture_decode_results.json and tiff_wic_results.json.\n");
-
-        var tiffResults = new System.Text.Json.Nodes.JsonObject();
-        var tiffPath = Path.Combine(fixtureFolder, "fixture.tiff");
-        if (File.Exists(tiffPath))
-        {
-            try
-            {
-                var previewOk = Glide.Imaging.NativeImageDecoder.TryDecode(tiffPath, 1, out var preview);
-                var previewWidth = previewOk ? preview.PixelSize.Width : 0;
-                var previewHeight = previewOk ? preview.PixelSize.Height : 0;
-                if (previewOk) preview.Dispose();
-                var fullOk = Glide.Imaging.NativeImageDecoder.TryDecode(tiffPath, 0, out var full);
-                var fullWidth = fullOk ? full.PixelSize.Width : 0;
-                var fullHeight = fullOk ? full.PixelSize.Height : 0;
-                if (fullOk) full.Dispose();
-                var malformedPath = Path.Combine(reportFolder, "malformed_tiff_fixture.tiff");
-                File.WriteAllBytes(malformedPath, new byte[] { 0x49, 0x49, 0x2A, 0x00, 0x01, 0x00 });
-                var malformedRejected = !Glide.Imaging.NativeImageDecoder.TryDecode(malformedPath, 1, out var malformed);
-                if (!malformedRejected) malformed.Dispose();
-                File.Delete(malformedPath);
-                var bounded = previewOk && previewWidth > 0 && previewHeight > 0 && Math.Max(previewWidth, previewHeight) <= 1;
-                var refined = fullOk && fullWidth > 0 && fullHeight > 0 && (fullWidth >= previewWidth && fullHeight >= previewHeight);
-                // A missing native WIC bridge is a platform/dependency gate, not a malformed
-                // fixture failure. Once WIC is available, malformed acceptance is a real FAIL.
-                var wicUnavailable = !previewOk && !fullOk;
-                tiffResults["status"] = wicUnavailable ? "SKIP" : (bounded && refined && malformedRejected ? "PASS" : "FAIL");
-                tiffResults["availability"] = wicUnavailable ? "WIC_UNAVAILABLE" : "WIC_AVAILABLE";
-                tiffResults["preview"] = new System.Text.Json.Nodes.JsonObject { ["available"] = previewOk, ["width"] = previewWidth, ["height"] = previewHeight, ["maxLongestSide"] = 1, ["bounded"] = bounded };
-                tiffResults["fullResolution"] = new System.Text.Json.Nodes.JsonObject { ["available"] = fullOk, ["width"] = fullWidth, ["height"] = fullHeight, ["refined"] = refined };
-                tiffResults["malformedRejected"] = wicUnavailable ? (bool?)null : malformedRejected;
-            }
-            catch (Exception ex)
-            {
-                tiffResults["status"] = "FAIL";
-                tiffResults["error"] = ex.GetType().Name + ": " + ex.Message;
-            }
-        }
-        else
-        {
-            tiffResults["status"] = "SKIP";
-            tiffResults["availability"] = "FIXTURE_UNAVAILABLE";
-        }
-        File.WriteAllText(Path.Combine(reportFolder, "tiff_wic_results.json"), tiffResults.ToJsonString(AppJsonContext.Indented));
-    }
-
-    private async Task CaptureAllSettingsPagesAsync(string reportFolder)
-    {
-        var previousCategory = _activeCategory;
-        var previousSearch = SearchBox.Text ?? string.Empty;
-        var previousOffset = ContentScroll.Offset;
-        var screenshotFiles = new List<string>();
-        var captureWarnings = new List<string>();
-        var scrollRows = new List<string> { "category,screenshot,offsetY,maxOffsetY,viewportHeight" };
-        var keys = new[] { "General", "Viewing", "Mouse", "Performance", "Status", "Slideshow", "Hotkeys", "Tabs", "Overlays", "Profiles", "Windows", "Developer" };
-        foreach (var key in keys)
-        {
-            ShowCategory(key, clearSearch: false);
-            ContentScroll.Offset = new Vector(ContentScroll.Offset.X, 0);
-            await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Render);
-
-            var immediate = $"settings_{key.ToLowerInvariant()}_immediate.png";
-            if (UiDiagnosticCapture.TryCapture(this, Path.Combine(reportFolder, immediate), out var immediateError))
-                screenshotFiles.Add(immediate);
-            else captureWarnings.Add($"{immediate}: {immediateError}");
-
-            await Task.Delay(180);
-            await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Render);
-            var settled = $"settings_{key.ToLowerInvariant()}_settled.png";
-            if (UiDiagnosticCapture.TryCapture(this, Path.Combine(reportFolder, settled), out var settledError))
-            {
-                screenshotFiles.Add(settled);
-                scrollRows.Add(ScrollEvidenceRow(key, settled));
-            }
-            else captureWarnings.Add($"{settled}: {settledError}");
-            UiDiagnosticCapture.WriteGeometry(ReferenceRoot, Path.Combine(reportFolder, $"settings_{key.ToLowerInvariant()}_geometry.txt"));
-            UiDiagnosticCapture.WriteLayoutAudit(ReferenceRoot, Path.Combine(reportFolder, $"settings_{key.ToLowerInvariant()}_layout_audit.txt"));
-
-            // Long Settings pages are part of Glide's visual contract. Capture the entire scrollable
-            // page in overlapping settled views rather than only proving that the top rendered.
-            // This deliberately uses ScrollBarMaximum rather than guessing which categories are long.
-            var maxY = Math.Max(0, ContentScroll.ScrollBarMaximum.Y);
-            var viewportHeight = Math.Max(1, ContentScroll.Viewport.Height);
-            if (maxY > 20)
-            {
-                var step = Math.Max(120, viewportHeight * 0.82);
-                var positions = new List<double>();
-                for (var y = step; y < maxY - 8; y += step) positions.Add(Math.Min(y, maxY));
-                if (positions.Count == 0 || Math.Abs(positions[^1] - maxY) > 8) positions.Add(maxY);
-
-                var scrollIndex = 2;
-                foreach (var y in positions.DistinctBy(value => Math.Round(value, 1)))
-                {
-                    ContentScroll.Offset = new Vector(ContentScroll.Offset.X, Math.Clamp(y, 0, maxY));
-                    await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Render);
-                    await Task.Delay(120);
-                    var scrolled = $"settings_{key.ToLowerInvariant()}_scroll{scrollIndex}_settled.png";
-                    if (UiDiagnosticCapture.TryCapture(this, Path.Combine(reportFolder, scrolled), out var scrolledError))
-                    {
-                        screenshotFiles.Add(scrolled);
-                        scrollRows.Add(ScrollEvidenceRow(key, scrolled));
-                    }
-                    else captureWarnings.Add($"{scrolled}: {scrolledError}");
-                    scrollIndex++;
-                }
-            }
-        }
-
-        // Responsive-shell fixtures: explicitly prove the former Viewbox letterboxing bug stays gone.
-        var oldWidth = Width; var oldHeight = Height;
-        var resizeScenarios = new (string Name, double Width, double Height)[]
-        {
-            ("compact", 760, 560), ("standard", 1040, 760), ("wide", 1320, 760), ("tall", 900, 1000)
-        };
-        foreach (var scenario in resizeScenarios)
-        {
-            Width = scenario.Width; Height = scenario.Height;
-            await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Render);
-            await Task.Delay(100);
-            var file = $"settings_resize_{scenario.Name}.png";
-            if (UiDiagnosticCapture.TryCapture(this, Path.Combine(reportFolder, file), out var error)) screenshotFiles.Add(file);
-            else captureWarnings.Add($"{file}: {error}");
-            UiDiagnosticCapture.WriteGeometry(ReferenceRoot, Path.Combine(reportFolder, $"settings_resize_{scenario.Name}_geometry.txt"));
-            UiDiagnosticCapture.WriteLayoutAudit(ReferenceRoot, Path.Combine(reportFolder, $"settings_resize_{scenario.Name}_layout_audit.txt"));
-        }
-        Width = oldWidth; Height = oldHeight;
-        await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Render);
-
-        // Permanent search fixture: proves that Search is not merely a textual index.
-        SearchBox.Text = "hotkey";
-        // Search rendering is debounced for responsiveness; flush it so the screenshot is not empty.
-        FlushPendingSearch();
-        ContentScroll.Offset = new Vector(ContentScroll.Offset.X, 0);
-        await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Render);
-        await Task.Delay(120);
-        const string searchShot = "settings_search_hotkey_settled.png";
-        if (UiDiagnosticCapture.TryCapture(this, Path.Combine(reportFolder, searchShot), out var searchError))
-        {
-            screenshotFiles.Add(searchShot);
-            scrollRows.Add(ScrollEvidenceRow("Search:hotkey", searchShot));
-        }
-        else captureWarnings.Add($"{searchShot}: {searchError}");
-
-        if (string.IsNullOrWhiteSpace(previousSearch))
-        {
-            _loadingControls = true;
-            SearchBox.Text = string.Empty;
-            _loadingControls = false;
-            ShowCategory(previousCategory, clearSearch: false);
-            ContentScroll.Offset = new Vector(previousOffset.X, Math.Min(previousOffset.Y, Math.Max(0, ContentScroll.ScrollBarMaximum.Y)));
-        }
-        else
-        {
-            SearchBox.Text = previousSearch; // TextChanged schedules the debounced rebuild.
-            FlushPendingSearch();            // Render it now so the window is left in a settled state.
-            ContentScroll.Offset = new Vector(previousOffset.X, Math.Min(previousOffset.Y, Math.Max(0, ContentScroll.ScrollBarMaximum.Y)));
-        }
-
-        File.WriteAllLines(Path.Combine(reportFolder, "settings_scroll_capture_index.csv"), scrollRows);
-        File.WriteAllLines(Path.Combine(reportFolder, "screenshot_index.txt"), new[]
-        {
-            "Glide UI diagnostic screenshots", "",
-            "Every Settings category is captured immediate + settled at the top.",
-            "Scrollable Settings categories additionally receive overlapping settled captures through the bottom of the page.",
-            "Search is captured using the editable 'hotkey' fixture.",
-            "Main-window immediate/settled/export-time and resize-scenario captures are also included.", ""
-        }.Concat(screenshotFiles));
-
-        static string Csv(string value) => "\"" + value.Replace("\"", "\"\"") + "\"";
-        var visualRows = new List<string>
-        {
-            "scenario,expected,automated_result,screenshot,ai_review_required,notes"
-        };
-        foreach (var file in screenshotFiles)
-        {
-            var scenario = Path.GetFileNameWithoutExtension(file);
-            visualRows.Add(string.Join(",", Csv(scenario), Csv("No clipping/overlap/stale paint; legacy Glide density and theme remain coherent"), Csv("CAPTURED"), Csv(file), "true", Csv("Review against bundled legacy reference screenshots")));
-        }
-        visualRows.Add(string.Join(",", Csv("main_current"), Csv("Main Glide chrome/content/status remain inside bounds"), Csv("CAPTURED"), Csv("main_export_time.png"), "true", Csv("See main_layout_audit.txt and main_geometry.txt")));
-        File.WriteAllLines(Path.Combine(reportFolder, "combined_visual_results.csv"), visualRows);
-
-        if (captureWarnings.Count > 0)
-            File.WriteAllLines(Path.Combine(reportFolder, "screenshot_capture_warnings.txt"), captureWarnings);
-
-        string ScrollEvidenceRow(string category, string screenshot)
-        {
-            var offset = ContentScroll.Offset.Y;
-            var maximum = Math.Max(0, ContentScroll.ScrollBarMaximum.Y);
-            var viewport = Math.Max(0, ContentScroll.Viewport.Height);
-            return string.Join(",", Csv(category), Csv(screenshot), offset.ToString("F1", System.Globalization.CultureInfo.InvariantCulture), maximum.ToString("F1", System.Globalization.CultureInfo.InvariantCulture), viewport.ToString("F1", System.Globalization.CultureInfo.InvariantCulture));
-        }
-    }
-
-
-    private void WriteSettingsControlEffectMap(string path)
-    {
-        var lines = new List<string>
-        {
-            "id\tcategory\tkind\tlabel\tfuturePhase\tcontrol\tcontrolType\tenabled\tstatus"
-        };
-        foreach (var definition in SettingsCatalog.All)
-        {
-            _settingControls.TryGetValue(definition.Id, out var control);
-            var status = definition.FuturePhase is not null
-                ? $"future phase {definition.FuturePhase}; intentionally disabled/hidden"
-                : control is null
-                    ? definition.Kind == SettingKind.Action ? "current semantic/action editor or generated UI" : "current setting without a direct named editor"
-                    : control.IsEnabled ? "current enabled editor; value participates in Settings state/effect path"
-                    : ConditionallyDisabledSettingIds.Contains(definition.Id) ? "current editor disabled by current state" : "current editor unexpectedly disabled";
-            lines.Add(string.Join("\t",
-                Sanitize(definition.Id), Sanitize(definition.Category), definition.Kind.ToString(), Sanitize(definition.Label), definition.FuturePhase?.ToString() ?? "",
-                Sanitize(control?.Name ?? ""), control?.GetType().Name ?? "", (control?.IsEnabled ?? false).ToString(), Sanitize(status)));
-        }
-        File.WriteAllLines(path, lines);
-
-        static string Sanitize(string value) => value.Replace("\t", " ").Replace("\r", " ").Replace("\n", " ");
-    }
-
     private static void NormalizeImportedState(GlideSettingsState state)
     {
         state.Hotkeys ??= HotkeyCatalog.CreateDefaultMap();
+        state.CustomHotkeyPresets = HotkeyPresetLibrary.Normalize(state.CustomHotkeyPresets);
         state.Gestures ??= GestureCatalog.CreateDefaultMap();
+        // Imports from before 4.8.0 describe mouse behaviour through the folded toggles.
+        SettingsStore.MigrateLegacyMouseToggles(state, state.SettingsSchemaVersion);
+        SettingsStore.MigrateDefaultsSchema8(state, state.SettingsSchemaVersion);
+        state.CustomGestures = GestureCatalog.NormalizeCustomGestures(state.CustomGestures);
+        state.GestureRecentActions = SettingsStore.NormalizeRecentGestureActions(state.GestureRecentActions);
         foreach (var key in state.Hotkeys.Keys.ToList())
             state.Hotkeys[key] = state.Hotkeys[key]
                 .Where(x => !x.Contains("Mouse", StringComparison.OrdinalIgnoreCase))

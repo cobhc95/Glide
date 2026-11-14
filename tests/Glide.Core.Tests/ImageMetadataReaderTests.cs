@@ -1,6 +1,5 @@
 using System.Text;
 using Glide.Imaging;
-using Xunit;
 
 namespace Glide.Core.Tests;
 

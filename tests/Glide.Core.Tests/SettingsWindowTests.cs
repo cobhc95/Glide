@@ -1,6 +1,4 @@
-﻿using Avalonia.Headless;
-using Glide.App.Settings;
-using Xunit;
+﻿using Glide.App.Settings;
 
 namespace Glide.Core.Tests;
 

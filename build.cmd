@@ -334,6 +334,20 @@ if exist "native\Glide.ShellThumbnail\build\Release\Glide.ShellThumbnail.dll" (
   echo WARNING: Glide.ShellThumbnail.dll was not built; Explorer thumbnails will be unavailable.
 )
 
+rem Optional code signing hook: runs only when a real certificate is configured through
+rem GLIDE_SIGN_CERT_THUMBPRINT or GLIDE_SIGN_PFX (see docs\code-signing.md). Without them nothing changes.
+set "GLIDE_SIGNING=0"
+if defined GLIDE_SIGN_CERT_THUMBPRINT set "GLIDE_SIGNING=1"
+if defined GLIDE_SIGN_PFX set "GLIDE_SIGNING=1"
+if "!GLIDE_SIGNING!"=="1" (
+  echo       Signing dist binaries...
+  powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File "tools\sign-local.ps1" -Path dist
+  if errorlevel 1 (
+    set "GLIDE_BUILD_RC=!errorlevel!"
+    goto :fail
+  )
+)
+
 rem Release deliverables: a clean portable archive and a directly testable EXE.
 if exist "Glide-%GLIDE_VERSION%-Portable.zip" del /q "Glide-%GLIDE_VERSION%-Portable.zip"
 if exist "Glide-%GLIDE_VERSION%.exe" del /q "Glide-%GLIDE_VERSION%.exe"
@@ -370,7 +384,7 @@ if /I "%GLIDE_SKIP_INSTALLER%"=="1" (
   call :progress 94 "Installer package"
   echo [9/9] Building Inno Setup installer...
   set "GLIDE_INSTALLER_PARENT=1"
-  call "%~dp0build-installer.cmd" --from-build
+  call "%~dp0tools\build-installer.cmd" --from-build
   set "GLIDE_INSTALLER_PARENT="
   if errorlevel 1 (
     set "GLIDE_BUILD_RC=!errorlevel!"
@@ -379,9 +393,9 @@ if /I "%GLIDE_SKIP_INSTALLER%"=="1" (
 )
 
 echo Packaging clean zero-context handover zip...
-powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File "package-source.ps1"
+powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File "tools\package-source.ps1"
 if errorlevel 1 (
-  echo WARNING: package-source.ps1 failed, continuing build completion.
+  echo WARNING: tools\package-source.ps1 failed, continuing build completion.
 )
 
 call :progress 100 "Complete"

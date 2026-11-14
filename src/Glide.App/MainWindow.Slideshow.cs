@@ -1,34 +1,12 @@
-﻿using System.Diagnostics;
-using System.Collections.ObjectModel;
-using System.Runtime.InteropServices;
-using System.Text.Json;
-using Avalonia;
+﻿using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Controls.ApplicationLifetimes;
-using Avalonia.Controls.Primitives;
-using Avalonia.Controls.Templates;
 using Avalonia.Input;
 using Avalonia.Interactivity;
-using Avalonia.Layout;
 using Avalonia.Media;
-using Avalonia.Media.Imaging;
-using Avalonia.Platform.Storage;
-using Avalonia.Styling;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
-using Glide.App.Controls;
-using Glide.App.Diagnostics;
-using Glide.App.Platform;
-using Glide.App.Printing;
-using Glide.App.Settings;
 using Glide.App.Services;
-using Glide.Core;
 using Glide.Core.Commands;
-using Glide.Core.Workspace;
-using Glide.Imaging;
-using Glide.Input;
-using Glide.Diagnostics.Runtime;
-using Microsoft.VisualBasic.FileIO;
 
 namespace Glide.App;
 
@@ -51,11 +29,21 @@ public partial class MainWindow
         };
         var startFullscreen = new CheckBox { Content = "Start slideshow in fullscreen", IsChecked = _settings.SlideshowStartFullscreen };
         var pauseInactive = new CheckBox { Content = "Pause while Glide is not the active window", IsChecked = _settings.SlideshowPauseWhenInactive };
-        var rightClickStops = new CheckBox { Content = "Right-click stops an active slideshow", IsChecked = _settings.SlideshowRightClickStops };
+        var rightAction = _inputRouter.ResolveGesture("slideshow.rightClick", _settings.Gestures);
+        var rightClickStops = new CheckBox { Content = "Right-click stops an active slideshow", IsChecked = rightAction == GestureCatalog.Default };
+        var leftAction = _inputRouter.ResolveGesture("slideshow.leftClick", _settings.Gestures);
+        var leftLabels = SlideshowLeftClickChoices.Select(c => c.Label).ToList();
+        var currentLeft = SlideshowLeftClickChoices.FirstOrDefault(c => c.Action == leftAction).Label;
+        if (currentLeft is null)
+        {
+            // A Settings-only action: show it so the dialog does not silently change it.
+            currentLeft = GestureCatalog.FindAction(leftAction)?.Label ?? leftAction;
+            leftLabels.Add(currentLeft);
+        }
         var leftClick = new ComboBox
         {
-            ItemsSource = Glide.Core.Settings.SlideshowLeftClickActions.All,
-            SelectedItem = Glide.Core.Settings.SlideshowLeftClickActions.Normalize(_settings.SlideshowLeftClickAction),
+            ItemsSource = leftLabels,
+            SelectedItem = currentLeft,
             MinWidth = 190
         };
         var qualityIndicator = new CheckBox { Content = "Show slideshow playing indicator", IsChecked = _settings.SlideshowShowQualityIndicator };
@@ -124,8 +112,14 @@ public partial class MainWindow
         _settings.SlideshowDirection = direction.SelectedItem?.ToString() == "Backward" ? "Backward" : "Forward";
         _settings.SlideshowStartFullscreen = startFullscreen.IsChecked == true;
         _settings.SlideshowPauseWhenInactive = pauseInactive.IsChecked == true;
-        _settings.SlideshowRightClickStops = rightClickStops.IsChecked == true;
-        _settings.SlideshowLeftClickAction = Glide.Core.Settings.SlideshowLeftClickActions.Normalize(leftClick.SelectedItem?.ToString());
+        // Write a row only when its control changed, so a Settings-only binding is preserved.
+        var stopsNow = rightClickStops.IsChecked == true;
+        if (stopsNow != (rightAction == GestureCatalog.Default))
+            _settings.Gestures["slideshow.rightClick"] = stopsNow ? GestureCatalog.Default : GestureCatalog.PassThrough;
+        var pickedLeft = leftClick.SelectedItem?.ToString();
+        if (!string.Equals(pickedLeft, currentLeft, StringComparison.Ordinal) &&
+            SlideshowLeftClickChoices.FirstOrDefault(c => c.Label == pickedLeft) is { Label: not null } choice)
+            _settings.Gestures["slideshow.leftClick"] = choice.Action;
         _settings.SlideshowShowQualityIndicator = qualityIndicator.IsChecked == true;
         SaveSettingsAndPublish();
         return true;
@@ -135,27 +129,34 @@ public partial class MainWindow
     /// <summary>Runs the user-chosen action for a left-click on the picture during a slideshow.</summary>
     private async Task HandleSlideshowLeftClickAsync()
     {
+        // Default of the "Slideshow: Left click" row; other actions arrive as gesture actions.
         if (_slideshow?.IsActive != true) return;
-        switch (Glide.Core.Settings.SlideshowLeftClickActions.Normalize(_settings.SlideshowLeftClickAction))
-        {
-            case Glide.Core.Settings.SlideshowLeftClickActions.NextImage: await ExecuteCommandAsync(GlideCommand.NextImage); break;
-            case Glide.Core.Settings.SlideshowLeftClickActions.PreviousImage: await ExecuteCommandAsync(GlideCommand.PreviousImage); break;
-            case Glide.Core.Settings.SlideshowLeftClickActions.StopSlideshow: StopSlideshow(restoreStartingMode: true); break;
-            case Glide.Core.Settings.SlideshowLeftClickActions.DoNothing: break;
-            default: await ToggleSlideshowAsync(); break;
-        }
+        await ToggleSlideshowAsync();
     }
+
+    // The session dialog keeps its two familiar mouse controls; they now read and write the
+    // Slideshow gesture rows. Labels map 1:1 onto the folded 4.7 choices.
+    private static readonly (string Label, string Action)[] SlideshowLeftClickChoices =
+    [
+        (Glide.Core.Settings.SlideshowLeftClickActions.PauseResume, GestureCatalog.Default),
+        (Glide.Core.Settings.SlideshowLeftClickActions.NextImage, GestureCatalog.Next),
+        (Glide.Core.Settings.SlideshowLeftClickActions.PreviousImage, GestureCatalog.Previous),
+        (Glide.Core.Settings.SlideshowLeftClickActions.StopSlideshow, GestureCatalog.StopSlideshow),
+        (Glide.Core.Settings.SlideshowLeftClickActions.DoNothing, GestureCatalog.PassThrough)
+    ];
 
     private void UpdateSlideshowUi()
     {
         var slideshow = _slideshow;
         var active = slideshow?.IsActive == true;
         var running = slideshow?.IsRunning == true;
+        // Slideshow-area gesture rows (4.8.0) replace "Right-click stops slideshow" and
+        // "Left-click during slideshow"; the viewport resolves them while a session is active.
         if (Viewport is not null)
-            Viewport.SlideshowRightClickStopEnabled = running && _settings.SlideshowRightClickStops;
-        if (Viewport is not null)
-            Viewport.SlideshowLeftClickEnabled = active &&
-                !string.Equals(Glide.Core.Settings.SlideshowLeftClickActions.Normalize(_settings.SlideshowLeftClickAction), Glide.Core.Settings.SlideshowLeftClickActions.DoNothing, StringComparison.Ordinal);
+        {
+            Viewport.SlideshowActive = active;
+            Viewport.SlideshowRunning = running;
+        }
         if (SlideshowQualityIndicator is not null)
             SlideshowQualityIndicator.IsVisible = running && _settings.SlideshowShowQualityIndicator;
         if (SlideshowIcon is not null) SlideshowIcon.Kind = running ? "Pause" : "Play";
@@ -229,6 +230,10 @@ public partial class MainWindow
         if (WindowState != WindowState.FullScreen) return;
         CancelSelectionForFullscreenTransition();
         StopFullscreenCursorAutoHide();
+        // Leaving fullscreen goes through an intermediate Normal state before the remembered
+        // placement (or Maximized/Minimized) is applied. Hide the top level for that transition so
+        // the window never flashes at the wrong place/size; it is revealed once placement settles.
+        HideForFullscreenExitTransition();
         WindowState = WindowState.Normal;
         var snapshot = _fullscreen.Restore();
         var exitBehavior = forceMaximized ? "Maximized" : (_settings.FullscreenExitBehavior ?? "Restore size and location");
@@ -263,6 +268,39 @@ public partial class MainWindow
             position = Position.ToString(), Width, Height
         });
         FinishFullscreenTransition();
+        RevealAfterFullscreenExitTransition();
+    }
+
+    private int _fullscreenExitFenceGeneration;
+    private bool _fullscreenExitFenceActive;
+
+    private void HideForFullscreenExitTransition()
+    {
+        // The warm-presentation gate already owns Opacity; never fight it.
+        if (_warmPresentationGateActive || _fullscreenExitFenceActive) return;
+        _fullscreenExitFenceActive = true;
+        _fullscreenExitFenceGeneration++;
+        Opacity = 0;
+    }
+
+    private void RevealAfterFullscreenExitTransition()
+    {
+        if (!_fullscreenExitFenceActive) return;
+        var generation = _fullscreenExitFenceGeneration;
+        void Reveal()
+        {
+            if (!_fullscreenExitFenceActive || generation != _fullscreenExitFenceGeneration) return;
+            _fullscreenExitFenceActive = false;
+            if (!_warmPresentationGateActive) Opacity = _sessionOpacity;
+        }
+        // Reveal after the restored placement has been laid out and one frame composed; the timer
+        // is a safety net so the window can never stay invisible.
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (!_fullscreenExitFenceActive || generation != _fullscreenExitFenceGeneration) return;
+            RequestAnimationFrame(_ => Dispatcher.UIThread.Post(Reveal, DispatcherPriority.Render));
+        }, DispatcherPriority.Loaded);
+        DispatcherTimer.RunOnce(Reveal, TimeSpan.FromMilliseconds(250));
     }
 
     private void ReapplyNormalBoundsAfterFullscreen()

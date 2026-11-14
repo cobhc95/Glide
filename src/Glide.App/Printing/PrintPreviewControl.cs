@@ -38,11 +38,19 @@ public sealed class PrintPreviewControl : Control
     public static readonly StyledProperty<double> MarginBottomProperty =
         AvaloniaProperty.Register<PrintPreviewControl, double>(nameof(MarginBottom), 50);
 
+    /// <summary>Text drawn when there is no paper to show yet ("Reading printer settings…", "No printer").</summary>
+    public static readonly StyledProperty<string> PlaceholderTextProperty =
+        AvaloniaProperty.Register<PrintPreviewControl, string>(nameof(PlaceholderText), "No printer");
+    /// <summary>When set, a small badge with this text is drawn over the preview ("Updating preview…").</summary>
+    public static readonly StyledProperty<string?> BusyTextProperty =
+        AvaloniaProperty.Register<PrintPreviewControl, string?>(nameof(BusyText));
+
     static PrintPreviewControl()
     {
         AffectsRender<PrintPreviewControl>(
             PaperProperty, LandscapeProperty, LayoutProperty, PreviewBitmapProperty,
-            MarginLeftProperty, MarginTopProperty, MarginRightProperty, MarginBottomProperty);
+            MarginLeftProperty, MarginTopProperty, MarginRightProperty, MarginBottomProperty,
+            PlaceholderTextProperty, BusyTextProperty);
     }
 
     // Cached per-Render allocations: brushes/pens are immutable after construction and safe to
@@ -59,14 +67,39 @@ public sealed class PrintPreviewControl : Control
     public double MarginTop { get => GetValue(MarginTopProperty); set => SetValue(MarginTopProperty, value); }
     public double MarginRight { get => GetValue(MarginRightProperty); set => SetValue(MarginRightProperty, value); }
     public double MarginBottom { get => GetValue(MarginBottomProperty); set => SetValue(MarginBottomProperty, value); }
+    public string PlaceholderText { get => GetValue(PlaceholderTextProperty); set => SetValue(PlaceholderTextProperty, value); }
+    public string? BusyText { get => GetValue(BusyTextProperty); set => SetValue(BusyTextProperty, value); }
+
+    private static readonly SolidColorBrush BadgeBrush = new(Color.FromArgb(225, 24, 28, 32));
+    private static readonly SolidColorBrush BadgeTextBrush = new(Color.FromRgb(0xE8, 0xEC, 0xF0));
+    private static readonly Pen BadgeEdgePen = new(new SolidColorBrush(Color.FromRgb(0x38, 0xA9, 0xF5)), 1);
 
     public override void Render(DrawingContext context)
     {
         base.Render(context);
+        RenderPage(context);
+        DrawBusyBadge(context);
+    }
+
+    private void DrawBusyBadge(DrawingContext context)
+    {
+        var text = BusyText;
+        if (string.IsNullOrWhiteSpace(text) || Bounds.Width < 40 || Bounds.Height < 30) return;
+        var formatted = new FormattedText(text, System.Globalization.CultureInfo.CurrentCulture,
+            FlowDirection.LeftToRight, Typeface.Default, 13, BadgeTextBrush);
+        var w = formatted.Width + 24;
+        var h = formatted.Height + 12;
+        var rect = new Rect(Math.Max(4, Bounds.Width - w - 10), 10, w, h);
+        context.DrawRectangle(BadgeBrush, BadgeEdgePen, rect, 6, 6);
+        context.DrawText(formatted, new Point(rect.X + 12, rect.Y + 6));
+    }
+
+    private void RenderPage(DrawingContext context)
+    {
         var paper = Paper;
         if (paper is null || paper.PaperWidthHundredths <= 0 || paper.PaperHeightHundredths <= 0)
         {
-            var empty = new FormattedText("No printer", System.Globalization.CultureInfo.CurrentCulture,
+            var empty = new FormattedText(PlaceholderText ?? "", System.Globalization.CultureInfo.CurrentCulture,
                 FlowDirection.LeftToRight, Typeface.Default, 14, Brushes.Gray);
             context.DrawText(empty, new Point(12, 12));
             return;
@@ -147,6 +180,112 @@ public sealed class PrintPreviewControl : Control
             new Rect(ox, oy, paperW * scale, paperH * scale));
     }
 
+    /// <summary>Longest side of the preview proxy: a screen-sized copy the preview draws instead of a full-resolution image.</summary>
+    public const int ProxyLongestSide = 2048;
+
+    /// <summary>Cores used for preview-only pixel work (bounded).</summary>
+    public static int PreviewWorkerCount => Math.Clamp(Environment.ProcessorCount / 2, 1, 4);
+
+    /// <summary>
+    /// A downscaled copy of <paramref name="source"/> no larger than <paramref name="longestSide"/>, for drawing the preview
+    /// (the preview area is never larger than a screen). Null when the source is already small enough (draw it as is)
+    /// or scaling failed. Runs off the UI thread; the caller owns and disposes the result. Preview only: printing
+    /// always uses the full-resolution image.
+    /// </summary>
+    public static Bitmap? CreateProxy(Bitmap source, int longestSide = ProxyLongestSide)
+    {
+        try
+        {
+            var w = source.PixelSize.Width;
+            var h = source.PixelSize.Height;
+            var longest = Math.Max(w, h);
+            if (w <= 0 || h <= 0 || longest <= longestSide) return null;
+            var scale = (double)longestSide / longest;
+            var size = new PixelSize(Math.Max(1, (int)Math.Round(w * scale)), Math.Max(1, (int)Math.Round(h * scale)));
+            return AreaDownscale(source, size) ?? source.CreateScaledBitmap(size, BitmapInterpolationMode.HighQuality);
+        }
+        catch { return null; }
+    }
+
+    /// <summary>
+    /// Box-filter (area average) downscale that works on any 32-bit Bitmap off the UI thread, including the decoder's
+    /// WriteableBitmaps. Reads the source in row bands (bounded memory: never a second full-size copy) and averages each
+    /// band on a few cores. Null when the pixel format is not 32-bit.
+    /// </summary>
+    private static Bitmap? AreaDownscale(Bitmap source, PixelSize size)
+    {
+        var format = source.Format;
+        if (format is null || (format != PixelFormat.Bgra8888 && format != PixelFormat.Rgba8888)) return null;
+        var sw = source.PixelSize.Width;
+        var sh = source.PixelSize.Height;
+        var dw = size.Width;
+        var dh = size.Height;
+        var alpha = source.AlphaFormat ?? AlphaFormat.Premul;
+        var target = new WriteableBitmap(size, new Vector(96, 96), format.Value, alpha);
+        try
+        {
+            var output = new byte[dw * dh * 4];
+            // Horizontal source span of each output column (same for every row).
+            var x0 = new int[dw];
+            var x1 = new int[dw];
+            for (var x = 0; x < dw; x++)
+            {
+                x0[x] = (int)((long)x * sw / dw);
+                x1[x] = Math.Max(x0[x] + 1, (int)((long)(x + 1) * sw / dw));
+            }
+            var options = new ParallelOptions { MaxDegreeOfParallelism = PreviewWorkerCount };
+            const int outRowsPerBand = 32;
+            var stride = sw * 4;
+            for (var bandStart = 0; bandStart < dh; bandStart += outRowsPerBand)
+            {
+                var bandEnd = Math.Min(dh, bandStart + outRowsPerBand);
+                var srcTop = (int)((long)bandStart * sh / dh);
+                var srcBottom = Math.Max(srcTop + 1, (int)((long)bandEnd * sh / dh));
+                var rows = srcBottom - srcTop;
+                var band = new byte[rows * stride];
+                var handle = GCHandle.Alloc(band, GCHandleType.Pinned);
+                try { source.CopyPixels(new PixelRect(0, srcTop, sw, rows), handle.AddrOfPinnedObject(), band.Length, stride); }
+                finally { handle.Free(); }
+                Parallel.For(bandStart, bandEnd, options, oy =>
+                {
+                    var y0 = (int)((long)oy * sh / dh);
+                    var y1 = Math.Max(y0 + 1, (int)((long)(oy + 1) * sh / dh));
+                    var outRow = oy * dw * 4;
+                    for (var ox = 0; ox < dw; ox++)
+                    {
+                        long b0 = 0, b1 = 0, b2 = 0, b3 = 0;
+                        for (var y = y0; y < y1; y++)
+                        {
+                            var row = (y - srcTop) * stride;
+                            for (var x = x0[ox]; x < x1[ox]; x++)
+                            {
+                                var i = row + x * 4;
+                                b0 += band[i]; b1 += band[i + 1]; b2 += band[i + 2]; b3 += band[i + 3];
+                            }
+                        }
+                        var n = (long)(y1 - y0) * (x1[ox] - x0[ox]);
+                        var o = outRow + ox * 4;
+                        output[o] = (byte)((b0 + n / 2) / n);
+                        output[o + 1] = (byte)((b1 + n / 2) / n);
+                        output[o + 2] = (byte)((b2 + n / 2) / n);
+                        output[o + 3] = (byte)((b3 + n / 2) / n);
+                    }
+                });
+            }
+            using (var fb = target.Lock())
+            {
+                for (var y = 0; y < dh; y++)
+                    Marshal.Copy(output, y * dw * 4, fb.Address + y * fb.RowBytes, dw * 4);
+            }
+            return target;
+        }
+        catch
+        {
+            target.Dispose();
+            return null;
+        }
+    }
+
     /// <summary>
     /// Produces a luminance-grayscale copy of a bitmap for the grayscale preview. Runs off the UI
     /// thread; the caller owns and disposes the result.
@@ -170,16 +309,23 @@ public sealed class PrintPreviewControl : Control
                     source.CopyPixels(fb, AlphaFormat.Unpremul);
                     Marshal.Copy(fb.Address, bytes, 0, bytes.Length);
                 }
-                for (var i = 0; i + 3 < bytes.Length; i += 4)
+                // Row bands on a few cores (bounded so the viewer keeps its own decode threads); per-pixel result unchanged.
+                var options = new ParallelOptions { MaxDegreeOfParallelism = PreviewWorkerCount };
+                const int band = 64;
+                Parallel.For(0, (h + band - 1) / band, options, chunk =>
                 {
-                    var b = bytes[i];
-                    var g = bytes[i + 1];
-                    var r = bytes[i + 2];
-                    var y = (byte)((r * 299 + g * 587 + b * 114 + 500) / 1000);
-                    bytes[i] = y;
-                    bytes[i + 1] = y;
-                    bytes[i + 2] = y;
-                }
+                    var end = Math.Min(h, (chunk + 1) * band) * stride;
+                    for (var i = chunk * band * stride; i + 3 < end; i += 4)
+                    {
+                        var b = bytes[i];
+                        var g = bytes[i + 1];
+                        var r = bytes[i + 2];
+                        var y = (byte)((r * 299 + g * 587 + b * 114 + 500) / 1000);
+                        bytes[i] = y;
+                        bytes[i + 1] = y;
+                        bytes[i + 2] = y;
+                    }
+                });
                 using (var fb = target.Lock())
                     Marshal.Copy(bytes, 0, fb.Address, bytes.Length);
                 return target;

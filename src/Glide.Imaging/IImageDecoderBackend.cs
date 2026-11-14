@@ -1,5 +1,4 @@
 using Avalonia;
-using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform;
 using Glide.Core;
@@ -85,24 +84,34 @@ public sealed class AvaloniaImageDecoderBackend : IImageDecoderBackend, IPathOpt
             if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("builtin_raster_full_decode_hit", sourcePath);
             return builtInFull;
         }
+        var nativeMissed = false;
         if (OperatingSystem.IsWindows() && !string.IsNullOrWhiteSpace(sourcePath))
         {
             if (NativeImageDecoder.SupportsDirectNativeDecode(sourcePath))
             {
+                NativeImageDecoder.ResetAllocationFailure();
                 if (NativeImageDecoder.TryDecode(sourcePath, 0, out var native))
                 {
                     if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("native_full_decode_hit", sourcePath);
                     return native;
                 }
+                // The frame itself could not be allocated: Skia would need the same memory again. Let the
+                // caller fall back to the preview (ImageLoadCoordinator handles allocation failures).
+                if (NativeImageDecoder.ResetAllocationFailure())
+                    throw new InsufficientMemoryException("There is not enough free memory to decode this image at full size.");
+                nativeMissed = true;
                 if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("native_full_decode_miss", sourcePath);
             }
         }
 
         try
         {
-            return new Bitmap(stream);
+            SkiaDecodeGuard.EnsureAllowed(stream, 0);
+            var managed = new Bitmap(stream);
+            if (nativeMissed) NativeImageDecoder.MarkNativeCodecUnavailable(sourcePath);
+            return managed;
         }
-        catch (Exception) when (!string.IsNullOrWhiteSpace(sourcePath))
+        catch (Exception ex) when (!string.IsNullOrWhiteSpace(sourcePath) && !SkiaDecodeGuard.IsRefusal(ex))
         {
             // Preserve the known-good Avalonia/Skia path first. Only if it cannot decode do we try
             // Windows' installed WIC codecs, then a genuine Shell thumbnail/preview (never a generic
@@ -121,13 +130,16 @@ public sealed class AvaloniaImageDecoderBackend : IImageDecoderBackend, IPathOpt
         longestSide = Math.Max(1, longestSide);
         try
         {
+            // Skia decodes formats without a scaled codec (PNG, BMP, GIF) at full size before resizing.
+            SkiaDecodeGuard.EnsureAllowed(stream, longestSide);
             if (source.Width >= source.Height)
                 return Bitmap.DecodeToWidth(stream, Math.Min(longestSide, source.Width), interpolationMode);
             return Bitmap.DecodeToHeight(stream, Math.Min(longestSide, source.Height), interpolationMode);
         }
-        catch
+        catch (Exception ex) when (!SkiaDecodeGuard.IsRefusal(ex))
         {
             if (stream.CanSeek) stream.Position = 0;
+            SkiaDecodeGuard.EnsureAllowed(stream, 0);
             return new Bitmap(stream);
         }
     }
@@ -144,15 +156,20 @@ public sealed class AvaloniaImageDecoderBackend : IImageDecoderBackend, IPathOpt
         // Native previews use the native WIC bridge first. This avoids a full-size Skia
         // decode followed by managed downscaling on the critical browse path and lets WIC request
         // a decoder-scaled first frame where the installed codec supports it.
-        if (NativeImageDecoder.SupportsDirectNativeDecode(sourcePath) &&
-            NativeImageDecoder.TryDecode(sourcePath!, longestSide, out var nativePreview))
-            return nativePreview;
+        var nativeMissed = false;
+        if (NativeImageDecoder.SupportsDirectNativeDecode(sourcePath))
+        {
+            if (NativeImageDecoder.TryDecode(sourcePath!, longestSide, out var nativePreview)) return nativePreview;
+            nativeMissed = true;
+        }
 
         try
         {
-            return DecodePreview(stream, source, longestSide, interpolationMode);
+            var managed = DecodePreview(stream, source, longestSide, interpolationMode);
+            if (nativeMissed) NativeImageDecoder.MarkNativeCodecUnavailable(sourcePath);
+            return managed;
         }
-        catch (Exception) when (!string.IsNullOrWhiteSpace(sourcePath))
+        catch (Exception ex) when (!string.IsNullOrWhiteSpace(sourcePath) && !SkiaDecodeGuard.IsRefusal(ex))
         {
             if (NativeImageDecoder.TryDecode(sourcePath!, longestSide, out var native)) return native;
             if (ImageFormatRegistry.IsSupported(sourcePath!) &&
@@ -353,10 +370,40 @@ public static partial class NativeImageDecoder
     }
 
     public static bool SupportsDirectNativeDecode(string? path)
-        => IsJpegPath(path) || IsTiffPath(path) || IsJpegXrPath(path) || IsPngPath(path) || IsBmpPath(path) ||
-           IsWebpPath(path) || IsGifPath(path) || IsIcoPath(path);
+        => (IsJpegPath(path) || IsTiffPath(path) || IsJpegXrPath(path) || IsPngPath(path) || IsBmpPath(path) ||
+            IsWebpPath(path) || IsGifPath(path) || IsIcoPath(path)) && !IsNativeCodecKnownUnavailable(path);
+
+    // Extensions for which this PC's WIC has no working codec (e.g. WebP without the Store "WebP Image
+    // Extensions"): the native attempt failed and the managed Skia decoder then succeeded. Skipping the
+    // doomed native attempt saves ~4 ms (decoder enumeration) on every later decode of that format.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> NativeUnavailable = new(StringComparer.OrdinalIgnoreCase);
+
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, int> NativeMisses = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The native codec failed on <paramref name="path"/> and the managed decoder succeeded. After three such
+    /// files of one extension (so one odd file cannot switch a format off) the native attempt is skipped.
+    /// </summary>
+    internal static void MarkNativeCodecUnavailable(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return;
+        var extension = ImageFormatRegistry.GetLongestExtension(path);
+        if (string.IsNullOrEmpty(extension)) return;
+        if (NativeMisses.AddOrUpdate(extension, 1, (_, n) => n + 1) >= 3) NativeUnavailable.TryAdd(extension, 0);
+    }
+
+    internal static bool IsNativeCodecKnownUnavailable(string? path)
+        => !NativeUnavailable.IsEmpty && !string.IsNullOrWhiteSpace(path) &&
+           NativeUnavailable.ContainsKey(ImageFormatRegistry.GetLongestExtension(path));
 
     public static bool SupportsNativeScaledPreview(string? path) => IsJpegPath(path) || IsJpegXrPath(path);
+
+    /// <summary>
+    /// Core formats whose Windows/Skia codecs can only decode at source resolution: any reduced
+    /// "preview" is a full decode followed by a resample.
+    /// </summary>
+    public static bool IsFullDecodeOnlyFormat(string? path)
+        => IsPngPath(path) || IsWebpPath(path) || IsTiffPath(path) || IsBmpPath(path) || IsGifPath(path) || IsIcoPath(path);
 
     public static bool TryDecode(string path, out Bitmap bitmap) => TryDecode(path, 0, out bitmap);
     public static bool TryDecode(string path, int maxLongestSide, out Bitmap bitmap)
@@ -407,10 +454,123 @@ public static partial class NativeImageDecoder
         catch { return false; }
     }
 
-    private static unsafe bool TryDecodeCore(string path, int maxLongestSide, bool shell, out Bitmap bitmap)
+    // 1 = the native bridge exports GlideDecodeImageIntoW, 0 = unknown, -1 = older bridge (fall back).
+    private static int _decodeIntoAvailable;
+
+    private sealed class SurfaceTarget
+    {
+        public WriteableBitmap? Bitmap;
+        public ILockedFramebuffer? Locked;
+        public bool AllocationFailed;
+    }
+
+    // Set when the last full-resolution decode on this thread failed because its frame could not be
+    // allocated, so the caller can fall back to a preview instead of retrying another full decoder.
+    [ThreadStatic] private static bool _allocationFailed;
+
+    /// <summary>Returns and clears this thread's "full frame could not be allocated" flag.</summary>
+    internal static bool ResetAllocationFailure()
+    {
+        var failed = _allocationFailed;
+        _allocationFailed = false;
+        return failed;
+    }
+
+    /// <summary>Tests: simulates an allocation failure on this thread.</summary>
+    internal static void MarkAllocationFailureForTests() => _allocationFailed = true;
+
+    /// <summary>Native allocator callback: creates the presentation bitmap and hands WIC its locked pixels.</summary>
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(System.Runtime.CompilerServices.CallConvCdecl) })]
+    private static unsafe IntPtr AllocateSurface(IntPtr context, uint width, uint height, uint* stride)
+    {
+        try
+        {
+            if (width == 0 || height == 0 || width > 65536 || height > 65536) return IntPtr.Zero;
+            if (GCHandle.FromIntPtr(context).Target is not SurfaceTarget target) return IntPtr.Zero;
+            // Backstop for the decoded-pixel cap: the native bridge checks it too (5.0+), but an older
+            // bridge only limits each side, so refuse an over-cap surface here as well.
+            if ((ulong)width * height > (ulong)DecodeMemoryGuard.MaxTotalPixels) return IntPtr.Zero;
+            WriteableBitmap bitmap;
+            try
+            {
+                bitmap = new WriteableBitmap(new PixelSize((int)width, (int)height), new Vector(96, 96), PixelFormat.Bgra8888, AlphaFormat.Premul);
+            }
+            catch (OutOfMemoryException)
+            {
+                target.AllocationFailed = true;
+                return IntPtr.Zero;
+            }
+            target.Bitmap = bitmap;
+            var locked = bitmap.Lock();
+            target.Locked = locked;
+            *stride = (uint)locked.RowBytes;
+            return locked.Address;
+        }
+        catch
+        {
+            return IntPtr.Zero;
+        }
+    }
+
+    /// <summary>
+    /// Full-resolution decode straight into the presentation bitmap (no intermediate native buffer and
+    /// copy). Returns false when the bridge is older, the image needs an EXIF rotation, or decoding failed,
+    /// so the caller falls back to the buffered path with identical pixels.
+    /// </summary>
+    private static unsafe bool TryDecodeFullInto(string path, out Bitmap bitmap, out int status)
+    {
+        bitmap = null!;
+        status = -1;
+        if (Volatile.Read(ref _decodeIntoAvailable) < 0) return false;
+        var target = new SurfaceTarget();
+        var handle = GCHandle.Alloc(target);
+        status = 0;
+        try
+        {
+            delegate* unmanaged[Cdecl]<IntPtr, uint, uint, uint*, IntPtr> allocate = &AllocateSurface;
+            status = GlideDecodeImageIntoW(path, (IntPtr)allocate, GCHandle.ToIntPtr(handle));
+            Volatile.Write(ref _decodeIntoAvailable, 1);
+        }
+        catch (EntryPointNotFoundException) { Volatile.Write(ref _decodeIntoAvailable, -1); status = -1; }
+        catch (DllNotFoundException) { Volatile.Write(ref _decodeIntoAvailable, -1); status = -1; }
+        catch { status = 0; }
+        finally
+        {
+            handle.Free();
+            target.Locked?.Dispose();
+        }
+        if (status == 1 && target.Bitmap is not null)
+        {
+            bitmap = target.Bitmap;
+            return true;
+        }
+        if (target.AllocationFailed) _allocationFailed = true;
+        target.Bitmap?.Dispose();
+        return false;
+    }
+
+    /// <summary>True when the loaded Glide.Native bridge supports direct full decodes (diagnostics/tests).</summary>
+    internal static bool DirectFullDecodeAvailable => Volatile.Read(ref _decodeIntoAvailable) > 0;
+
+    /// <summary>Tests: the buffered (decode + copy) full-resolution path, for pixel-identity checks.</summary>
+    internal static bool TryDecodeFullBufferedForTests(string path, out Bitmap bitmap) => TryDecodeCore(path, 0, shell: false, out bitmap, allowDirect: false);
+
+    /// <summary>Tests: the direct (decode into the bitmap) full-resolution path; false on an older bridge.</summary>
+    internal static bool TryDecodeFullDirectForTests(string path, out Bitmap bitmap) => TryDecodeFullInto(path, out bitmap, out _);
+
+    private static unsafe bool TryDecodeCore(string path, int maxLongestSide, bool shell, out Bitmap bitmap, bool allowDirect = true)
     {
         bitmap = null!;
         if (!OperatingSystem.IsWindows() || string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return false;
+        // Full-resolution decodes (refinement, quality recovery, full-first frames, full neighbours) go
+        // straight into the bitmap: half the peak memory and no full-frame memcpy.
+        if (allowDirect && !shell && maxLongestSide <= 0)
+        {
+            if (TryDecodeFullInto(path, out bitmap, out var directStatus)) return true;
+            // The codec itself failed (not an EXIF rotation, not an older bridge): the buffered path
+            // runs the same WIC decoder and would fail the same way.
+            if (directStatus == 0 && Volatile.Read(ref _decodeIntoAvailable) > 0) return false;
+        }
         try
         {
             maxLongestSide = Math.Clamp(maxLongestSide, 0, 32768);
@@ -435,12 +595,22 @@ public static partial class NativeImageDecoder
         try
         {
             if (decoded.Width == 0 || decoded.Height == 0 || decoded.Width > 65536 || decoded.Height > 65536 ||
-                decoded.Width > int.MaxValue || decoded.Height > int.MaxValue || decoded.Stride < checked(decoded.Width * 4u)) return false;
+                decoded.Width > int.MaxValue || decoded.Height > int.MaxValue || decoded.Stride < checked(decoded.Width * 4u) ||
+                (ulong)decoded.Width * decoded.Height > (ulong)DecodeMemoryGuard.MaxTotalPixels) return false;
             var requiredBytes = checked((ulong)decoded.Stride * decoded.Height);
             if (decoded.BufferBytes < requiredBytes || decoded.BufferBytes > 2UL * 1024 * 1024 * 1024) return false;
 
-            WriteableBitmap? candidate = new(new PixelSize(checked((int)decoded.Width), checked((int)decoded.Height)),
-                new Vector(96, 96), PixelFormat.Bgra8888, AlphaFormat.Premul);
+            WriteableBitmap? candidate;
+            try
+            {
+                candidate = new(new PixelSize(checked((int)decoded.Width), checked((int)decoded.Height)),
+                    new Vector(96, 96), PixelFormat.Bgra8888, AlphaFormat.Premul);
+            }
+            catch (OutOfMemoryException)
+            {
+                _allocationFailed = true;
+                return false;
+            }
             try
             {
                 using var frame = candidate.Lock();
@@ -475,6 +645,10 @@ public static partial class NativeImageDecoder
     internal static int RawGlideDecodeImage(string path, uint maxLongestSide, out NativeDecodedImage image)
         => GlideDecodeImageW(path, maxLongestSide, out image);
 
+    /// <summary>Bounded, orientation-aware, decoder-scaled decode (colour-first progressive level).</summary>
+    internal static int RawGlideDecodeImageBounded(string path, uint maxWidth, uint maxHeight, out NativeDecodedImage image)
+        => GlideDecodeImageBoundedExW(path, maxWidth, maxHeight, 1, out image);
+
     internal static void RawGlideFreeBuffer(IntPtr data)
         => GlideFreeImageBuffer(data);
 
@@ -490,6 +664,9 @@ public static partial class NativeImageDecoder
 
     [LibraryImport("Glide.Native", EntryPoint = "GlideDecodeImageW", StringMarshalling = StringMarshalling.Utf16)]
     private static partial int GlideDecodeImageW(string path, uint maxLongestSide, out NativeDecodedImage image);
+
+    [LibraryImport("Glide.Native", EntryPoint = "GlideDecodeImageIntoW", StringMarshalling = StringMarshalling.Utf16)]
+    private static partial int GlideDecodeImageIntoW(string path, IntPtr allocate, IntPtr context);
 
     [LibraryImport("Glide.Native", EntryPoint = "GlideDecodeImageBoundedExW", StringMarshalling = StringMarshalling.Utf16)]
     private static partial int GlideDecodeImageBoundedExW(string path, uint maxWidth, uint maxHeight, int progressiveColorFirstPreview, out NativeDecodedImage image);

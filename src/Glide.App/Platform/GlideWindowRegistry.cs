@@ -1,6 +1,4 @@
 using Avalonia;
-using Avalonia.Controls;
-using Glide.Core.Workspace;
 
 namespace Glide.App.Platform;
 

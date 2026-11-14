@@ -10,7 +10,7 @@ public sealed class FullscreenMouseNavigationDirectionContractTests
         var window = ReadSource("src", "Glide.App", "MainWindow.axaml.cs").Replace("\r\n", "\n");
 
         Assert.Contains("BrowseRequested?.Invoke(this, 1);", viewport, StringComparison.Ordinal);
-        Assert.Contains("if (IsFullscreen && FullscreenClickNavigationEnabled) BrowseRequested?.Invoke(this, -1);", viewport, StringComparison.Ordinal);
+        Assert.Contains("if (IsFullscreen && FullscreenClickNavigationEnabled && configuredClick == GestureCatalog.Default) BrowseRequested?.Invoke(this, -1);", viewport, StringComparison.Ordinal);
         Assert.Contains("(IsFullscreen || _lastImageDest.Contains(point.Position))", viewport, StringComparison.Ordinal);
         Assert.Contains("FullscreenNavigationRequested?.Invoke(1);", manager, StringComparison.Ordinal);
         Assert.Contains("FullscreenNavigationRequested = direction => _ = NavigateMouseAsync(direction)", window, StringComparison.Ordinal);

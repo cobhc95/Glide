@@ -1,5 +1,4 @@
 using Avalonia.Threading;
-using Glide.Core;
 using Glide.App.Controls;
 
 namespace Glide.App.Services;

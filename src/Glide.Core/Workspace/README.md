@@ -6,7 +6,7 @@ OWNS: tab identity, active tab, create/select/close/restore/duplicate/cycle and 
 
 DOES NOT OWN: Avalonia tab visuals, HWND/native dragging, decoding, image viewport transforms.
 
-KEY TYPES: `WorkspaceState`, `TabState`, `HomeTabState`, `ImageTabState`, `BrowserTabState`.
+KEY TYPES: `WorkspaceState`, `TabState`, `HomeTabState`, `ImageTabState`, `BrowserTabState` (the Explorer tab: folder, selected file, scroll position, view and filter).
 
 STATE FLOW: semantic command/UI intent -> WorkspaceState mutation -> MainWindow rebuilds visual tab strip -> active typed tab is presented.
 

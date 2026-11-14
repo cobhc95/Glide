@@ -1,10 +1,8 @@
 using System.Reflection;
 using Avalonia.Controls;
-using Avalonia.Headless;
 using Avalonia.VisualTree;
 using Glide.App;
 using Glide.App.Settings;
-using Xunit;
 
 namespace Glide.Core.Tests;
 
@@ -33,12 +31,12 @@ public sealed class Regression422Tests
                 // async-void caller crashed the process.
                 Assert.False(window.IsVisible);
 
-                var method = typeof(MainWindow).GetMethod(
-                    "ShowOwnedDialogAsync",
-                    BindingFlags.NonPublic | BindingFlags.Instance,
-                    binder: null,
-                    types: new[] { typeof(Window) },
-                    modifiers: null);
+                // There is also a generic ShowOwnedDialogAsync<T>(Window); pick the non-generic one. (This test was
+                // never actually executed before the headless fixture awaited async bodies: the lookup threw
+                // AmbiguousMatchException into an unobserved task.)
+                var method = typeof(MainWindow).GetMethods(BindingFlags.NonPublic | BindingFlags.Instance)
+                    .FirstOrDefault(m => m.Name == "ShowOwnedDialogAsync" && !m.IsGenericMethodDefinition &&
+                                         m.GetParameters() is [{ ParameterType: var p }] && p == typeof(Window));
                 Assert.NotNull(method);
 
                 var dialog = new Window();

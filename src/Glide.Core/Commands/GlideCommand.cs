@@ -81,5 +81,37 @@ public enum GlideCommand
     ExternalProgram3,
     SaveImage,
     SaveImageAs,
-    FitWindow
+    FitWindow,
+    GifPlayPause,
+    GifPreviousFrame,
+    GifNextFrame,
+    // 4.8.0 gesture actions (appended to keep earlier numeric values stable).
+    JumpForward10,
+    JumpBack10,
+    ZoomTo200,
+    // 5.0.x master action registry: features that existed only as a button, menu item or gesture
+    // (appended so every earlier numeric value, saved in older profiles, keeps its meaning).
+    MaximizeRestoreWindow,
+    MinimizeWindow,
+    ClearOverlays,
+    CloseStatusBar,
+    NewExplorerTab,
+    NewHomeTab,
+    OpenFirstImageInFolder,
+    ToggleOverlayMode,
+    CustomizeTitleBar,
+    ShowFolderInWindowsExplorer,
+    ResetTransparency,
+    ClearRecentHistory,
+    CycleRecentHistorySize,
+    /// <summary>Flips or cycles a catalogued setting. The setting comes from the registry action, never from the enum.</summary>
+    ChangeSetting,
+    /// <summary>Quits Glide: every window closes and the process ends (Speed Boost standby and the tray icon do not keep it alive). Appended last to keep every saved numeric value.</summary>
+    ExitApplication,
+    /// <summary>Browser-style Back in the active tab's history (Explorer folders, images opened from them, Home). Appended (5.0.0).</summary>
+    NavigateBack,
+    /// <summary>Browser-style Forward in the active tab's history. Appended (5.0.0).</summary>
+    NavigateForward,
+    /// <summary>Backspace: Back through the tab history when there is a Back step, otherwise Previous image in an image tab, otherwise nothing. Appended (5.0.0).</summary>
+    BackOrPrevious
 }

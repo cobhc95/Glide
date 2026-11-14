@@ -1,4 +1,3 @@
-using Xunit;
 using Glide.Imaging;
 
 namespace Glide.Core.Tests;

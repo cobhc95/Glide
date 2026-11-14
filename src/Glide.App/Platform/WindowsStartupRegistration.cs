@@ -1,4 +1,3 @@
-using System.Runtime.InteropServices;
 using Microsoft.Win32;
 
 namespace Glide.App.Platform;
@@ -60,14 +59,4 @@ internal static class WindowsStartupRegistration
         }
     }
 
-    public static bool IsRunAtStartupConfigured()
-    {
-        if (!OperatingSystem.IsWindows()) return false;
-        try
-        {
-            using var key = Registry.CurrentUser.OpenSubKey(RunKeyPath, writable: false);
-            return key?.GetValue(ValueName) is not null;
-        }
-        catch { return false; }
-    }
 }

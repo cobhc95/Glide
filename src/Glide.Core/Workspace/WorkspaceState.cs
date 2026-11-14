@@ -47,7 +47,10 @@ public sealed class WorkspaceState
     public bool ReplaceActiveBrowserFolder(string folder)
     {
         if (Active is not BrowserTabState browser) return false;
-        _tabs[ActiveIndex] = browser with { Folder = Path.GetFullPath(folder), Title = BrowserTitle(folder) };
+        var full = Path.GetFullPath(folder);
+        // The remembered selection/scroll belongs to the folder it was captured in.
+        var sameFolder = string.Equals(browser.Folder, full, StringComparison.OrdinalIgnoreCase);
+        _tabs[ActiveIndex] = browser with { Folder = full, Title = BrowserTitle(folder), View = sameFolder ? browser.View : null };
         return true;
     }
 

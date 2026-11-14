@@ -5,61 +5,9 @@ namespace Glide.Imaging;
 
 public sealed record CodecProviderArtifact(string Id, string Version, string License, string Path, string Sha256, bool AbiValid, string Reason, CodecProviderInfo? Info = null);
 
-/// <summary>Discovery and verification for decoder-only providers. Invalid entries are isolated.</summary>
+/// <summary>Manifest reading and SHA-256 verification for decoder-only providers (loading lives in CodecProviderRuntime).</summary>
 public static class CodecProviderInventory
 {
-    public static IReadOnlyList<CodecProviderArtifact> Discover(string directory)
-    {
-        if (!Directory.Exists(directory)) return Array.Empty<CodecProviderArtifact>();
-        var result = new List<CodecProviderArtifact>();
-        foreach (var file in Directory.EnumerateFiles(directory, "*.dll", SearchOption.TopDirectoryOnly).OrderBy(x => x, StringComparer.OrdinalIgnoreCase))
-        {
-            try
-            {
-                var hash = ComputeSha256(file);
-                if (!TryReadManifest(file, hash, out var info, out var reason))
-                {
-                    result.Add(new CodecProviderArtifact(Path.GetFileNameWithoutExtension(file), "unknown", "unknown", file, hash, false, reason));
-                    continue;
-                }
-                if (!NativeCodecProvider.TryLoad(file, info, out var provider, out reason) || provider is null)
-                {
-                    result.Add(new CodecProviderArtifact(info.Id, info.Version, info.License, file, hash, false, reason, info));
-                    continue;
-                }
-                provider.Dispose();
-                result.Add(new CodecProviderArtifact(info.Id, info.Version, info.License, file, hash, true, "Verified native exports and manifest/hash.", info));
-            }
-            catch (Exception ex) { result.Add(new CodecProviderArtifact(Path.GetFileNameWithoutExtension(file), "unknown", "unknown", file, "", false, "Provider inspection failed: " + ex.Message)); }
-        }
-        return result;
-    }
-
-    internal static IReadOnlyList<NativeCodecProvider> LoadVerified(string directory, Action<CodecProviderArtifact>? report = null)
-    {
-        var loaded = new List<NativeCodecProvider>();
-        IEnumerable<string> files = Directory.Exists(directory)
-            ? Directory.EnumerateFiles(directory, "*.dll", SearchOption.TopDirectoryOnly).OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
-            : Array.Empty<string>();
-        foreach (var file in files)
-        {
-            var hash = SafeHash(file);
-            if (!TryReadManifest(file, hash, out var info, out var reason))
-            {
-                report?.Invoke(new CodecProviderArtifact(Path.GetFileNameWithoutExtension(file), "unknown", "unknown", file, hash, false, reason));
-                continue;
-            }
-            if (!NativeCodecProvider.TryLoad(file, info, out var provider, out reason) || provider is null)
-            {
-                report?.Invoke(new CodecProviderArtifact(info.Id, info.Version, info.License, file, hash, false, reason, info));
-                continue;
-            }
-            loaded.Add(provider);
-            report?.Invoke(new CodecProviderArtifact(info.Id, info.Version, info.License, file, hash, true, "Loaded and verified native provider.", info));
-        }
-        return loaded;
-    }
-
     /// <summary>
     /// Reads only manifest metadata and intentionally does not hash or load the DLL. Used solely on
     /// first use when a developer build has no generated index. This must never run on app startup.
@@ -105,5 +53,4 @@ public static class CodecProviderInventory
         using var sha = SHA256.Create();
         return Convert.ToHexString(sha.ComputeHash(stream)).ToLowerInvariant();
     }
-    private static string SafeHash(string path) { try { return ComputeSha256(path); } catch { return ""; } }
 }

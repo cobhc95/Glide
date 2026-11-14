@@ -1,34 +1,18 @@
-﻿using System.Diagnostics;
-using System.Collections.ObjectModel;
-using System.Runtime.InteropServices;
-using System.Text.Json;
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Controls.ApplicationLifetimes;
-using Avalonia.Controls.Primitives;
-using Avalonia.Controls.Templates;
 using Avalonia.Input;
 using Avalonia.Interactivity;
-using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
-using Avalonia.Platform.Storage;
 using Avalonia.Styling;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Glide.App.Controls;
-using Glide.App.Diagnostics;
-using Glide.App.Platform;
-using Glide.App.Printing;
 using Glide.App.Settings;
-using Glide.App.Services;
 using Glide.Core;
+using Glide.App.Services;
 using Glide.Core.Commands;
-using Glide.Core.Workspace;
 using Glide.Imaging;
-using Glide.Input;
-using Glide.Diagnostics.Runtime;
-using Microsoft.VisualBasic.FileIO;
 
 namespace Glide.App;
 
@@ -52,7 +36,7 @@ public partial class MainWindow
     /// </summary>
     private MenuItem BuildAlwaysOnTopMenuItem()
     {
-        var item = new MenuItem { Header = ActiveAlwaysOnTop ? "Always on top  ✓" : "Always on top", Icon = MenuIcon("AlwaysOnTop") };
+        var item = MenuActions.Tag(new MenuItem { Header = ActiveAlwaysOnTop ? "Always on top  ✓" : "Always on top", Icon = MenuIcon("AlwaysOnTop") }, "window.alwaysTop");
         item.Click += (_, _) => AlwaysOnTopClicked(null, new RoutedEventArgs());
         return item;
     }
@@ -106,7 +90,7 @@ public partial class MainWindow
                 ContextMenu = BuildTitleActionContextMenu(id)
             };
             button.Classes.Add("glideIcon");
-            if (id is "folder.previous" or "folder.next" or "image.previous" or "image.next" or "image.first" or "image.last")
+            if (id is "nav.back" or "nav.forward" or "folder.previous" or "folder.next" or "image.previous" or "image.next" or "image.first" or "image.last")
                 button.Classes.Add("nav");
             // Home is a safety-critical title-bar action. Execute it on the consumed client-area
             // pointer press instead of the ordinary Click route: in custom chrome a press/release
@@ -154,6 +138,7 @@ public partial class MainWindow
 
         if (_titleBarButtons.TryGetValue("window.alwaysOnTop", out var topmostButton))
             SetActiveClass(topmostButton, ActiveAlwaysOnTop);
+        UpdateHistoryNavigationState();
         RefreshTitleActionTooltips();
         // Rebuilding resets every button to visible; reapply the width-based one-at-a-time reveal.
         ApplyCompactChromeLayout();
@@ -177,8 +162,8 @@ public partial class MainWindow
             if (TitleBarButtonCatalog.Find(id) is not { } definition) continue;
             var label = id == "window.transparency"
                 ? $"Window transparency: {(int)Math.Round(_sessionOpacity * 100)}%"
-                : definition.Label;
-            ToolTip.SetTip(button, $"[{label} ({ShortcutFor(definition.Command)})]");
+                : TitleActionLabel(id, definition);
+            ToolTip.SetTip(button, $"[{label} ({ShortcutForTitleButton(definition)})]");
             ToolTip.SetShowDelay(button, 650);
         }
     }
@@ -187,12 +172,15 @@ public partial class MainWindow
     {
         var menu = new ContextMenu();
         var items = new List<MenuItem>();
-        MenuItem Item(string header, Action action, bool enabled = true, string? icon = null)
+        // tag: a registry action id, or MenuActions.ContextPrefix + why for items acting on this one button.
+        MenuItem Item(string header, Action action, string tag, bool enabled = true, string? icon = null)
         {
             var item = new MenuItem { Header = header, IsEnabled = enabled };
             if (icon is not null) item.Icon = MenuIcon(icon);
             item.Click += (_, _) => action();
-            return item;
+            return tag.StartsWith(MenuActions.ContextPrefix, StringComparison.Ordinal)
+                ? MenuActions.Context(item, tag[MenuActions.ContextPrefix.Length..])
+                : MenuActions.Tag(item, tag);
         }
 
         if (id == "window.alwaysOnTop")
@@ -205,18 +193,24 @@ public partial class MainWindow
                 RebuildTitleActionStrip();
             }
             string Tick(string text, bool on) => on ? $"{text}  ✓" : text;
-            items.Add(Item(Tick("Always on top", ActiveAlwaysOnTop), () => AlwaysOnTopClicked(null, new RoutedEventArgs()), true, "AlwaysOnTop"));
-            items.Add(Item(Tick("Hard: stay above every window", HardAlwaysOnTop), () => SetMode("Hard")));
-            items.Add(Item(Tick("Soft: ordinary always on top", !HardAlwaysOnTop), () => SetMode("Soft")));
+            items.Add(Item(Tick("Always on top", ActiveAlwaysOnTop), () => AlwaysOnTopClicked(null, new RoutedEventArgs()), "window.alwaysTop", true, "AlwaysOnTop"));
+            items.Add(Item(Tick("Hard: stay above every window", HardAlwaysOnTop), () => SetMode("Hard"), "setting.windows.alwaysOnTopMode"));
+            items.Add(Item(Tick("Soft: ordinary always on top", !HardAlwaysOnTop), () => SetMode("Soft"), "setting.windows.alwaysOnTopMode"));
+            items.Add(new MenuItem { Header = "-" });
+        }
+        else if (id == "file.locate")
+        {
+            items.Add(BuildShowInExplorerTargetMenuItem("Show in Glide's Explorer tab", ShowInExplorerTargets.GlideTab, "Browser"));
+            items.Add(BuildShowInExplorerTargetMenuItem("Show in Windows File Explorer", ShowInExplorerTargets.WindowsExplorer, "FolderLocate"));
             items.Add(new MenuItem { Header = "-" });
         }
         var current = TitleBarButtonCatalog.Normalize(_settings.TitleBarButtons).ToList();
         var index = current.FindIndex(x => string.Equals(x, id, StringComparison.OrdinalIgnoreCase));
-        items.Add(Item("Move left", () => MoveTitleAction(id, -1), index > 0, "Previous"));
-        items.Add(Item("Move right", () => MoveTitleAction(id, 1), index >= 0 && index < current.Count - 1, "Next"));
-        items.Add(Item("Remove from title bar", () => RemoveTitleAction(id), index >= 0, "Close"));
+        items.Add(Item("Move left", () => MoveTitleAction(id, -1), MenuActions.ContextPrefix + "titlebar.moveThisButton", index > 0, "Previous"));
+        items.Add(Item("Move right", () => MoveTitleAction(id, 1), MenuActions.ContextPrefix + "titlebar.moveThisButton", index >= 0 && index < current.Count - 1, "Next"));
+        items.Add(Item("Remove from title bar", () => RemoveTitleAction(id), MenuActions.ContextPrefix + "titlebar.removeThisButton", index >= 0, "Close"));
         items.Add(new MenuItem { Header = "-" });
-        items.Add(Item("Customize title-bar buttons…", () => _ = ShowTitleBarCustomizerAsync(), true, "Settings"));
+        items.Add(Item("Customize title-bar buttons…", () => _ = ShowTitleBarCustomizerAsync(), "titlebar.customize", true, "Settings"));
         items.Add(new MenuItem { Header = "-" });
         AppendWholeAppOverlayMenuItems(items);
         menu.ItemsSource = items;
@@ -266,7 +260,8 @@ public partial class MainWindow
             {
                 // Modal children of an always-on-top viewer must share the same z-order contract.
                 // Otherwise Windows can bury Settings/confirmation dialogs behind the owner.
-                Topmost = Topmost
+                Topmost = Topmost,
+                PlacementChanged = SaveSettingsWindowPlacement
             };
             _overlays?.SetModalSuppressed(true);
             try
@@ -287,6 +282,15 @@ public partial class MainWindow
         }
     }
 
+    /// <summary>Remembers where the user left the Settings window (size, position, maximized) for its next opening.</summary>
+    private void SaveSettingsWindowPlacement(SettingsWindowPlacement placement)
+    {
+        placement.WriteTo(_settings);
+        // The shared per-window store is authoritative (SaveSettingsAndPublish copies it into _settings).
+        WindowPlacementService.Remember(SettingsWindowPlacement.StoreKey, placement.ToState(), persist: false);
+        SaveSettingsAndPublish();
+    }
+
     private void SaveSettingsAndPublish()
     {
         // The compact first-frame projection is intentionally incomplete. Never serialize that
@@ -305,6 +309,9 @@ public partial class MainWindow
             _deferredStartupSettingsAdopted = true;
         }
 
+        // Dialog placements are saved by WindowPlacementService as each window closes; include the live store so this
+        // full save never writes back an older copy.
+        WindowPlacementService.ApplyTo(_settings);
         SettingsStore.Save(_settings);
         App.PublishCurrentSettings(_settings);
         _startupSettingsBaseline = _settings.CloneState();
@@ -472,7 +479,7 @@ public partial class MainWindow
 
     private void ApplySettingsVisuals(bool deferSecondaryChrome = false)
     {
-        ApplyPalette(_settings.ThemeChoice, _settings.AccentChoice, _settings.GlowChoice, _settings.GlowIntensityPercent, _settings.CustomAccentHex, _settings.CustomGlowHex, _settings.MainBackgroundChoice, _settings.CustomMainBackgroundHex);
+        ThemePaletteApplier.Apply(_settings.ThemeChoice, _settings.AccentChoice, _settings.GlowChoice, _settings.GlowIntensityPercent, _settings.CustomAccentHex, _settings.CustomGlowHex, _settings.MainBackgroundChoice, _settings.CustomMainBackgroundHex);
         ApplyTopmostState(forceNative: true);
         KeyboardNavigation.SetTabNavigation(this, _settings.EnableTabFocusNavigation ? KeyboardNavigationMode.Continue : KeyboardNavigationMode.None);
         // Window.Background is a compositor contract, not the normal theme surface. Keep the
@@ -509,30 +516,41 @@ public partial class MainWindow
             _ => RightImageDragMode.Smart
         };
         Viewport.RightDragWindowMoveAllowed = WindowState == WindowState.Normal;
-        Viewport.MiddleDragPanEnabled = _settings.MiddleDragPan;
-        Viewport.WindowedWheelZoom = _settings.WindowedWheelZoom;
-        Viewport.CtrlWheelZoomEnabled = _settings.CtrlWheelZoom;
+        Viewport.CustomGestures = _settings.CustomGestures;
+        // 4.8.0: middle-drag pan, windowed wheel zoom and Ctrl+wheel zoom are gesture rows now
+        // (drag.middleImage, wheel.*); the viewport's built-in defaults equal the old stock toggles.
+        Viewport.MiddleDragPanEnabled = false;
+        Viewport.WindowedWheelZoom = false;
+        Viewport.CtrlWheelZoomEnabled = true;
         Viewport.InvertWheelDirection = _settings.InvertWheelDirection;
         // This gate is specifically for a viewport left-drag becoming a native window move.
         // Empty-background dragging has its own user toggle and consults the same state policy below.
         Viewport.BackgroundWindowDragEnabled = IsLeftWindowMoveAllowedForCurrentState();
         var useOverlayInteractions = _wholeAppOverlayMode && !_settings.WholeAppOverlayUseWindowedInteractions;
-        Viewport.SelectionClickZoomEnabled = useOverlayInteractions ? false : _settings.SelectionClickZoom;
-        Viewport.SelectionRightClickZoomOutEnabled = useOverlayInteractions ? false : _settings.SelectionRightClickZoomOut;
+        // Selection zoom on/off is the Selection rows ("Ignore here" = old toggle off).
+        Viewport.ForceLeftDragMoveWindow = useOverlayInteractions;
+        Viewport.SelectionClickZoomEnabled = !useOverlayInteractions;
+        Viewport.SelectionRightClickZoomOutEnabled = !useOverlayInteractions;
         Viewport.ReverseSelectionZoomOutScale = _settings.ReverseSelectionZoomOutScale;
+        Viewport.ZoomStepPercent = Glide.Core.ZoomStepPolicy.Clamp(_settings.ViewportZoomStepPercent);
         Viewport.PreserveManualZoomOnBitmapChange = _settings.PreserveManualZoomOnNavigate;
         Viewport.LeftDragMode = useOverlayInteractions
             ? LeftImageDragMode.MoveWindow
-            : _settings.LeftDragMode switch
+            : _inputRouter.ResolveGesture("drag.leftImage", _settings.Gestures) switch
             {
-                "Pan image" => LeftImageDragMode.Pan,
-                "Move window" => LeftImageDragMode.MoveWindow,
+                // The left-drag row replaces the old "Left-drag action" choice. The mode still
+                // drives the selection-buffer hit test exactly as the old choice did.
+                GestureCatalog.Pan => LeftImageDragMode.Pan,
+                GestureCatalog.MoveWindow => LeftImageDragMode.MoveWindow,
                 _ => LeftImageDragMode.Selection
             };
         Viewport.IsFullscreen = WindowState == WindowState.FullScreen;
         ApplySelectionBuffer();
-        Viewport.FullscreenClickNavigationEnabled = _settings.FullscreenClickNavigation;
-        Viewport.FullscreenDoubleClickExitEnabled = _settings.DoubleClickExitFullscreen;
+        // Fullscreen click navigation is the Fullscreen image rows' Default ("Ignore here" = old toggle off).
+        Viewport.FullscreenClickNavigationEnabled = true;
+        // A configured fullscreen double-click delays single-click navigation by the double-click time.
+        Viewport.FullscreenDoubleClickExitEnabled = _inputRouter.ResolveGesture("fullscreen.doubleLeftImage", _settings.Gestures)
+            is not (GestureCatalog.Default or GestureCatalog.Nothing or GestureCatalog.PassThrough);
         UpdateSlideshowUi();
 
         NavigationGroup.IsVisible = _settings.StatusShowNavigation;
@@ -545,6 +563,7 @@ public partial class MainWindow
         StatusCloseButton.IsVisible = _settings.StatusShowClose;
         UpdateOverlayStatusButtons();
         ApplyStatusBarSize();
+        UpdateViewportStatusInset();
         CornerCounterHost.IsVisible = _settings.PictureCounterEnabled && !_wholeAppOverlayMode;
         ApplyPictureCounterVisuals();
 
@@ -704,7 +723,12 @@ public partial class MainWindow
 
         if (_homeSurface is not null)
         {
-            _homeSurface.StatusSurface.Height = metrics.Height * scale;
+            // Same two layouts as the viewer's bar: stacked (info text on its own line, content-sized rows, the configured height is the
+            // minimum) or the single fixed-height line.
+            var homeStacked = _settings.StatusStackInfoLine;
+            _homeSurface.ApplyStackedStatusLayout(homeStacked);
+            _homeSurface.StatusSurface.Height = homeStacked ? double.NaN : metrics.Height * scale;
+            _homeSurface.StatusSurface.MinHeight = homeStacked ? metrics.Height * scale : 0;
             _homeSurface.StatusSurface.MaxWidth = metrics.MaxWidth * scale;
             foreach (var button in _homeSurface.StatusSurface.GetVisualDescendants().OfType<Button>().Where(x => x.Classes.Contains("legacyStatusIcon")))
             {
@@ -715,20 +739,50 @@ public partial class MainWindow
         ApplyCollapsedStatusChrome();
     }
 
+    /// <summary>Right-click menu / Settings switch for the status bar's Auto-hide mode.</summary>
+    private void SetStatusAutoHide(bool enabled)
+    {
+        _settings.StatusAutoHide = enabled;
+        SaveSettingsAndPublish();
+        ApplyStatusVisibility();
+    }
+
+    /// <summary>
+    /// Right-click menu / Settings switch for "Always stack the information on a separate line": re-lays the bar out at once
+    /// (the bar becomes taller or shorter, so the reserved fit area and the reveal area are re-measured from the new box).
+    /// </summary>
+    private void SetStatusStackInfoLine(bool enabled)
+    {
+        _settings.StatusStackInfoLine = enabled;
+        SaveSettingsAndPublish();
+        ApplyStatusBarSize();
+        UpdateViewportStatusInset();
+    }
+
     private void StatusSurfacePointerPressed(object? sender, PointerPressedEventArgs e)
     {
         if (!e.GetCurrentPoint(sender as Visual ?? ViewerStatusSurface).Properties.IsRightButtonPressed) return;
         e.Handled = true;
+        var owned = BuildStatusSurfaceContextMenu();
+        // The menu is a popup window: the pointer leaves the bar while it is open, but an auto-hidden bar must stay put.
+        _statusMenuOpen = true;
+        owned.Closed += (_, _) => { _statusMenuOpen = false; UpdateStatusHoverReveal(_lastWindowPointer); };
+        owned.Open(sender as Control ?? ViewerStatusSurface);
+    }
+
+    /// <summary>The status bar's right-click menu (also used by tests).</summary>
+    internal ContextMenu BuildStatusSurfaceContextMenu()
+    {
         var menu = new ContextMenu();
         var items = new List<MenuItem>();
         if (WindowState == WindowState.FullScreen)
         {
-            var pin = new MenuItem
+            var pin = MenuActions.Tag(new MenuItem
             {
                 Header = _settings.FullscreenStatusAlwaysOn
                     ? "Keep status bar visible in fullscreen  ✓"
                     : "Keep status bar visible in fullscreen"
-            };
+            }, "setting.fullscreen.statusAlways");
             pin.Click += (_, _) =>
             {
                 _settings.FullscreenStatusAlwaysOn = !_settings.FullscreenStatusAlwaysOn;
@@ -739,10 +793,14 @@ public partial class MainWindow
             items.Add(pin);
             items.Add(new MenuItem { Header = "-" });
         }
-        var hoverReveal = new MenuItem { Header = _settings.StatusShowOnHoverWhenClosed ? "Reveal collapsed bar on bottom-edge hover  ✓" : "Reveal collapsed bar on bottom-edge hover", Icon = MenuIcon("Eye") };
-        hoverReveal.Click += (_, _) => { _settings.StatusShowOnHoverWhenClosed = !_settings.StatusShowOnHoverWhenClosed; SaveSettingsAndPublish(); ApplyStatusVisibility(); };
-        items.Add(hoverReveal);
-        var autoResize = new MenuItem { Header = _settings.StatusBarAutoFit ? "Auto-resize  ✓" : "Auto-resize", Icon = MenuIcon("Fit") };
+        var autoHideItem = MenuActions.Tag(new MenuItem { Header = _settings.StatusAutoHide ? "Auto-hide status bar  ✓" : "Auto-hide status bar", Icon = MenuIcon("Eye") }, "setting.status.autoHide");
+        autoHideItem.Click += (_, _) => SetStatusAutoHide(!_settings.StatusAutoHide);
+        items.Add(autoHideItem);
+        // The hover reveal (status.hoverWhenClosed) and its reveal-area adjustment live in Settings > Tabs & status bar only.
+        var reserveFit = MenuActions.Tag(new MenuItem { Header = _settings.StatusReserveFitSpace ? "Reserve status bar space when fitting  ✓" : "Reserve status bar space when fitting", Icon = MenuIcon("FitWindow") }, "setting.status.reserveFitSpace");
+        reserveFit.Click += (_, _) => { _settings.StatusReserveFitSpace = !_settings.StatusReserveFitSpace; SaveSettingsAndPublish(); UpdateViewportStatusInset(); };
+        items.Add(reserveFit);
+        var autoResize = MenuActions.Tag(new MenuItem { Header = _settings.StatusBarAutoFit ? "Auto-resize  ✓" : "Auto-resize", Icon = MenuIcon("Fit") }, "setting.status.autoResize");
         autoResize.Click += (_, _) =>
         {
             _settings.StatusBarAutoFit = !_settings.StatusBarAutoFit;
@@ -750,12 +808,16 @@ public partial class MainWindow
             ApplyStatusBarSize();
         };
         items.Add(autoResize);
+        const string stackHeader = "Always stack the information on a separate line";
+        var stackInfo = MenuActions.Tag(new MenuItem { Header = _settings.StatusStackInfoLine ? stackHeader + "  ✓" : stackHeader, Icon = MenuIcon("StackLines") }, "setting.status.stackInfoLine");
+        stackInfo.Click += (_, _) => SetStatusStackInfoLine(!_settings.StatusStackInfoLine);
+        items.Add(stackInfo);
         items.Add(new MenuItem { Header = "-" });
         // The six sizes live in one submenu instead of six top-level entries.
         var sizeMenu = new MenuItem { Header = $"Size  ({_settings.StatusBarSize})", Icon = MenuIcon("Maximize") };
         foreach (var size in new[] { "Tiny", "Very small", "Small", "Medium", "Large", "Extra large" })
         {
-            var item = new MenuItem { Header = string.Equals(_settings.StatusBarSize, size, StringComparison.OrdinalIgnoreCase) ? $"{size}  ✓" : size };
+            var item = MenuActions.Tag(new MenuItem { Header = string.Equals(_settings.StatusBarSize, size, StringComparison.OrdinalIgnoreCase) ? $"{size}  ✓" : size }, "setting.status.size");
             item.Click += (_, _) =>
             {
                 _settings.StatusBarSize = size;
@@ -769,21 +831,20 @@ public partial class MainWindow
         var positionMenu = new MenuItem { Header = $"Position  ({_settings.StatusBarAlignment})", Icon = MenuIcon("Fit") };
         foreach (var position in new[] { "Center", "Left", "Right" })
         {
-            var item = new MenuItem { Header = string.Equals(_settings.StatusBarAlignment, position, StringComparison.OrdinalIgnoreCase) ? $"{position}  ✓" : position };
+            var item = MenuActions.Tag(new MenuItem { Header = string.Equals(_settings.StatusBarAlignment, position, StringComparison.OrdinalIgnoreCase) ? $"{position}  ✓" : position }, "setting.status.alignment");
             item.Click += (_, _) =>
             {
                 _settings.StatusBarAlignment = position;
                 SaveSettingsAndPublish();
-                _collapseAnchorsCaptured = false;
                 ApplyStatusVisibility();
             };
             positionMenu.Items.Add(item);
         }
         items.Add(positionMenu);
-        var cornerItem = new MenuItem { Header = _settings.StatusCollapsedToCorner ? "Collapsed button in lower-right corner  ✓" : "Collapsed button in lower-right corner", Icon = MenuIcon("Collapse") };
+        var cornerItem = MenuActions.Tag(new MenuItem { Header = _settings.StatusCollapsedToCorner ? "Collapsed button in lower-right corner  ✓" : "Collapsed button in lower-right corner", Icon = MenuIcon("Collapse") }, "setting.status.collapsedCorner");
         cornerItem.Click += (_, _) => { _settings.StatusCollapsedToCorner = !_settings.StatusCollapsedToCorner; SaveSettingsAndPublish(); ApplyStatusVisibility(); };
         items.Add(cornerItem);
         menu.ItemsSource = items;
-        PrepareOwnedContextMenu(menu).Open(sender as Control ?? ViewerStatusSurface);
+        return PrepareOwnedContextMenu(menu);
     }
 }

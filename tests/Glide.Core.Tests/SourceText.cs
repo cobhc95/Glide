@@ -6,8 +6,20 @@ namespace Glide.Core.Tests;
 /// </summary>
 internal static class SourceText
 {
+    /// <summary>The repository root (the folder holding Glide.sln), found by walking up from the test binary.</summary>
+    public static string RepoRoot
+    {
+        get
+        {
+            for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
+                if (File.Exists(Path.Combine(dir.FullName, "Glide.sln"))) return dir.FullName;
+            throw new DirectoryNotFoundException("Glide.sln not found above " + AppContext.BaseDirectory);
+        }
+    }
+
     public static string Read(string path)
     {
+        if (!Path.IsPathRooted(path)) path = Path.Combine(RepoRoot, path);
         var text = File.ReadAllText(path);
         if (!string.Equals(Path.GetFileName(path), "MainWindow.axaml.cs", StringComparison.OrdinalIgnoreCase))
             return text;

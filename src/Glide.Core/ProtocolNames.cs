@@ -1,18 +1,31 @@
+using System.Security.Cryptography;
+using System.Text;
+
 namespace Glide.Core;
 
 /// <summary>
-/// Single source for IPC/registry/installer identity strings. The pipe + presence names are a
+/// Single source for the external-open IPC identity strings. The pipe + presence names are a
 /// wire-compat surface (changing them orphans old/new coexistence), so they live here rather
-/// than scattered across broker/registration/installer code (4.5.2 audit).
+/// than scattered across broker code (4.5.2 audit).
+///
+/// 5.0: both names are scoped to the user (<see cref="UserScoped"/>). Named pipes are machine-global, so
+/// with a shared name another account could create the pipe first and stop this user's launches from
+/// reaching their running Glide. The presence sentinel moved to v4 together with the pipe so 4.x and 5.x
+/// processes never wait on each other's names; each version forwards only to its own kind.
 /// </summary>
 public static class ProtocolNames
 {
     public const string PipeName = "Glide3.ExternalOpen.v2";
-    public const string PresenceName = @"Local\Glide3.ProcessPresence.v3";
+    public const string PresenceName = @"Local\Glide3.ProcessPresence.v4";
     public const string ProtocolHeader = "GLIDE3\t2";
-    public const string AppExe = "Glide.exe";
-    public const string AppName = "Glide Image Viewer";
-    public const string AppShortName = "Glide";
-    public const string RegistryAppPathsKey = @"Software\Microsoft\Windows\CurrentVersion\App Paths\Glide.exe";
-    public const string RegisteredApplicationsValue = "Glide Image Viewer";
+
+    /// <summary>
+    /// Appends a short, stable hash of <paramref name="userKey"/> (the user's SID) to <paramref name="baseName"/>.
+    /// The hash keeps the name short and avoids putting the raw SID in a kernel object name.
+    /// </summary>
+    public static string UserScoped(string baseName, string userKey)
+    {
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes((userKey ?? string.Empty).ToUpperInvariant()));
+        return baseName + "." + Convert.ToHexString(hash, 0, 8);
+    }
 }

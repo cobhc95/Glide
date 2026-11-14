@@ -622,48 +622,17 @@ internal sealed class NativeOverlayWindowRenderer : IDisposable
         var velocity = item.Velocity.Length > .001 ? item.Velocity * (speed / item.Velocity.Length) : new Vector(speed, 0);
         var margin = Math.Clamp(speed * 0.9 + 30, 48, 360);
         var steer = new Vector();
-        AddBoundarySteer(ref steer, item.X - item.Bounds.Left, velocity.X < 0, new Vector(speed, 0), margin, speed);
-        AddBoundarySteer(ref steer, item.Bounds.Right - item.X, velocity.X > 0, new Vector(-speed, 0), margin, speed);
-        AddBoundarySteer(ref steer, item.Y - item.Bounds.Top, velocity.Y < 0, new Vector(0, speed), margin, speed);
-        AddBoundarySteer(ref steer, item.Bounds.Bottom - item.Y, velocity.Y > 0, new Vector(0, -speed), margin, speed);
+        OverlayDriftMotion.AddBoundarySteer(ref steer, item.X - item.Bounds.Left, velocity.X < 0, new Vector(speed, 0), margin);
+        OverlayDriftMotion.AddBoundarySteer(ref steer, item.Bounds.Right - item.X, velocity.X > 0, new Vector(-speed, 0), margin);
+        OverlayDriftMotion.AddBoundarySteer(ref steer, item.Y - item.Bounds.Top, velocity.Y < 0, new Vector(0, speed), margin);
+        OverlayDriftMotion.AddBoundarySteer(ref steer, item.Bounds.Bottom - item.Y, velocity.Y > 0, new Vector(0, -speed), margin);
         var desired = velocity + steer;
         if (desired.Length > .001) desired *= speed / desired.Length;
-        velocity = RotateTowards(velocity, desired, Math.PI * 2.2 * Math.Clamp(dt, 0, .05));
+        velocity = OverlayDriftMotion.RotateTowards(velocity, desired, Math.PI * 2.2 * Math.Clamp(dt, 0, .05));
         item.X += velocity.X * dt;
         item.Y += velocity.Y * dt;
-        ClampWithoutBounce(item, ref velocity);
+        velocity = OverlayDriftMotion.ClampWithoutBounce(item.Bounds, ref item.X, ref item.Y, velocity);
         item.Velocity = velocity;
-    }
-
-    private static void AddBoundarySteer(ref Vector steer, double distance, bool headingOutward, Vector inward, double margin, double speed)
-    {
-        if (!headingOutward || distance >= margin) return;
-        var strength = 1 - Math.Clamp(distance / margin, 0, 1);
-        steer += inward * (0.65 + strength * strength * 2.35);
-    }
-
-    private static Vector RotateTowards(Vector current, Vector desired, double maxRadians)
-    {
-        var speed = Math.Max(1, current.Length);
-        if (desired.Length <= .001 || maxRadians <= 0) return current;
-        var from = Math.Atan2(current.Y, current.X);
-        var to = Math.Atan2(desired.Y, desired.X);
-        var delta = Math.Atan2(Math.Sin(to - from), Math.Cos(to - from));
-        var angle = from + Math.Clamp(delta, -maxRadians, maxRadians);
-        return new Vector(Math.Cos(angle) * speed, Math.Sin(angle) * speed);
-    }
-
-    private static void ClampWithoutBounce(Item item, ref Vector velocity)
-    {
-        var speed = Math.Max(1, velocity.Length);
-        var inward = Math.Max(1, speed * 0.18);
-        if (item.Bounds.Right <= item.Bounds.Left) { item.X = item.Bounds.Left; velocity = new Vector(0, velocity.Y); }
-        else if (item.X <= item.Bounds.Left) { item.X = item.Bounds.Left; if (velocity.X < inward) velocity = new Vector(inward, velocity.Y); }
-        else if (item.X >= item.Bounds.Right) { item.X = item.Bounds.Right; if (velocity.X > -inward) velocity = new Vector(-inward, velocity.Y); }
-        if (item.Bounds.Bottom <= item.Bounds.Top) { item.Y = item.Bounds.Top; velocity = new Vector(velocity.X, 0); }
-        else if (item.Y <= item.Bounds.Top) { item.Y = item.Bounds.Top; if (velocity.Y < inward) velocity = new Vector(velocity.X, inward); }
-        else if (item.Y >= item.Bounds.Bottom) { item.Y = item.Bounds.Bottom; if (velocity.Y > -inward) velocity = new Vector(velocity.X, -inward); }
-        if (velocity.Length > .001 && Math.Abs(velocity.Length - speed) > .001) velocity *= speed / velocity.Length;
     }
 
     private static void Collide(IReadOnlyList<Item> items, double dt)
@@ -699,7 +668,7 @@ internal sealed class NativeOverlayWindowRenderer : IDisposable
         var speed = Math.Max(1, velocity.Length);
         var tangent = horizontal ? new Vector(direction * speed, velocity.Y) : new Vector(velocity.X, direction * speed);
         if (tangent.Length > .001) tangent *= speed / tangent.Length;
-        return RotateTowards(velocity, tangent, maxTurn);
+        return OverlayDriftMotion.RotateTowards(velocity, tangent, maxTurn);
     }
     private static void Clamp(Item item) { item.X = Math.Clamp(item.X, item.Bounds.Left, item.Bounds.Right); item.Y = Math.Clamp(item.Y, item.Bounds.Top, item.Bounds.Bottom); }
     private static IntPtr NativeWindowProcedure(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam) => message == WM_NCHITTEST ? new IntPtr(-1) : message == WM_MOUSEACTIVATE ? new IntPtr(MA_NOACTIVATE) : DefWindowProcW(hwnd, message, wParam, lParam);

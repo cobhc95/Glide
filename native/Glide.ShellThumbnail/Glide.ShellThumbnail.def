@@ -3,3 +3,7 @@ EXPORTS
     DllCanUnloadNow     PRIVATE
     DllRegisterServer   PRIVATE
     DllUnregisterServer PRIVATE
+    GlideThumbnailSetTestOverrides
+    GlideThumbnailGetLastDiagnostics
+    GlideThumbnailDescribeQuality
+    GlideThumbnailMaxEdge

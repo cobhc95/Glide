@@ -2,7 +2,6 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Threading;
 using Glide.App;
-using Xunit;
 
 namespace Glide.Core.Tests;
 
@@ -17,7 +16,7 @@ public sealed class StatusBarLayoutTests
     public StatusBarLayoutTests(AvaloniaHeadlessFixture fixture) { _ = fixture; }
 
     [Fact]
-    public async Task One_line_status_content_does_not_reserve_a_second_row()
+    public async Task One_line_status_content_does_not_reserve_a_second_row_when_stacking_is_off()
     {
         await AvaloniaHeadlessFixture.RunOnUIThreadAsync(() =>
         {
@@ -26,6 +25,9 @@ public sealed class StatusBarLayoutTests
             {
                 window.Show();
                 ForceViewerStatusVisible(window);
+                // "Always stack the information on a separate line" is on by default; this is the single-line layout it replaces
+                // (StatusStackInfoLineTests covers the stacked default).
+                SingleLine(window);
                 LayoutAt(window, 1800, 900);
 
                 var surface = window.FindControl<Border>("ViewerStatusSurface")!;
@@ -117,6 +119,12 @@ public sealed class StatusBarLayoutTests
             }
             return Task.CompletedTask;
         });
+    }
+
+    private static void SingleLine(MainWindow window)
+    {
+        var field = typeof(MainWindow).GetField("_settings", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+        ((Glide.App.Settings.GlideSettingsState)field.GetValue(window)!).StatusStackInfoLine = false;
     }
 
     private static void ForceViewerStatusVisible(MainWindow window)

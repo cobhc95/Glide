@@ -48,8 +48,6 @@ public readonly record struct ImageEditTransform(int QuarterTurns, bool FlipHori
 /// <summary>Format decisions for Save / Save As, kept UI-free for testing.</summary>
 public static class ImageSavePolicy
 {
-    public static readonly string[] SaveAsExtensions = [".jpg", ".png", ".bmp", ".tif"];
-
     /// <summary>True when a plain Save can re-encode the original in its own format.</summary>
     public static bool CanSaveInPlace(string path, Func<string, bool> canEncode)
         => canEncode(Path.GetExtension(path));

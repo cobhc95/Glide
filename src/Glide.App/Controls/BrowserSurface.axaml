@@ -2,29 +2,66 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:controls="using:Glide.App.Controls"
              x:Class="Glide.App.Controls.BrowserSurface">
-  <Grid RowDefinitions="44,*" Background="{DynamicResource BrushViewport}">
-        <Border x:Name="BrowserToolbarBorder" Grid.Row="0" Background="{DynamicResource BrushSurface}" BorderBrush="{DynamicResource BrushBorderSoft}" BorderThickness="0,0,0,1">
-          <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,*,Auto,Auto" ColumnSpacing="5" Margin="9,6">
-            <Button x:Name="BrowserBackButton" Classes="browserTool" Click="BrowserBackClicked" ToolTip.Tip="Back"><controls:GlideIconView Kind="Previous" Classes="toolbarGlyph"/></Button>
-            <Button x:Name="BrowserForwardButton" Grid.Column="1" Classes="browserTool" Click="BrowserForwardClicked" ToolTip.Tip="Forward"><controls:GlideIconView Kind="Next" Classes="toolbarGlyph"/></Button>
-            <Button x:Name="BrowserUpButton" Grid.Column="2" Classes="browserTool" Click="BrowserUpClicked" ToolTip.Tip="Up one folder"><controls:GlideIconView Kind="Up" Classes="toolbarGlyph"/></Button>
-            <Button x:Name="BrowserRefreshButton" Grid.Column="3" Classes="browserTool" Click="BrowserRefreshClicked" ToolTip.Tip="Refresh"><controls:GlideIconView Kind="Refresh" Classes="toolbarGlyph"/></Button>
-            <TextBox x:Name="BrowserAddressBox" Grid.Column="4" Classes="browserAddress" KeyDown="BrowserAddressKeyDown" ToolTip.Tip="Folder path — press Enter to navigate"/>
-            <ComboBox x:Name="BrowserViewModeCombo" Grid.Column="5" Width="132" Height="31" SelectedIndex="0" SelectionChanged="BrowserViewModeChanged" ToolTip.Tip="Thumbnail size">
-              <ComboBoxItem Content="Large icons"/>
-              <ComboBoxItem Content="Medium icons"/>
-              <ComboBoxItem Content="Compact"/>
-            </ComboBox>
-            <Button x:Name="BrowserWindowsExplorerButton" Grid.Column="6" Classes="browserTool" Click="BrowserWindowsExplorerClicked" ToolTip.Tip="Open this folder in Windows Explorer"><controls:GlideIconView Kind="Browser" Classes="toolbarGlyph"/></Button>
-          </Grid>
-        </Border>
-        <Grid Grid.Row="1" x:Name="BrowserContentSurface">
+  <UserControl.Styles>
+    <!-- Tiles: transparent hit-testable cards. Selection/hover are an accent-tinted fill so every accent colour works. -->
+    <Style Selector=":is(Border).exTile"><Setter Property="Background" Value="Transparent"/><Setter Property="BorderThickness" Value="1"/><Setter Property="BorderBrush" Value="Transparent"/><Setter Property="CornerRadius" Value="6"/></Style>
+    <Style Selector=":is(Border).exTile Border.exFill"><Setter Property="Opacity" Value="0"/></Style>
+    <Style Selector=":is(Border).exTile:pointerover Border.exFill"><Setter Property="Opacity" Value="0.16"/></Style>
+    <Style Selector=":is(Border).exTile.selected Border.exFill"><Setter Property="Opacity" Value="0.34"/></Style>
+    <Style Selector=":is(Border).exTile.selected:pointerover Border.exFill"><Setter Property="Opacity" Value="0.46"/></Style>
+    <Style Selector=":is(Border).exTile.focused"><Setter Property="BorderBrush" Value="{DynamicResource BrushAccent}"/></Style>
+    <Style Selector=":is(Border).exTile.drop"><Setter Property="BorderBrush" Value="{DynamicResource BrushAccent}"/><Setter Property="BorderThickness" Value="2"/></Style>
+    <Style Selector=":is(Border).exTile.cut"><Setter Property="Opacity" Value="0.5"/></Style>
+    <Style Selector=":is(Border).exTile TextBlock.exName"><Setter Property="Foreground" Value="{DynamicResource BrushText}"/></Style>
+    <Style Selector=":is(Border).exTile TextBlock.exMuted"><Setter Property="Foreground" Value="{DynamicResource BrushMuted}"/></Style>
+    <Style Selector="Button.exNav"><Setter Property="Background" Value="Transparent"/><Setter Property="HorizontalAlignment" Value="Stretch"/><Setter Property="HorizontalContentAlignment" Value="Left"/><Setter Property="BorderThickness" Value="0"/><Setter Property="CornerRadius" Value="5"/><Setter Property="Padding" Value="8,5"/><Setter Property="Focusable" Value="False"/></Style>
+    <Style Selector="Button.exNav:pointerover"><Setter Property="Background" Value="{DynamicResource BrushSurfaceHover}"/></Style>
+    <Style Selector="Button.exNav.current"><Setter Property="Background" Value="{DynamicResource BrushSurfaceHover}"/></Style>
+    <Style Selector="Button.exNav.drop"><Setter Property="Background" Value="{DynamicResource BrushAccent}"/></Style>
+    <Style Selector="Button.exHeader"><Setter Property="Background" Value="Transparent"/><Setter Property="BorderThickness" Value="0"/><Setter Property="CornerRadius" Value="0"/><Setter Property="Padding" Value="8,4"/><Setter Property="HorizontalAlignment" Value="Stretch"/><Setter Property="HorizontalContentAlignment" Value="Left"/><Setter Property="Focusable" Value="False"/></Style>
+    <Style Selector="Button.exHeader:pointerover"><Setter Property="Background" Value="{DynamicResource BrushSurfaceHover}"/></Style>
+    <Style Selector="Button.crumb:pointerover"><Setter Property="Background" Value="{DynamicResource BrushSurfaceHover}"/></Style>
+  </UserControl.Styles>
+  <Grid RowDefinitions="44,*,26" Background="{DynamicResource BrushViewport}">
+    <Border x:Name="BrowserToolbarBorder" Grid.Row="0" Background="{DynamicResource BrushSurface}" BorderBrush="{DynamicResource BrushBorderSoft}" BorderThickness="0,0,0,1">
+      <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,*,Auto,Auto,Auto" ColumnSpacing="5" Margin="9,6">
+        <Button x:Name="BrowserBackButton" Classes="browserTool" Click="BrowserBackClicked" ToolTip.Tip="Back (Alt+Left)"><controls:GlideIconView Kind="Previous" Classes="toolbarGlyph"/></Button>
+        <Button x:Name="BrowserForwardButton" Grid.Column="1" Classes="browserTool" Click="BrowserForwardClicked" ToolTip.Tip="Forward (Alt+Right)"><controls:GlideIconView Kind="Next" Classes="toolbarGlyph"/></Button>
+        <Button x:Name="BrowserHistoryButton" Grid.Column="2" Classes="browserTool" Width="22" Click="BrowserHistoryClicked" ToolTip.Tip="Recent locations"><controls:GlideIconView Kind="Down" Width="11" Height="11" StrokeWidth="1.8"/></Button>
+        <Button x:Name="BrowserUpButton" Grid.Column="3" Classes="browserTool" Click="BrowserUpClicked" ToolTip.Tip="Up one folder (Alt+Up)"><controls:GlideIconView Kind="Up" Classes="toolbarGlyph"/></Button>
+        <Button x:Name="BrowserRefreshButton" Grid.Column="4" Classes="browserTool" Click="BrowserRefreshClicked" ToolTip.Tip="Refresh (F5)"><controls:GlideIconView Kind="Refresh" Classes="toolbarGlyph"/></Button>
+        <controls:ExplorerAddressBar x:Name="BrowserAddressBar" Grid.Column="5" NavigateRequested="BrowserAddressNavigateRequested"/>
+        <TextBox x:Name="BrowserFilterBox" Grid.Column="6" Width="190" Height="31" Padding="9,3" VerticalContentAlignment="Center" Watermark="Filter this folder (Ctrl+F)" TextChanged="BrowserFilterTextChanged" KeyDown="BrowserFilterKeyDown" ToolTip.Tip="Type to filter the items in this folder"/>
+        <ComboBox x:Name="BrowserViewModeCombo" Grid.Column="7" Width="148" Height="31" SelectedIndex="1" SelectionChanged="BrowserViewModeChanged" ToolTip.Tip="View">
+          <ComboBoxItem Content="Extra large icons"/>
+          <ComboBoxItem Content="Large icons"/>
+          <ComboBoxItem Content="Medium icons"/>
+          <ComboBoxItem Content="Small icons"/>
+          <ComboBoxItem Content="List"/>
+          <ComboBoxItem Content="Details"/>
+        </ComboBox>
+        <Button x:Name="BrowserWindowsExplorerButton" Grid.Column="8" Classes="browserTool" Click="BrowserWindowsExplorerClicked" ToolTip.Tip="Show this folder in Windows File Explorer"><controls:GlideIconView Kind="FolderLocate" Classes="toolbarGlyph"/></Button>
+      </Grid>
+    </Border>
+
+    <Grid x:Name="BrowserBody" Grid.Row="1" ColumnDefinitions="208,1,*">
+      <Border x:Name="BrowserNavPane" Grid.Column="0" Background="{DynamicResource BrushSurface}">
+        <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+          <StackPanel x:Name="BrowserNavHost" Margin="6,8" Spacing="1"/>
+        </ScrollViewer>
+      </Border>
+      <Border Grid.Column="1" Background="{DynamicResource BrushBorderSoft}"/>
+      <Grid x:Name="BrowserContentSurface" Grid.Column="2" RowDefinitions="Auto,*">
+        <!-- Details column headers: built at runtime, visible only in Details view. -->
+        <Border x:Name="BrowserDetailsHeader" Grid.Row="0" IsVisible="False" Background="{DynamicResource BrushSurface}" BorderBrush="{DynamicResource BrushBorderSoft}" BorderThickness="0,0,0,1"/>
+        <Grid Grid.Row="1">
           <!-- Retained only so the isolated legacy COM-host code remains buildable for diagnostics/future fallback. -->
           <Grid x:Name="NativeExplorerHostSurface" IsVisible="False" Width="1" Height="1"/>
-          <ScrollViewer x:Name="BrowserScrollViewer" Margin="0" Padding="10"
+          <ScrollViewer x:Name="BrowserScrollViewer" Margin="0" Padding="0" Focusable="True"
                         HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto"
-                        Background="{DynamicResource BrushViewport}" KeyDown="BrowserListKeyDown">
-            <ItemsRepeater x:Name="BrowserRepeater" HorizontalCacheLength="1" VerticalCacheLength="1">
+                        AllowAutoHide="False"
+                        Background="{DynamicResource BrushViewport}">
+            <ItemsRepeater x:Name="BrowserRepeater" Margin="10" HorizontalCacheLength="1" VerticalCacheLength="1">
               <ItemsRepeater.Layout>
                 <UniformGridLayout Orientation="Horizontal"
                                    MinItemWidth="176" MinItemHeight="188"
@@ -32,7 +69,20 @@
               </ItemsRepeater.Layout>
             </ItemsRepeater>
           </ScrollViewer>
+          <Canvas x:Name="BrowserRubberLayer" IsHitTestVisible="False" ClipToBounds="True">
+            <Border x:Name="BrowserRubberRect" IsVisible="False" BorderThickness="1" BorderBrush="{DynamicResource BrushAccent}"/>
+          </Canvas>
+          <TextBlock x:Name="BrowserEmptyText" IsHitTestVisible="False" IsVisible="False" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{DynamicResource BrushMuted}" FontSize="14" Text="This folder is empty."/>
         </Grid>
-      
+      </Grid>
+    </Grid>
+
+    <Border x:Name="BrowserStatusBar" Grid.Row="2" Background="{DynamicResource BrushSurface}" BorderBrush="{DynamicResource BrushBorderSoft}" BorderThickness="0,1,0,0">
+      <Grid ColumnDefinitions="Auto,Auto,*" Margin="12,0" ColumnSpacing="18">
+        <TextBlock x:Name="BrowserItemCountText" Grid.Column="0" VerticalAlignment="Center" FontSize="12" Foreground="{DynamicResource BrushMuted}" Text="0 items"/>
+        <TextBlock x:Name="BrowserSelectionText" Grid.Column="1" VerticalAlignment="Center" FontSize="12" Foreground="{DynamicResource BrushMuted}" Text=""/>
+        <TextBlock x:Name="BrowserMessageText" Grid.Column="2" VerticalAlignment="Center" HorizontalAlignment="Right" FontSize="12" Foreground="{DynamicResource BrushMuted}" TextTrimming="CharacterEllipsis" Text=""/>
+      </Grid>
+    </Border>
   </Grid>
 </UserControl>

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Glide.Core.Workspace;
 using Glide.Core;
 
@@ -27,11 +28,54 @@ public static class WorkspaceSessionStore
         public bool Active { get; set; }
         public ImageTabViewState? ImageView { get; set; }
         public BrowserNavigationState? BrowserNavigation { get; set; }
+
+        // Optional (4.8.0): the item selected in an Explorer tab's folder and its scroll offset. Older
+        // files simply lack them; older Glide versions ignore them.
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? SelectedPath { get; set; }
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public double? ScrollY { get; set; }
     }
+
+    /// <summary>
+    /// A serialized session plus the file it belongs to, captured on the calling (UI) thread so the
+    /// slower file write can run elsewhere without touching live tab state.
+    /// </summary>
+    internal sealed record SessionSnapshot(string Path, string Json, long Sequence);
+
+    /// <summary>Quiet time after the last Explorer change before the session is written (about a second; tests shorten it).</summary>
+    internal static TimeSpan AutosaveDelay = TimeSpan.FromSeconds(1);
+
+    private static readonly object WriteLock = new();
+    private static long _sequence;
+    private static long _lastWrittenSequence;
+    private static string? _lastWrittenPath;
+    private static string? _lastWrittenJson;
+    private static int _writeCount;
+
+    /// <summary>Number of times the session file was actually written by this process (tests and diagnostics).</summary>
+    internal static int WriteCount => Volatile.Read(ref _writeCount);
+
+    internal static string SessionPathIn(string settingsDirectory) => Path.Combine(settingsDirectory, FileName);
+
+    private static string SessionPath => SessionPathIn(SettingsStore.GetSettingsDirectory());
 
     public static void Save(IReadOnlyList<TabState> tabs, int activeIndex)
     {
         if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("workspace_session_write_start", $"tabs={tabs.Count}");
+        try
+        {
+            var snapshot = Snapshot(tabs, activeIndex);
+            if (snapshot is null) return;
+            Write(snapshot);
+            if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("workspace_session_write_end", $"tabs={tabs.Count}");
+        }
+        catch { if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("workspace_session_write_failed"); /* Session persistence is best-effort and must never prevent closing. */ }
+    }
+
+    /// <summary>Serializes the tabs now. A later snapshot always supersedes an earlier one, even if it is written first.</summary>
+    internal static SessionSnapshot? Snapshot(IReadOnlyList<TabState> tabs, int activeIndex, string? settingsDirectory = null)
+    {
         try
         {
             var doc = new SessionDocument { ActiveIndex = Math.Max(0, activeIndex) };
@@ -48,18 +92,55 @@ public static class WorkspaceSessionStore
                         doc.Tabs.Add(new SessionTab { Kind = "Image", Path = image.Path, ImageView = image.ViewState, Active = active });
                         break;
                     case BrowserTabState browser:
-                        doc.Tabs.Add(new SessionTab { Kind = "Browser", Path = browser.Folder, BrowserNavigation = browser.Navigation, Active = active });
+                        doc.Tabs.Add(new SessionTab
+                        {
+                            Kind = "Browser", Path = browser.Folder, BrowserNavigation = browser.Navigation, Active = active,
+                            SelectedPath = string.IsNullOrWhiteSpace(browser.View?.SelectedPath) ? null : browser.View!.SelectedPath,
+                            // Written whenever the tab's view is known (even 0), so a restore can tell "nothing
+                            // selected, not scrolled" from an older file that carried no view at all.
+                            ScrollY = browser.View is { } view ? (double.IsFinite(view.ScrollY) && view.ScrollY > 0 ? Math.Round(view.ScrollY, 1) : 0) : null
+                        });
                         break;
                 }
             }
-            Directory.CreateDirectory(SettingsStore.GetSettingsDirectory());
-            var path = Path.Combine(SettingsStore.GetSettingsDirectory(), FileName);
-            var temp = path + ".tmp";
-            File.WriteAllText(temp, JsonSerializer.Serialize(doc, AppJsonContext.Default.SessionDocument));
-            File.Move(temp, path, true);
-            if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("workspace_session_write_end", $"tabs={doc.Tabs.Count}");
+            return new SessionSnapshot(settingsDirectory is null ? SessionPath : SessionPathIn(settingsDirectory), JsonSerializer.Serialize(doc, AppJsonContext.Default.SessionDocument),
+                Interlocked.Increment(ref _sequence));
         }
-        catch { if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("workspace_session_write_failed"); /* Session persistence is best-effort and must never prevent closing. */ }
+        catch { return null; }
+    }
+
+    /// <summary>
+    /// Atomic write: a temp file in the same folder, then a rename over the session file, so a crash
+    /// mid-write leaves either the previous or the new file, never a truncated one. Skips a write that
+    /// would not change the file and a snapshot that a newer one has already replaced.
+    /// </summary>
+    internal static void Write(SessionSnapshot snapshot)
+    {
+        lock (WriteLock)
+        {
+            if (snapshot.Sequence < _lastWrittenSequence) return;
+            if (string.Equals(_lastWrittenPath, snapshot.Path, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(_lastWrittenJson, snapshot.Json, StringComparison.Ordinal) && File.Exists(snapshot.Path))
+            {
+                _lastWrittenSequence = snapshot.Sequence;
+                return;
+            }
+            Directory.CreateDirectory(Path.GetDirectoryName(snapshot.Path)!);
+            var temp = snapshot.Path + "." + Environment.ProcessId + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            try
+            {
+                File.WriteAllText(temp, snapshot.Json);
+                File.Move(temp, snapshot.Path, true);
+                _lastWrittenSequence = snapshot.Sequence;
+                _lastWrittenPath = snapshot.Path;
+                _lastWrittenJson = snapshot.Json;
+                Interlocked.Increment(ref _writeCount);
+            }
+            finally
+            {
+                try { if (File.Exists(temp)) File.Delete(temp); } catch { }
+            }
+        }
     }
 
     public static (IReadOnlyList<TabState> Tabs, int ActiveIndex)? Load()
@@ -67,7 +148,7 @@ public static class WorkspaceSessionStore
         if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("workspace_session_read_start");
         try
         {
-            var path = Path.Combine(SettingsStore.GetSettingsDirectory(), FileName);
+            var path = SessionPath;
             if (!File.Exists(path)) return null;
             var doc = JsonSerializer.Deserialize(File.ReadAllText(path), AppJsonContext.Default.SessionDocument);
             if (doc is null || doc.Schema != SchemaVersion) return null;
@@ -81,7 +162,7 @@ public static class WorkspaceSessionStore
                 else if (string.Equals(item.Kind, "Image", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(item.Path))
                     restored = new ImageTabState(Guid.NewGuid(), Path.GetFullPath(item.Path)) { ViewState = item.ImageView };
                 else if (string.Equals(item.Kind, "Browser", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(item.Path))
-                    restored = new BrowserTabState(Guid.NewGuid(), Path.GetFullPath(item.Path)) { Navigation = item.BrowserNavigation };
+                    restored = new BrowserTabState(Guid.NewGuid(), Path.GetFullPath(item.Path)) { Navigation = item.BrowserNavigation, View = RestoredView(item) };
 
                 if (restored is null) continue;
                 tabs.Add(restored);
@@ -95,4 +176,13 @@ public static class WorkspaceSessionStore
         catch { if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("workspace_session_read_failed"); return null; }
     }
 
+    private static BrowserTabViewState? RestoredView(SessionTab item)
+    {
+        string? selected = null;
+        try { if (!string.IsNullOrWhiteSpace(item.SelectedPath)) selected = Path.GetFullPath(item.SelectedPath); }
+        catch { /* a damaged value only loses the selection, never the session */ }
+        if (selected is null && item.ScrollY is null) return null; // an older file: no view was recorded
+        var scroll = item.ScrollY is { } y && double.IsFinite(y) && y > 0 ? y : 0;
+        return new BrowserTabViewState(selected, scroll);
+    }
 }

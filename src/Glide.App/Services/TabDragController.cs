@@ -1,7 +1,6 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
-using Glide.App;
 
 namespace Glide.App.Services;
 

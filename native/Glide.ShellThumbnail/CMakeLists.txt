@@ -28,14 +28,45 @@ set(WEBP_BUILD_WEBPMUX OFF CACHE BOOL "" FORCE)
 set(WEBP_BUILD_EXTRAS OFF CACHE BOOL "" FORCE)
 set(WEBP_BUILD_WEBP_JS OFF CACHE BOOL "" FORCE)
 set(WEBP_USE_THREAD OFF CACHE BOOL "" FORCE)
+# Security hardening (5.0): Control Flow Guard and Spectre variant 1 mitigations for every object in the
+# provider, including the vendored libwebp (CFG only protects indirect calls in code compiled with it).
+# Explorer's thumbnail host loads this DLL, so it must never be the weakest module in that process.
+# /Qspectre needs the Spectre-mitigated libraries for the active MSVC toolset (Visual Studio Installer >
+# Individual components); MSBuild refuses the project without them (MSB8040), so it is conditional.
+if(MSVC)
+  set(GLIDE_SPECTRE_OPTION "")
+  get_filename_component(_glide_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+  if(EXISTS "${_glide_cl_dir}/../../../lib/spectre/x64")
+    set(GLIDE_SPECTRE_OPTION /Qspectre)
+  else()
+    message(STATUS "Glide.ShellThumbnail: Spectre-mitigated libraries not installed for this toolset; building without /Qspectre")
+  endif()
+  add_compile_options(/guard:cf ${GLIDE_SPECTRE_OPTION})
+endif()
 add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../third_party/libwebp"
                  "${CMAKE_CURRENT_BINARY_DIR}/libwebp"
                  EXCLUDE_FROM_ALL)
+
+# Single-source the provider's version from Directory.Build.props (like build.cmd does) so the DLL's
+# version resource always matches Glide.exe. Settings shows it in the Explorer thumbnails status line.
+set(GLIDE_VERSION "0.0.0")
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/../../Directory.Build.props" GLIDE_VERSION_LINE REGEX "<Version>[0-9]+\\.[0-9]+\\.[0-9]+</Version>")
+if(GLIDE_VERSION_LINE)
+    string(REGEX REPLACE ".*<Version>([0-9]+\\.[0-9]+\\.[0-9]+)</Version>.*" "\\1" GLIDE_VERSION "${GLIDE_VERSION_LINE}")
+endif()
+string(REPLACE "." ";" GLIDE_VERSION_PARTS "${GLIDE_VERSION}")
+list(GET GLIDE_VERSION_PARTS 0 GLIDE_VERSION_MAJOR)
+list(GET GLIDE_VERSION_PARTS 1 GLIDE_VERSION_MINOR)
+list(GET GLIDE_VERSION_PARTS 2 GLIDE_VERSION_PATCH)
+configure_file("${CMAKE_CURRENT_SOURCE_DIR}/Glide.ShellThumbnail.rc.in"
+               "${CMAKE_CURRENT_BINARY_DIR}/Glide.ShellThumbnail.rc" @ONLY)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/../../Directory.Build.props")
 
 add_library(Glide.ShellThumbnail SHARED
     GlideThumbnailProvider.cpp
     ThumbnailCore.cpp
     Glide.ShellThumbnail.def
+    "${CMAKE_CURRENT_BINARY_DIR}/Glide.ShellThumbnail.rc"
 )
 
 target_compile_features(Glide.ShellThumbnail PRIVATE cxx_std_20)
@@ -57,3 +88,10 @@ target_link_libraries(Glide.ShellThumbnail PRIVATE
 )
 
 set_target_properties(Glide.ShellThumbnail PROPERTIES OUTPUT_NAME "Glide.ShellThumbnail")
+
+# SDL checks for Glide's own sources (libwebp is third-party C and keeps its upstream warning set), plus
+# CFG, CET shadow-stack compatibility, ASLR (high entropy) and DEP at link time.
+if(MSVC)
+  target_compile_options(Glide.ShellThumbnail PRIVATE /sdl)
+  target_link_options(Glide.ShellThumbnail PRIVATE /guard:cf /CETCOMPAT /DYNAMICBASE /HIGHENTROPYVA /NXCOMPAT)
+endif()

@@ -24,21 +24,49 @@ internal sealed record ExternalLaunchBatch(IReadOnlyList<ExternalLaunchRequest> 
 /// </summary>
 internal static class ExternalLaunchBroker
 {
-    private const string PipeName = ProtocolNames.PipeName;
-    // v3 is an EventWaitHandle sentinel rather than a thread-affine mutex. Creation is the process
+    // Security (R5): the pipe and presence names carry a hash of the current user's SID, at both ends.
+    // A machine-global name let another account create "Glide3.ExternalOpen.v2" first and block this
+    // user's single-instance forwarding (images then did not open); CurrentUserOnly (below) already
+    // stopped it from receiving anything.
+    internal static readonly string PipeName = ProtocolNames.UserScoped(ProtocolNames.PipeName, CurrentUserKey());
+    // v3+ is an EventWaitHandle sentinel rather than a thread-affine mutex. Creation is the process
     // election primitive; followers close their handle immediately, so the sentinel disappears when
     // the elected owner releases/exits and another live Glide process can take over.
-    private const string PresenceName = ProtocolNames.PresenceName;
+    private static readonly string PresenceName = ProtocolNames.UserScoped(ProtocolNames.PresenceName, CurrentUserKey());
     private static string EffectivePresenceName =>
         AppContext.BaseDirectory.Contains("Glide.Core.Tests", StringComparison.OrdinalIgnoreCase)
             ? $"{PresenceName}.{Environment.ProcessId}"
             : PresenceName;
+
+    /// <summary>The current user's SID (stable across sessions and renames); the user name as a fallback.</summary>
+    internal static string CurrentUserKey()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            try
+            {
+                using var identity = WindowsIdentity.GetCurrent();
+                if (identity.User?.Value is { Length: > 0 } sid) return sid;
+            }
+            catch { }
+        }
+        return Environment.UserDomainName + "\\" + Environment.UserName;
+    }
     private const string ProtocolHeader = ProtocolNames.ProtocolHeader;
     // A ready warm broker normally accepts the connection immediately. This deadline is only a
     // bounded safety net for the owner-startup/pipe-replacement race; it is not a hot-path delay.
     private static readonly TimeSpan ClientDeadline = TimeSpan.FromMilliseconds(250);
     private static readonly TimeSpan ServerPeerDeadline = TimeSpan.FromSeconds(2);
     private const int MaxProtocolLineChars = 128 * 1024;
+
+    // Security: pipe names are machine-global, so another account could create "Glide3.ExternalOpen.v2"
+    // first (or in the gap between two server instances) and receive the paths users open. With
+    // CurrentUserOnly the client refuses a pipe not owned by the current user before writing anything,
+    // and the server's pipe grants access to the current user only (previously Everyone/Anonymous could
+    // read). 5.0 also scopes the pipe and presence names to the user (see PipeName), so 4.x and 5.x
+    // builds no longer forward to each other; each version elects and forwards within its own kind.
+    internal const PipeOptions ClientPipeOptions = PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly;
+    internal const PipeOptions ServerPipeOptions = PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly;
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern bool AllowSetForegroundWindow(int dwProcessId);
     private static readonly object Gate = new();
@@ -57,16 +85,15 @@ internal static class ExternalLaunchBroker
 
     private enum BrokerState { Owner, Follower, Ready, Stopping }
 
-    internal static string PresenceObjectNameForTests => EffectivePresenceName;
-
     // IPC peer check (inbox only — no extra ACL packages): after a client connects the
     // server compares the impersonated peer name to the current user. This is FAIL-OPEN
     // by design: dropping on mismatch broke legitimate double-click opens (impersonation
     // APIs disagree across split tokens/service sessions), which is worse than the residual
     // cross-user open-request risk — requested paths are still validated, canonicalized and
     // re-checked for existence/type before use, and only open/activate files, never commands.
-    // Mismatches are marked in the performance trace for diagnostics. Proper fix when the
-    // NuGet feed is reachable: PipeSecurity via System.IO.Pipes.AccessControl.
+    // Mismatches are marked in the performance trace for diagnostics. (GetImpersonationUserName
+    // fails before the server has read from the pipe, which is why this check could never gate.)
+    // Access control is now enforced by PipeOptions.CurrentUserOnly on both ends (in-box, no package).
     private static bool IsSameUserPeer(NamedPipeServerStream server, out string? peerName)
     {
         peerName = null;
@@ -199,7 +226,7 @@ internal static class ExternalLaunchBroker
             using var attemptCts = new CancellationTokenSource(remaining);
             try
             {
-                await using var client = new NamedPipeClientStream(".", PipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+                await using var client = new NamedPipeClientStream(".", PipeName, PipeDirection.InOut, ClientPipeOptions);
                 await client.ConnectAsync(attemptCts.Token).ConfigureAwait(false);
                 if (OperatingSystem.IsWindows())
                 {
@@ -456,9 +483,9 @@ internal static class ExternalLaunchBroker
         {
             try
             {
-                // Plain pipe; the peer is authenticated via IsSameUserPeer after connect.
+                // Current-user-only pipe (see ServerPipeOptions); IsSameUserPeer remains a diagnostic mark.
                 await using var server = new NamedPipeServerStream(
-                        PipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+                        PipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, ServerPipeOptions);
                 if (!readinessPublished)
                 {
                     lock (Gate)

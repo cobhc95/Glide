@@ -5,6 +5,8 @@ using Avalonia.Media;
 using Avalonia.Threading;
 using Glide.App.Controls;
 
+using Glide.App.Services;
+
 namespace Glide.App;
 
 /// <summary>Adaptive status-bar layout: wide row, header + balanced rows, or overflow menu.</summary>
@@ -36,6 +38,8 @@ public partial class MainWindow
             ("OverlaySave", "Save overlay layout", OverlaySaveButton),
             ("Close", "Clear all overlays", OverlayClearButton)
         }),
+        // Shown only while an animated GIF is open (GifGroup.IsVisible, see UpdateGifStatusUi).
+        new(GifGroupBorder, GifGroup, 4, () => new[] { ("FramePrevious", "Previous GIF frame", GifPreviousFrameButton), (_gifPlayer?.IsPaused == true ? "Play" : "Pause", _gifPlayer?.IsPaused == true ? "Play GIF" : "Pause GIF", GifPlayPauseButton), ("FrameNext", "Next GIF frame", GifNextFrameButton) }),
         new(SlideshowGroupBorder, SlideshowGroup, 6, () => new[] { ("Play", "Slideshow play / pause", SlideshowButton), ("Stop", "Stop slideshow", SlideshowStopButton) }),
         new(NavGroupBorder, NavigationGroup, 0, () => Array.Empty<(string, string, Button)>())
     };
@@ -108,11 +112,14 @@ public partial class MainWindow
         {
             StatusStatsText.TextWrapping = TextWrapping.NoWrap;
             StatusStatsText.TextTrimming = TextTrimming.CharacterEllipsis;
+            StatusStatsText.MaxLines = 0;
             StatusStatsText.MaxWidth = statsCap;
             StatusStatsText.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
             statsWidth = StatusStatsText.DesiredSize.Width;
         }
         StatusStatsHost.IsVisible = showStats;
+        // A revealed Auto-hide bar has no collapse button (ApplyCollapsedStatusChrome), so the wrap decision must not reserve its slot.
+        StatusCollapseButton.IsVisible = !_settings.StatusAutoHide;
         StatusWindowControls.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
         var windowControlsWidth = StatusWindowControls.DesiredSize.Width;
 
@@ -125,7 +132,11 @@ public partial class MainWindow
 
         var all = Enumerable.Range(0, enabled.Count).ToList();
         var allWidth = RowWidth(all);
-        var wide = allWidth + ColGap + windowControlsWidth + (showStats ? statsWidth + ColGap : 0d) <= inner;
+        // "Always stack the information on a separate line" (default): the info text keeps its own top line (with the window
+        // buttons at its right) and the button groups sit below it even when everything would fit on one line. It needs a
+        // visible info text: with no stats to show (a very narrow window, or nothing to display) the single-row logic applies.
+        var stacked = _settings.StatusStackInfoLine && showStats && !string.IsNullOrWhiteSpace(StatusStatsText.Text);
+        var wide = !stacked && allWidth + ColGap + windowControlsWidth + (showStats ? statsWidth + ColGap : 0d) <= inner;
 
         List<int> row1 = all, row2 = new();
         var overflow = false;
@@ -147,7 +158,9 @@ public partial class MainWindow
             {
                 // Header line: wrap only at the separators (segments use non-breaking spaces).
                 StatusStatsText.TextWrapping = TextWrapping.Wrap;
-                StatusStatsText.TextTrimming = TextTrimming.None;
+                // Stacked: a name longer than the bar wraps at most onto a second line and then ends in an ellipsis.
+                StatusStatsText.TextTrimming = stacked ? TextTrimming.CharacterEllipsis : TextTrimming.None;
+                StatusStatsText.MaxLines = stacked ? 2 : 0;
                 StatusStatsText.MaxWidth = Math.Max(60d, inner - windowControlsWidth - ColGap);
             }
 
@@ -207,6 +220,9 @@ public partial class MainWindow
             {
                 if (!button.IsVisible) continue;
                 var item = new MenuItem { Header = label, Icon = MenuIcon(icon), IsEnabled = button.IsEnabled };
+                item = StatusButtonActionIds().TryGetValue(button, out var actionId) && !actionId.StartsWith(MenuActions.ContextPrefix, StringComparison.Ordinal)
+                    ? MenuActions.Tag(item, actionId)
+                    : MenuActions.Context(item, "status.overflowButton");
                 var target = button;
                 item.Click += async (_, _) => await ExecuteStatusButtonAsync(target);
                 group.Add(item);
@@ -218,6 +234,26 @@ public partial class MainWindow
         if (items.Count == 0) return;
         PrepareOwnedContextMenu(new ContextMenu { ItemsSource = items }).Open(StatusMoreButton);
     }
+
+    /// <summary>
+    /// Every status-bar button and the registry action it performs (or a context tag). The status-bar coverage
+    /// test fails when a button is added to the bar without an entry here, so each button is reachable from the
+    /// hotkey list, gestures and Settings search through its registry action.
+    /// </summary>
+    internal IReadOnlyDictionary<Button, string> StatusButtonActionIds() => new Dictionary<Button, string>
+    {
+        [StatusZoomOutButton] = "view.zoomOut", [StatusZoomInButton] = "view.zoomIn",
+        [StatusFitImageButton] = "view.fit", [StatusFitWindowButton] = "view.fitWindow", [StatusFitWidthButton] = "view.fitWidth", [StatusFitHeightButton] = "view.fitHeight",
+        [StatusInfoButton] = "view.info", [StatusOptionsButton] = "app.settings",
+        [StatusSaveButton] = "file.save", [StatusSaveAsButton] = "file.saveAs",
+        [OverlaySaveButton] = "overlay.saveLayout", [OverlayClearButton] = "overlay.clear", [OverlayAddButton] = "overlay.add", [OverlayLoadButton] = "overlay.loadLayout",
+        [GifPreviousFrameButton] = "gif.previousFrame", [GifPlayPauseButton] = "gif.playPause", [GifNextFrameButton] = "gif.nextFrame",
+        [SlideshowButton] = "slideshow.startPause", [SlideshowStopButton] = "slideshow.stop",
+        [StatusFirstButton] = "nav.first", [StatusPreviousButton] = "nav.previous", [StatusNextButton] = "nav.next", [StatusLastButton] = "nav.last",
+        [StatusCollapseButton] = "status.toggle", [StatusCloseButton] = "status.close", [StatusActualButton] = "view.actual",
+        [StatusRestoreButton] = "status.toggle",
+        [StatusMoreButton] = MenuActions.ContextPrefix + "status.overflowMenu (lists the buttons that do not fit)",
+    };
 
     /// <summary>A small vector icon in the toolbar's own style, tinted with the theme text colour.</summary>
     private Control MenuIcon(string kind) => MenuIcons.Create(this, kind);

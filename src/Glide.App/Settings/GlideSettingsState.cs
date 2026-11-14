@@ -42,6 +42,8 @@ public sealed record GlideSettingsState
     public bool NewExplorerTabsUseLastLocation { get; set; } = true;
     public string NewExplorerTabDefaultDirectory { get; set; } = string.Empty;
     public string LastNewExplorerTabDirectory { get; set; } = string.Empty;
+    // Explorer tab (4.8.0): what double-click / Enter does with an image; middle-click does the other.
+    public string ExplorerOpenImagesWith { get; set; } = "Double-click: current tab, middle-click: new tab";
     public string LastOpenDirectory { get; set; } = string.Empty;
     public string LastOpenFileDirectory { get; set; } = string.Empty;
     // ThemeChoice is authoritative. LightTheme is retained only for backwards-compatible profile/settings migration.
@@ -74,7 +76,8 @@ public sealed record GlideSettingsState
 
     // Interface & Behavior
     public bool ShowStatusSurface { get; set; } = true;
-    public bool StatusShowOnHoverWhenClosed { get; set; } = false;
+    /// <summary>Reveal a collapsed status bar when the pointer enters the box it would occupy. On by default; files without the key get true.</summary>
+    public bool StatusShowOnHoverWhenClosed { get; set; } = true;
     public bool ShowScrollbars { get; set; } = true;
     public bool FullPathInTitle { get; set; }
     public bool HideCursorFullscreen { get; set; } = true;
@@ -100,8 +103,16 @@ public sealed record GlideSettingsState
     public List<string> TitleBarButtons { get; set; } = TitleBarButtonCatalog.DefaultButtonIds.ToList();
     public bool TabBarShowBackButton { get; set; } = true;
     public bool TabBarShowForwardButton { get; set; } = true;
-    // Navigate-to-folder title action: Internal browser (default) or Windows Explorer.
+    // Legacy hidden value from the removed embedded Explorer ("Internal browser" / "Windows Explorer"). It has
+    // no UI or effect any more and is only kept so older settings files round-trip; see ShowInExplorerTarget.
     public string NavigateToFolderBehavior { get; set; } = "Windows Explorer";
+    // What the title-bar "Show in Explorer" button (file.locate) does: ShowInExplorerTargets.GlideTab
+    // (default) or ShowInExplorerTargets.WindowsExplorer. Also switchable from the button's right-click menu.
+    public string ShowInExplorerTarget { get; set; } = ShowInExplorerTargets.GlideTab;
+    // Explorer tab (4.8.0) view and filter preferences.
+    public string ExplorerDefaultView { get; set; } = "Large icons";
+    public bool ExplorerShowHiddenFiles { get; set; }
+    public bool ExplorerShowOnlyImages { get; set; } = true;
     public bool FullscreenStatusAlwaysOn { get; set; } = true;
     public bool FullscreenKeepTabBarOpen { get; set; }
     public bool AlwaysOnTop { get; set; }
@@ -123,7 +134,7 @@ public sealed record GlideSettingsState
     public string StatusFitScope { get; set; } = "This session and future sessions";
     public bool PointerZoom { get; set; } = true;
     public bool PreserveManualZoomOnNavigate { get; set; }
-    public int ViewportZoomStepPercent { get; set; } = 10;
+    public int ViewportZoomStepPercent { get; set; } = Glide.Core.ZoomStepPolicy.DefaultStepPercent;
     public bool UpscaleSmallImages { get; set; }
     public bool HighPrecisionSubpixelRendering { get; set; } = true;
     public bool ShowImageLoadingIndicator { get; set; } = true;
@@ -167,27 +178,34 @@ public sealed record GlideSettingsState
     public bool MiddleDragPan { get; set; }
 
     // Advanced gesture matrix. Every slot is persisted by stable ID and resolves through GestureCatalog.
+    // Since 4.8.0 (schema 7) the mouse toggles above that map to a gesture row are folded into this
+    // map by a one-time migration; those toggle properties are kept only so older files and profiles
+    // can still be read and migrated (GestureLegacyMigration). They no longer drive runtime behaviour.
     public Dictionary<string, string> Gestures { get; set; } = GestureCatalog.CreateDefaultMap();
+    // User-defined gestures (area + input + optional held key -> action), at most 6 per area.
+    public List<CustomGesture> CustomGestures { get; set; } = new();
+    // Most recently picked gesture actions (newest first), shown as "Recent" chips in the action picker.
+    public List<string> GestureRecentActions { get; set; } = new();
 
     // Performance & Startup
-    public string InitialImageQuality { get; set; } = "Balanced";
+    public string InitialImageQuality { get; set; } = "Maximum quality";
     public bool AdaptiveFastPreview { get; set; } = true; // decoder-scaled first useful frame
-    public int AdaptivePreviewDelayMs { get; set; } = 20;
+    public int AdaptivePreviewDelayMs { get; set; } = 5;
     public bool SequentialForegroundReads { get; set; } = true;
     public bool PredictivePrefetch { get; set; } = true;
     public bool BackgroundRefinement { get; set; } = true;
     public bool PurgeCacheOnMinimize { get; set; }
     public bool StartupDiagnostics { get; set; }
-    public int PrefetchDepth { get; set; } = 5;
-    public bool PrefetchSiblingFolders { get; set; }
-    public int PrefetchSiblingFolderImageCount { get; set; } = 3;
-    public int CacheItems { get; set; } = 16;
-    public int CompressedCacheMegabytes { get; set; } = 256;
-    public int DecodedCacheMegabytes { get; set; } = 256;
-    public int RapidPreviewLongestSide { get; set; } = 3000;
+    public int PrefetchDepth { get; set; } = 15;
+    public bool PrefetchSiblingFolders { get; set; } = true;
+    public int PrefetchSiblingFolderImageCount { get; set; } = 7;
+    public int CacheItems { get; set; } = 20;
+    public int CompressedCacheMegabytes { get; set; } = 999;
+    public int DecodedCacheMegabytes { get; set; } = 999;
+    public int RapidPreviewLongestSide { get; set; } = 2400;
     // Reduced-resolution frame used specifically while rapid keyboard/wheel browsing is active.
     // Presets stage sensible defaults, but the user may override this independently afterwards.
-    public int RapidBrowsePreviewLongestSide { get; set; } = 1440;
+    public int RapidBrowsePreviewLongestSide { get; set; } = 3500;
     public bool ProgressiveColorFirstPreview { get; set; } = true;
     // "Fast", "Balanced", or "Full quality". The stock Balanced performance preset intentionally
     // uses Full quality while dragging/panning; users can still override this independently.
@@ -235,9 +253,17 @@ public sealed record GlideSettingsState
     /// <summary>Where the floating status bar sits: Center (default), Left or Right.</summary>
     /// <summary>When collapsed, park the expand button in the lower-right corner, away from the image.</summary>
     public bool StatusCollapsedToCorner { get; set; } = true;
+    /// <summary>Windows-taskbar style auto-hide: the status bar is fully hidden until the pointer reaches the bottom edge.</summary>
+    public bool StatusAutoHide { get; set; }
+    /// <summary>Adjustment in DIP (-40..300, default 0 = exactly the box the status bar occupies) of the invisible area that reveals a collapsed or auto-hidden status bar.</summary>
+    public int StatusRevealZoneExpand { get; set; } = Glide.Core.StatusBarAutoHide.DefaultRevealZoneExpand;
     public string StatusBarAlignment { get; set; } = "Center";
     public int StatusBarGlobalScalePercent { get; set; } = 100;
     public bool StatusBarAutoFit { get; set; } = true;
+    /// <summary>On (default): the file information always sits on its own line above the button groups, even when everything would fit on one line.</summary>
+    public bool StatusStackInfoLine { get; set; } = true;
+    /// <summary>Fit modes size the image to the area above the visible status bar instead of under it.</summary>
+    public bool StatusReserveFitSpace { get; set; }
     public int StatusBarMaximizedBoostPercent { get; set; } = 15;
 
     // Slideshow
@@ -264,6 +290,8 @@ public sealed record GlideSettingsState
     public bool DetachedWindowHomeTab { get; set; }
     public bool DoubleClickTabCloses { get; set; } = true;
     public bool MiddleClickTabCloses { get; set; } = true;
+    // Filename size in the tab tooltip: "Small", "Medium" (default) or "Large".
+    public string TabToolTipTextSize { get; set; } = "Medium";
     // "Tab order" cycles left-to-right; "Most recently used" cycles like Alt+Tab while Ctrl is held.
     public string TabCycleOrder { get; set; } = "Tab order";
     // "Open home page", "Keep last tab open", or "Close program". Applies when the user closes the final ordinary tab.
@@ -328,6 +356,8 @@ public sealed record GlideSettingsState
 
     // Hotkeys
     public Dictionary<string, List<string>> Hotkeys { get; set; } = HotkeyCatalog.CreateDefaultMap();
+    /// <summary>User-saved keyboard mappings, offered next to the built-in presets. Older files simply have none.</summary>
+    public List<CustomHotkeyPreset> CustomHotkeyPresets { get; set; } = new();
 
     // Windows Integration
     public string ExternalProgram1 { get; set; } = string.Empty;
@@ -341,10 +371,29 @@ public sealed record GlideSettingsState
     public double WindowHeight { get; set; }
     public bool WindowWasMaximized { get; set; }
 
+    // Settings window placement: remembered when the Settings window closes and restored when it opens.
+    // Position is in device pixels, size in DIPs (the size of the window when not maximized); a width or
+    // height of 0 means nothing has been saved yet and the compact default size is used.
+    public int SettingsWindowX { get; set; } = int.MinValue;
+    public int SettingsWindowY { get; set; } = int.MinValue;
+    public double SettingsWindowWidth { get; set; }
+    public double SettingsWindowHeight { get; set; }
+    public bool SettingsWindowWasMaximized { get; set; }
+
+    // Every other window's remembered placement (Print, Settings, dialogs ...), keyed by a stable window id
+    // (see Glide.App.Services.WindowPlacementCatalog). Older files simply have none; Settings also falls back to the
+    // SettingsWindow* properties above. Owned at runtime by WindowPlacementService, which overlays its live copy
+    // whenever the main window saves settings.
+    public Dictionary<string, WindowPlacementState> WindowPlacements { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
     public GlideSettingsState CloneState() => this with
     {
+        WindowPlacements = ClonePlacements(WindowPlacements),
         Hotkeys = Hotkeys.ToDictionary(kv => kv.Key, kv => kv.Value.ToList(), StringComparer.OrdinalIgnoreCase),
         Gestures = Gestures.ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase),
+        CustomGestures = (CustomGestures ?? new()).Where(x => x is not null).Select(x => x.Clone()).ToList(),
+        CustomHotkeyPresets = (CustomHotkeyPresets ?? new()).Where(x => x is not null).Select(x => x.Clone()).ToList(),
+        GestureRecentActions = (GestureRecentActions ?? new()).ToList(),
         TitleBarButtons = TitleBarButtonCatalog.Normalize(TitleBarButtons).ToList()
     };
 
@@ -372,7 +421,27 @@ public sealed record GlideSettingsState
         right.Gestures = ignoredGestures;
         left.TitleBarButtons = ignoredTitleBarButtons;
         right.TitleBarButtons = ignoredTitleBarButtons;
+        var leftCustom = left.CustomGestures;
+        var rightCustom = right.CustomGestures;
+        var leftRecent = left.GestureRecentActions;
+        var rightRecent = right.GestureRecentActions;
+        var leftPresets = left.CustomHotkeyPresets;
+        var rightPresets = right.CustomHotkeyPresets;
+        var ignoredPresets = new List<CustomHotkeyPreset>();
+        left.CustomHotkeyPresets = ignoredPresets; right.CustomHotkeyPresets = ignoredPresets;
+        var ignoredCustom = new List<CustomGesture>();
+        var ignoredRecent = new List<string>();
+        left.CustomGestures = ignoredCustom; right.CustomGestures = ignoredCustom;
+        left.GestureRecentActions = ignoredRecent; right.GestureRecentActions = ignoredRecent;
+        var leftPlacements = left.WindowPlacements;
+        var rightPlacements = right.WindowPlacements;
+        var ignoredPlacements = new Dictionary<string, WindowPlacementState>(StringComparer.OrdinalIgnoreCase);
+        left.WindowPlacements = ignoredPlacements; right.WindowPlacements = ignoredPlacements;
         if (!Equals(left, right)) return false;
+        if (!WindowPlacementsEqual(leftPlacements, rightPlacements)) return false;
+        if (!CustomGesturesEqual(leftCustom, rightCustom)) return false;
+        if (!CustomHotkeyPresetsEqual(leftPresets, rightPresets)) return false;
+        if (!leftRecent.SequenceEqual(rightRecent, StringComparer.OrdinalIgnoreCase)) return false;
         if (leftHotkeys.Count != rightHotkeys.Count) return false;
         foreach (var kv in leftHotkeys)
         {
@@ -387,6 +456,120 @@ public sealed record GlideSettingsState
         if (!leftTitleBarButtons.SequenceEqual(rightTitleBarButtons, StringComparer.OrdinalIgnoreCase)) return false;
         return true;
     }
+
+    internal static Dictionary<string, WindowPlacementState> ClonePlacements(Dictionary<string, WindowPlacementState>? source) =>
+        (source ?? new()).Where(kv => !string.IsNullOrWhiteSpace(kv.Key) && kv.Value is not null)
+            .ToDictionary(kv => kv.Key, kv => kv.Value with { }, StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Semantic equality of two per-window placement stores (same keys, case-insensitive, and the same geometry; the last-used stamp is ignored).</summary>
+    internal static bool WindowPlacementsEqual(Dictionary<string, WindowPlacementState>? a, Dictionary<string, WindowPlacementState>? b)
+    {
+        a ??= new(); b ??= new();
+        if (a.Count != b.Count) return false;
+        foreach (var kv in a)
+        {
+            var other = b.FirstOrDefault(x => string.Equals(x.Key, kv.Key, StringComparison.OrdinalIgnoreCase)).Value;
+            if (other is null || kv.Value is null || !kv.Value.SameGeometry(other)) return false;
+        }
+        return true;
+    }
+
+    internal static bool CustomHotkeyPresetsEqual(IReadOnlyList<CustomHotkeyPreset> a, IReadOnlyList<CustomHotkeyPreset> b)
+    {
+        if (a.Count != b.Count) return false;
+        for (var i = 0; i < a.Count; i++)
+        {
+            if (!string.Equals(a[i].Name, b[i].Name, StringComparison.OrdinalIgnoreCase)) return false;
+            var left = a[i].Hotkeys ?? new();
+            var right = b[i].Hotkeys ?? new();
+            if (left.Count != right.Count) return false;
+            foreach (var pair in left)
+                if (!right.TryGetValue(pair.Key, out var values) || !pair.Value.SequenceEqual(values, StringComparer.OrdinalIgnoreCase)) return false;
+        }
+        return true;
+    }
+
+    internal static bool CustomGesturesEqual(IReadOnlyList<CustomGesture> a, IReadOnlyList<CustomGesture> b)
+    {
+        if (a.Count != b.Count) return false;
+        for (var i = 0; i < a.Count; i++)
+        {
+            if (!string.Equals(a[i].Area, b[i].Area, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(a[i].Input, b[i].Input, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(a[i].Modifier, b[i].Modifier, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(a[i].Action, b[i].Action, StringComparison.OrdinalIgnoreCase)) return false;
+        }
+        return true;
+    }
+
+    /// <summary>The folded 4.7 mouse toggles as stored in this state (migration input).</summary>
+    public LegacyMouseToggles ToLegacyMouseToggles() => new()
+    {
+        DoubleClickFullscreen = DoubleClickFullscreen,
+        DoubleClickExitFullscreen = DoubleClickExitFullscreen,
+        FullscreenClickNavigation = FullscreenClickNavigation,
+        WindowedWheelZoom = WindowedWheelZoom,
+        CtrlWheelZoom = CtrlWheelZoom,
+        LeftDragMode = LeftDragMode,
+        SelectionClickZoom = SelectionClickZoom,
+        SelectionRightClickZoomOut = SelectionRightClickZoomOut,
+        MiddleDragPan = MiddleDragPan,
+        OverlayWheelZoom = OverlayWheelZoom,
+        OverlayRightDragPan = OverlayRightDragPan,
+        SlideshowLeftClickAction = SlideshowLeftClickAction,
+        SlideshowRightClickStops = SlideshowRightClickStops,
+        DoubleClickTabCloses = DoubleClickTabCloses,
+        MiddleClickTabCloses = MiddleClickTabCloses,
+        ExplorerOpenImagesWith = ExplorerOpenImagesWith
+    };
+
+    /// <summary>
+    /// Converts the folded toggles into explicit gesture bindings and then resets them to their stock
+    /// values, so they are inert afterwards (runtime reads only the gesture map).
+    /// </summary>
+    public void FoldLegacyMouseToggles()
+    {
+        Gestures ??= GestureCatalog.CreateDefaultMap();
+        GestureLegacyMigration.Apply(Gestures, ToLegacyMouseToggles());
+        var d = new GlideSettingsState();
+        DoubleClickFullscreen = d.DoubleClickFullscreen;
+        DoubleClickExitFullscreen = d.DoubleClickExitFullscreen;
+        FullscreenClickNavigation = d.FullscreenClickNavigation;
+        WindowedWheelZoom = d.WindowedWheelZoom;
+        CtrlWheelZoom = d.CtrlWheelZoom;
+        LeftDragMode = d.LeftDragMode;
+        SelectionClickZoom = d.SelectionClickZoom;
+        SelectionRightClickZoomOut = d.SelectionRightClickZoomOut;
+        MiddleDragPan = d.MiddleDragPan;
+        OverlayWheelZoom = d.OverlayWheelZoom;
+        OverlayRightDragPan = d.OverlayRightDragPan;
+        SlideshowLeftClickAction = d.SlideshowLeftClickAction;
+        SlideshowRightClickStops = d.SlideshowRightClickStops;
+        DoubleClickTabCloses = d.DoubleClickTabCloses;
+        MiddleClickTabCloses = d.MiddleClickTabCloses;
+        ExplorerOpenImagesWith = d.ExplorerOpenImagesWith;
+    }
+}
+
+/// <summary>
+/// One remembered window geometry in <see cref="GlideSettingsState.WindowPlacements"/>. Position is in device pixels
+/// (outer top-left; <see cref="int.MinValue"/> = none), size in DIPs (client size when not maximized; 0 = none, which is
+/// what position-only dialogs store).
+/// </summary>
+public sealed record WindowPlacementState
+{
+    public int X { get; set; } = int.MinValue;
+    public int Y { get; set; } = int.MinValue;
+    public double Width { get; set; }
+    public double Height { get; set; }
+    public bool Maximized { get; set; }
+    public long LastUsedUtcTicks { get; set; }
+
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool HasSize => Width > 0 && Height > 0 && !double.IsNaN(Width) && !double.IsNaN(Height);
+
+    public bool SameGeometry(WindowPlacementState other) =>
+        X == other.X && Y == other.Y && Width.Equals(other.Width) && Height.Equals(other.Height) && Maximized == other.Maximized;
 }
 
 public sealed record OverlayWindowPlacementState
@@ -396,4 +579,32 @@ public sealed record OverlayWindowPlacementState
     public double Width { get; set; }
     public double Height { get; set; }
     public long LastUsedUtcTicks { get; set; }
+}
+
+/// <summary>Values of <see cref="GlideSettingsState.ShowInExplorerTarget"/> (also the Settings combo item texts).</summary>
+public static class ShowInExplorerTargets
+{
+    public const string GlideTab = "Glide's Explorer tab";
+    public const string WindowsExplorer = "Windows File Explorer";
+
+    /// <summary>
+    /// Maps any stored value to one of the two choices. Unknown / empty values and the legacy hidden
+    /// "Windows Explorer" default (which every pre-4.8 file carried without the user ever choosing it)
+    /// become the new default; "Internal browser" meant Glide's own browser; only the explicit new
+    /// "Windows File Explorer" value keeps Windows File Explorer.
+    /// </summary>
+    public static string Normalize(string? value) =>
+        string.Equals(value?.Trim(), WindowsExplorer, StringComparison.OrdinalIgnoreCase) ? WindowsExplorer : GlideTab;
+
+    public static bool IsWindowsExplorer(string? value) => Normalize(value) == WindowsExplorer;
+}
+
+/// <summary>Explorer tab view choices (Settings combo item texts, in menu order).</summary>
+public static class ExplorerDefaultViews
+{
+    public static readonly string[] All = ["Extra large icons", "Large icons", "Medium icons", "Small icons", "List", "Details"];
+    public const string Default = "Large icons";
+
+    public static string Normalize(string? value) =>
+        All.FirstOrDefault(x => string.Equals(x, value?.Trim(), StringComparison.OrdinalIgnoreCase)) ?? Default;
 }

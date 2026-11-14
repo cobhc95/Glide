@@ -58,7 +58,11 @@ public static class ProfileStore
     public static GlideSettingsState? Load(Guid id)
     {
         var profile = LoadDocument().Profiles.FirstOrDefault(p => p.Id == id);
-        return profile?.Settings.CloneState();
+        if (profile?.Settings.CloneState() is not { } state) return null;
+        // Profiles saved before 4.8.0 still describe mouse behaviour through the folded toggles.
+        SettingsStore.MigrateLegacyMouseToggles(state, state.SettingsSchemaVersion);
+        SettingsStore.MigrateDefaultsSchema8(state, state.SettingsSchemaVersion);
+        return state;
     }
 
     public static string Rename(Guid id, string name)

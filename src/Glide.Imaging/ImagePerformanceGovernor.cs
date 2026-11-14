@@ -6,7 +6,10 @@ public sealed record ImageHardwareProfile(GlideHardwareTier Tier, int LogicalPro
 {
     public int ForegroundDecodeLanes => Tier == GlideHardwareTier.Constrained ? 1 : 2;
     public int CompressedWarmLanes => Tier == GlideHardwareTier.Constrained ? 1 : Tier == GlideHardwareTier.HighEnd ? 4 : 2;
-    public int SpeculativeDecodeLanes => Tier == GlideHardwareTier.Constrained ? 1 : Tier == GlideHardwareTier.HighEnd ? 3 : 2;
+    // High-end: a quarter of the logical processors, 3..6 (4 on a 16-thread CPU; was a fixed 3). The
+    // prefetch run now decodes that many neighbours concurrently (it used to decode one at a time); the
+    // foreground keeps its own lanes and cancels stale speculation on a miss, and a jump drops to 1 lane.
+    public int SpeculativeDecodeLanes => Tier == GlideHardwareTier.Constrained ? 1 : Tier == GlideHardwareTier.HighEnd ? Math.Clamp(LogicalProcessors / 4, 3, 6) : 2;
     public long MaxSpeculativeCompressedFileBytes => Tier switch
     {
         GlideHardwareTier.Constrained => 32L * 1024 * 1024,
@@ -34,6 +37,15 @@ public static class ImagePerformanceGovernor
     private static readonly Lazy<ImageHardwareProfile> CurrentProfile = new(Detect, LazyThreadSafetyMode.ExecutionAndPublication);
     public static ImageHardwareProfile Current => CurrentProfile.Value;
 
+    /// <summary>Concurrent neighbour (prefetch) decodes for this machine's hardware tier.</summary>
+    public static int SpeculativeDecodeLanes => Current.SpeculativeDecodeLanes;
+
+    /// <summary>
+    /// Concurrent Explorer thumbnail decodes: a quarter of the logical processors, 2..6 (4 on a 16-thread
+    /// desktop, 2 on a 4-thread laptop). Measured: 8 lanes were no faster than 4 and slowed tab switches.
+    /// </summary>
+    public static int ThumbnailDecodeLanes => Math.Clamp(Current.LogicalProcessors / 4, 2, 6);
+
     /// <summary>
     /// Returns the largest file eligible for speculative managed-byte caching. The limit is tied
     /// to the active cache budget and current memory pressure so a single neighbour cannot consume
@@ -56,14 +68,6 @@ public static class ImagePerformanceGovernor
         }
         catch { }
         return Math.Max(8L * 1024 * 1024, Math.Min(Current.MaxSpeculativeCompressedFileBytes, Math.Min(budgetLimit, availableLimit)));
-    }
-
-    public static int ChoosePreviewLongestSide(int configuredMaximum, int viewportLongestPhysicalPixels)
-    {
-        configuredMaximum = Math.Clamp(configuredMaximum, 480, 4096);
-        if (viewportLongestPhysicalPixels <= 0) return configuredMaximum;
-        var target = checked((int)Math.Ceiling(viewportLongestPhysicalPixels * Current.ViewportPreviewScale));
-        return Math.Clamp(Math.Min(configuredMaximum, target), 480, configuredMaximum);
     }
 
     public static (int Width, int Height) ChoosePreviewBounds(int configuredMaximum, int viewportWidthPhysicalPixels, int viewportHeightPhysicalPixels)

@@ -1,7 +1,6 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
-using Avalonia.Controls.Primitives.PopupPositioning;
 using Avalonia.Markup.Xaml;
 using Avalonia.Threading;
 using Glide.App.Services;
@@ -119,29 +118,8 @@ public partial class App : Application
         GlidePerformanceTrace.Mark("avalonia_xaml_start");
         AvaloniaXamlLoader.Load(this);
         GlidePerformanceTrace.Mark("avalonia_xaml_end");
-        RegisterToolTipPlacement();
-    }
-
-    /// <summary>
-    /// Avalonia opens tooltips at the pointer by default, so the popup lands on top of the hovered
-    /// toolbar button: the button can no longer be clicked and, because the pointer is now over the
-    /// popup, moving onto a neighbouring button never closes it. Anchor every tooltip to its control
-    /// instead, opening away from the window edge the control sits on (above for the bottom status
-    /// bar, below for the title/tab bar), so it never covers the control row.
-    /// </summary>
-    private static void RegisterToolTipPlacement()
-    {
-        ToolTip.ToolTipOpeningEvent.AddClassHandler<Control>((control, _) =>
-        {
-            if (TopLevel.GetTopLevel(control) is not { } top) return;
-            var origin = control.TranslatePoint(default, top);
-            if (origin is null) return;
-            var centerY = origin.Value.Y + control.Bounds.Height / 2;
-            var lowerHalf = centerY > top.Bounds.Height / 2;
-            ToolTip.SetPlacement(control, lowerHalf ? PlacementMode.Top : PlacementMode.Bottom);
-            ToolTip.SetHorizontalOffset(control, 0);
-            ToolTip.SetVerticalOffset(control, lowerHalf ? -6 : 6);
-        }, handledEventsToo: true);
+        ToolTipGuard.Register();
+        PopupCursorGuard.Register();
     }
 
     public override void OnFrameworkInitializationCompleted()

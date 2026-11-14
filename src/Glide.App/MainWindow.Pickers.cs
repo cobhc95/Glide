@@ -1,34 +1,11 @@
-﻿using System.Diagnostics;
-using System.Collections.ObjectModel;
-using System.Runtime.InteropServices;
-using System.Text.Json;
-using Avalonia;
-using Avalonia.Controls;
-using Avalonia.Controls.ApplicationLifetimes;
-using Avalonia.Controls.Primitives;
-using Avalonia.Controls.Templates;
-using Avalonia.Input;
+﻿using Avalonia.Input;
 using Avalonia.Interactivity;
-using Avalonia.Layout;
-using Avalonia.Media;
-using Avalonia.Media.Imaging;
 using Avalonia.Platform.Storage;
-using Avalonia.Styling;
 using Avalonia.Threading;
-using Avalonia.VisualTree;
-using Glide.App.Controls;
-using Glide.App.Diagnostics;
-using Glide.App.Platform;
-using Glide.App.Printing;
 using Glide.App.Settings;
-using Glide.App.Services;
 using Glide.Core;
-using Glide.Core.Commands;
+using Glide.Core.Navigation;
 using Glide.Core.Workspace;
-using Glide.Imaging;
-using Glide.Input;
-using Glide.Diagnostics.Runtime;
-using Microsoft.VisualBasic.FileIO;
 
 namespace Glide.App;
 
@@ -204,6 +181,8 @@ public partial class MainWindow
 
     private void DragOverReceived(object? sender, DragEventArgs e)
     {
+        // Drags that start inside the Explorer tab are the Explorer's own (move/copy between folders).
+        if (ExplorerDragPaths(e) is not null) return;
         // Without an explicit effect Windows shows the "not allowed" cursor and never delivers Drop.
         e.DragEffects = e.DataTransfer.TryGetFiles() is { Length: > 0 } ? DragDropEffects.Copy : DragDropEffects.None;
         e.Handled = true;
@@ -211,6 +190,7 @@ public partial class MainWindow
 
     private async void DropReceived(object? sender, DragEventArgs e)
     {
+        if (ExplorerDragPaths(e) is not null) return;
         // The main viewer shows images only; dropped videos open as Window-in-Window overlays.
         var droppedVideos = e.DataTransfer.TryGetFiles()?.Select(x => x.TryGetLocalPath())
             .Where(x => !string.IsNullOrWhiteSpace(x) && File.Exists(x) && VideoFormatRegistry.IsVideo(x)).ToArray();
@@ -234,20 +214,6 @@ public partial class MainWindow
         await OpenAsImageTabAsync(path);
     }
 
-    private void PreviousFolderTopClicked(object? sender, RoutedEventArgs e) => _ = RunSerializedNavigationResultAsync(() => TryNavigateSiblingFolderAsync(-1));
-    private void NextFolderTopClicked(object? sender, RoutedEventArgs e) => _ = RunSerializedNavigationResultAsync(() => TryNavigateSiblingFolderAsync(1));
-    private void PreviousFolderClicked(object? sender, RoutedEventArgs e) => _ = RunSerializedNavigationResultAsync(() => TryNavigateSiblingFolderAsync(-1));
-    private void NextFolderClicked(object? sender, RoutedEventArgs e) => _ = RunSerializedNavigationResultAsync(() => TryNavigateSiblingFolderAsync(1));
-
-    private async void ExploreFolderClicked(object? sender, RoutedEventArgs e)
-    {
-        var folder = string.IsNullOrWhiteSpace(_currentPath) ? null : Path.GetDirectoryName(_currentPath);
-        if (folder is null || !Directory.Exists(folder)) return;
-        _workspace.AddBrowser(folder);
-        RebuildTabStrip();
-        await ActivateWorkspaceAsync();
-    }
-
     private void NavigateBrowserTo(string folder, bool addHistory, string? highlightPath = null)
     {
         if (_workspace.Active is not BrowserTabState browser || !Directory.Exists(folder)) return;
@@ -255,68 +221,44 @@ public partial class MainWindow
         _settings.LastNewExplorerTabDirectory = folder;
         SaveSettingsAndPublish();
         var id = browser.Id;
-        if (!_browserSessions.TryGetValue(id, out var session)) _browserSessions[id] = session = new BrowserSession();
+        // One history per tab (MainWindow.History.cs): folders are entries next to an image opened from this tab and Home.
+        var history = HistoryFor(browser);
+        var highlight = NormalizeBrowserHighlight(folder, highlightPath);
 
         if (addHistory)
         {
-            // Preserve the item the user was on before leaving this folder. Going Back therefore
-            // restores the correct child/file instead of carrying a stale selection from another
-            // directory.
-            CaptureCurrentBrowserSelection(session);
-
-            _tabForwardFolderTargets.Remove(id);
-            _tabForwardImageTargets.Remove(id);
-            if (session.Index >= 0 && session.Index < session.History.Count - 1)
-            {
-                var remove = session.History.Count - session.Index - 1;
-                EnsureBrowserHighlightSlots(session);
-                session.History.RemoveRange(session.Index + 1, remove);
-                session.Highlights.RemoveRange(session.Index + 1, remove);
-            }
-
-            if (session.History.Count == 0 || !string.Equals(session.History[^1], folder, StringComparison.OrdinalIgnoreCase))
-            {
-                session.History.Add(folder);
-                session.Highlights.Add(NormalizeBrowserHighlight(folder, highlightPath));
-                session.Index = session.History.Count - 1;
-            }
-            else
-            {
-                session.Index = session.History.Count - 1;
-                SetBrowserHistoryHighlight(session, session.Index, folder, highlightPath);
-            }
+            // Preserve the item the user was on (and the scroll) before leaving this folder. Going Back therefore
+            // restores the correct child/file instead of carrying a stale selection from another directory.
+            CaptureExplorerHistoryEntry(history, browser);
+            // Like a browser: the Forward entries are dropped; the same folder again only updates its highlight.
+            history.Push(NavigationEntry.Explorer(folder, highlight));
         }
-        else if (session.History.Count == 0)
+        else if (history.Current is { Kind: NavigationEntryKind.Explorer } current && NavigationEntry.PathsEqual(current.Path, folder))
         {
-            session.History.Add(folder);
-            session.Highlights.Add(NormalizeBrowserHighlight(folder, highlightPath));
-            session.Index = 0;
+            if (highlight is not null) history.UpdateCurrent(entry => entry with { SelectedPath = highlight });
         }
-        else if (!string.IsNullOrWhiteSpace(highlightPath))
+        else
         {
-            SetBrowserHistoryHighlight(session, session.Index, folder, highlightPath);
+            // Shown without an explicit history step (first show of the tab, a refresh after the tab turned into an
+            // Explorer view): recorded like any other location.
+            history.Record(NavigationEntry.Explorer(folder, highlight));
         }
 
         _workspace.ReplaceActiveBrowserFolder(folder);
         if (_workspace.Active is BrowserTabState activeBrowser)
-            _workspace.ReplaceTab(activeBrowser with
-            {
-                Navigation = new BrowserNavigationState(session.History.ToArray(), session.Index, session.Highlights.ToArray())
-            });
+            _workspace.ReplaceTab(activeBrowser with { Navigation = BrowserNavigationFor(id) });
 
-        BrowserAddressBox.Text = folder;
         RefreshManagedBrowser(folder);
-        BrowserBackButton.IsEnabled = session.Index > 0 || (_tabForwardImageTargets.TryGetValue(id, out var backTarget) && File.Exists(backTarget));
-        BrowserForwardButton.IsEnabled = session.Index >= 0 && session.Index < session.History.Count - 1;
-        BrowserUpButton.IsEnabled = Directory.GetParent(folder) is not null;
+        UpdateExplorerNavigationState(folder);
         Title = AppVersion.ExplorerTitle(folder);
         RebuildTabStrip();
         SelectBrowserHighlight(id);
         UpdateTabNavigationButtons();
+        NoteExplorerSessionChanged();
         _diagnostics.Write("browser", "navigate", new
         {
-            folder, addHistory, historyIndex = session.Index, historyCount = session.History.Count,
-            highlight = CurrentBrowserHistoryHighlight(session)
+            folder, addHistory, historyIndex = history.Index, historyCount = history.Count,
+            highlight = CurrentBrowserHistoryHighlight(id)
         });
     }
 
@@ -332,34 +274,12 @@ public partial class MainWindow
         catch { return null; }
     }
 
-    private static void EnsureBrowserHighlightSlots(BrowserSession session)
+    /// <summary>The item the active Explorer folder should select from the tab history (null: none remembered).</summary>
+    private string? CurrentBrowserHistoryHighlight(Guid tabId)
     {
-        while (session.Highlights.Count < session.History.Count) session.Highlights.Add(null);
-        if (session.Highlights.Count > session.History.Count)
-            session.Highlights.RemoveRange(session.History.Count, session.Highlights.Count - session.History.Count);
-    }
-
-    private static string? CurrentBrowserHistoryHighlight(BrowserSession session)
-    {
-        EnsureBrowserHighlightSlots(session);
-        return session.Index >= 0 && session.Index < session.Highlights.Count ? session.Highlights[session.Index] : null;
-    }
-
-    private static void SetBrowserHistoryHighlight(BrowserSession session, int index, string folder, string? target)
-    {
-        EnsureBrowserHighlightSlots(session);
-        if (index < 0 || index >= session.History.Count) return;
-        session.Highlights[index] = NormalizeBrowserHighlight(folder, target);
-    }
-
-    private void CaptureCurrentBrowserSelection(BrowserSession session)
-    {
-        if (_workspace.Active is not BrowserTabState browser || session.Index < 0 || session.Index >= session.History.Count) return;
-        var selected = _browserCurrentIndex >= 0 && _browserCurrentIndex < _browserEntries.Count
-            ? _browserEntries[_browserCurrentIndex].Path
-            : _browserSelection.FirstOrDefault();
-        if (!string.IsNullOrWhiteSpace(selected))
-            SetBrowserHistoryHighlight(session, session.Index, browser.Folder, selected);
+        if (!_tabHistories.TryGetValue(tabId, out var history) || history.Current is not { Kind: NavigationEntryKind.Explorer } current) return null;
+        if (_workspace.Tabs.FirstOrDefault(t => t.Id == tabId) is BrowserTabState browser && !NavigationEntry.PathsEqual(current.Path, browser.Folder)) return null;
+        return current.SelectedPath;
     }
 
     private void NativeExplorerFolderNavigated(string folder)
@@ -373,38 +293,19 @@ public partial class MainWindow
         SaveSettingsAndPublish();
         if (string.Equals(browser.Folder, folder, StringComparison.OrdinalIgnoreCase)) return;
 
+        var history = HistoryFor(browser);
+        CaptureExplorerHistoryEntry(history, browser);
+        history.Push(NavigationEntry.Explorer(folder));
         _workspace.ReplaceActiveBrowserFolder(folder);
-        if (!_browserSessions.TryGetValue(browser.Id, out var session)) _browserSessions[browser.Id] = session = new BrowserSession();
-        CaptureCurrentBrowserSelection(session);
-        if (session.Index >= 0 && session.Index < session.History.Count - 1)
-        {
-            var remove = session.History.Count - session.Index - 1;
-            EnsureBrowserHighlightSlots(session);
-            session.History.RemoveRange(session.Index + 1, remove);
-            session.Highlights.RemoveRange(session.Index + 1, remove);
-        }
-        if (session.History.Count == 0 || !string.Equals(session.History[^1], folder, StringComparison.OrdinalIgnoreCase))
-        {
-            session.History.Add(folder);
-            session.Highlights.Add(null);
-            session.Index = session.History.Count - 1;
-        }
-
         if (_workspace.Active is BrowserTabState activeBrowser)
-            _workspace.ReplaceTab(activeBrowser with
-            {
-                Navigation = new BrowserNavigationState(session.History.ToArray(), session.Index, session.Highlights.ToArray())
-            });
+            _workspace.ReplaceTab(activeBrowser with { Navigation = BrowserNavigationFor(browser.Id) });
 
-        BrowserAddressBox.Text = folder;
-        BrowserBackButton.IsEnabled = session.Index > 0 || (_tabForwardImageTargets.TryGetValue(browser.Id, out var nativeBackTarget) && File.Exists(nativeBackTarget));
-        BrowserForwardButton.IsEnabled = session.Index >= 0 && session.Index < session.History.Count - 1;
-        BrowserUpButton.IsEnabled = Directory.GetParent(folder) is not null;
+        UpdateExplorerNavigationState(folder);
         Title = AppVersion.ExplorerTitle(folder);
         RebuildTabStrip();
         SelectBrowserHighlight(browser.Id);
         UpdateTabNavigationButtons();
-        _diagnostics.Write("browser", "native_navigation", new { folder, historyIndex = session.Index, historyCount = session.History.Count });
+        _diagnostics.Write("browser", "native_navigation", new { folder, historyIndex = history.Index, historyCount = history.Count });
     }
 
     private async void NativeExplorerFileActivated(string path)

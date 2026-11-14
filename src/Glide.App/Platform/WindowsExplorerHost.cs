@@ -1,7 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.Marshalling;
 using System.Text;
-using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Platform;
 

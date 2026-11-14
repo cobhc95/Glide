@@ -1,34 +1,14 @@
-﻿using System.Diagnostics;
-using System.Collections.ObjectModel;
-using System.Runtime.InteropServices;
-using System.Text.Json;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Controls.Primitives;
-using Avalonia.Controls.Templates;
 using Avalonia.Input;
 using Avalonia.Interactivity;
-using Avalonia.Layout;
 using Avalonia.Media;
-using Avalonia.Media.Imaging;
-using Avalonia.Platform.Storage;
-using Avalonia.Styling;
-using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Glide.App.Controls;
-using Glide.App.Diagnostics;
-using Glide.App.Platform;
-using Glide.App.Printing;
-using Glide.App.Settings;
+
 using Glide.App.Services;
-using Glide.Core;
-using Glide.Core.Commands;
-using Glide.Core.Workspace;
-using Glide.Imaging;
-using Glide.Input;
-using Glide.Diagnostics.Runtime;
-using Microsoft.VisualBasic.FileIO;
 
 namespace Glide.App;
 
@@ -118,7 +98,7 @@ public partial class MainWindow
                 Opacity = 0.01, Focusable = false, ZIndex = 2
             };
             ToolTip.SetTip(button, tip);
-            button.Click += (_, _) => Viewport.ZoomBy(zoomIn ? 1.15 : 1.0 / 1.15);
+            button.Click += (_, _) => Viewport.ZoomStep(zoomIn);
             return button;
         }
         var zoomOutHit = ZoomHit("Zoom out", false);
@@ -183,7 +163,6 @@ public partial class MainWindow
         chrome.TopmostActive = _settings.OverlayAlwaysOnTop;
         _wholeAppOverlayChromeVisual = chrome;
         _wholeAppOverlayOpacityHitTarget = opacityHit;
-        _wholeAppOverlayResizeGrip = null;
         _wholeAppOverlayControlsHost = host;
         return host;
     }
@@ -234,7 +213,7 @@ public partial class MainWindow
         var viewportPoint = e.GetPosition(Viewport);
         var zoomIn = e.Delta.Y > 0;
         if (_settings.InvertWheelDirection) zoomIn = !zoomIn;
-        Viewport.ZoomBy(zoomIn ? 1.12 : 1.0 / 1.12, viewportPoint);
+        Viewport.ZoomBy(zoomIn ? Viewport.WheelZoomFactor : 1.0 / Viewport.WheelZoomFactor, viewportPoint);
         AlignWholeAppOverlayChromeToPixels();
         e.Handled = true;
     }
@@ -432,47 +411,47 @@ public partial class MainWindow
     {
         if (!_wholeAppOverlayMode)
         {
-            var enter = new MenuItem { Header = "Enter Overlay (Window-in-Window) Mode", Icon = MenuIcon("Overlays") };
+            var enter = MenuActions.Tag(new MenuItem { Header = MenuActions.Header("Enter Overlay (Window-in-Window) Mode", ShortcutForAction("overlay.toggleMode")), Icon = MenuIcon("Overlays") }, "overlay.toggleMode");
             enter.Click += (_, _) => EnterWholeAppOverlayMode();
             items.Add(enter);
             return;
         }
 
-        var interactions = new MenuItem
+        var interactions = MenuActions.Tag(new MenuItem
         {
             Header = _settings.WholeAppOverlayUseWindowedInteractions
                 ? "Interaction: Windowed mode  ✓"
                 : "Interaction: Overlay mode  ✓",
             Icon = MenuIcon("Mouse")
-        };
+        }, "setting.overlay.wholeAppWindowedInteractions");
         interactions.Click += (_, _) => ToggleWholeAppOverlayInteractionMode();
         items.Add(interactions);
         var sizeMenu = new MenuItem { Header = "Size", Icon = MenuIcon("Maximize") };
         foreach (var percent in new[] { 25, 50, 75, 100, 125, 150, 200 })
         {
-            var choice = new MenuItem { Header = $"{percent}%" };
+            var choice = MenuActions.Context(new MenuItem { Header = $"{percent}%" }, "overlay.windowSizePercent");
             choice.Click += (_, _) => SetWholeAppOverlaySize(percent);
             sizeMenu.Items.Add(choice);
         }
         items.Add(sizeMenu);
         items.Add(new MenuItem { Header = "-" });
 
-        var always = new MenuItem
+        var always = MenuActions.Tag(new MenuItem
         {
             Header = _settings.AlwaysStartWholeAppOverlayMode
                 ? "Always enter Glide in Overlay mode  ✓"
                 : "Always enter Glide in Overlay mode",
             Icon = MenuIcon("Overlays")
-        };
+        }, "setting.overlay.wholeAppAlwaysStart");
         always.Click += (_, _) => ToggleAlwaysStartWholeAppOverlayMode();
         items.Add(always);
 
-        var topmost = new MenuItem { Header = _settings.OverlayAlwaysOnTop ? "Always on top  ✓" : "Always on top", Icon = MenuIcon("AlwaysOnTop") };
+        var topmost = MenuActions.Tag(new MenuItem { Header = _settings.OverlayAlwaysOnTop ? "Always on top  ✓" : "Always on top", Icon = MenuIcon("AlwaysOnTop") }, "window.alwaysTop");
         topmost.Click += (_, _) => AlwaysOnTopClicked(null, new RoutedEventArgs());
         items.Add(topmost);
 
         items.Add(new MenuItem { Header = "-" });
-        var exit = new MenuItem { Header = "Exit Overlay mode", Icon = MenuIcon("Close") };
+        var exit = MenuActions.Tag(new MenuItem { Header = MenuActions.Header("Exit Overlay mode", ShortcutForAction("overlay.toggleMode")), Icon = MenuIcon("Close") }, "overlay.toggleMode");
         exit.Click += (_, _) => ExitWholeAppOverlayMode();
         items.Add(exit);
     }

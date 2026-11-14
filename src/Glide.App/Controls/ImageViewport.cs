@@ -1,5 +1,3 @@
-using System.Diagnostics;
-using System.Runtime.InteropServices;
 using System.Runtime.CompilerServices;
 using Avalonia;
 using Avalonia.Controls;
@@ -36,14 +34,20 @@ public readonly record struct ViewportPresentationFrame(
 
 public sealed class GestureActionRequestedEventArgs : EventArgs
 {
-    public GestureActionRequestedEventArgs(string actionId, Point position)
+    public GestureActionRequestedEventArgs(string actionId, Point position, int wheelStep = 0, string? slotId = null)
     {
         ActionId = actionId;
         Position = position;
+        WheelStep = wheelStep;
+        SlotId = slotId;
     }
 
     public string ActionId { get; }
     public Point Position { get; }
+    /// <summary>For direction-aware wheel actions: -1 (scroll up = previous / back) or +1 (scroll down).</summary>
+    public int WheelStep { get; }
+    /// <summary>The gesture slot that produced the action, when known (slideshow rows use it).</summary>
+    public string? SlotId { get; }
 }
 
 /// <summary>
@@ -78,12 +82,13 @@ public sealed class ImageViewport : Control
     private Point _panStartPointer;
     private bool _panMoved;
     private bool _rightPanGesture;
-    private Point _hoverPointer;
     private bool _hoverSelection;
     private Point _pressPoint;
-    private long _leftPressTicks;
     private bool _leftPressOnImage;
     private bool _rightPressOnImage;
+    // A plain right press on the empty area around the image (or with no image). Its context menu is
+    // deferred to button release exactly like a right press on the image.
+    private bool _rightPressOnBackground;
     private bool _rightPressOnSelection;
     private bool _selectionZoomOutCursorPressed;
     private bool _middlePressOnImage;
@@ -97,7 +102,6 @@ public sealed class ImageViewport : Control
     private Matrix? _selectionViewToImage;
     private Point _selectionStartView;
     private Rect? _selectionViewRect;
-    private Size? _presentationSourceSize;
     private BitmapInterpolationMode _configuredInterpolationMode = BitmapInterpolationMode.MediumQuality;
     private string _interactivePanQuality = "Full quality";
     private bool _interactiveQualityActive;
@@ -109,8 +113,6 @@ public sealed class ImageViewport : Control
     private int _panUpdateCount;
     private double _panTravelPixels;
     private Color _accentColor = Color.Parse("#38A9F5");
-    private IBrush _selectionFill = new SolidColorBrush(Color.FromArgb(30, 56, 169, 245));
-    private IBrush _selectionStroke = new SolidColorBrush(Color.FromArgb(245, 56, 169, 245));
     private readonly Cursor _handCursor = new(StandardCursorType.Hand);
 
     public event EventHandler<int>? BrowseRequested;
@@ -128,8 +130,6 @@ public sealed class ImageViewport : Control
     public long PresentationRequestId => _presentedFrame.RequestId;
     public ViewportPresentationFrame PresentedFrame => _presentedFrame;
     internal void RecordPresentationDrawForTests(long requestId) => PresentationDrawRecorded?.Invoke(requestId);
-
-    public event Action<Bitmap?>? PriorBitmapReleased;
 
     public bool PointerCenteredZoomEnabled { get; set; } = true;
     // Right-drag policy is intentionally independent from stationary right-click/context-menu
@@ -161,15 +161,25 @@ public sealed class ImageViewport : Control
     private DispatcherTimer? _pendingFullscreenClickTimer;
 
     private void CancelPendingFullscreenClick() => _pendingFullscreenClickTimer?.Stop();
-    public bool SlideshowRightClickStopEnabled { get; set; }
     public LeftImageDragMode LeftDragMode { get; set; } = LeftImageDragMode.Selection;
     public IReadOnlyDictionary<string, string>? GestureBindings { get; set; }
+    /// <summary>User-defined gestures; a match for the current input + held key wins over the slot binding.</summary>
+    public IReadOnlyList<CustomGesture>? CustomGestures { get; set; }
+    /// <summary>A slideshow session exists (playing or paused); Slideshow-area rows apply.</summary>
+    public bool SlideshowActive { get; set; }
+    /// <summary>Whole-app Overlay mode: left-drag always moves the window.</summary>
+    public bool ForceLeftDragMoveWindow { get; set; }
+    /// <summary>The slideshow is actively playing (the default right-click stop applies only then).</summary>
+    public bool SlideshowRunning { get; set; }
+    // Held key of the pointer event being handled, used to match custom gestures.
+    private string _gestureModifier = GestureModifiers.None;
+    private void CaptureGestureModifier(KeyModifiers modifiers) =>
+        _gestureModifier = GestureModifiers.From(modifiers.HasFlag(KeyModifiers.Control), modifiers.HasFlag(KeyModifiers.Shift), modifiers.HasFlag(KeyModifiers.Alt));
     public ImageSelectionOverlay? SelectionOverlayTarget { get; set; }
 
     public event Action? SlideshowRightClickStopRequested;
     /// <summary>Raised for a left press on the picture while a slideshow is active and the user chose a left-click action.</summary>
     public event Action? SlideshowLeftClickRequested;
-    public bool SlideshowLeftClickEnabled { get; set; }
 
     public Bitmap? Bitmap
     {
@@ -205,7 +215,6 @@ public sealed class ImageViewport : Control
         var bitmapSize = bitmap is null ? default : new Size(bitmap.PixelSize.Width, bitmap.PixelSize.Height);
 
         _presentedFrame = new ViewportPresentationFrame(bitmap, size, bitmapSize, requestId, path);
-        _presentationSourceSize = bitmap is null ? null : size;
         SetValue(BitmapProperty, bitmap);
         _selectionImage = null;
         _selectionViewRect = null;
@@ -282,8 +291,6 @@ public sealed class ImageViewport : Control
     public void SetAccentColor(Color color)
     {
         _accentColor = color;
-        _selectionFill = new SolidColorBrush(Color.FromArgb(30, color.R, color.G, color.B));
-        _selectionStroke = new SolidColorBrush(Color.FromArgb(245, color.R, color.G, color.B));
         InvalidateVisual();
         InvalidateSelectionOverlay();
     }
@@ -308,20 +315,6 @@ public sealed class ImageViewport : Control
             "Full quality" => "Full quality",
             _ => "Balanced"
         };
-    }
-
-    /// <summary>
-    /// Sets the logical source dimensions used for layout while a decoder-scaled preview is on screen.
-    /// A preview must occupy exactly the same fitted rectangle as the final frame; only its sampling
-    /// resolution may differ. This prevents the Maximum speed first frame from appearing as a small
-    /// image surrounded by black borders and then jumping when refinement arrives.
-    /// </summary>
-    public void SetPresentationSourceSize(int width, int height)
-    {
-        if (width <= 0 || height <= 0) return;
-        _presentationSourceSize = new Size(width, height);
-        _pan = ClampPan(_pan);
-        InvalidateVisual();
     }
 
     private Size CoordinateImageSize => _presentedFrame.SourceSize;
@@ -389,7 +382,7 @@ public sealed class ImageViewport : Control
         if (restoreFull) InvalidateVisual();
     }
 
-    private void InvalidateSelectionOverlayInteractive(bool force = false)
+    private void InvalidateSelectionOverlayInteractive()
     {
         // Hot path: geometry is already in view coordinates. Push four doubles directly to the
         // lightweight overlay and let Avalonia coalesce redundant invalidations naturally. Do not
@@ -411,7 +404,7 @@ public sealed class ImageViewport : Control
     public bool HasSelection => _selectionImage is { Width: > 0, Height: > 0 };
     public bool TryGetSelectionPixelRect(out PixelRect rect)
     {
-        if (Bitmap is not { } bitmap || _selectionImage is not { } selection)
+        if (Bitmap is null || _selectionImage is not { } selection)
         {
             rect = default;
             return false;
@@ -455,6 +448,29 @@ public sealed class ImageViewport : Control
             _lastImageDest.Width + left + right, _lastImageDest.Height + top + bottom);
         return zone.Contains(point);
     }
+    private double _fitBottomInset;
+
+    /// <summary>
+    /// DIPs reserved at the bottom of the viewport (the visible status bar when "Reserve status bar
+    /// space when fitting" is on). Fit modes, centring and pan limits all use the area above it.
+    /// </summary>
+    public double FitBottomInset
+    {
+        get => _fitBottomInset;
+        set
+        {
+            var next = double.IsFinite(value) ? Math.Max(0, value) : 0;
+            if (Math.Abs(next - _fitBottomInset) < 0.5) return;
+            _fitBottomInset = next;
+            _pan = ClampPan(_pan);
+            InvalidateVisual();
+            RaiseViewChanged();
+        }
+    }
+
+    private double ViewWidth => Bounds.Width;
+    private double ViewHeight => Bounds.Height - _fitBottomInset >= 48 ? Bounds.Height - _fitBottomInset : Bounds.Height;
+
     public double CurrentScale => GetScale();
     public int ZoomPercent => (int)Math.Round(CurrentScale * 100);
 
@@ -476,7 +492,7 @@ public sealed class ImageViewport : Control
             _hoverSelection = false;
             Cursor = null;
             if (!_panning) _selectionViewToImage = null;
-            InvalidateSelectionOverlayInteractive(force: true);
+            InvalidateSelectionOverlayInteractive();
         };
         PointerCaptureLost += OnPointerCaptureLost;
         SizeChanged += (_, _) =>
@@ -494,7 +510,8 @@ public sealed class ImageViewport : Control
 
     public void CancelInteraction()
     {
-        var hadInteraction = _panning || _selecting || _leftPressOnImage || _rightPressOnImage || _middlePressOnImage;
+        var hadInteraction = _panning || _selecting || _leftPressOnImage || _rightPressOnImage || _rightPressOnBackground || _middlePressOnImage;
+        _rightPressOnBackground = false;
         if (_selecting) { _selectionImage = null; _selectionViewRect = null; }
         _panning = false;
         _selecting = false;
@@ -573,7 +590,7 @@ public sealed class ImageViewport : Control
 
         _selectionViewToImage = null;
         Cursor = null;
-        InvalidateSelectionOverlayInteractive(force: true);
+        InvalidateSelectionOverlayInteractive();
         RaiseViewChanged();
         return tiny;
     }
@@ -606,6 +623,8 @@ public sealed class ImageViewport : Control
     public Rect? GetPresentationRectForViewportSize(Size viewportSize)
     {
         if (Bitmap is null || viewportSize.Width <= 0 || viewportSize.Height <= 0) return null;
+        if (viewportSize.Height - _fitBottomInset >= 48)
+            viewportSize = new Size(viewportSize.Width, viewportSize.Height - _fitBottomInset);
         var coordinateSize = CoordinateImageSize;
         var display = GetDisplayImageSize(coordinateSize);
         if (display.Width <= 0 || display.Height <= 0) return null;
@@ -645,6 +664,44 @@ public sealed class ImageViewport : Control
         RaiseViewChanged();
     }
 
+    /// <summary>Exact zoom level (1 = 100%), centred; used by "Zoom to 200%".</summary>
+    public void ZoomTo(double scale)
+    {
+        if (Bitmap is null) return;
+        _fitMode = FitMode.Manual;
+        _zoom = Math.Clamp(scale, 0.05, 32);
+        _pan = ClampPan(default);
+        InvalidateVisual();
+        RaiseViewChanged();
+    }
+
+    /// <summary>
+    /// Wheel pan: scroll down moves the view down (or right when <paramref name="horizontal"/>), only
+    /// when the image is larger than the view on that axis. A fit mode becomes manual at the current
+    /// presentation scale, exactly like a drag pan.
+    /// </summary>
+    internal void PanByWheel(double deltaY, bool horizontal)
+    {
+        if (Bitmap is null || !CanPanImage()) return;
+        var presentationScale = GetScale();
+        _fitMode = FitMode.Manual;
+        _zoom = presentationScale;
+        var step = deltaY * 80;
+        _pan = ClampPan(_pan + (horizontal ? new Vector(step, 0) : new Vector(0, step)));
+        RequestCleanRedraw();
+        if (_selectionImage is not null) InvalidateSelectionOverlay();
+        RaiseViewChanged();
+    }
+
+    /// <summary>The "Viewport zoom step" setting (percent). Drives <see cref="KeyZoomFactor"/> and <see cref="WheelZoomFactor"/>.</summary>
+    public int ZoomStepPercent { get; set; } = Glide.Core.ZoomStepPolicy.DefaultStepPercent;
+    /// <summary>Factor of one keyboard / menu / button zoom-in step.</summary>
+    public double KeyZoomFactor => Glide.Core.ZoomStepPolicy.KeyFactor(ZoomStepPercent);
+    /// <summary>Factor of one wheel (or wheel-like gesture) zoom-in step.</summary>
+    public double WheelZoomFactor => Glide.Core.ZoomStepPolicy.WheelFactor(ZoomStepPercent);
+    /// <summary>One keyboard / menu / button zoom step about the view centre.</summary>
+    public void ZoomStep(bool zoomIn) => ZoomBy(zoomIn ? KeyZoomFactor : 1 / KeyZoomFactor);
+
     public void ZoomBy(double factor) => ZoomBy(factor, null);
 
     public void ZoomBy(double factor, Point? pointer)
@@ -656,7 +713,7 @@ public sealed class ImageViewport : Control
         if (PointerCenteredZoomEnabled && pointer is { } before)
         {
             var ratio = _zoom / Math.Max(0.0001, oldScale);
-            var centre = new Point(Bounds.Width / 2 + _pan.X, Bounds.Height / 2 + _pan.Y);
+            var centre = new Point(ViewWidth / 2 + _pan.X, ViewHeight / 2 + _pan.Y);
             var vector = before - centre;
             _pan += vector * (1 - ratio);
         }
@@ -668,11 +725,11 @@ public sealed class ImageViewport : Control
 
     public ViewportScrollState GetScrollState()
     {
-        if (Bitmap is not { } bitmap || _fitMode != FitMode.Manual) return default;
+        if (Bitmap is null || _fitMode != FitMode.Manual) return default;
         var display = GetDisplayImageSize(CoordinateImageSize);
         var scale = GetScale();
-        var overflowX = Math.Max(0, display.Width * scale - Bounds.Width);
-        var overflowY = Math.Max(0, display.Height * scale - Bounds.Height);
+        var overflowX = Math.Max(0, display.Width * scale - ViewWidth);
+        var overflowY = Math.Max(0, display.Height * scale - ViewHeight);
         return new ViewportScrollState(
             overflowX > 0.5, overflowX, Math.Clamp(overflowX / 2 - _pan.X, 0, overflowX),
             overflowY > 0.5, overflowY, Math.Clamp(overflowY / 2 - _pan.Y, 0, overflowY));
@@ -682,7 +739,7 @@ public sealed class ImageViewport : Control
     {
         if (Bitmap is not { } bitmap || _fitMode != FitMode.Manual) return;
         var display = GetDisplayImageSize(CoordinateImageSize);
-        var overflow = Math.Max(0, display.Width * GetScale() - Bounds.Width);
+        var overflow = Math.Max(0, display.Width * GetScale() - ViewWidth);
         if (overflow <= 0) return;
         _pan = new Vector(overflow / 2 - Math.Clamp(value, 0, overflow), _pan.Y);
         _pan = ClampPan(_pan);
@@ -695,7 +752,7 @@ public sealed class ImageViewport : Control
     {
         if (Bitmap is not { } bitmap || _fitMode != FitMode.Manual) return;
         var display = GetDisplayImageSize(CoordinateImageSize);
-        var overflow = Math.Max(0, display.Height * GetScale() - Bounds.Height);
+        var overflow = Math.Max(0, display.Height * GetScale() - ViewHeight);
         if (overflow <= 0) return;
         _pan = new Vector(_pan.X, overflow / 2 - Math.Clamp(value, 0, overflow));
         _pan = ClampPan(_pan);
@@ -711,7 +768,7 @@ public sealed class ImageViewport : Control
         _selectionViewRect = null;
         _hoverSelection = false;
         Cursor = null;
-        InvalidateSelectionOverlayInteractive(force: true);
+        InvalidateSelectionOverlayInteractive();
         RaiseViewChanged();
         return true;
     }
@@ -760,8 +817,8 @@ public sealed class ImageViewport : Control
             var width = displaySize.Width * scale;
             var height = displaySize.Height * scale;
             _pan = ClampPan(_pan);
-            var left = (Bounds.Width - width) / 2 + _pan.X;
-            var top = (Bounds.Height - height) / 2 + _pan.Y;
+            var left = (ViewWidth - width) / 2 + _pan.X;
+            var top = (ViewHeight - height) / 2 + _pan.Y;
             _lastImageDest = new Rect(left, top, width, height);
 
             using (context.PushTransform(BuildImageToViewMatrix(bitmapPixelSize, _lastImageDest)))
@@ -825,13 +882,13 @@ public sealed class ImageViewport : Control
 
     private bool CanPanImage()
     {
-        if (Bitmap is not { } bitmap) return false;
+        if (Bitmap is null) return false;
         var display = GetDisplayImageSize(CoordinateImageSize);
         var scale = GetScale();
         // Ownership is based on what the user can actually see, not the internal fit-mode enum.
         // Fit-width/fit-height can themselves crop one axis; in that case right-hold must pan the
         // picture, and BeginPan converts the current presentation scale to manual mode seamlessly.
-        return display.Width * scale > Bounds.Width + 0.5 || display.Height * scale > Bounds.Height + 0.5;
+        return display.Width * scale > ViewWidth + 0.5 || display.Height * scale > ViewHeight + 0.5;
     }
 
     private bool ShouldPanOnRightDrag()
@@ -852,11 +909,11 @@ public sealed class ImageViewport : Control
 
     private Vector ClampPan(Vector candidate)
     {
-        if (Bitmap is not { } bitmap || _fitMode != FitMode.Manual) return default;
+        if (Bitmap is null || _fitMode != FitMode.Manual) return default;
         var display = GetDisplayImageSize(CoordinateImageSize);
         var scale = GetScale();
-        var halfOverflowX = Math.Max(0, display.Width * scale - Bounds.Width) / 2;
-        var halfOverflowY = Math.Max(0, display.Height * scale - Bounds.Height) / 2;
+        var halfOverflowX = Math.Max(0, display.Width * scale - ViewWidth) / 2;
+        var halfOverflowY = Math.Max(0, display.Height * scale - ViewHeight) / 2;
         return new Vector(
             Math.Clamp(candidate.X, -halfOverflowX, halfOverflowX),
             Math.Clamp(candidate.Y, -halfOverflowY, halfOverflowY));
@@ -871,10 +928,10 @@ public sealed class ImageViewport : Control
         var h = Math.Max(1, display.Height);
         return _fitMode switch
         {
-            FitMode.FitWidth => Math.Min(32, Bounds.Width / w),
-            FitMode.FitHeight => Math.Min(32, Bounds.Height / h),
-            FitMode.FitImage => Math.Min(1.0, Math.Min(Bounds.Width / w, Bounds.Height / h)),
-            FitMode.FitWindow => Math.Min(32, Math.Min(Bounds.Width / w, Bounds.Height / h)),
+            FitMode.FitWidth => Math.Min(32, ViewWidth / w),
+            FitMode.FitHeight => Math.Min(32, ViewHeight / h),
+            FitMode.FitImage => Math.Min(1.0, Math.Min(ViewWidth / w, ViewHeight / h)),
+            FitMode.FitWindow => Math.Min(32, Math.Min(ViewWidth / w, ViewHeight / h)),
             _ => _zoom
         };
     }
@@ -914,7 +971,15 @@ public sealed class ImageViewport : Control
             imageDest.Y + p0.Y * sy);
     }
 
-    private string ResolveGesture(string slotId) => GestureCatalog.ResolveAction(slotId, GestureBindings);
+    private string ResolveGesture(string slotId) => GestureCatalog.ResolveAction(slotId, GestureBindings, CustomGestures, _gestureModifier);
+
+    private static bool IsDefaultOrPassThrough(string actionId) =>
+        string.Equals(actionId, GestureCatalog.Default, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(actionId, GestureCatalog.PassThrough, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Selection right-click zoom-out is active unless the Selection row says "Ignore here".</summary>
+    private bool SelectionRightZoomOutActive =>
+        SelectionRightClickZoomOutEnabled && !string.Equals(ResolveGesture("selection.rightClick"), GestureCatalog.PassThrough, StringComparison.OrdinalIgnoreCase);
 
     private bool DispatchGestureAction(string actionId, Point position)
     {
@@ -922,6 +987,7 @@ public sealed class ImageViewport : Control
         switch (actionId)
         {
             case GestureCatalog.Default:
+            case GestureCatalog.PassThrough:
                 return false;
             case GestureCatalog.Nothing:
                 return true;
@@ -937,12 +1003,26 @@ public sealed class ImageViewport : Control
         }
     }
 
+    /// <summary>One-shot action for a slot that needs its id downstream (slideshow rows).</summary>
+    private void RaiseSlotAction(string actionId, Point position, string slotId)
+    {
+        actionId = GestureCatalog.NormalizeAction(actionId);
+        switch (actionId)
+        {
+            case GestureCatalog.Default or GestureCatalog.PassThrough or GestureCatalog.Nothing: return;
+            case GestureCatalog.ContextMenu: ContextMenuRequested?.Invoke(position); return;
+            case GestureCatalog.ClearSelection: ClearSelection(); return;
+            default: GestureActionRequested?.Invoke(this, new GestureActionRequestedEventArgs(actionId, position, 0, slotId)); return;
+        }
+    }
+
     private bool DispatchPressedGesture(string actionId, PointerPressedEventArgs e, Point position, bool rightButton = false)
     {
         actionId = GestureCatalog.NormalizeAction(actionId);
         switch (actionId)
         {
             case GestureCatalog.Default:
+            case GestureCatalog.PassThrough:
                 return false;
             case GestureCatalog.Nothing:
                 e.Handled = true;
@@ -988,13 +1068,29 @@ public sealed class ImageViewport : Control
     private void OnWheel(object? sender, PointerWheelEventArgs e)
     {
         if (Bitmap is null) return;
+        CaptureGestureModifier(e.KeyModifiers);
         var ctrl = e.KeyModifiers.HasFlag(KeyModifiers.Control);
-        var slot = IsFullscreen
-            ? (ctrl ? "wheel.fullscreenCtrl" : "wheel.fullscreen")
-            : (ctrl ? "wheel.windowedCtrl" : "wheel.windowed");
+        var shift = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
+        var alt = e.KeyModifiers.HasFlag(KeyModifiers.Alt);
+        var plainSlot = IsFullscreen ? "wheel.fullscreen" : "wheel.windowed";
+        var slot = ctrl ? (IsFullscreen ? "wheel.fullscreenCtrl" : "wheel.windowedCtrl")
+            : shift ? (IsFullscreen ? "wheel.fullscreenShift" : "wheel.windowedShift")
+            : alt ? (IsFullscreen ? "wheel.fullscreenAlt" : "wheel.windowedAlt")
+            : plainSlot;
         var configured = ResolveGesture(slot);
+        // Shift / Alt + wheel default to "as wheel": exactly what the plain wheel does (4.7 ignored them).
+        if (!ctrl && (shift || alt) && string.Equals(configured, GestureCatalog.Default, StringComparison.OrdinalIgnoreCase))
+            configured = ResolveGesture(plainSlot);
+        if (SlideshowActive)
+        {
+            var slideshowWheel = ResolveGesture("slideshow.wheel");
+            if (!string.Equals(slideshowWheel, GestureCatalog.Default, StringComparison.OrdinalIgnoreCase)) configured = slideshowWheel;
+        }
         if (e.GetCurrentPoint(this).Properties.IsRightButtonPressed)
         {
+            // Any wheel turn while the right button is held is a right+wheel gesture: the release that
+            // ends it is never a right click (no context menu), on the image or on the background.
+            _rightWheelConsumed = true;
             var rightHeld = ResolveGesture("wheel.rightHeld");
             if (!string.Equals(rightHeld, GestureCatalog.Default, StringComparison.OrdinalIgnoreCase))
             {
@@ -1011,7 +1107,7 @@ public sealed class ImageViewport : Control
                 var wheelZoomIn = e.Delta.Y > 0;
                 if (InvertWheelDirection) wheelZoomIn = !wheelZoomIn;
                 if (reverse) wheelZoomIn = !wheelZoomIn;
-                ZoomBy(wheelZoomIn ? 1.12 : 1 / 1.12, position);
+                ZoomBy(wheelZoomIn ? WheelZoomFactor : 1 / WheelZoomFactor, position);
                 e.Handled = true;
                 return;
             }
@@ -1022,10 +1118,22 @@ public sealed class ImageViewport : Control
                 return;
             }
             if (configured == GestureCatalog.Nothing) { e.Handled = true; return; }
+            if (configured == GestureCatalog.PanWheel || configured == GestureCatalog.PanWheelHorizontal)
+            {
+                PanByWheel(e.Delta.Y, horizontal: configured == GestureCatalog.PanWheelHorizontal);
+                e.Handled = true;
+                return;
+            }
+            if (configured is GestureCatalog.JumpWheel or GestureCatalog.FolderWheel or GestureCatalog.RotateWheel or GestureCatalog.TabWheel)
+            {
+                GestureActionRequested?.Invoke(this, new GestureActionRequestedEventArgs(configured, position, WheelNavigationStep(e.Delta.Y, InvertWheelDirection), slot));
+                e.Handled = true;
+                return;
+            }
             if (configured == GestureCatalog.ZoomIn || configured == GestureCatalog.ZoomOut)
             {
                 var configuredZoomIn = configured == GestureCatalog.ZoomIn;
-                ZoomBy(configuredZoomIn ? 1.12 : 1 / 1.12, position);
+                ZoomBy(configuredZoomIn ? WheelZoomFactor : 1 / WheelZoomFactor, position);
                 e.Handled = true;
                 return;
             }
@@ -1048,14 +1156,10 @@ public sealed class ImageViewport : Control
 
         var zoomIn = e.Delta.Y > 0;
         if (InvertWheelDirection) zoomIn = !zoomIn;
-        var factor = zoomIn ? 1.12 : 1 / 1.12;
+        var factor = zoomIn ? WheelZoomFactor : 1 / WheelZoomFactor;
         ZoomBy(factor, e.GetPosition(this));
         e.Handled = true;
     }
-
-    private const int VkLButton = 0x01;
-    private const int VkRButton = 0x02;
-    private const int VkMButton = 0x04;
 
     private static (bool Left, bool Right, bool Middle) ReadPressedButtons(PointerPoint point)
     {
@@ -1071,13 +1175,14 @@ public sealed class ImageViewport : Control
     {
         var point = e.GetCurrentPoint(this);
         var pressed = ReadPressedButtons(point);
+        CaptureGestureModifier(e.KeyModifiers);
         _pressPoint = point.Position;
-        if (pressed.Left) _leftPressTicks = Environment.TickCount64;
         _leftPressOnImage = pressed.Left && Bitmap is not null && _lastImageDest.Contains(point.Position);
         // In fullscreen the entire viewer surface owns plain right-click navigation, including
         // letterbox/pillarbox space. Overlay tunnel routing runs before this control and still owns
         // overlay right-clicks, so broadening the canvas hit here cannot steal overlay menus.
         if (pressed.Right) _rightWheelConsumed = false;
+        _rightPressOnBackground = false;
         _rightPressOnImage = pressed.Right && Bitmap is not null && (IsFullscreen || _lastImageDest.Contains(point.Position));
         _rightPressOnSelection = _rightPressOnImage && Bitmap is not null && IsPointInsideSelection(point.Position);
         _middlePressOnImage = pressed.Middle && Bitmap is not null && _lastImageDest.Contains(point.Position);
@@ -1085,24 +1190,49 @@ public sealed class ImageViewport : Control
         // Slideshow owns a viewer right-click only while it is actively playing and the user has
         // enabled this session option. Handle it before selection/pan/context-menu ownership so a
         // slideshow stop can never also open a normal viewer menu or zoom a retained selection.
-        if (pressed.Right && SlideshowRightClickStopEnabled)
+        // Slideshow-area rows: Default right-click stops a playing slideshow; "Ignore here" lets the
+        // press fall through; any other action owns the press while a slideshow session is active.
+        if (pressed.Right && SlideshowActive)
         {
-            SlideshowRightClickStopRequested?.Invoke();
-            _rightPressOnImage = false;
-            _rightPressOnSelection = false;
-            e.Handled = true;
-            return;
+            var slideshowRight = ResolveGesture("slideshow.rightClick");
+            var isDefault = string.Equals(slideshowRight, GestureCatalog.Default, StringComparison.OrdinalIgnoreCase);
+            if ((isDefault && SlideshowRunning) || !IsDefaultOrPassThrough(slideshowRight))
+            {
+                if (isDefault) SlideshowRightClickStopRequested?.Invoke();
+                else RaiseSlotAction(slideshowRight, point.Position, "slideshow.rightClick");
+                _rightPressOnImage = false;
+                _rightPressOnSelection = false;
+                e.Handled = true;
+                return;
+            }
         }
 
-        // The user-chosen slideshow left-click action (default: pause / resume) owns a left press on the
-        // picture, ahead of selection, pan, window drag and fullscreen click-navigation.
-        if (pressed.Left && SlideshowLeftClickEnabled && Bitmap is not null &&
+        // The slideshow left-click row (default: pause / resume) owns a left press on the picture,
+        // ahead of selection, pan, window drag and fullscreen click-navigation.
+        if (pressed.Left && SlideshowActive && Bitmap is not null &&
             (IsFullscreen || _lastImageDest.Contains(point.Position)))
         {
-            SlideshowLeftClickRequested?.Invoke();
-            _leftPressOnImage = false;
-            e.Handled = true;
-            return;
+            var slideshowLeft = ResolveGesture("slideshow.leftClick");
+            if (!string.Equals(slideshowLeft, GestureCatalog.PassThrough, StringComparison.OrdinalIgnoreCase))
+            {
+                if (string.Equals(slideshowLeft, GestureCatalog.Default, StringComparison.OrdinalIgnoreCase)) SlideshowLeftClickRequested?.Invoke();
+                else RaiseSlotAction(slideshowLeft, point.Position, "slideshow.leftClick");
+                _leftPressOnImage = false;
+                e.Handled = true;
+                return;
+            }
+        }
+
+        if (pressed.Middle && SlideshowActive && Bitmap is not null)
+        {
+            var slideshowMiddle = ResolveGesture("slideshow.middleClick");
+            if (!IsDefaultOrPassThrough(slideshowMiddle))
+            {
+                RaiseSlotAction(slideshowMiddle, point.Position, "slideshow.middleClick");
+                _middlePressOnImage = false;
+                e.Handled = true;
+                return;
+            }
         }
 
         // Avalonia exposes a generic DoubleTapped event, but the legacy gesture matrix distinguishes
@@ -1134,13 +1264,17 @@ public sealed class ImageViewport : Control
             var fullscreenSlot = pressed.Left ? "fullscreen.leftClickImage"
                 : pressed.Right ? "fullscreen.rightClickImage"
                 : pressed.Middle ? "fullscreen.middleClickImage" : null;
+            // Default = click navigation; "Ignore here" = the press continues like a windowed press.
+            var leftNavigates = false;
             if (fullscreenSlot is not null)
             {
                 var configured = ResolveGesture(fullscreenSlot);
-                if (!string.Equals(configured, GestureCatalog.Default, StringComparison.OrdinalIgnoreCase) &&
+                if (!IsDefaultOrPassThrough(configured) &&
                     DispatchPressedGesture(configured, e, point.Position, pressed.Right)) return;
+                leftNavigates = pressed.Left && FullscreenClickNavigationEnabled &&
+                    string.Equals(configured, GestureCatalog.Default, StringComparison.OrdinalIgnoreCase);
             }
-            if (FullscreenClickNavigationEnabled && pressed.Left && FullscreenDoubleClickExitEnabled)
+            if (leftNavigates && FullscreenDoubleClickExitEnabled)
             {
                 e.Handled = true;
                 if (e.ClickCount >= 2)
@@ -1159,7 +1293,7 @@ public sealed class ImageViewport : Control
                 _pendingFullscreenClickTimer.Start();
                 return;
             }
-            if (FullscreenClickNavigationEnabled && pressed.Left)
+            if (leftNavigates)
             {
                 // Fullscreen mouse-button navigation is deliberately unambiguous: left-click
                 // advances and right-click (handled on release below) goes backwards. The older
@@ -1183,7 +1317,8 @@ public sealed class ImageViewport : Control
         {
             var slot = pressed.Left ? "drag.leftEmpty" : "drag.rightEmpty";
             var configured = ResolveGesture(slot);
-            if (!string.Equals(configured, GestureCatalog.Default, StringComparison.OrdinalIgnoreCase))
+            var contextMenuOnRelease = pressed.Right && string.Equals(configured, GestureCatalog.ContextMenu, StringComparison.OrdinalIgnoreCase);
+            if (!contextMenuOnRelease && !string.Equals(configured, GestureCatalog.Default, StringComparison.OrdinalIgnoreCase))
             {
                 DispatchPressedGesture(configured, e, point.Position, rightButton: pressed.Right);
                 return;
@@ -1198,7 +1333,11 @@ public sealed class ImageViewport : Control
             }
             else if (pressed.Right)
             {
-                ContextMenuRequested?.Invoke(point.Position);
+                // Like a right press on the image, the menu waits for button release so right+wheel
+                // zoom and right-drag never pop it up. OnMoved / OnReleased finish the gesture.
+                _rightPressOnBackground = true;
+                e.Pointer.Capture(this);
+                _capturedPointer = e.Pointer;
                 e.Handled = true;
             }
             return;
@@ -1223,7 +1362,7 @@ public sealed class ImageViewport : Control
             // rectangle and hit-test were valid. This mirrors the legacy contract: once a selection
             // exists, left click inside zooms in and right click inside zooms out. Right-drag pan
             // remains available everywhere outside the active selection.
-            if (SelectionRightClickZoomOutEnabled && _selectionImage is { } selected)
+            if (SelectionRightZoomOutActive && _selectionImage is { } selected)
             {
                 // Cursor feedback is deliberately independent from the selection lifetime. Zoom-out
                 // consumes the retained rectangle immediately on press, but legacy Glide keeps the
@@ -1302,7 +1441,7 @@ public sealed class ImageViewport : Control
             var configured = ResolveGesture("selection.leftClick");
             if (!string.Equals(configured, GestureCatalog.Default, StringComparison.OrdinalIgnoreCase) &&
                 DispatchPressedGesture(configured, e, point.Position)) return;
-            if (SelectionClickZoomEnabled)
+            if (SelectionClickZoomEnabled && !string.Equals(configured, GestureCatalog.PassThrough, StringComparison.OrdinalIgnoreCase))
             {
                 // A selection is a one-shot zoom command. After zoom-in the rectangle disappears;
                 // zooming out later requires drawing a new selection and right-clicking inside it.
@@ -1320,6 +1459,10 @@ public sealed class ImageViewport : Control
         }
 
         var leftDragConfigured = ResolveGesture("drag.leftImage");
+        // Whole-app Overlay mode forces left-drag = move window; a left-drag row of Pan / Move window
+        // (the folded 4.7 "Left-drag action" choice) must not override that, exactly as before.
+        if (ForceLeftDragMoveWindow && leftDragConfigured is GestureCatalog.Pan or GestureCatalog.MoveWindow)
+            leftDragConfigured = GestureCatalog.Default;
         if (!string.Equals(leftDragConfigured, GestureCatalog.Default, StringComparison.OrdinalIgnoreCase) &&
             DispatchPressedGesture(leftDragConfigured, e, point.Position)) return;
 
@@ -1379,7 +1522,16 @@ public sealed class ImageViewport : Control
     private void OnMoved(object? sender, PointerEventArgs e)
     {
         var pointer = e.GetPosition(this);
-        _hoverPointer = pointer;
+
+        // Right-drag that started on the empty background is not a click: crossing the threshold
+        // cancels the pending release-time context menu (same rule as a right-drag on the image).
+        if (_rightPressOnBackground && !IsStationaryRightRelease(pointer))
+        {
+            _rightPressOnBackground = false;
+            ReleaseCapture();
+            e.Handled = true;
+            return;
+        }
 
         // A stationary right press outside a selection is reserved for the context menu. Promote
         // it to window dragging only after real movement, so holding/dragging can never also open
@@ -1489,6 +1641,10 @@ public sealed class ImageViewport : Control
         // matching legacy 1.2.125, so pointer movement never invalidates an Avalonia cursor visual.
     }
 
+    /// <summary>A right release counts as a click only while the pointer stayed within the click threshold of the press.</summary>
+    private bool IsStationaryRightRelease(Point release) =>
+        Math.Abs(release.X - _pressPoint.X) <= ClickMovementTolerance && Math.Abs(release.Y - _pressPoint.Y) <= ClickMovementTolerance;
+
     private void PendingFullscreenClickElapsed(object? sender, EventArgs e)
     {
         _pendingFullscreenClickTimer?.Stop();
@@ -1499,6 +1655,7 @@ public sealed class ImageViewport : Control
     {
         // Pure visual feedback reset. This must not participate in gesture ownership/capture.
         SetSelectionZoomOutCursorPressed(false);
+        CaptureGestureModifier(e.KeyModifiers);
         var completedPanInteraction = false;
         if (e.InitialPressMouseButton == MouseButton.Right && _rightWheelConsumed)
         {
@@ -1516,6 +1673,17 @@ public sealed class ImageViewport : Control
             ReleaseCapture();
             _rightPressOnImage = false;
             _rightPressOnSelection = false;
+            _rightPressOnBackground = false;
+            e.Handled = true;
+            return;
+        }
+        if (_rightPressOnBackground && e.InitialPressMouseButton == MouseButton.Right)
+        {
+            // Empty background: same release rule as the image (stationary and no wheel turn).
+            var release = e.GetPosition(this);
+            _rightPressOnBackground = false;
+            ReleaseCapture();
+            if (IsStationaryRightRelease(release)) ContextMenuRequested?.Invoke(release);
             e.Handled = true;
             return;
         }
@@ -1534,7 +1702,7 @@ public sealed class ImageViewport : Control
 
             if (wasRightClick)
             {
-                if (_rightPressOnSelection && _selectionImage is { } selected && SelectionRightClickZoomOutEnabled)
+                if (_rightPressOnSelection && _selectionImage is { } selected && SelectionRightZoomOutActive)
                 {
                     // Right-clicking a newly drawn selection is a one-shot zoom-out command.
                     // The rectangle disappears exactly like a left-click zoom-in selection.
@@ -1550,11 +1718,12 @@ public sealed class ImageViewport : Control
                 {
                     if (restore is { } prior) RestoreViewState(prior);
                     var configuredClick = ResolveGesture(IsFullscreen ? "fullscreen.rightClickImage" : "windowed.rightClickImage");
-                    if (string.Equals(configuredClick, GestureCatalog.Default, StringComparison.OrdinalIgnoreCase))
+                    if (IsDefaultOrPassThrough(configuredClick))
                     {
                         // A stationary fullscreen right-click is always Previous, even when the
                         // press entered the right-drag pan candidate path. Actual movement still pans.
-                        if (IsFullscreen && FullscreenClickNavigationEnabled) BrowseRequested?.Invoke(this, -1);
+                        // "Ignore here" opens the context menu like a windowed right-click.
+                        if (IsFullscreen && FullscreenClickNavigationEnabled && configuredClick == GestureCatalog.Default) BrowseRequested?.Invoke(this, -1);
                         else ContextMenuRequested?.Invoke(clickPosition);
                     }
                     else
@@ -1585,10 +1754,10 @@ public sealed class ImageViewport : Control
         // When the image is not currently cropped there is nothing to pan, but a right-click inside
         // a selection still owns zoom-out. Capture/release lets us distinguish a real click from an
         // accidental move without handing the gesture to native window dragging.
-        if (!completedPanInteraction && _rightPressOnSelection && SelectionRightClickZoomOutEnabled && _selectionImage is { } clickSelection)
+        if (!completedPanInteraction && _rightPressOnSelection && SelectionRightZoomOutActive && _selectionImage is { } clickSelection)
         {
             var release = e.GetPosition(this);
-            var stationary = Math.Abs(release.X - _pressPoint.X) <= ClickMovementTolerance && Math.Abs(release.Y - _pressPoint.Y) <= ClickMovementTolerance;
+            var stationary = IsStationaryRightRelease(release);
             var stillInside = Bitmap is not null && IsPointInsideSelection(release);
             ReleaseCapture();
             if (stationary && stillInside)
@@ -1614,14 +1783,14 @@ public sealed class ImageViewport : Control
         if (!completedPanInteraction && _rightPressOnImage && !_rightPressOnSelection)
         {
             var release = e.GetPosition(this);
-            var stationary = Math.Abs(release.X - _pressPoint.X) <= ClickMovementTolerance && Math.Abs(release.Y - _pressPoint.Y) <= ClickMovementTolerance;
+            var stationary = IsStationaryRightRelease(release);
             ReleaseCapture();
             if (stationary)
             {
                 var configuredClick = ResolveGesture(IsFullscreen ? "fullscreen.rightClickImage" : "windowed.rightClickImage");
-                if (string.Equals(configuredClick, GestureCatalog.Default, StringComparison.OrdinalIgnoreCase))
+                if (IsDefaultOrPassThrough(configuredClick))
                 {
-                    if (IsFullscreen && FullscreenClickNavigationEnabled) BrowseRequested?.Invoke(this, -1);
+                    if (IsFullscreen && FullscreenClickNavigationEnabled && configuredClick == GestureCatalog.Default) BrowseRequested?.Invoke(this, -1);
                     else ContextMenuRequested?.Invoke(release);
                 }
                 else
@@ -1761,8 +1930,8 @@ public sealed class ImageViewport : Control
 
         var oldScale = GetScale();
         var viewSelection = ImageRectToView(selection, _lastImageDest, CoordinateImageSize);
-        var widthFraction = Math.Clamp(viewSelection.Width / Math.Max(1, Bounds.Width), 0.02, 1.0);
-        var heightFraction = Math.Clamp(viewSelection.Height / Math.Max(1, Bounds.Height), 0.02, 1.0);
+        var widthFraction = Math.Clamp(viewSelection.Width / Math.Max(1, ViewWidth), 0.02, 1.0);
+        var heightFraction = Math.Clamp(viewSelection.Height / Math.Max(1, ViewHeight), 0.02, 1.0);
         var selectionFraction = Math.Max(widthFraction, heightFraction);
 
         // Glide default: reverse proportional mapping so a smaller selection produces the stronger
@@ -1777,7 +1946,7 @@ public sealed class ImageViewport : Control
         // Anchor around the selected region's centre so zoom-out feels spatially stable.
         var anchor = new Point(viewSelection.X + viewSelection.Width / 2, viewSelection.Y + viewSelection.Height / 2);
         var ratio = _zoom / Math.Max(0.0001, oldScale);
-        var centre = new Point(Bounds.Width / 2 + _pan.X, Bounds.Height / 2 + _pan.Y);
+        var centre = new Point(ViewWidth / 2 + _pan.X, ViewHeight / 2 + _pan.Y);
         var vector = anchor - centre;
         _pan += vector * (1 - ratio);
         _pan = ClampPan(_pan);
@@ -1801,7 +1970,7 @@ public sealed class ImageViewport : Control
         var coordinateSize = CoordinateImageSize;
         var displaySize = GetDisplayImageSize(coordinateSize);
         var displaySelection = ImageRectToDisplay(selection, coordinateSize);
-        _zoom = Math.Clamp(Math.Min(Bounds.Width / Math.Max(1, displaySelection.Width), Bounds.Height / Math.Max(1, displaySelection.Height)), 0.05, 32);
+        _zoom = Math.Clamp(Math.Min(ViewWidth / Math.Max(1, displaySelection.Width), ViewHeight / Math.Max(1, displaySelection.Height)), 0.05, 32);
         var selectionCentre = new Point(displaySelection.X + displaySelection.Width / 2, displaySelection.Y + displaySelection.Height / 2);
         var imageCentre = new Point(displaySize.Width / 2, displaySize.Height / 2);
         _pan = new Vector((imageCentre.X - selectionCentre.X) * _zoom, (imageCentre.Y - selectionCentre.Y) * _zoom);

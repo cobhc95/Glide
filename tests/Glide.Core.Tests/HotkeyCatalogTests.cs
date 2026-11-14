@@ -1,15 +1,34 @@
 using Glide.Core.Commands;
-using Xunit;
 
 namespace Glide.Core.Tests;
 
 public sealed class HotkeyCatalogTests
 {
     [Fact]
-    public void Hotkey_contract_has_72_editable_hotkey_rows()
+    public void Hotkey_contract_keeps_the_75_historical_rows_and_unique_ids()
     {
-        Assert.Equal(72, HotkeyCatalog.All.Count);
-        Assert.Equal(72, HotkeyCatalog.All.Select(x => x.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count());
+        // 5.0.x: the list is read from AppActionRegistry; the 75 historical rows come first, then every action the
+        // registry added (commands that were only buttons/menus/gestures, and generated setting toggles).
+        Assert.True(HotkeyCatalog.All.Count > 75);
+        Assert.Equal(HotkeyCatalog.LegacyIds, HotkeyCatalog.All.Take(75).Select(x => x.Id));
+        Assert.Equal(HotkeyCatalog.All.Count, HotkeyCatalog.All.Select(x => x.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count());
+    }
+
+    [Fact]
+    public void Explore_containing_folder_action_is_renamed_has_ctrl_e_and_the_alias_stays_unbound()
+    {
+        var action = HotkeyCatalog.Find("folder.exploreParent")!;
+        Assert.Equal("Explore/Browse containing folder", action.Label);
+        Assert.Equal(GlideCommand.ExploreParentFolder, action.Command);
+        Assert.Equal(new[] { "Ctrl+E" }, action.DefaultShortcuts);
+        Assert.Equal(action.DefaultShortcuts[0], ShortcutText.Canonicalize(action.DefaultShortcuts[0]));
+        Assert.Single(HotkeyCatalog.All, x => x.Command == GlideCommand.ExploreParentFolder);   // renamed, not added
+        // The alias keeps no key of its own and reports its target's.
+        Assert.Empty(AppActionRegistry.Find("file.showInExplorer")!.HotkeySlots);
+        Assert.Equal(new[] { "Ctrl+E" }, HotkeyCatalog.ShortcutsForAction("file.showInExplorer", HotkeyCatalog.CreateDefaultMap()));
+        // Ctrl+E is owned by exactly this action: no other default and no fixed key uses it.
+        Assert.Single(HotkeyCatalog.All.Where(r => r.DefaultShortcuts.Any(s => ShortcutText.AreEqual(s, "Ctrl+E"))));
+        Assert.DoesNotContain(HotkeyCatalog.FixedShortcuts, f => ShortcutText.AreEqual(f.Shortcut, "Ctrl+E"));
     }
 
     [Fact]

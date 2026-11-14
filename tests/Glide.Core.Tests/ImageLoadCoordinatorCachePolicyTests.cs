@@ -1,5 +1,3 @@
-using Xunit;
-using Glide.Core;
 using Glide.Imaging;
 using Glide.Diagnostics;
 

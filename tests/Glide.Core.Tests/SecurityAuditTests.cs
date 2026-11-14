@@ -1,6 +1,4 @@
 using System.Buffers.Binary;
-using System.Net;
-using Glide.Core.Security;
 using Glide.Imaging;
 
 namespace Glide.Core.Tests;
@@ -66,7 +64,7 @@ public sealed class SecurityAuditTests : IDisposable
     [Fact]
     public void ImageHeaderProbe_Accepts_Legitimate_HighResolution_Image()
     {
-        // Craft a PNG declaring 8K (7680 x 4320 = ~33 MP, well within 256 MP cap)
+        // Craft a PNG declaring 8K (7680 x 4320 = ~33 MP, well within the 512 MP cap)
         var png8K = new byte[32];
         new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 }.CopyTo(png8K, 0);
         BinaryPrimitives.WriteInt32BigEndian(png8K.AsSpan(8, 4), 13);
@@ -85,9 +83,13 @@ public sealed class SecurityAuditTests : IDisposable
     public void ImageLoadCoordinator_IsDecompressionBomb_Identifies_Hostile_Dimensions()
     {
         Assert.True(ImageLoadCoordinator.IsDecompressionBomb(new ImageDimensions(70_000, 100)));
-        Assert.True(ImageLoadCoordinator.IsDecompressionBomb(new ImageDimensions(20_000, 20_000))); // 400 MP > 256 MP
-        Assert.False(ImageLoadCoordinator.IsDecompressionBomb(new ImageDimensions(16_000, 9_000))); // 144 MP <= 256 MP
+        Assert.True(ImageLoadCoordinator.IsDecompressionBomb(new ImageDimensions(30_000, 20_000))); // 600 MP > 512 MP
+        Assert.True(ImageLoadCoordinator.IsDecompressionBomb(new ImageDimensions(32_000, 16_001))); // just over 512 MP
+        Assert.False(ImageLoadCoordinator.IsDecompressionBomb(new ImageDimensions(32_000, 16_000))); // exactly 512 MP
+        Assert.False(ImageLoadCoordinator.IsDecompressionBomb(new ImageDimensions(20_000, 20_000))); // 400 MP (refused before 5.0)
+        Assert.False(ImageLoadCoordinator.IsDecompressionBomb(new ImageDimensions(16_000, 9_000))); // 144 MP
         Assert.False(ImageLoadCoordinator.IsDecompressionBomb(new ImageDimensions(3840, 2160))); // 4K UHD
+        Assert.Equal(512_000_000L, ImageHeaderProbe.MaxTotalPixels);
     }
 
     [Fact]
@@ -100,167 +102,235 @@ public sealed class SecurityAuditTests : IDisposable
 
     #endregion
 
-    #region Network Fetching & SSRF Defenses
+    #region 2026-11 security audit regressions
 
-    [Theory]
-    [InlineData("http://example.com/photo.jpg")]
-    [InlineData("https://cdn.example.com/images/gallery/sample.png")]
-    [InlineData("https://sub.domain.org:8443/image.webp?token=abc")]
-    public void SecureImageFetcher_ValidateUrl_Accepts_Valid_Http_Urls(string url)
+    private static byte[] PngHeader(int width, int height)
     {
-        Assert.True(SecureImageFetcher.ValidateUrl(url, out var uri, out var reason), $"URL '{url}' should be valid: {reason}");
-        Assert.NotNull(uri);
-    }
-
-    [Theory]
-    [InlineData("")]
-    [InlineData("   ")]
-    [InlineData("file:///C:/Windows/System32/cmd.exe")]
-    [InlineData("ftp://ftp.example.com/image.jpg")]
-    [InlineData("content://media/external/images/media/1")]
-    [InlineData("javascript:alert(1)")]
-    [InlineData("data:image/png;base64,iVBORw0KGgo=")]
-    [InlineData("gopher://gopher.example.com/")]
-    [InlineData("ldap://ldap.example.com/cn=users")]
-    [InlineData("http://user:password@example.com/image.jpg")] // Rejects userinfo
-    [InlineData("/relative/path/image.jpg")] // Rejects relative
-    public void SecureImageFetcher_ValidateUrl_Rejects_Disallowed_Schemes_And_Inputs(string url)
-    {
-        Assert.False(SecureImageFetcher.ValidateUrl(url, out _, out var reason), $"URL '{url}' should be rejected.");
-        Assert.NotEmpty(reason);
-    }
-
-    [Theory]
-    // Loopback
-    [InlineData("127.0.0.1", true)]
-    [InlineData("127.0.0.254", true)]
-    [InlineData("::1", true)]
-    // RFC 1918 Private
-    [InlineData("10.0.0.1", true)]
-    [InlineData("10.255.255.255", true)]
-    [InlineData("172.16.0.1", true)]
-    [InlineData("172.31.255.255", true)]
-    [InlineData("192.168.0.1", true)]
-    [InlineData("192.168.254.254", true)]
-    // Link-Local / Cloud Metadata (169.254.169.254)
-    [InlineData("169.254.169.254", true)]
-    [InlineData("169.254.1.1", true)]
-    [InlineData("fe80::1", true)]
-    // CGNAT
-    [InlineData("100.64.0.1", true)]
-    [InlineData("100.127.255.254", true)]
-    // Multicast & Broadcast
-    [InlineData("224.0.0.1", true)]
-    [InlineData("239.255.255.255", true)]
-    [InlineData("255.255.255.255", true)]
-    [InlineData("0.0.0.0", true)]
-    // IPv4-mapped IPv6
-    [InlineData("::ffff:127.0.0.1", true)]
-    [InlineData("::ffff:192.168.1.1", true)]
-    [InlineData("::ffff:169.254.169.254", true)]
-    // Public IPs (Allowed)
-    [InlineData("8.8.8.8", false)]
-    [InlineData("1.1.1.1", false)]
-    [InlineData("93.184.216.34", false)]
-    [InlineData("2606:4700:4700::1111", false)]
-    public void SecureImageFetcher_IsBlockedIpAddress_Accurately_Filters_Private_And_Public_Ips(string ipString, bool shouldBlock)
-    {
-        var ip = IPAddress.Parse(ipString);
-        var blocked = SecureImageFetcher.IsBlockedIpAddress(ip);
-        Assert.Equal(shouldBlock, blocked);
-    }
-
-    [Theory]
-    // Redirect targets must never escape to file:// or private IPs: ValidateUrl rejects
-    // non-HTTP schemes, and the socket layer blocks private IPs even after a redirect.
-    [InlineData("file:///C:/Windows/System32/cmd.exe")]
-    [InlineData("file:///etc/passwd")]
-    public void SecureImageFetcher_ValidateUrl_Rejects_Redirect_To_File_Urls(string url)
-    {
-        Assert.False(SecureImageFetcher.ValidateUrl(url, out _, out var reason));
-        Assert.NotEmpty(reason);
-    }
-
-    [Theory]
-    // Obscure numeric IP spellings that normalize to loopback must parse-and-block.
-    [InlineData("2130706433")] // 0x7F000001 == 127.0.0.1
-    [InlineData("0x7f.0.0.1")] // hex-dotted loopback
-    [InlineData("0x7F000001")] // single hex loopback
-    [InlineData("0177.0.0.01")] // octal-dotted loopback
-    public void SecureImageFetcher_NumericIp_Parses_And_Blocks_Loopback(string host)
-    {
-        Assert.True(SecureImageFetcher.TryParseNumericIp(host, out var address), $"Numeric host '{host}' should parse.");
-        Assert.NotNull(address);
-        Assert.True(SecureImageFetcher.IsBlockedIpAddress(address!), $"Numeric host '{host}' ({address}) must be blocked.");
-    }
-
-    // NOTE: ContentLength-lie (declared length small, body huge) needs a mock HTTP server;
-    // no such pattern exists in this file, so it is intentionally skipped. Enforcement lives
-    // in SecureImageFetcher.FetchImageBytesAsync via the streaming totalRead > maxDownloadBytes
-    // cap, which covers lies regardless of the declared header.
-
-    #endregion
-
-    #region Cache Handling & Path Traversal Defenses
-
-    [Theory]
-    [InlineData("../../windows/system32/cmd.exe")]
-    [InlineData("..\\..\\secret.txt")]
-    [InlineData("sub/../../etc/passwd")]
-    [InlineData("https://example.com/../../../../autoexec.bat")]
-    [InlineData("C:\\boot.ini")]
-    [InlineData("https://example.com/image.png?v=1&foo=bar")]
-    public void SecureDiskCache_Neutralizes_Path_Traversal_Keys(string hostileKey)
-    {
-        var cache = new SecureDiskCache(_tempCacheDir);
-        var safePath = cache.GetSafeCachePath(hostileKey, ".png");
-
-        // The safe path must strictly reside within _tempCacheDir
-        var canonicalTemp = Path.GetFullPath(_tempCacheDir) + Path.DirectorySeparatorChar;
-        Assert.StartsWith(canonicalTemp, safePath, StringComparison.OrdinalIgnoreCase);
-
-        // Filename must be SHA-256 hash plus extension (64 chars hash + 4 chars .png = 68 chars)
-        var fileName = Path.GetFileName(safePath);
-        Assert.Equal(68, fileName.Length);
-        Assert.EndsWith(".png", fileName, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("..", fileName);
+        var png = new byte[33];
+        new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 }.CopyTo(png, 0);
+        BinaryPrimitives.WriteInt32BigEndian(png.AsSpan(8, 4), 13);
+        "IHDR"u8.CopyTo(png.AsSpan(12, 4));
+        BinaryPrimitives.WriteInt32BigEndian(png.AsSpan(16, 4), width);
+        BinaryPrimitives.WriteInt32BigEndian(png.AsSpan(20, 4), height);
+        png[24] = 8; png[25] = 6; // 8-bit RGBA
+        return png;
     }
 
     [Fact]
-    public async Task SecureDiskCache_Write_Read_Delete_Works_Safely()
+    public void Startup_preloader_never_full_decodes_or_hands_over_an_over_cap_image()
     {
-        var cache = new SecureDiskCache(_tempCacheDir);
-        var key = "https://example.com/test_image.jpg";
-        var payload = new byte[] { 0xFF, 0xD8, 0xFF, 0xE0, 0x01, 0x02, 0x03, 0x04 };
+        // 30000 x 30000 = 900 MP: refused by the header probe, but the preloader used to ignore that and
+        // decode at full resolution (or hand the bytes to a consumer that decodes without a size check).
+        var path = Path.Combine(_tempCacheDir, "bomb.png");
+        File.WriteAllBytes(path, PngHeader(30_000, 30_000));
 
-        // Write
-        await cache.WriteAsync(key, payload, ".jpg");
+        using var result = Glide.Imaging.StartupImagePreloader.PreloadForTests(path, 0, 0);
 
-        // Read
-        var exists = cache.TryRead(key, out var readBytes, ".jpg");
-        Assert.True(exists);
-        Assert.NotNull(readBytes);
-        Assert.Equal(payload, readBytes);
-
-        // Delete
-        var deleted = cache.TryDelete(key, ".jpg");
-        Assert.True(deleted);
-
-        // Verify gone
-        var existsAfterDelete = cache.TryRead(key, out _, ".jpg");
-        Assert.False(existsAfterDelete);
+        Assert.Null(result);
     }
 
     [Fact]
-    public async Task SecureDiskCache_Purge_Removes_Entries()
+    public void Startup_preloader_still_preloads_a_normal_image()
     {
-        var cache = new SecureDiskCache(_tempCacheDir);
-        await cache.WriteAsync("k1", new byte[] { 1, 2, 3 });
-        await cache.WriteAsync("k2", new byte[] { 4, 5, 6 });
+        var path = Path.Combine(_tempCacheDir, "pixel.png");
+        File.WriteAllBytes(path, Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg=="));
 
-        var purged = cache.Purge();
-        Assert.Equal(2, purged);
+        using var result = Glide.Imaging.StartupImagePreloader.PreloadForTests(path, 0, 0);
+
+        Assert.NotNull(result);
+        Assert.True(result!.NativeStatus == 1 || result.PreloadedBytes is { Length: > 0 });
+    }
+
+    /// <summary>1x1 global-palette GIF built from raw image descriptors (each frame's LZW data is one pixel).</summary>
+    private static byte[] TinyGif(IEnumerable<(int Width, int Height)> frames)
+    {
+        var bytes = new List<byte>();
+        bytes.AddRange("GIF89a"u8.ToArray());
+        bytes.AddRange(new byte[] { 1, 0, 1, 0, 0x80, 0, 0 });      // 1x1 screen, 2-colour global palette
+        bytes.AddRange(new byte[] { 0xFF, 0, 0, 0, 0xFF, 0 });      // red, green
+        foreach (var (width, height) in frames)
+        {
+            bytes.Add(0x2C);
+            bytes.AddRange(new byte[] { 0, 0, 0, 0, (byte)width, (byte)(width >> 8), (byte)height, (byte)(height >> 8), 0 });
+            bytes.Add(2);                                            // LZW minimum code size
+            bytes.AddRange(new byte[] { 2, 0x44, 0x01, 0 });         // clear, index 0, end (3-bit codes)
+        }
+        bytes.Add(0x3B);
+        return bytes.ToArray();
+    }
+
+    [Fact]
+    public void Gif_decoder_skips_a_hostile_oversized_frame_without_allocating_it()
+    {
+        // A ~60-byte file declaring a 65535 x 32767 frame used to allocate a 2 GB index buffer and run a
+        // billion-iteration draw loop on the player thread.
+        var gif = TinyGif(new[] { (1, 1), (65535, 32767), (1, 1), (1, 1) });
+
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        var frames = 0;
+        var size = GifAnimationDecoder.DecodeFrames(gif, (_, _, _, _) => { frames++; return true; });
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.Equal((1, 1), size);
+        Assert.Equal(3, frames);
+        Assert.True(allocated < 64L * 1024 * 1024, $"decoder allocated {allocated:N0} bytes for a 1x1 animation");
+    }
+
+    [Fact]
+    public void Gif_decoder_caps_the_number_of_frames()
+    {
+        var gif = TinyGif(Enumerable.Repeat((1, 1), GifAnimationDecoder.MaxFrames + 5));
+
+        var frames = 0;
+        var size = GifAnimationDecoder.DecodeFrames(gif, (_, _, _, _) => { frames++; return true; });
+
+        Assert.Equal((1, 1), size);
+        Assert.Equal(GifAnimationDecoder.MaxFrames, frames);
+    }
+
+    [Fact]
+    public void External_open_pipe_is_current_user_only_on_both_ends()
+    {
+        Assert.True(Glide.App.Services.ExternalLaunchBroker.ClientPipeOptions.HasFlag(System.IO.Pipes.PipeOptions.CurrentUserOnly));
+        Assert.True(Glide.App.Services.ExternalLaunchBroker.ServerPipeOptions.HasFlag(System.IO.Pipes.PipeOptions.CurrentUserOnly));
+        Assert.True(Glide.App.Services.ExternalLaunchBroker.ClientPipeOptions.HasFlag(System.IO.Pipes.PipeOptions.Asynchronous));
+    }
+
+    [Fact]
+    public void Clipboard_paste_ignores_relative_paths()
+    {
+        var absolute = Path.Combine(_tempCacheDir, "pasted.txt");
+        File.WriteAllText(absolute, "x");
+        var relativeName = "glide-relative-" + Guid.NewGuid().ToString("N") + ".txt";
+        var relativeFull = Path.Combine(Environment.CurrentDirectory, relativeName);
+        File.WriteAllText(relativeFull, "x");
+        try
+        {
+            var usable = Glide.App.Explorer.WindowsExplorerFileClipboard.UsablePastePaths(
+                new[] { relativeName, @".\" + relativeName, absolute, Path.Combine(_tempCacheDir, "missing.txt") });
+            Assert.Equal(new[] { absolute }, usable);
+        }
+        finally { try { File.Delete(relativeFull); } catch { } }
+    }
+
+    [Fact]
+    public async Task Permanent_delete_of_a_read_only_junction_never_touches_the_target()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var target = Path.Combine(_tempCacheDir, "target");
+        Directory.CreateDirectory(target);
+        var kept = Path.Combine(target, "kept.txt");
+        File.WriteAllText(kept, "keep me");
+        File.SetAttributes(kept, FileAttributes.ReadOnly);
+        var junction = Path.Combine(_tempCacheDir, "link");
+        using (var mklink = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("cmd.exe")
+               {
+                   ArgumentList = { "/c", "mklink", "/J", junction, target },
+                   UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true,
+               })!)
+        {
+            await mklink.WaitForExitAsync();
+            if (mklink.ExitCode != 0 || !Directory.Exists(junction)) return; // junctions unavailable here
+        }
+        File.SetAttributes(junction, File.GetAttributes(junction) | FileAttributes.ReadOnly);
+        try
+        {
+            var result = await Glide.App.Explorer.ExplorerFileOperations.DeleteAsync(new[] { junction }, permanent: true);
+
+            // Whether or not Windows lets the read-only link itself go, the target is never touched:
+            // its content stays and no read-only flag inside it is cleared by the delete's retry path.
+            Assert.True(File.Exists(kept), "the junction's target content must survive");
+            Assert.True((File.GetAttributes(kept) & FileAttributes.ReadOnly) != 0,
+                "deleting a link must not clear read-only flags inside its target");
+            Assert.True(result.Deleted.Count + result.Errors.Count == 1);
+        }
+        finally
+        {
+            try { File.SetAttributes(kept, FileAttributes.Normal); } catch { }
+            try
+            {
+                if (Directory.Exists(junction))
+                {
+                    File.SetAttributes(junction, File.GetAttributes(junction) & ~FileAttributes.ReadOnly);
+                    Directory.Delete(junction);
+                }
+            }
+            catch { }
+        }
+    }
+
+    [Fact]
+    public void Installer_never_trusts_hkcu_for_the_install_directory_and_launches_unelevated()
+    {
+        var script = ReadRepositoryFile("installer", "Glide.iss");
+        Assert.DoesNotContain("ExistingAppPath(HKCU", script, StringComparison.Ordinal);
+        Assert.Matches(@"Description: ""Launch Glide""; Flags: [^\r\n]*\brunasoriginaluser\b", script);
+    }
+
+    [Fact]
+    public void Startup_removes_the_current_directory_from_the_dll_search_order()
+    {
+        var program = ReadRepositoryFile("src", "Glide.App", "Program.cs");
+        var main = program.IndexOf("public static int Main(", StringComparison.Ordinal);
+        var call = program.IndexOf("SetDllDirectoryW(string.Empty)", StringComparison.Ordinal);
+        var firstWork = program.IndexOf("CommandLineTools.TryRun(", StringComparison.Ordinal);
+        Assert.True(main >= 0 && call > main && call < firstWork, "SetDllDirectoryW(\"\") must run first in Main");
+    }
+
+    private static string ReadRepositoryFile(params string[] segments)
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null)
+        {
+            var candidate = Path.Combine(new[] { directory.FullName }.Concat(segments).ToArray());
+            if (File.Exists(candidate)) return File.ReadAllText(candidate);
+            directory = directory.Parent;
+        }
+        throw new FileNotFoundException("Could not locate repository file.", Path.Combine(segments));
     }
 
     #endregion
+}
+
+/// <summary>Settings/profile import must never decide which executables Glide launches.</summary>
+[Collection(AvaloniaHeadlessCollection.Name)]
+public sealed class SettingsImportSecurityTests
+{
+    public SettingsImportSecurityTests(AvaloniaHeadlessFixture fixture) { _ = fixture; }
+
+    [Fact]
+    public void Imported_files_keep_this_pcs_external_programs()
+    {
+        var current = new Glide.App.Settings.GlideSettingsState { ExternalProgram1 = @"C:\Tools\Editor.exe" };
+        var imported = new Glide.App.Settings.GlideSettingsState
+        {
+            ExternalProgram1 = @"C:\Windows\System32\mshta.exe",
+            ExternalProgram2 = @"\\attacker\share\run.exe",
+            ExternalProgram3 = "",
+        };
+
+        Assert.True(Glide.App.Settings.SettingsWindow.KeepLocalLaunchTargets(imported, current));
+        Assert.Equal(@"C:\Tools\Editor.exe", imported.ExternalProgram1);
+        Assert.Equal("", imported.ExternalProgram2);
+        Assert.Equal("", imported.ExternalProgram3);
+
+        var same = new Glide.App.Settings.GlideSettingsState { ExternalProgram1 = @"c:\tools\editor.exe" };
+        Assert.False(Glide.App.Settings.SettingsWindow.KeepLocalLaunchTargets(same, current));
+    }
+
+    [Fact]
+    public async Task Oversized_import_files_are_refused_before_reading()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "glide-import-" + Guid.NewGuid().ToString("N") + ".json");
+        try
+        {
+            using (var stream = new FileStream(path, FileMode.CreateNew))
+                stream.SetLength(Glide.App.Settings.SettingsWindow.MaxImportFileBytes + 1);
+            await Assert.ThrowsAsync<InvalidDataException>(() => Glide.App.Settings.SettingsWindow.ReadImportFileAsync(path));
+
+            await File.WriteAllTextAsync(path, "{\"Schema\":1}");
+            Assert.Equal("{\"Schema\":1}", await Glide.App.Settings.SettingsWindow.ReadImportFileAsync(path));
+        }
+        finally { try { File.Delete(path); } catch { } }
+    }
 }

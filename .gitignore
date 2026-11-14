@@ -14,7 +14,7 @@ diagnostics-out/
 *.log
 *-output.txt
 # Historical handoff/manifesto snapshots live under Archive/ (git-ignored). The canonical
-# GLIDE_MANIFESTO_AND_HANDOFF.md at the repo root stays tracked.
+# docs/GLIDE_MANIFESTO_AND_HANDOFF.md stays tracked.
 Archive/*MANIFESTO*
 Archive/*HANDOFF*
 Archive/*handover*

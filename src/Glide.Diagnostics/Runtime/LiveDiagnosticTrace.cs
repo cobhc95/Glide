@@ -1,7 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text;
-using System.Text.Json;
 
 namespace Glide.Diagnostics.Runtime;
 
@@ -194,12 +193,6 @@ public static class LiveDiagnosticTrace
         _writer = new StreamWriter(stream, new UTF8Encoding(false)) { AutoFlush = true };
         _writer.WriteLine($"Glide live diagnostic trace | version {_version} | PID {Environment.ProcessId} | started {DateTimeOffset.Now:O}");
         _writer.WriteLine("If Glide disappears, drag this file back into ChatGPT. The final lines are the most important.");
-    }
-
-    private static void WriteLineUnsafe(string subsystem, string name, object? data)
-    {
-        var payload = data is null ? "" : " | " + SafeSerialize(data);
-        _writer!.WriteLine($"{DateTimeOffset.Now:O} | +{Lifetime.Elapsed.TotalMilliseconds:F1}ms | T{Environment.CurrentManagedThreadId} | {subsystem}.{name}{payload}");
     }
 
     // Payloads are anonymous objects, whose compiler-generated ToString lists every property and

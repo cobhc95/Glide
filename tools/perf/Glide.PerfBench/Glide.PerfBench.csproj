@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Headless performance harness. NOT part of Glide.sln, so build.cmd / the installer never ship it.
+       Run through tools\perf\run-perf.ps1 (Release). It references the real Glide assemblies and the
+       same Glide.Native.dll the app copies, so measurements exercise the production decode paths. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
+    <TieredPGO>true</TieredPGO>
+    <IsPackable>false</IsPackable>
+    <!-- Benchmark-only code: the production analyzer/style gates are not useful here. -->
+    <EnforceCodeStyleInBuild>false</EnforceCodeStyleInBuild>
+    <AnalysisMode>None</AnalysisMode>
+    <NoWarn>$(NoWarn);CA1416;CA2007;CS1591</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Avalonia.Headless" Version="11.3.20" />
+    <PackageReference Include="Avalonia.Skia" Version="11.3.20" />
+    <ProjectReference Include="..\..\..\src\Glide.Core\Glide.Core.csproj" />
+    <ProjectReference Include="..\..\..\src\Glide.Imaging\Glide.Imaging.csproj" />
+    <ProjectReference Include="..\..\..\src\Glide.App\Glide.App.csproj" />
+  </ItemGroup>
+</Project>

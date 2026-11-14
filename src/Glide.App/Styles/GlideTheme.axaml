@@ -19,7 +19,6 @@
     <Color x:Key="GlideAccent">#38A9F5</Color>
     <Color x:Key="GlideAccentSoft">#27435E</Color>
     <Color x:Key="GlideNavAccent">#39A9E5</Color>
-    <Color x:Key="GlideOverlayAccent">#AE94FF</Color>
     <Color x:Key="GlideSettingsRail">#1A1D20</Color>
 
     <SolidColorBrush x:Key="BrushWindow" Color="{StaticResource GlideWindow}"/>
@@ -39,7 +38,6 @@
     <SolidColorBrush x:Key="BrushAccent" Color="{StaticResource GlideAccent}"/>
     <SolidColorBrush x:Key="BrushAccentSoft" Color="{StaticResource GlideAccentSoft}"/>
     <SolidColorBrush x:Key="BrushNavAccent" Color="{StaticResource GlideNavAccent}"/>
-    <SolidColorBrush x:Key="BrushOverlayAccent" Color="{StaticResource GlideOverlayAccent}"/>
     <SolidColorBrush x:Key="BrushSettingsRail" Color="{StaticResource GlideSettingsRail}"/>
 
     <SolidColorBrush x:Key="BrushChromeButton" Color="#161616"/>
@@ -66,6 +64,16 @@
     <SolidColorBrush x:Key="BrushPrimaryActionHover" Color="#3787BC"/>
     <SolidColorBrush x:Key="BrushSecondaryAction" Color="#1A1C20"/>
     <SolidColorBrush x:Key="BrushSecondaryActionHover" Color="#242A30"/>
+    <!-- Gesture action dropdown field (owner-approved mockup). -->
+    <SolidColorBrush x:Key="BrushGestureField" Color="#23262B"/>
+    <SolidColorBrush x:Key="BrushGestureFieldBorder" Color="#3A4047"/>
+    <SolidColorBrush x:Key="BrushGestureFieldHover" Color="#2B3036"/>
+    <SolidColorBrush x:Key="BrushGestureFieldHoverBorder" Color="#59616B"/>
+    <SolidColorBrush x:Key="BrushGestureFieldText" Color="#8A93A0"/>
+    <SolidColorBrush x:Key="BrushGestureFieldTextHover" Color="#D6DAE0"/>
+    <SolidColorBrush x:Key="BrushGestureFieldAccentText" Color="#7CC4FB"/>
+    <SolidColorBrush x:Key="BrushGestureFieldChanged" Color="#1438A9F5"/>
+    <SolidColorBrush x:Key="BrushGestureFieldChangedHover" Color="#2638A9F5"/>
   </Styles.Resources>
 
   <Style Selector="Window">
@@ -92,12 +100,6 @@
     <Setter Property="IconBrush" Value="{DynamicResource BrushAccent}"/><Setter Property="StrokeWidth" Value="1.55"/>
   </Style>
 
-
-  <Style Selector="controls|GlideIconView.homeGlyph">
-    <Setter Property="Width" Value="19"/><Setter Property="Height" Value="19"/>
-    <Setter Property="IconBrush" Value="{DynamicResource BrushAccent}"/><Setter Property="StrokeWidth" Value="1.55"/>
-    <Setter Property="HorizontalAlignment" Value="Center"/><Setter Property="VerticalAlignment" Value="Top"/><Setter Property="Margin" Value="0,2,0,0"/>
-  </Style>
 
   <!-- Main window chrome -->
   <Style Selector="Button.glideIcon">
@@ -170,7 +172,6 @@
   <Style Selector="Border.glideTab:pointerover"><Setter Property="Background" Value="{DynamicResource BrushTabHover}"/></Style>
   <Style Selector="Border.glideTab.active"><Setter Property="Background" Value="{DynamicResource BrushTabActive}"/></Style>
   <Style Selector="Border.glideTab.dragging"><Setter Property="Opacity" Value="0.82"/><Setter Property="BorderBrush" Value="{DynamicResource BrushAccent}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="BoxShadow" Value="0 5 16 0 #66000000"/></Style>
-  <Style Selector="Border.glideTab.attachTarget"><Setter Property="Background" Value="{DynamicResource BrushAccentSoft}"/><Setter Property="BorderBrush" Value="{DynamicResource BrushAccent}"/><Setter Property="BorderThickness" Value="1"/></Style>
   <Style Selector="Border.tabHit"><Setter Property="Background" Value="Transparent"/><Setter Property="BorderThickness" Value="0"/><Setter Property="CornerRadius" Value="8"/></Style>
   <Style Selector="Border.tabHit:pointerover"><Setter Property="Background" Value="Transparent"/></Style>
   <Style Selector="Button.tabClose"><Setter Property="Background" Value="Transparent"/><Setter Property="BorderThickness" Value="0"/><Setter Property="Padding" Value="0"/><Setter Property="Width" Value="20"/><Setter Property="Height" Value="20"/><Setter Property="CornerRadius" Value="10"/></Style>
@@ -178,9 +179,6 @@
 
   <!-- Home -->
   <Style Selector="Border.homeCard"><Setter Property="Background" Value="{DynamicResource BrushCard}"/><Setter Property="BorderBrush" Value="{DynamicResource BrushBorder}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="8"/><Setter Property="Padding" Value="13,10"/><Setter Property="MinHeight" Value="82"/></Style>
-  <Style Selector="Border.homeCardAccent"><Setter Property="Background" Value="{DynamicResource BrushCardAccent}"/></Style>
-  <Style Selector="TextBlock.homeTitle"><Setter Property="FontSize" Value="14.5"/><Setter Property="FontWeight" Value="SemiBold"/></Style>
-  <Style Selector="TextBlock.homeDescription"><Setter Property="FontSize" Value="11.5"/><Setter Property="Foreground" Value="{DynamicResource BrushMuted}"/><Setter Property="TextWrapping" Value="Wrap"/><Setter Property="Margin" Value="0,3,0,0"/></Style>
 
   <!-- Floating status surface -->
   <Style Selector="Border.statusSurface"><Setter Property="Background" Value="{DynamicResource BrushStatusSurface}"/><Setter Property="BorderBrush" Value="{DynamicResource BrushStatusBorder}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="10"/><Setter Property="BoxShadow" Value="0 4 18 0 #55000000"/></Style>
@@ -248,6 +246,26 @@
     <Setter Property="Height" Value="44"/>
   </Style>
   <Style Selector="Button.statusRestore:pointerover"><Setter Property="Background" Value="{DynamicResource BrushStatusButtonHover}"/></Style>
+  <!-- Collapsed status bar with "Collapsed button in lower-right corner" off: the expand button rests as a small, unobtrusive
+       but findable arrow on a subtle rounded backing (about 30% dark grey fill and a thin ~45% white border, so it reads on
+       both light and dark images). The backing is the button's content presenter, drawn 26x20 and centred in the button's
+       normal slot so the arrow never moves; hovering swaps it for the full framed button and shade. -->
+  <Style Selector="Button.statusIcon.collapsedArrow"><Setter Property="Background" Value="Transparent"/><Setter Property="BorderBrush" Value="Transparent"/></Style>
+  <Style Selector="Button.statusIcon.collapsedArrow /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Width" Value="26"/><Setter Property="Height" Value="20"/>
+    <Setter Property="HorizontalAlignment" Value="Center"/><Setter Property="VerticalAlignment" Value="Center"/>
+    <Setter Property="CornerRadius" Value="7"/><Setter Property="BorderThickness" Value="1"/>
+    <Setter Property="Background" Value="#4D23272B"/><Setter Property="BorderBrush" Value="#73FFFFFF"/>
+  </Style>
+  <Style Selector="Button.statusIcon.collapsedArrow controls|GlideIconView.statusGlyph"><Setter Property="Width" Value="14"/><Setter Property="Height" Value="14"/><Setter Property="StrokeWidth" Value="2.2"/><Setter Property="Opacity" Value="1"/></Style>
+  <Style Selector="Button.statusIcon.collapsedArrow:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Width" Value="NaN"/><Setter Property="Height" Value="NaN"/>
+    <Setter Property="HorizontalAlignment" Value="Stretch"/><Setter Property="VerticalAlignment" Value="Stretch"/>
+    <Setter Property="Background" Value="{DynamicResource BrushStatusButtonHover}"/><Setter Property="BorderBrush" Value="{DynamicResource BrushStatusNavBorder}"/>
+  </Style>
+  <Style Selector="Button.statusIcon.collapsedArrow:pointerover controls|GlideIconView.statusGlyph"><Setter Property="Width" Value="20"/><Setter Property="Height" Value="20"/><Setter Property="StrokeWidth" Value="1.55"/><Setter Property="Opacity" Value="1"/></Style>
+  <!-- Tooltips never take the mouse wheel or any other pointer input from the control underneath them. -->
+  <Style Selector="ToolTip"><Setter Property="IsHitTestVisible" Value="False"/></Style>
 
 
   <Style Selector="Border.recentPanel">
@@ -295,9 +313,6 @@
     <Setter Property="MinHeight" Value="28"/>
   </Style>
   <Style Selector="Button.miniAction:pointerover"><Setter Property="Background" Value="{DynamicResource BrushSecondaryActionHover}"/></Style>
-  <Style Selector="TextBox.browserAddress"><Setter Property="Background" Value="{DynamicResource BrushSearch}"/><Setter Property="Foreground" Value="{DynamicResource BrushText}"/><Setter Property="BorderBrush" Value="{DynamicResource BrushInputBorder}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="5"/><Setter Property="Height" Value="31"/><Setter Property="Padding" Value="9,3"/></Style>
-  <Style Selector="ListBoxItem.browserItem"><Setter Property="Padding" Value="10,7"/><Setter Property="CornerRadius" Value="5"/></Style>
-  <Style Selector="ListBoxItem.browserItem:pointerover"><Setter Property="Background" Value="{DynamicResource BrushSurfaceHover}"/></Style>
 
 
   <!-- Fluent defaults (0.5 s to expand, 2 s to collapse) feel sluggish, especially in Settings. -->
@@ -317,14 +332,12 @@
     <Setter Property="Background" Value="Transparent"/><Setter Property="Foreground" Value="{DynamicResource BrushText}"/>
     <Setter Property="BorderThickness" Value="0"/><Setter Property="CornerRadius" Value="7"/>
     <Setter Property="Height" Value="50"/><Setter Property="HorizontalAlignment" Value="Stretch"/><Setter Property="HorizontalContentAlignment" Value="Stretch"/>
-    <Setter Property="Padding" Value="26,0"/><Setter Property="FontSize" Value="15"/>
+    <Setter Property="Padding" Value="16,0"/><Setter Property="FontSize" Value="15"/>
   </Style>
   <Style Selector="Button.settingsNav:pointerover"><Setter Property="Background" Value="{DynamicResource BrushSettingsNavHover}"/></Style>
   <Style Selector="Button.settingsNav.selected"><Setter Property="Background" Value="{DynamicResource BrushSettingsNavSelected}"/><Setter Property="BorderBrush" Value="{DynamicResource BrushAccent}"/><Setter Property="BorderThickness" Value="3,0,0,0"/></Style>
-  <Style Selector="Button.settingsNav.overlayNav"><Setter Property="Foreground" Value="{DynamicResource BrushText}"/></Style>
   <Style Selector="controls|GlideIconView.navGlyph"><Setter Property="Width" Value="25"/><Setter Property="Height" Value="25"/><Setter Property="IconBrush" Value="#98A3AE"/><Setter Property="StrokeWidth" Value="1.5"/></Style>
   <Style Selector="Button.settingsNav.selected controls|GlideIconView.navGlyph"><Setter Property="IconBrush" Value="{DynamicResource BrushAccent}"/></Style>
-  <Style Selector="Button.settingsNav.overlayNav controls|GlideIconView.navGlyph"><Setter Property="IconBrush" Value="{DynamicResource BrushMuted}"/></Style>
 
   <Style Selector="TextBox.settingsSearch"><Setter Property="Background" Value="{DynamicResource BrushSearch}"/><Setter Property="Foreground" Value="{DynamicResource BrushText}"/><Setter Property="BorderBrush" Value="{DynamicResource BrushInputBorder}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="0"/><Setter Property="Height" Value="30"/><Setter Property="FontSize" Value="14"/><Setter Property="Padding" Value="13,3"/></Style>
   <Style Selector="ComboBox"><Setter Property="MinHeight" Value="29"/><Setter Property="FontSize" Value="14"/><Setter Property="Background" Value="{DynamicResource BrushInput}"/><Setter Property="Foreground" Value="{DynamicResource BrushText}"/><Setter Property="BorderBrush" Value="{DynamicResource BrushInputBorder}"/><Setter Property="BorderThickness" Value="1"/></Style>
@@ -342,6 +355,8 @@
 
   <!-- Editable Hotkeys/Search surfaces. -->
   <Style Selector="Border.hotkeyTable"><Setter Property="Background" Value="{DynamicResource BrushSurface}"/><Setter Property="BorderBrush" Value="{DynamicResource BrushBorder}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="5"/></Style>
+  <Style Selector="Button.hotkeyHeaderButton"><Setter Property="Background" Value="Transparent"/><Setter Property="BorderThickness" Value="0"/><Setter Property="CornerRadius" Value="0"/><Setter Property="Padding" Value="8,6"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="HorizontalAlignment" Value="Stretch"/><Setter Property="VerticalAlignment" Value="Stretch"/><Setter Property="HorizontalContentAlignment" Value="Left"/><Setter Property="VerticalContentAlignment" Value="Center"/></Style>
+  <Style Selector="Button.hotkeyHeaderButton:pointerover"><Setter Property="Background" Value="{DynamicResource BrushSettingsNavHover}"/></Style>
   <Style Selector="ListBox.hotkeyList"><Setter Property="Background" Value="Transparent"/><Setter Property="BorderThickness" Value="0"/></Style>
   <Style Selector="ListBoxItem.hotkeyRow"><Setter Property="Padding" Value="9,5"/><Setter Property="CornerRadius" Value="4"/><Setter Property="HorizontalContentAlignment" Value="Stretch"/></Style>
   <Style Selector="ListBoxItem.hotkeyRow:pointerover"><Setter Property="Background" Value="{DynamicResource BrushSettingsNavHover}"/></Style>
@@ -350,6 +365,133 @@
   <Style Selector="Border.searchResult"><Setter Property="Background" Value="{DynamicResource BrushSurface}"/><Setter Property="BorderBrush" Value="{DynamicResource BrushBorderSoft}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="6"/><Setter Property="Padding" Value="10,8"/><Setter Property="Margin" Value="0,0,0,5"/></Style>
   <Style Selector="Border.searchResult:pointerover"><Setter Property="Background" Value="{DynamicResource BrushSurfaceHover}"/></Style>
   <Style Selector="Border.searchResult.capturePending"><Setter Property="Background" Value="{DynamicResource BrushAccentSoft}"/><Setter Property="BorderBrush" Value="{DynamicResource BrushAccent}"/><Setter Property="BorderThickness" Value="2"/></Style>
+  <!-- Mouse gesture panel (Settings > Mouse & keyboard): left area rail + rows + compact action picker. -->
+  <Style Selector="Border.gestureCard"><Setter Property="Background" Value="{DynamicResource BrushSurface}"/><Setter Property="BorderBrush" Value="{DynamicResource BrushBorder}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="9"/><Setter Property="Margin" Value="4,2,0,0"/><Setter Property="ClipToBounds" Value="True"/></Style>
+  <Style Selector="Border.gestureHairline"><Setter Property="Background" Value="{DynamicResource BrushBorder}"/></Style>
+  <Style Selector="TextBox.gestureSearch"><Setter Property="Background" Value="{DynamicResource BrushInput}"/><Setter Property="Foreground" Value="{DynamicResource BrushText}"/><Setter Property="BorderBrush" Value="{DynamicResource BrushInputBorder}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="7"/><Setter Property="MinHeight" Value="30"/><Setter Property="FontSize" Value="13"/><Setter Property="Padding" Value="30,5,8,5"/><Setter Property="VerticalContentAlignment" Value="Center"/></Style>
+  <Style Selector="ToggleButton.gestureTool, Button.gestureTool"><Setter Property="Background" Value="{DynamicResource BrushSecondaryAction}"/><Setter Property="Foreground" Value="{DynamicResource BrushText}"/><Setter Property="BorderBrush" Value="{DynamicResource BrushInputBorder}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="7"/><Setter Property="Padding" Value="11,5"/><Setter Property="MinHeight" Value="30"/><Setter Property="FontSize" Value="13"/><Setter Property="VerticalAlignment" Value="Center"/></Style>
+  <Style Selector="ToggleButton.gestureTool:checked /template/ ContentPresenter#PART_ContentPresenter"><Setter Property="Background" Value="{DynamicResource BrushAccentSoft}"/><Setter Property="BorderBrush" Value="{DynamicResource BrushAccent}"/><Setter Property="Foreground" Value="{DynamicResource BrushAccent}"/></Style>
+  <Style Selector="Button.gestureArea"><Setter Property="Background" Value="Transparent"/><Setter Property="Foreground" Value="{DynamicResource BrushText}"/><Setter Property="BorderThickness" Value="0"/><Setter Property="CornerRadius" Value="7"/><Setter Property="Height" Value="32"/><Setter Property="Padding" Value="9,0"/><Setter Property="FontSize" Value="13"/><Setter Property="HorizontalAlignment" Value="Stretch"/><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="VerticalContentAlignment" Value="Center"/></Style>
+  <Style Selector="Button.gestureArea:pointerover /template/ ContentPresenter#PART_ContentPresenter"><Setter Property="Background" Value="{DynamicResource BrushSettingsNavHover}"/></Style>
+  <Style Selector="Button.gestureArea.selected"><Setter Property="Background" Value="{DynamicResource BrushAccentSoft}"/><Setter Property="Foreground" Value="{DynamicResource BrushAccent}"/></Style>
+  <Style Selector="Button.gestureArea.selected /template/ ContentPresenter#PART_ContentPresenter"><Setter Property="Background" Value="{DynamicResource BrushAccentSoft}"/><Setter Property="Foreground" Value="{DynamicResource BrushAccent}"/></Style>
+  <Style Selector="Button.gestureArea controls|GlideIconView"><Setter Property="IconBrush" Value="{DynamicResource BrushMuted}"/></Style>
+  <Style Selector="Button.gestureArea.selected controls|GlideIconView"><Setter Property="IconBrush" Value="{DynamicResource BrushAccent}"/></Style>
+  <Style Selector="Border.gestureBadge"><Setter Property="Background" Value="{DynamicResource BrushAccent}"/><Setter Property="CornerRadius" Value="8"/><Setter Property="MinWidth" Value="18"/><Setter Property="Height" Value="17"/><Setter Property="Padding" Value="5,0"/><Setter Property="VerticalAlignment" Value="Center"/></Style>
+  <Style Selector="Border.gestureBadge TextBlock"><Setter Property="Foreground" Value="White"/><Setter Property="FontSize" Value="11"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="HorizontalAlignment" Value="Center"/><Setter Property="VerticalAlignment" Value="Center"/></Style>
+  <Style Selector="TextBlock.gestureGroupHeader"><Setter Property="FontSize" Value="11"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Foreground" Value="{DynamicResource BrushMuted}"/><Setter Property="VerticalAlignment" Value="Center"/><Setter Property="LetterSpacing" Value="0.6"/></Style>
+  <Style Selector="TextBlock.gestureRowLabel"><Setter Property="FontSize" Value="13"/><Setter Property="Foreground" Value="{DynamicResource BrushText}"/><Setter Property="VerticalAlignment" Value="Center"/><Setter Property="TextTrimming" Value="CharacterEllipsis"/></Style>
+  <Style Selector="TextBlock.gestureHint"><Setter Property="FontSize" Value="12"/><Setter Property="Foreground" Value="{DynamicResource BrushMuted2}"/><Setter Property="TextWrapping" Value="Wrap"/></Style>
+  <Style Selector="controls|GlideIconView.gestureRowIcon"><Setter Property="Width" Value="15"/><Setter Property="Height" Value="15"/><Setter Property="StrokeWidth" Value="1.4"/><Setter Property="IconBrush" Value="{DynamicResource BrushMuted}"/><Setter Property="VerticalAlignment" Value="Center"/></Style>
+  <!-- The action picker: a full-width dropdown FIELD (owner-approved mockup): 30 px, 7 px radius, field fill,
+       1 px border, 10 px padding, muted single-line "Default (...)" and a 15 px chevron pointing DOWN.
+       Hover: lighter fill/border, text + chevron brighten. Open: accent border, chevron flipped UP in light accent.
+       Keyboard focus: accent border + 2 px soft accent ring. Changed: accent border, ~8 % accent tint, light accent
+       text; the leading dot's visibility is set in code (GestureActionPicker.Render), never by a style.
+       GestureActionPicker sets StyleKeyOverride = Button, so these "Button" selectors reach it. Colours are set on
+       the Fluent template's PART_ContentPresenter too, so Fluent's own pointer-over / pressed / disabled
+       template states can never replace the field look. GestureDropdownRenderTests renders and checks this. -->
+  <Style Selector="Button.gesturePicker"><Setter Property="Background" Value="{DynamicResource BrushGestureField}"/><Setter Property="Foreground" Value="{DynamicResource BrushGestureFieldText}"/><Setter Property="BorderBrush" Value="{DynamicResource BrushGestureFieldBorder}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="7"/><Setter Property="Height" Value="30"/><Setter Property="MinHeight" Value="30"/><Setter Property="Padding" Value="10,0"/><Setter Property="FontSize" Value="13"/><Setter Property="HorizontalAlignment" Value="Stretch"/><Setter Property="VerticalAlignment" Value="Center"/><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="VerticalContentAlignment" Value="Center"/></Style>
+  <Style Selector="Button.gesturePicker /template/ ContentPresenter#PART_ContentPresenter"><Setter Property="Background" Value="{DynamicResource BrushGestureField}"/><Setter Property="BorderBrush" Value="{DynamicResource BrushGestureFieldBorder}"/><Setter Property="Foreground" Value="{DynamicResource BrushGestureFieldText}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="7"/></Style>
+  <Style Selector="Button.gesturePicker TextBlock.gesturePickerText"><Setter Property="TextWrapping" Value="NoWrap"/><Setter Property="TextTrimming" Value="CharacterEllipsis"/></Style>
+  <Style Selector="Button.gesturePicker controls|GlideIconView.gesturePickerChevron"><Setter Property="IconBrush" Value="{DynamicResource BrushGestureFieldText}"/><Setter Property="StrokeWidth" Value="1.5"/><Setter Property="RenderTransformOrigin" Value="50%,50%"/><Setter Property="RenderTransform" Value="rotate(180deg)"/></Style>
+  <Style Selector="Button.gesturePicker:pointerover /template/ ContentPresenter#PART_ContentPresenter, Button.gesturePicker:pressed /template/ ContentPresenter#PART_ContentPresenter"><Setter Property="Background" Value="{DynamicResource BrushGestureFieldHover}"/><Setter Property="BorderBrush" Value="{DynamicResource BrushGestureFieldHoverBorder}"/><Setter Property="Foreground" Value="{DynamicResource BrushGestureFieldTextHover}"/></Style>
+  <Style Selector="Button.gesturePicker:pointerover controls|GlideIconView.gesturePickerChevron"><Setter Property="IconBrush" Value="{DynamicResource BrushGestureFieldTextHover}"/></Style>
+  <Style Selector="Button.gesturePicker.open /template/ ContentPresenter#PART_ContentPresenter"><Setter Property="BorderBrush" Value="{DynamicResource BrushAccent}"/><Setter Property="Foreground" Value="{DynamicResource BrushGestureFieldTextHover}"/></Style>
+  <Style Selector="Button.gesturePicker.open controls|GlideIconView.gesturePickerChevron"><Setter Property="IconBrush" Value="{DynamicResource BrushGestureFieldAccentText}"/><Setter Property="RenderTransform" Value="rotate(0deg)"/></Style>
+  <Style Selector="Button.gesturePicker:focus-visible /template/ ContentPresenter#PART_ContentPresenter"><Setter Property="BorderBrush" Value="{DynamicResource BrushAccent}"/><Setter Property="Foreground" Value="{DynamicResource BrushGestureFieldTextHover}"/><Setter Property="BoxShadow" Value="0 0 0 2 #4538A9F5"/></Style>
+  <Style Selector="Button.gesturePicker.changed /template/ ContentPresenter#PART_ContentPresenter"><Setter Property="Background" Value="{DynamicResource BrushGestureFieldChanged}"/><Setter Property="BorderBrush" Value="{DynamicResource BrushAccent}"/><Setter Property="Foreground" Value="{DynamicResource BrushGestureFieldAccentText}"/></Style>
+  <Style Selector="Button.gesturePicker.changed:pointerover /template/ ContentPresenter#PART_ContentPresenter, Button.gesturePicker.changed:pressed /template/ ContentPresenter#PART_ContentPresenter"><Setter Property="Background" Value="{DynamicResource BrushGestureFieldChangedHover}"/></Style>
+  <Style Selector="Button.gesturePicker:disabled"><Setter Property="Opacity" Value="0.45"/></Style>
+  <Style Selector="Button.gestureAddCustom"><Setter Property="Background" Value="Transparent"/><Setter Property="Foreground" Value="{DynamicResource BrushMuted}"/><Setter Property="BorderThickness" Value="0"/><Setter Property="Padding" Value="0"/><Setter Property="HorizontalAlignment" Value="Stretch"/><Setter Property="HorizontalContentAlignment" Value="Stretch"/></Style>
+  <Style Selector="Button.gestureIconButton"><Setter Property="Background" Value="Transparent"/><Setter Property="BorderThickness" Value="0"/><Setter Property="Padding" Value="4"/><Setter Property="Width" Value="26"/><Setter Property="Height" Value="26"/><Setter Property="CornerRadius" Value="6"/><Setter Property="VerticalAlignment" Value="Center"/></Style>
+  <!-- Custom-gesture Input / Hold combos: the same field look as the action picker. -->
+  <Style Selector="ComboBox.gestureCustomCombo"><Setter Property="MinHeight" Value="30"/><Setter Property="Height" Value="30"/><Setter Property="FontSize" Value="13"/><Setter Property="CornerRadius" Value="7"/><Setter Property="Padding" Value="10,0,6,0"/><Setter Property="Background" Value="{DynamicResource BrushGestureField}"/><Setter Property="BorderBrush" Value="{DynamicResource BrushGestureFieldBorder}"/><Setter Property="Foreground" Value="{DynamicResource BrushGestureFieldText}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="HorizontalAlignment" Value="Stretch"/><Setter Property="VerticalAlignment" Value="Center"/></Style>
+  <Style Selector="ComboBox.gestureCustomCombo /template/ PathIcon#DropDownGlyph"><Setter Property="Foreground" Value="{DynamicResource BrushGestureFieldText}"/></Style>
+  <Style Selector="ComboBox.gestureCustomCombo:pointerover /template/ Border#Background"><Setter Property="Background" Value="{DynamicResource BrushGestureFieldHover}"/><Setter Property="BorderBrush" Value="{DynamicResource BrushGestureFieldHoverBorder}"/></Style>
+  <Style Selector="ComboBox.gestureCustomCombo:pointerover /template/ PathIcon#DropDownGlyph"><Setter Property="Foreground" Value="{DynamicResource BrushGestureFieldTextHover}"/></Style>
+  <Style Selector="ComboBox.gestureCustomCombo.changed"><Setter Property="Background" Value="{DynamicResource BrushGestureFieldChanged}"/><Setter Property="BorderBrush" Value="{DynamicResource BrushAccent}"/><Setter Property="Foreground" Value="{DynamicResource BrushGestureFieldAccentText}"/></Style>
+  <Style Selector="ComboBox.gestureCustomCombo.changed:pointerover /template/ Border#Background"><Setter Property="Background" Value="{DynamicResource BrushGestureFieldChangedHover}"/><Setter Property="BorderBrush" Value="{DynamicResource BrushAccent}"/></Style>
+  <Style Selector="ComboBox.gestureCustomCombo:dropdownopen /template/ Border#Background, ComboBox.gestureCustomCombo:focus-visible /template/ Border#Background"><Setter Property="BorderBrush" Value="{DynamicResource BrushAccent}"/></Style>
+  <!-- Picker popup ("design C, compact"). -->
+  <Style Selector="FlyoutPresenter.gesturePickerFlyout"><Setter Property="Background" Value="{DynamicResource BrushSurfaceRaised}"/><Setter Property="BorderBrush" Value="{DynamicResource BrushBorder}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="9"/><Setter Property="Padding" Value="8"/><Setter Property="MinWidth" Value="0"/><Setter Property="MaxWidth" Value="260"/></Style>
+  <Style Selector="Button.gesturePickItem"><Setter Property="Background" Value="Transparent"/><Setter Property="Foreground" Value="{DynamicResource BrushText}"/><Setter Property="BorderThickness" Value="0"/><Setter Property="CornerRadius" Value="6"/><Setter Property="Height" Value="26"/><Setter Property="Padding" Value="7,0"/><Setter Property="FontSize" Value="12.5"/><Setter Property="HorizontalAlignment" Value="Stretch"/><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="VerticalContentAlignment" Value="Center"/></Style>
+  <Style Selector="Button.gesturePickItem:pointerover /template/ ContentPresenter#PART_ContentPresenter"><Setter Property="Background" Value="{DynamicResource BrushSettingsNavHover}"/></Style>
+  <Style Selector="Button.gesturePickItem.current, Button.gestureChip.current"><Setter Property="Background" Value="{DynamicResource BrushAccentSoft}"/><Setter Property="Foreground" Value="{DynamicResource BrushAccent}"/></Style>
+  <Style Selector="Button.gestureChip"><Setter Property="Background" Value="{DynamicResource BrushInput}"/><Setter Property="Foreground" Value="{DynamicResource BrushText}"/><Setter Property="BorderBrush" Value="{DynamicResource BrushInputBorder}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="11"/><Setter Property="Height" Value="23"/><Setter Property="Padding" Value="8,0"/><Setter Property="FontSize" Value="12"/><Setter Property="Margin" Value="0,0,4,4"/><Setter Property="VerticalContentAlignment" Value="Center"/></Style>
+  <Style Selector="Button.gestureChip:pointerover /template/ ContentPresenter#PART_ContentPresenter"><Setter Property="Background" Value="{DynamicResource BrushSurfaceHover}"/></Style>
+  <Style Selector="Border.gesturePill"><Setter Property="Background" Value="{DynamicResource BrushAccentSoft}"/><Setter Property="CornerRadius" Value="8"/><Setter Property="Padding" Value="7,1"/><Setter Property="VerticalAlignment" Value="Center"/></Style>
+  <Style Selector="Border.gesturePill TextBlock"><Setter Property="Foreground" Value="{DynamicResource BrushAccent}"/><Setter Property="FontSize" Value="11.5"/><Setter Property="FontWeight" Value="SemiBold"/></Style>
+
+  <!-- Settings cards (controls:SettingsCard, template-less; StyleKey is Border). Matches the gesture panel:
+       rounded surface, hairline border, accent badge. Expanded headers must NOT pick up Fluent's accent
+       :checked fill, so every ToggleButton state is overridden on the template presenter. -->
+  <Style Selector="Border.settingsCard"><Setter Property="Background" Value="{DynamicResource BrushSurface}"/><Setter Property="BorderBrush" Value="{DynamicResource BrushBorderSoft}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="8"/><Setter Property="Margin" Value="0,0,0,10"/><Setter Property="ClipToBounds" Value="True"/></Style>
+  <Style Selector="ToggleButton.settingsCardHeader"><Setter Property="Background" Value="Transparent"/><Setter Property="Foreground" Value="{DynamicResource BrushText}"/><Setter Property="BorderBrush" Value="Transparent"/><Setter Property="BorderThickness" Value="0"/><Setter Property="CornerRadius" Value="0"/><Setter Property="Padding" Value="14,10"/><Setter Property="MinHeight" Value="52"/><Setter Property="HorizontalAlignment" Value="Stretch"/><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="VerticalContentAlignment" Value="Center"/></Style>
+  <Style Selector="ToggleButton.settingsCardHeader /template/ ContentPresenter#PART_ContentPresenter"><Setter Property="Background" Value="Transparent"/><Setter Property="BorderBrush" Value="Transparent"/><Setter Property="Foreground" Value="{DynamicResource BrushText}"/></Style>
+  <Style Selector="ToggleButton.settingsCardHeader:pointerover /template/ ContentPresenter#PART_ContentPresenter"><Setter Property="Background" Value="{DynamicResource BrushSurfaceHover}"/><Setter Property="BorderBrush" Value="Transparent"/><Setter Property="Foreground" Value="{DynamicResource BrushText}"/></Style>
+  <Style Selector="ToggleButton.settingsCardHeader:pressed /template/ ContentPresenter#PART_ContentPresenter"><Setter Property="Background" Value="{DynamicResource BrushSettingsNavSelected}"/><Setter Property="BorderBrush" Value="Transparent"/><Setter Property="Foreground" Value="{DynamicResource BrushText}"/></Style>
+  <Style Selector="ToggleButton.settingsCardHeader:checked /template/ ContentPresenter#PART_ContentPresenter"><Setter Property="Background" Value="Transparent"/><Setter Property="BorderBrush" Value="Transparent"/><Setter Property="Foreground" Value="{DynamicResource BrushText}"/></Style>
+  <Style Selector="ToggleButton.settingsCardHeader:checked:pointerover /template/ ContentPresenter#PART_ContentPresenter"><Setter Property="Background" Value="{DynamicResource BrushSurfaceHover}"/><Setter Property="BorderBrush" Value="Transparent"/><Setter Property="Foreground" Value="{DynamicResource BrushText}"/></Style>
+  <Style Selector="ToggleButton.settingsCardHeader:checked:pressed /template/ ContentPresenter#PART_ContentPresenter"><Setter Property="Background" Value="{DynamicResource BrushSettingsNavSelected}"/><Setter Property="BorderBrush" Value="Transparent"/><Setter Property="Foreground" Value="{DynamicResource BrushText}"/></Style>
+  <Style Selector="controls|GlideIconView.settingsCardIcon"><Setter Property="Width" Value="18"/><Setter Property="Height" Value="18"/><Setter Property="IconBrush" Value="{DynamicResource BrushAccent}"/><Setter Property="StrokeWidth" Value="1.55"/></Style>
+  <Style Selector="controls|GlideIconView.settingsCardChevron"><Setter Property="Width" Value="14"/><Setter Property="Height" Value="14"/><Setter Property="IconBrush" Value="{DynamicResource BrushMuted}"/><Setter Property="StrokeWidth" Value="1.5"/></Style>
+  <Style Selector="ToggleButton.settingsCardHeader:pointerover controls|GlideIconView.settingsCardChevron"><Setter Property="IconBrush" Value="{DynamicResource BrushText}"/></Style>
+  <Style Selector="TextBlock.settingsCardTitle"><Setter Property="FontSize" Value="15"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Foreground" Value="{DynamicResource BrushText}"/></Style>
+  <Style Selector="TextBlock.settingsCardSubtitle"><Setter Property="FontSize" Value="12.5"/><Setter Property="Foreground" Value="{DynamicResource BrushMuted}"/></Style>
+  <Style Selector="Border.settingsCardRule"><Setter Property="Background" Value="{DynamicResource BrushBorderSoft}"/><Setter Property="Margin" Value="14,0"/></Style>
+  <Style Selector="StackPanel.settingsCardBody"><Setter Property="Margin" Value="14,12,14,14"/></Style>
+  <Style Selector="Border.settingsCardBadge"><Setter Property="Background" Value="{DynamicResource BrushAccent}"/><Setter Property="CornerRadius" Value="9"/><Setter Property="MinWidth" Value="18"/><Setter Property="Height" Value="18"/><Setter Property="Padding" Value="7,0"/><Setter Property="VerticalAlignment" Value="Center"/></Style>
+  <Style Selector="Border.settingsCardBadge TextBlock"><Setter Property="Foreground" Value="White"/><Setter Property="FontSize" Value="11"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="HorizontalAlignment" Value="Center"/><Setter Property="VerticalAlignment" Value="Center"/></Style>
+  <!-- Search "Open" reveal: adorner over the revealed row. The fill is a translucent accent (an adorner
+       draws ON TOP of the row, so the opaque BrushAccentSoft would hide it). Add class "fading" to fade out. -->
+  <Style Selector="Border.settingsRevealHighlight">
+    <Setter Property="Background" Value="#2238A9F5"/><Setter Property="BorderBrush" Value="{DynamicResource BrushAccent}"/><Setter Property="BorderThickness" Value="1.5"/>
+    <Setter Property="CornerRadius" Value="6"/><Setter Property="Margin" Value="-6,-3"/><Setter Property="IsHitTestVisible" Value="False"/><Setter Property="Opacity" Value="1"/>
+    <Setter Property="Transitions"><Transitions><DoubleTransition Property="Opacity" Duration="0:0:0.35"/></Transitions></Setter>
+  </Style>
+  <Style Selector="Border.settingsRevealHighlight.fading"><Setter Property="Opacity" Value="0"/></Style>
+
   <Style Selector="Button.searchOpen"><Setter Property="Background" Value="{DynamicResource BrushSecondaryAction}"/><Setter Property="Foreground" Value="{DynamicResource BrushText}"/><Setter Property="BorderBrush" Value="{DynamicResource BrushInputBorder}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="5"/><Setter Property="Padding" Value="10,4"/></Style>
+
+
+  <!-- Reset Glide card and its dialogs (SettingsWindow.Reset.cs). Red is a fixed signal colour in every theme.
+       Group labels, two-column tick-box rows, the 30 px button bar and the danger button follow the approved mockup. -->
+  <Style Selector="TextBlock.resetGroupLabel"><Setter Property="FontSize" Value="11"/><Setter Property="LetterSpacing" Value="0.55"/><Setter Property="Foreground" Value="{DynamicResource BrushMuted}"/><Setter Property="VerticalAlignment" Value="Center"/></Style>
+  <Style Selector="Border.resetGroupRule"><Setter Property="Height" Value="1"/><Setter Property="Background" Value="{DynamicResource BrushBorderSoft}"/><Setter Property="VerticalAlignment" Value="Center"/></Style>
+  <Style Selector="Border.resetBarRule"><Setter Property="BorderBrush" Value="{DynamicResource BrushBorderSoft}"/><Setter Property="BorderThickness" Value="0,1,0,0"/></Style>
+  <!-- Own template: the Fluent box is 20 px and its row cannot take the 6/8 px padding, hover fill and first-line alignment of the mockup. -->
+  <Style Selector="CheckBox.resetItem">
+    <Setter Property="HorizontalAlignment" Value="Stretch"/><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="VerticalContentAlignment" Value="Top"/>
+    <Setter Property="FontSize" Value="13"/><Setter Property="MinHeight" Value="0"/><Setter Property="Background" Value="Transparent"/><Setter Property="Padding" Value="8,6"/>
+    <Setter Property="Template">
+      <ControlTemplate>
+        <Border Name="PART_Border" Background="{TemplateBinding Background}" CornerRadius="7" Padding="{TemplateBinding Padding}">
+          <Grid ColumnDefinitions="Auto,*">
+            <Grid Height="18" VerticalAlignment="Top" Margin="0,0,10,0">
+              <Border Name="NormalRectangle" Width="15" Height="15" CornerRadius="3.5" BorderThickness="1.5" BorderBrush="{DynamicResource BrushMuted2}" Background="Transparent" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+              <Path Name="CheckGlyph" Data="M0,4 L3,7 L8.5,1" Stretch="Uniform" Stroke="White" StrokeThickness="1.8" StrokeLineCap="Round" StrokeJoin="Round" Opacity="0" Width="9" Height="8" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Grid>
+            <ContentPresenter Name="PART_ContentPresenter" Grid.Column="1" Content="{TemplateBinding Content}" ContentTemplate="{TemplateBinding ContentTemplate}" Foreground="{TemplateBinding Foreground}" VerticalAlignment="Top"/>
+          </Grid>
+        </Border>
+      </ControlTemplate>
+    </Setter>
+  </Style>
+  <Style Selector="CheckBox.resetItem:pointerover /template/ Border#PART_Border"><Setter Property="Background" Value="{DynamicResource BrushSurfaceRaised}"/></Style>
+  <Style Selector="CheckBox.resetItem:pointerover /template/ Border#NormalRectangle"><Setter Property="BorderBrush" Value="{DynamicResource BrushMuted}"/></Style>
+  <Style Selector="CheckBox.resetItem:checked /template/ Border#NormalRectangle"><Setter Property="Background" Value="{DynamicResource BrushAccent}"/><Setter Property="BorderBrush" Value="{DynamicResource BrushAccent}"/></Style>
+  <Style Selector="CheckBox.resetItem:checked /template/ Path#CheckGlyph"><Setter Property="Opacity" Value="1"/></Style>
+  <Style Selector="CheckBox.resetItem:focus-visible /template/ Border#PART_Border"><Setter Property="BorderBrush" Value="{DynamicResource BrushAccent}"/><Setter Property="BorderThickness" Value="1"/></Style>
+  <Style Selector="TextBlock.resetItemTitle"><Setter Property="FontSize" Value="13"/><Setter Property="Foreground" Value="{DynamicResource BrushText}"/><Setter Property="TextWrapping" Value="Wrap"/></Style>
+  <Style Selector="TextBlock.resetItemHint"><Setter Property="FontSize" Value="12"/><Setter Property="Foreground" Value="{DynamicResource BrushMuted}"/><Setter Property="TextWrapping" Value="Wrap"/></Style>
+  <Style Selector="Button.secondaryAction.resetBar"><Setter Property="Height" Value="30"/><Setter Property="MinHeight" Value="30"/><Setter Property="MinWidth" Value="0"/><Setter Property="Padding" Value="12,0"/><Setter Property="FontSize" Value="13"/><Setter Property="CornerRadius" Value="7"/><Setter Property="VerticalAlignment" Value="Center"/><Setter Property="VerticalContentAlignment" Value="Center"/><Setter Property="HorizontalContentAlignment" Value="Center"/></Style>
+  <Style Selector="Button.dangerAction"><Setter Property="Height" Value="30"/><Setter Property="MinHeight" Value="30"/><Setter Property="MinWidth" Value="0"/><Setter Property="Padding" Value="12,0"/><Setter Property="FontSize" Value="13"/><Setter Property="CornerRadius" Value="7"/><Setter Property="BorderThickness" Value="1"/><Setter Property="VerticalAlignment" Value="Center"/><Setter Property="VerticalContentAlignment" Value="Center"/><Setter Property="HorizontalContentAlignment" Value="Center"/><Setter Property="Foreground" Value="White"/><Setter Property="Background" Value="#C0392B"/><Setter Property="BorderBrush" Value="#E5645A"/></Style>
+  <Style Selector="Button.dangerAction /template/ ContentPresenter#PART_ContentPresenter"><Setter Property="Background" Value="#C0392B"/><Setter Property="BorderBrush" Value="#E5645A"/><Setter Property="Foreground" Value="White"/></Style>
+  <Style Selector="Button.dangerAction:pointerover /template/ ContentPresenter#PART_ContentPresenter"><Setter Property="Background" Value="#D4463A"/><Setter Property="BorderBrush" Value="#FF7A6E"/><Setter Property="Foreground" Value="White"/></Style>
+  <Style Selector="Button.dangerAction:pressed /template/ ContentPresenter#PART_ContentPresenter"><Setter Property="Background" Value="#A93226"/><Setter Property="BorderBrush" Value="#E5645A"/><Setter Property="Foreground" Value="White"/></Style>
+  <Style Selector="Button.dangerAction:disabled"><Setter Property="Opacity" Value="0.45"/></Style>
+  <Style Selector="Button.dangerAction:disabled /template/ ContentPresenter#PART_ContentPresenter"><Setter Property="Background" Value="#C0392B"/><Setter Property="BorderBrush" Value="#E5645A"/><Setter Property="Foreground" Value="White"/></Style>
+  <Style Selector="TextBlock.resetWarning"><Setter Property="FontSize" Value="12"/><Setter Property="Foreground" Value="#F0B429"/><Setter Property="TextWrapping" Value="Wrap"/></Style>
 
 </Styles>

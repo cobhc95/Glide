@@ -45,8 +45,10 @@
         </ScrollViewer>
 
         <Border x:Name="HomeStatusSurface" Classes="statusSurface legacyViewerStatus" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="14,0,14,14" Height="58">
-          <Grid ColumnDefinitions="*,Auto" Margin="16,8,8,8">
-            <TextBlock x:Name="HomeStatusText" Text="Glide  •  Drop an image here or Ctrl+O" FontSize="12.5" Foreground="{DynamicResource BrushMuted}" VerticalAlignment="Center"/>
+          <!-- Same two layouts as the viewer's status bar (HomeSurface.ApplyStackedStatusLayout): the info text on its own top line with the
+               collapse / close buttons at its right and the buttons on the row below (default), or everything on a single line. -->
+          <Grid x:Name="HomeStatusLayoutGrid" ColumnDefinitions="Auto,*,Auto" RowDefinitions="*" Margin="16,8,8,8" ColumnSpacing="8" RowSpacing="0">
+            <TextBlock x:Name="HomeStatusText" Text="Glide  •  Drop an image here or Ctrl+O" FontSize="12.5" Foreground="{DynamicResource BrushMuted}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
             <StackPanel x:Name="HomeStatusControlsPanel" Grid.Column="1" Orientation="Horizontal" Spacing="4">
               <Button Classes="statusIcon legacyStatusIcon" IsEnabled="False" ToolTip.Tip="Zoom out"><controls:GlideIconView Kind="ZoomOut" Classes="statusGlyph"/></Button>
               <Button Classes="statusIcon legacyStatusIcon" IsEnabled="False" ToolTip.Tip="Zoom in"><controls:GlideIconView Kind="ZoomIn" Classes="statusGlyph"/></Button>
@@ -59,8 +61,10 @@
               <Button Classes="statusIcon legacyStatusIcon nav" IsEnabled="False" ToolTip.Tip="Previous image"><controls:GlideIconView Kind="Previous" Classes="statusGlyph"/></Button>
               <Button Classes="statusIcon legacyStatusIcon nav" IsEnabled="False" ToolTip.Tip="Next image"><controls:GlideIconView Kind="Next" Classes="statusGlyph"/></Button>
               <Button Classes="statusIcon legacyStatusIcon nav" IsEnabled="False" ToolTip.Tip="Last image"><controls:GlideIconView Kind="Last" Classes="statusGlyph"/></Button>
+            </StackPanel>
+            <StackPanel x:Name="HomeStatusWindowControls" Grid.Column="2" Orientation="Horizontal" Spacing="4" VerticalAlignment="Top">
               <Button x:Name="HomeStatusCollapseButton" Classes="statusIcon legacyStatusIcon" Click="CollapseStatusClicked" ToolTip.Tip="Collapse status surface"><controls:GlideIconView Kind="Collapse" Classes="statusGlyph"/></Button>
-              <Button Classes="statusIcon legacyStatusIcon" Click="CloseStatusClicked" ToolTip.Tip="Hide status surface"><controls:GlideIconView Kind="Close" Classes="statusGlyph"/></Button>
+              <Button x:Name="HomeStatusCloseButton" Classes="statusIcon legacyStatusIcon" Click="CloseStatusClicked" ToolTip.Tip="Hide status surface"><controls:GlideIconView Kind="Close" Classes="statusGlyph"/></Button>
             </StackPanel>
           </Grid>
         </Border>

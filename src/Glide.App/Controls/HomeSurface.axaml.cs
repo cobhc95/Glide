@@ -1,7 +1,5 @@
-using System;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
-using Avalonia.Markup.Xaml;
 
 namespace Glide.App.Controls;
 
@@ -33,6 +31,39 @@ public partial class HomeSurface : UserControl
     public Border StatusSurface => HomeStatusSurface;
     public TextBlock StatusText => HomeStatusText;
     public StackPanel StatusControlsPanel => HomeStatusControlsPanel;
+    public StackPanel StatusWindowControls => HomeStatusWindowControls;
+    public bool StatusStacked { get; private set; }
+
+    /// <summary>
+    /// Lays the Home status bar out like the viewer's: stacked (info text on its own top line, collapse / close at its right,
+    /// buttons on the row below) or on a single line.
+    /// </summary>
+    public void ApplyStackedStatusLayout(bool stacked)
+    {
+        StatusStacked = stacked;
+        static void Place(Control control, int row, int column, int span)
+        {
+            Grid.SetRow(control, row);
+            Grid.SetColumn(control, column);
+            Grid.SetColumnSpan(control, span);
+        }
+        if (stacked)
+        {
+            Place(HomeStatusText, 0, 0, 2);
+            Place(HomeStatusWindowControls, 0, 2, 1);
+            Place(HomeStatusControlsPanel, 1, 0, 3);
+        }
+        else
+        {
+            Place(HomeStatusText, 0, 0, 1);
+            Place(HomeStatusControlsPanel, 0, 1, 1);
+            Place(HomeStatusWindowControls, 0, 2, 1);
+        }
+        // One row stretches the buttons across the bar's fixed height (the single-line look); stacked uses two content-sized rows.
+        HomeStatusLayoutGrid.RowDefinitions = RowDefinitions.Parse(stacked ? "Auto,Auto" : "*");
+        HomeStatusLayoutGrid.RowSpacing = stacked ? 4 : 0;
+        HomeStatusWindowControls.VerticalAlignment = stacked ? Avalonia.Layout.VerticalAlignment.Top : Avalonia.Layout.VerticalAlignment.Center;
+    }
     public Button OptionsButton => HomeOptionsButton;
     public Button StatusCollapseButton => HomeStatusCollapseButton;
 

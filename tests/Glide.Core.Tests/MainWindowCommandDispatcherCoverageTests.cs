@@ -9,7 +9,7 @@ public sealed class MainWindowCommandDispatcherCoverageTests
     [Fact]
     public void MissingCommands_excludes_None_and_reports_only_unmapped_semantic_actions()
     {
-        var commands = Enum.GetValues<GlideCommand>().Where(command => command != GlideCommand.None).ToArray();
+        var commands = Enum.GetValues<GlideCommand>().Where(command => command is not (GlideCommand.None or GlideCommand.ChangeSetting)).ToArray();
         Assert.Empty(MainWindowCommandDispatcher.MissingCommands(commands));
         Assert.Contains(GlideCommand.OpenFile, MainWindowCommandDispatcher.MissingCommands(commands.Where(command => command != GlideCommand.OpenFile)));
     }
@@ -34,7 +34,8 @@ public sealed class MainWindowCommandDispatcherCoverageTests
             {
                 var mapped = window.ProductionMappedCommandsForTests();
                 // Derive the expectation from the enum so the count can never silently drift again.
-                var expected = Enum.GetValues<GlideCommand>().Count(command => command != GlideCommand.None);
+                // ChangeSetting is executed by MainWindow.ExecuteActionAsync (it needs the registry action's setting id).
+                var expected = Enum.GetValues<GlideCommand>().Count(command => command is not (GlideCommand.None or GlideCommand.ChangeSetting));
                 Assert.Equal(expected, mapped.Count);
                 Assert.Empty(MainWindowCommandDispatcher.MissingCommands(mapped));
             }

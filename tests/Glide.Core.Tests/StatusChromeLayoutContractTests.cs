@@ -43,12 +43,21 @@ public sealed class StatusChromeLayoutContractTests
         Assert.Contains("(expanded || collapsedOnly) && ImageView.IsVisible", visibility, StringComparison.Ordinal);
         Assert.Contains("ApplyCollapsedStatusChrome()", visibility, StringComparison.Ordinal);
         var collapsed = MethodBody(statusChrome, "private void ApplyCollapsedStatusChrome()");
-        Assert.Contains("StatusControlsPanel.IsVisible = !collapsedOnly", collapsed, StringComparison.Ordinal);
-        Assert.Contains("StatusCloseButton.IsVisible = !collapsedOnly", collapsed, StringComparison.Ordinal);
-        // The collapsed bar is just the button (no empty strip), pinned to the collapse button's spot.
-        Assert.Contains("PinCollapsedSurface(ViewerStatusSurface", collapsed, StringComparison.Ordinal);
+        // Corner mode: the collapsed bar is just the button (no empty strip), parked lower-right.
+        Assert.Contains("StatusControlsPanel.IsVisible = !compact", collapsed, StringComparison.Ordinal);
+        Assert.Contains("StatusCloseButton.IsVisible = !compact", collapsed, StringComparison.Ordinal);
+        Assert.Contains("PinCollapsedSurfaceToCorner(ViewerStatusSurface)", collapsed, StringComparison.Ordinal);
+        // Corner off: the expanded layout stays live but ghosted, so the expand button sits exactly
+        // where the collapse button is (multi-row bars, resizes, alignment) without a stale anchor.
+        Assert.Contains("SetGhosted(StatusControlsPanel, ghost)", collapsed, StringComparison.Ordinal);
+        Assert.Contains("SetGhosted(StatusCloseButton, ghost)", collapsed, StringComparison.Ordinal);
+        Assert.Contains("SetGhosted(StatusStatsHost, ghost)", collapsed, StringComparison.Ordinal);
         Assert.Contains("ApplyStatusSurfaceAlignment(ViewerStatusSurface)", collapsed, StringComparison.Ordinal);
         Assert.DoesNotContain("Close()", collapsed, StringComparison.Ordinal);
+        Assert.DoesNotContain("_collapseAnchor", statusChrome, StringComparison.Ordinal);
+        Assert.DoesNotContain("StatusButtonAnchorX", statusChrome, StringComparison.Ordinal);
+        var chromeless = MethodBody(statusChrome, "private static void SetStatusSurfaceChromeless(");
+        Assert.Contains("surface.Background = null", chromeless, StringComparison.Ordinal);
 
         var viewerChrome = ReadSource("src", "Glide.App", "MainWindow.ViewerChrome.cs").Replace("\r\n", "\n");
         var collapse = MethodBody(viewerChrome, "private void CollapseStatusClicked(");
@@ -66,7 +75,7 @@ public sealed class StatusChromeLayoutContractTests
         Assert.Contains("Auto-resize status bar", catalog, StringComparison.Ordinal);
 
         var mainWindow = ReadSource("src", "Glide.App", "MainWindow.axaml.cs").Replace("\r\n", "\n");
-        var menu = MethodBody(mainWindow, "private void StatusSurfacePointerPressed(");
+        var menu = MethodBody(mainWindow, "internal ContextMenu BuildStatusSurfaceContextMenu()");
         Assert.Contains("Auto-resize", menu, StringComparison.Ordinal);
         Assert.Contains("_settings.StatusBarAutoFit = !_settings.StatusBarAutoFit", menu, StringComparison.Ordinal);
 

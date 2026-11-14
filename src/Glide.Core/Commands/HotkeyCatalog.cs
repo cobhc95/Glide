@@ -10,86 +10,48 @@ public sealed record HotkeyActionDefinition(
     string Label,
     string Category,
     GlideCommand Command,
-    string[] DefaultShortcuts);
+    string[] DefaultShortcuts,
+    string[]? SearchTerms = null,
+    string? ActionId = null);
+
+/// <summary>A read-only shortcut owned by one surface (Explorer list keys, slideshow Space...). Shown in the
+/// hotkey list and found by Settings search, but never rebindable and never part of the saved hotkey map.</summary>
+public sealed record FixedShortcutDefinition(string Id, string Shortcut, string Label, string Category, string Description, string[] SearchTerms);
 
 public static class HotkeyCatalog
 {
-    public static IReadOnlyList<HotkeyActionDefinition> All { get; } = new HotkeyActionDefinition[]
-    {
-        new("file.open", "Open file", "File", GlideCommand.OpenFile, ["O", "Ctrl+O"]),
-        new("file.openFolder", "Open folder", "File", GlideCommand.OpenFolder, ["Ctrl+Shift+O"]),
-        new("app.settings", "Open Settings", "Application", GlideCommand.Settings, ["Ctrl+,"]),
-        new("folder.refresh", "Refresh current folder", "File", GlideCommand.RefreshFolder, ["F5", "U", "Ctrl+R"]),
-        new("workspace.home", "Open / select Home tab", "Workspace", GlideCommand.Home, []),
-        new("folder.previous", "Previous sibling folder", "Navigation", GlideCommand.PreviousFolder, ["Shift+Left"]),
-        new("folder.next", "Next sibling folder", "Navigation", GlideCommand.NextFolder, ["Shift+Right"]),
-        new("folder.exploreParent", "Explore containing folder", "Navigation", GlideCommand.ExploreParentFolder, []),
-        new("slideshow.startPause", "Start / pause / resume slideshow", "Slideshow", GlideCommand.StartPauseSlideshow, ["Shift+A", "S"]),
-        new("slideshow.stop", "Stop slideshow session", "Slideshow", GlideCommand.StopSlideshow, []),
-        new("view.info", "Toggle image information", "Viewing", GlideCommand.ToggleImageInfo, ["I"]),
-        new("view.rotateLeft", "Rotate view left", "Viewing", GlideCommand.RotateLeft, ["L"]),
-        new("view.rotateRight", "Rotate view right", "Viewing", GlideCommand.RotateRight, ["R"]),
-        new("view.flipHorizontal", "Flip view horizontally", "Viewing", GlideCommand.FlipHorizontal, ["H"]),
-        new("view.flipVertical", "Flip view vertically", "Viewing", GlideCommand.FlipVertical, ["V"]),
-        new("nav.nextSpace", "Next image (Space)", "Navigation", GlideCommand.NextImage, ["Space"]),
-        new("nav.nextRight", "Next image (Right Arrow)", "Navigation", GlideCommand.NextImage, ["Right"]),
-        new("nav.nextPage", "Next image (Page Down)", "Navigation", GlideCommand.NextImage, ["PageDown"]),
-        new("nav.previousBack", "Previous image (Backspace)", "Navigation", GlideCommand.PreviousImage, ["Backspace"]),
-        new("nav.previousLeft", "Previous image (Left Arrow)", "Navigation", GlideCommand.PreviousImage, ["Left"]),
-        new("nav.previousPage", "Previous image (Page Up)", "Navigation", GlideCommand.PreviousImage, ["PageUp"]),
-        new("nav.first", "First image", "Navigation", GlideCommand.FirstImage, ["Ctrl+Home", "Home"]),
-        new("nav.last", "Last image", "Navigation", GlideCommand.LastImage, ["Ctrl+End", "End"]),
-        new("view.fullscreen", "Toggle fullscreen", "Viewing", GlideCommand.ToggleFullscreen, ["F", "F11", "Enter"]),
-        new("view.fit", "Fit image", "Viewing", GlideCommand.FitImage, ["Shift+W"]),
-        new("view.fitWidth", "Fit width", "Viewing", GlideCommand.FitWidth, ["2"]),
-        new("view.fitHeight", "Fit height", "Viewing", GlideCommand.FitHeight, ["1"]),
-        new("view.fitWindow", "Fit to window (enlarge or shrink)", "Viewing", GlideCommand.FitWindow, ["4"]),
-        new("view.actual", "Actual size / 100%", "Viewing", GlideCommand.ActualSize, ["3", "Ctrl+H"]),
-        new("view.toggleFitActual", "Toggle Fit / 100%", "Viewing", GlideCommand.ToggleFitActual, []),
-        new("view.zoomIn", "Zoom in", "Viewing", GlideCommand.ZoomIn, ["+", "="] ),
-        new("view.zoomOut", "Zoom out", "Viewing", GlideCommand.ZoomOut, ["-"] ),
-        new("selection.clear", "Clear selection", "Selection", GlideCommand.ClearSelection, ["Esc"]),
-        new("tab.new", "New tab", "Tabs", GlideCommand.NewTab, ["Ctrl+T"]),
-        new("tab.close", "Close tab", "Tabs", GlideCommand.CloseTab, ["Ctrl+W", "Ctrl+F4"]),
-        new("tab.restore", "Restore closed tab", "Tabs", GlideCommand.RestoreClosedTab, ["Ctrl+Shift+T"]),
-        new("tab.duplicate", "Duplicate tab", "Tabs", GlideCommand.DuplicateTab, ["Ctrl+Shift+K"]),
-        new("window.newSameImage", "New window with current picture", "Application", GlideCommand.NewWindowSameImage, ["Ctrl+N"]),
-        new("window.duplicateSession", "Duplicate current window/session", "Application", GlideCommand.DuplicateSessionWindow, ["Ctrl+Shift+N"]),
-        new("tab.next", "Next tab", "Tabs", GlideCommand.NextTab, ["Ctrl+Tab", "Ctrl+PageDown"]),
-        new("tab.previous", "Previous tab", "Tabs", GlideCommand.PreviousTab, ["Ctrl+Shift+Tab", "Ctrl+PageUp"]),
-        new("tab.select1", "Select tab 1", "Tabs", GlideCommand.SelectTab1, ["Ctrl+1"]),
-        new("tab.select2", "Select tab 2", "Tabs", GlideCommand.SelectTab2, ["Ctrl+2"]),
-        new("tab.select3", "Select tab 3", "Tabs", GlideCommand.SelectTab3, ["Ctrl+3"]),
-        new("tab.select4", "Select tab 4", "Tabs", GlideCommand.SelectTab4, ["Ctrl+4"]),
-        new("tab.select5", "Select tab 5", "Tabs", GlideCommand.SelectTab5, ["Ctrl+5"]),
-        new("tab.select6", "Select tab 6", "Tabs", GlideCommand.SelectTab6, ["Ctrl+6"]),
-        new("tab.select7", "Select tab 7", "Tabs", GlideCommand.SelectTab7, ["Ctrl+7"]),
-        new("tab.select8", "Select tab 8", "Tabs", GlideCommand.SelectTab8, ["Ctrl+8"]),
-        new("tab.selectLast", "Select last tab", "Tabs", GlideCommand.SelectLastTab, ["Ctrl+9"]),
-        new("tab.detach", "Move active tab to new Glide window", "Tabs", GlideCommand.DetachTab, []),
-        new("window.close", "Close Glide window", "Application", GlideCommand.CloseWindow, ["Ctrl+Shift+W"]),
-        new("window.alwaysTop", "Toggle Always On Top", "Application", GlideCommand.ToggleAlwaysOnTop, []),
-        new("status.toggle", "Show / hide status surface", "Application", GlideCommand.ToggleStatusSurface, ["Alt+Shift+S"]),
-        new("window.transparency", "Show window transparency control", "Application", GlideCommand.ToggleTransparency, []),
-        new("view.contextMenu", "Open viewer context menu", "Viewing", GlideCommand.ShowContextMenu, []),
-        new("overlay.add", "Add Window-in-Window overlay", "Overlays", GlideCommand.AddOverlay, ["Shift+O"]),
-        new("overlay.saveLayout", "Save overlay layout", "Overlays", GlideCommand.SaveOverlayLayout, ["Ctrl+Shift+S"]),
-        new("overlay.loadLayout", "Load overlay layout", "Overlays", GlideCommand.LoadOverlayLayout, ["Ctrl+Shift+L"]),
-        new("file.copyImage", "Copy image / active selection pixels", "File", GlideCommand.CopyImage, ["Ctrl+C", "Ctrl+Insert"]),
-        new("file.copyFile", "Copy underlying image file", "File", GlideCommand.CopyFile, []),
-        new("file.copyName", "Copy file name", "File", GlideCommand.CopyFileName, []),
-        new("file.copyFolder", "Copy folder path", "File", GlideCommand.CopyFolderPath, []),
-        new("file.copyPath", "Copy full path", "File", GlideCommand.CopyFullPath, []),
-        new("file.rename", "Rename current file", "File", GlideCommand.RenameFile, ["F2", "F6"]),
-        new("file.delete", "Delete current file to Recycle Bin", "File", GlideCommand.DeleteFile, ["Delete"]),
-        new("file.print", "Print current image", "File", GlideCommand.Print, ["Ctrl+P"]),
-        new("file.save", "Save (overwrite with current rotation/flip)", "File", GlideCommand.SaveImage, ["Ctrl+S"]),
-        // Ctrl+Shift+S is already the canonical overlay-layout save shortcut.
-        new("file.saveAs", "Save as…", "File", GlideCommand.SaveImageAs, ["Ctrl+Alt+S"]),
-        new("external.1", "Open in external program 1", "External", GlideCommand.ExternalProgram1, ["Shift+1"]),
-        new("external.2", "Open in external program 2", "External", GlideCommand.ExternalProgram2, ["Shift+2"]),
-        new("external.3", "Open in external program 3", "External", GlideCommand.ExternalProgram3, ["Shift+3"])
-    };
+    /// <summary>
+    /// Every editable hotkey row, read from the master <see cref="AppActionRegistry"/>. The first 75 rows are the
+    /// pre-registry list (same ids, labels, categories, defaults and order, so saved maps, presets and the input
+    /// router's priority are unchanged); actions added later follow, unassigned by default.
+    /// </summary>
+    public static IReadOnlyList<HotkeyActionDefinition> All { get; } = AppActionRegistry.All
+        .SelectMany(action => action.HotkeySlots.Select(slot => new HotkeyActionDefinition(
+            slot.Id, slot.Label, action.Category, action.Command, slot.DefaultShortcuts,
+            action.SearchTerms.Length == 0 ? null : action.SearchTerms, action.Id)))
+        .ToArray();
+
+    /// <summary>Read-only shortcuts listed next to the editable rows.</summary>
+    public static IReadOnlyList<FixedShortcutDefinition> FixedShortcuts { get; } = AppActionRegistry.All
+        .Where(action => action.Kind == AppActionKind.FixedShortcut)
+        .Select(action => new FixedShortcutDefinition(action.Id, action.FixedShortcut!, action.Label, action.Category, action.Description, action.SearchTerms))
+        .ToArray();
+
+    /// <summary>The ids of the 75 rows that existed before the registry (saved settings / presets use them).</summary>
+    public static readonly string[] LegacyIds =
+    [
+        "file.open", "file.openFolder", "app.settings", "folder.refresh", "workspace.home", "folder.previous", "folder.next",
+        "folder.exploreParent", "slideshow.startPause", "slideshow.stop", "view.info", "view.rotateLeft", "view.rotateRight",
+        "view.flipHorizontal", "view.flipVertical", "nav.nextSpace", "nav.nextRight", "nav.nextPage", "nav.previousBack",
+        "nav.previousLeft", "nav.previousPage", "nav.first", "nav.last", "view.fullscreen", "view.fit", "view.fitWidth",
+        "view.fitHeight", "view.fitWindow", "view.actual", "view.toggleFitActual", "view.zoomIn", "view.zoomOut", "gif.playPause",
+        "gif.previousFrame", "gif.nextFrame", "selection.clear", "tab.new", "tab.close", "tab.restore", "tab.duplicate",
+        "window.newSameImage", "window.duplicateSession", "tab.next", "tab.previous", "tab.select1", "tab.select2", "tab.select3",
+        "tab.select4", "tab.select5", "tab.select6", "tab.select7", "tab.select8", "tab.selectLast", "tab.detach", "window.close",
+        "window.alwaysTop", "status.toggle", "window.transparency", "view.contextMenu", "overlay.add", "overlay.saveLayout",
+        "overlay.loadLayout", "file.copyImage", "file.copyFile", "file.copyName", "file.copyFolder", "file.copyPath", "file.rename",
+        "file.delete", "file.print", "file.save", "file.saveAs", "external.1", "external.2", "external.3"
+    ];
 
     public static Dictionary<string, List<string>> CreateDefaultMap() =>
         All.ToDictionary(x => x.Id, x => x.DefaultShortcuts.ToList(), StringComparer.OrdinalIgnoreCase);
@@ -137,6 +99,7 @@ public static class HotkeyCatalog
         {
             // IrfanView familiarity: F/5/6/1 are its long-standing fit/width/height/original-size
             // viewing keys; F11/Enter provide fullscreen familiarity.
+            AssignExclusive("nav.previousBack", "Backspace"); // 5.0.0: Backspace is Back by default; this preset deliberately keeps it as Previous image (Back keeps Alt+Left).
             AssignExclusive("view.fullscreen", "F11", "Enter");
             AssignExclusive("view.fit", "F", "Shift+W");
             AssignExclusive("view.fitWidth", "5", "W");
@@ -149,6 +112,7 @@ public static class HotkeyCatalog
         {
             // nomacs upstream defaults on Windows: arrows browse, Home/End first/last, PageUp/Down
             // skip, F11 fullscreen, Ctrl+0 reset/fit, Ctrl+1 100%, Ctrl+2 fit frame.
+            AssignExclusive("nav.previousBack", "Backspace"); // 5.0.0: Backspace is Back by default; this preset deliberately keeps it as Previous image (Back keeps Alt+Left).
             AssignExclusive("view.fullscreen", "F11");
             AssignExclusive("view.fit", "Ctrl+0", "Ctrl+2");
             AssignExclusive("view.actual", "Ctrl+1");
@@ -161,6 +125,7 @@ public static class HotkeyCatalog
         {
             // FastStone's documented viewer navigation already matches Glide's Space/Right/PageDown
             // and Backspace/Left/PageUp conventions; restrict fullscreen to its F11 convention.
+            AssignExclusive("nav.previousBack", "Backspace"); // 5.0.0: Backspace is Back by default; this preset deliberately keeps it as Previous image (Back keeps Alt+Left).
             Replace("view.fullscreen", "F11");
             return map;
         }
@@ -169,6 +134,7 @@ public static class HotkeyCatalog
         {
             // XnView MP keeps arrows/Home/End/Page navigation familiar. Its 100% command is *; the
             // Avalonia key name emitted for the numeric-keypad multiply key is "Multiply".
+            AssignExclusive("nav.previousBack", "Backspace"); // 5.0.0: Backspace is Back by default; this preset deliberately keeps it as Previous image (Back keeps Alt+Left).
             AssignExclusive("view.actual", "Multiply");
             Replace("view.fullscreen", "F11");
             return map;
@@ -180,6 +146,19 @@ public static class HotkeyCatalog
 
     public static HotkeyActionDefinition? Find(string id) =>
         All.FirstOrDefault(x => string.Equals(x.Id, id, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>Every shortcut currently bound to a registry action (all of its hotkey rows; an alias reports its target's).</summary>
+    public static IReadOnlyList<string> ShortcutsForAction(string actionId, IReadOnlyDictionary<string, List<string>> bindings)
+    {
+        var action = AppActionRegistry.Find(actionId);
+        if (action?.AliasOf is { } alias) action = AppActionRegistry.Find(alias);
+        if (action is null) return Array.Empty<string>();
+        return action.HotkeySlots
+            .SelectMany(slot => bindings.TryGetValue(slot.Id, out var assigned) ? (IEnumerable<string>)assigned : Array.Empty<string>())
+            .Where(shortcut => !string.IsNullOrWhiteSpace(shortcut))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
 
     public static IReadOnlyList<string> ShortcutsForCommand(
         GlideCommand command,

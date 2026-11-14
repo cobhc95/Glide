@@ -5,9 +5,6 @@ namespace Glide.Imaging;
 /// <summary>Small optional Windows WIC encoder for real PNG/JPEG/BMP/TIFF output.</summary>
 public static partial class NativeImageEncoder
 {
-    /// <summary>Extensions the WIC bridge can write (WIC ships no WebP/GIF-animation encoder we use).</summary>
-    public static IReadOnlyList<string> EncodableExtensions { get; } = [".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff"];
-
     /// <summary>Maps an extension to the native format id, or -1 when unsupported.</summary>
     public static int FormatId(string extension) => extension.ToLowerInvariant() switch
     {

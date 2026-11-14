@@ -1,458 +1,279 @@
-# Glide 4.7.1
+# Glide Image Viewer
 
-> **Glide 4.7.1 is available:** Download the [installer or portable archive](https://github.com/cobhc95/Glide/releases/tag/v4.7.1). The source in this repository matches 4.7.1.
+> **Glide 5.0.0 is available:** download the [installer or portable archive](https://github.com/cobhc95/Glide/releases/tag/v5.0.0). The source in this repository matches 5.0.0.
 
 ## Fast. Multi-tabbed. Multi-window. Highly customizable.
 
-![Glide main user interface](docs/screenshots/4.6/hero.jpg)
+![Glide main window: an image with the stacked status bar, Back and Forward title-bar buttons and tab strip](docs/screenshots/5.0/hero.jpg)
 
-**Glide 4.6.0 is a high-performance Windows image viewer built around instant-feeling image opening, a compact installer, multi-tab and multi-window workflows, live folder refresh, Save / Save As with format conversion, transparent overlays, deep mouse/keyboard customization, Launch Speed Boost, complete image printing, native SVG/vector support, Photoshop PSD/PSB viewing, automatic Windows Open With integration, Windows Explorer thumbnails, and recognition/routing for 196 image and document filename extensions.**
+**Glide is a Windows image viewer built to feel instant: a compact installer, a window that opens before you notice, tabs and multiple windows, a built-in Explorer tab, live folder refresh, Save and Save As with format conversion, transparent Window-in-Window overlays, one panel for every mouse gesture, a hotkey for almost everything, animated GIF playback, complete printing, native SVG and Photoshop support, Windows Open With and Explorer thumbnails, and 196 recognised file extensions.** Everything is configurable, nothing phones home, and no .NET runtime is needed.
 
-## What's new in 4.7.1
+[Download](#download-and-install) | [What changed since 4.7.1](#what-changed-since-471) | [Feature tour](#feature-tour) | [Default shortcuts](#default-shortcuts) | [Formats](#recognized-and-routed-formats) | [Build](#building-from-source) | [Docs](#documentation)
 
-* The collapsed status bar is just the expand button, with no panel around it.
-* When the title bar runs out of room, the buttons nearest the window controls (such as Settings) stay and the leftmost ones hide first.
-* Right-click the **Always on top** title-bar button to pick Hard or Soft mode.
+## Download and install
 
-See the [4.7.1 release notes](release-notes-4.7.1.md).
+Windows x64 only. No .NET runtime is required. Get the files from the [latest release](https://github.com/cobhc95/Glide/releases/latest):
 
-## What's new in 4.7.0
+* **`Glide.Setup.exe`**: the installer (requires administrator rights). Installs to Program Files by default, adds Glide to Windows' Open With menu and registers Explorer thumbnails.
+* **`Glide-5.0.0-Portable.zip`**: the portable build. Extract it anywhere and run `Glide.exe`; no installation or administrator rights are needed.
+* **`Glide.Setup.sha256`**: the installer's checksum. To verify the download, run `certutil -hashfile Glide.Setup.exe SHA256` and compare the result with the value in this file.
 
-Thanks to [@vertigo220](https://github.com/vertigo220) for the detailed report ([#1](https://github.com/cobhc95/Glide/issues/1)) behind this release.
-
-* **Animated GIFs play**, and a new **Fit to window** mode (key `4`) scales images up or down to the largest size that fits.
-* **Tabs:** Ctrl+Tab in most-recently-used order, an option to turn off middle-click close, no more overlapping tabs, and full file path in tooltips.
-* **Status bar:** shows the file name, can be placed Left / Center / Right (right-click it), and collapses to just an expand button that can be parked in the lower-right corner.
-* **Right button + wheel** gesture, a simpler Home page, Speed Boost tray icon choices, and many settings and rename-dialog fixes.
-* **Fixed** a right-click menu that could stay on screen after clicking.
-
-See the [4.7.0 release notes](release-notes-4.7.0.md) and [changelog](CHANGELOG.md) for the full list.
-
-## Previously in 4.6.0
-
-* **Video overlays:** play videos in Window-in-Window overlays with transport controls, volume, looping and automatic next video. Glide uses Windows codecs first; if Windows can't play a video, it offers to download an optional FFmpeg decoder. Videos remain separate from image navigation.
-* **A clearer Settings window:** 14 categories are reorganised into eight, with improved search, shortcut filtering and faster updates.
-* **Adaptive status bar and menus:** controls rearrange as the window narrows, with an overflow menu, a new Tiny size, Save and Save As buttons, and grouped menus with icons.
-* **More control over viewing:** choose image sort order, set a selection buffer around the picture, configure slideshow clicks and draw a custom animation area for overlays.
-* **Navigation and reliability fixes:** Explorer-style natural sorting, corrected mouse-wheel direction, working drag and drop, title-bar double-click, fullscreen window restoration and Speed Boost launches.
-* **Security and performance:** bounded PNG text and SVGZ decompression, safer codec handling, and improvements to startup, printing and overlay rendering.
-
-See the [4.6.0 release notes](release-notes-4.6.0.md) and [changelog](CHANGELOG.md) for the full list. Earlier highlights (4.5.0):
-
-- **Photoshop files open in Glide.** `.psd`, `.psb` (large document) and `.pdd` files now open in the
-  viewer and get thumbnails both inside Glide and in Windows Explorer. Glide shows the flattened image
-  Photoshop stores in the file, so it opens fast without rebuilding layers. RGB, CMYK, grayscale,
-  indexed, bitmap, duotone and Lab images are supported at 8, 16 and 32 bits per channel, with
-  transparency.
-
-After upgrading, re-register Explorer thumbnails in Settings so Explorer picks up `.psd`/`.psb`.
-
-Known limitation: if a PSD was saved with "Maximize Compatibility" turned off, the stored flattened
-image can be out of date, and that is what Glide shows.
-
-### Previously in 4.4.0
-
-> **Security update — please upgrade.** 4.4.0 fixes a memory-safety bug in Glide's Explorer
-> thumbnail provider. A crafted `.tga` file could trigger it simply by opening its folder in
-> Explorer.
-
-- **Live folder refresh.** Images that are downloaded, copied, moved or renamed into the folder you're
-  viewing appear in next/previous navigation and the image counter without reopening it. Deleted files
-  drop out. Partial downloads (`.crdownload`, `.part`, `.tmp`) are ignored until they finish, and the
-  current image stays selected.
-- **Save and Save As.** `Ctrl+S` saves over the current file in its original format, after asking
-  first. `Ctrl+Alt+S` saves a copy as JPEG, PNG, BMP or TIFF. Rotations and flips are written into the
-  pixels. The file is written to a temporary file and then swapped in, so a failed save can never
-  damage the original. Both commands are also in the right-click menu.
-- **Fullscreen cursor auto-hide.** The cursor hides after 3 seconds without movement and only comes
-  back after about a second of continuous movement, so a nudge of the desk, a click or a key press
-  won't show it. It stays visible over controls and menus.
-- **Explorer thumbnail fixes.** Fixed a TGA stack overflow, an SGI bounds-check overflow and a TGA
-  colour-map out-of-bounds read. PNM/PBM/PGM/PPM/PAM, 24-bit PCX and compressed SGI thumbnails now
-  decode correctly.
-
-Known limitations: Save As cannot write WebP, and saving does not keep EXIF or other metadata.
-
-### Previously in 4.3.5
-
-- **Maximize no longer sticks at the old size after rotating the display** (portrait ↔ landscape) or
-  moving the taskbar. Glide re-fits a maximized window to the monitor's live work area and refreshes
-  its monitor cache on display, DPI and taskbar changes. A title-bar double-click now uses the real
-  Windows maximized state.
-- **Taskbar icon is back.** The window's native frame styles are reapplied every time the UI framework
-  rewrites them, and Glide attaches system-sized icons from `Glide.exe` to every window, including
-  after Speed Boost restore. Windows Snap Layouts are more reliable as a result.
-- **Stability:** fixed a possible crash while browsing when the image cache evicted a file that was
-  still being decoded. Unexpected UI errors are now logged instead of closing the viewer.
-
-### Previously in 4.3.4 and 4.3.3
-
-- 4.3.4: maximize/restore and resize-edge decisions use Windows' actual window state.
-- 4.3.3: 25–200% size presets in the image-overlay and whole-app Overlay context menus.
-
-### Previously in 4.3.2
-
-- **A viewed image is never left locked after you close it.** Deleting or moving an image that had
-  already been closed could fail with *"the file is open in Glide Image Viewer"*. Glide's background
-  readers (EXIF/metadata, print DPI and the SVG loader) now open the source with full delete sharing,
-  and the SVG loader reads the document into memory instead of handing the raw path to the third-party
-  loader. A read that outlives the viewer — including after a Speed Boost standby close — can no
-  longer block Explorer.
-
-### Previously in 4.3.1
-
-- **WebP thumbnails in Explorer.** Windows ships no in-box WebP codec (it comes only with the
-  optional *Webp Image Extensions* Store package), so `.webp` files showed a generic icon even with
-  Explorer thumbnails enabled — the in-box "Photo Thumbnail Provider" fails without that codec.
-  Glide now bundles a small decode-only **libwebp** decoder inside its native thumbnail provider and
-  claims `.webp` itself, so real WebP thumbnails appear on any Windows install. This is entirely
-  self-contained: no Store package and no runtime download is required.
-
-### Previously in 4.3.0
-
-- **Windows Explorer thumbnails.** Explorer now shows real thumbnails for every format Glide can
-  open instead of a generic icon. A small native provider decodes inside Explorer's isolated
-  thumbnail host — it never loads .NET or Glide's UI, never creates a window and never blocks
-  Explorer. Embedded previews and decoder-native downscaling keep large folders fast (measured
-  median **1 ms**, p95 **13 ms**). Configure it under **Settings → Windows & developer →
-  Explorer thumbnails**.
-- **Each Glide window gets its own taskbar button**, and minimizing can no longer lose a window —
-  every window keeps its own taskbar entry and restores it after Speed Boost standby.
-
-### Previously in 4.2.7
-
-Glide 4.2.7 made Windows integration automatic:
-
-- **Open With, set up for you.** On install (and on first launch for portable copies) Glide adds
-  itself to Windows' **Open With** menu for **every supported format** — no trip to Options required.
-  The installer registers it machine-wide; a portable copy registers it for the current user.
-- **Respects your choice.** Windows still owns the *default* app decision. Removing Glide from
-  Open With in Settings sticks (Glide will not silently re-add it), and uninstalling removes exactly
-  what the installer added.
-
-### Previously in 4.2.6
-
-Glide 4.2.6 expanded what opens natively and gave every recognized suffix a safe, defined route:
-
-- **Native SVG / vector support.** `.svg` and gzip-compressed `.svgz` render in-process at exactly the
-  resolution needed — crisp at any zoom in the viewer and full quality in the print preview.
-- **Bundled built-in decoders** for TGA/TARGA/ICB/VDA/VST, PCX, PNM (PBM/PGM/PPM/PAM), QOI, Radiance
-  HDR/RGBE, WBMP, XBM, XPM and SGI/RGB/RGBA/BW — no optional codec or plug-in required on a clean PC.
-- **A defined, non-crashing route for every recognized extension:** built-in decoders → Windows WIC →
-  Skia → a genuine Windows Shell thumbnail/preview → optional codec provider. When nothing can decode
-  a file, Glide names the suffix and states that an optional codec is required instead of failing
-  silently.
-- **Print fixes:** auto-rotate now truly rotates, Actual-size/Fill-page stay inside the window,
-  printer Properties (landscape) no longer crashes and updates the preview, grayscale is real in the
-  preview *and* the spool, Paper Source is populated, and the Print window scrolls.
-
-See [`docs/format-coverage.md`](docs/format-coverage.md) for the full format route map and a
-side-by-side comparison with IrfanView.
-
-### Complete image printing
-
-Glide 4.2.5 added a complete, reference-faithful image printing workflow:
-
-- **Print the current image** with `Ctrl+P`, the viewer right-click menu, or the browser item menu.
-  Glide prints the **original full-resolution decoded image** — never a screenshot of the viewport,
-  so zoom, pan, selection, overlays and other chrome are never baked into the page.
-- **Glide-native Print window with live WYSIWYG preview** that updates the moment you change paper,
-  orientation, scaling, margins or alignment:
-  - Printer selector and native **Properties…** (driver preferences)
-  - Paper size, paper source (when the driver exposes trays)
-  - Portrait / Landscape, Copies (1–99), Colour / Grayscale (when supported)
-  - Scaling: **Best fit**, **Fill page** (crop to fill), **Actual size (100%)**, **Custom scale %**,
-    **Stretch** — plus **Keep aspect ratio** and **Automatically rotate for best fit**
-  - **Nine alignment positions** (Left / Centre / Right × Top / Centre / Bottom)
-  - Four independent margins in **mm or inches** based on your Windows locale
-- **Accurate WYSIWYG.** The preview and the printed page share one geometry engine and both use the
-  printer's real printable rectangle, so preview and paper cannot disagree — zero margins print to
-  the printable edge, never over it.
-- **Embedded-DPI Actual size** (JFIF, EXIF, PNG `pHYs`, TIFF, BMP) with a documented **96 DPI**
-  fallback, **EXIF orientation** honoured, and transparency composited against white.
-- **Your layout preferences are remembered** between sessions; no printer enumeration happens at
-  startup, so normal viewing performance is unchanged.
-
-See [CHANGELOG.md](CHANGELOG.md) and the GitHub release notes for the full list.
-
-> **Privacy:** Glide writes no diagnostic, telemetry or log files anywhere unless you explicitly ask
-> for an export from Settings → Windows & developer. A normal install leaves your Downloads folder
-> untouched.
-
-Glide is designed for users who desire the instantaneous startup of classic viewers without sacrificing modern multi-tabbed navigation, configurable fullscreen behaviour, non-destructive overlays, extensive hotkey mapping, viewer emulation profiles, prefetch controls, and an exhaustively configurable settings engine.
-
-> **Format Breadth:** Glide recognizes and routes **196 suffixes**. The protected built-in fast path covers JPEG/JPG, PNG, BMP, GIF, TIFF, WebP, and ICO essentials, and bundled built-in decoders cover **SVG/SVGZ** plus the legacy raster family (**TGA, PCX, PNM/PAM, QOI, HDR, WBMP, XBM, XPM, SGI**). Everything else is handled via Windows WIC, a genuine Windows Shell preview, or a verified optional codec provider depending on installed platform capabilities.
+Upgrading from 4.x keeps your settings (older files are migrated once, and your own key bindings and customised title bar are kept). The installer closes Glide before upgrading.
 
 ---
 
-## Visual Overview & Adaptive Layout
+## What changed since 4.7.1
 
-![Glide Home screen](docs/screenshots/4.6/welcome.jpg)
+5.0.0 is the biggest Glide release so far. (4.8.0 was never published; everything built for it is part of 5.0.0.) Thanks to vertigo220, whose detailed bug reports and feature ideas shaped it: see [Thanks](#-thanks).
 
-Glide's interface is engineered with a responsive design system that reflows seamlessly across any window size, aspect ratio, or DPI scale.
+### ⚡ Opening speed: v4 vs v5
 
-The settings window adapts to different window sizes and display scales.
+Time until the viewer shows its final sharp frame at Fit (median milliseconds, warm cache, lower is better). The bar is how much of the time is gone.
 
----
+| Format | v4 | v5 | Change | Faster |
+|---|---:|---:|---:|---|
+| 🖼️ JPEG, 24 MP | 83 | 46 | -45 % | ▓▓▓▓▓░░░░░ |
+| 🖼️ Progressive JPEG, 50 MP | 978 | 107 | -89 % | ▓▓▓▓▓▓▓▓▓░ |
+| 🖼️ PNG, 24 MP | 154 | 127 | -17 % | ▓▓░░░░░░░░ |
+| 🖼️ WebP, 24 MP | 378 | 184 | -51 % | ▓▓▓▓▓░░░░░ |
+| 🖼️ TIFF (LZW), 24 MP | 585 | 177 | -70 % | ▓▓▓▓▓▓▓░░░ |
+| 🖼️ BMP, 24 MP | 123 | 27 | -78 % | ▓▓▓▓▓▓▓▓░░ |
+| 🎞️ GIF, animated 1080p x 60 frames (first frame) | 6.0 | 5.0 | -16 % | ▓▓░░░░░░░░ |
+| 💯 JPEG, 100 MP | 258 | 124 | -52 % | ▓▓▓▓▓░░░░░ |
+| 💯 Progressive JPEG, 100 MP | 980 | 201 | -80 % | ▓▓▓▓▓▓▓▓░░ |
+| 💯 TIFF (LZW), 100 MP | 2333 | 756 | -68 % | ▓▓▓▓▓▓▓░░░ |
+| 💯 PNG, 100 MP | 634 | 530 | -16 % | ▓▓░░░░░░░░ |
+| 💯 BMP, 100 MP | 362 | 98 | -73 % | ▓▓▓▓▓▓▓░░░ |
+| 🧠 Peak memory of a full decode, 24 MP / 100 MP (MB) | 184 / 770 | 93 / 385 | -50 % | ▓▓▓▓▓░░░░░ |
+| 🔋 CPU to browse 21 x 24 MP images at 500 ms per step (s) | 11.5 | 4.8 | -58 % | ▓▓▓▓▓▓░░░░ |
+| 🔋 CPU to browse 21 x 4K images at 500 ms per step (s) | 9.9 | 1.0 | -90 % | ▓▓▓▓▓▓▓▓▓░ |
+| 🗂️ Explorer, 5000 files: visible thumbnails (ms) | 87 | 68 | -22 % | ▓▓░░░░░░░░ |
 
-## Core Feature Reference & Settings Gallery
+JPEG decoding itself is limited by the Windows codecs, so the very first frame of a JPEG is unchanged (24 MP: 36.7 vs 37.2 ms); the gains come from refinement, memory and browsing. Stepping through a folder with prefetch is a cache hit in both versions (about 0.15 ms). A 1080p 60-frame GIF now animates; in v4 it exceeded the animation memory budget and stayed still. *Method:* headless benchmark harness (`tools/perf`) on an AMD Ryzen 7 9700X (16 logical CPUs, 61.6 GB RAM, Windows 11 24H2), factory defaults (Maximum quality, 2400 px preview cap, prefetch depth 15, 999 MB caches), a 2560x1369 viewport, synthetic test images, medians of 5 warm runs (3 for 90 MP and above). "v4" is the pre-5.0 source (4.7.1 behaviour plus unreleased 4.8 work). Synthetic JPEGs are about half the size of real camera JPEGs, so absolute JPEG times are optimistic; the comparison is like-for-like. Your numbers will vary with your PC.
 
-The Glide Settings engine exposes nearly every aspect of the viewer's execution, rendering, input handling, and presentation. The screenshots below show the 4.6.0 settings UI. The eight categories are General & startup, Appearance & viewing, Interface & window, Tabs & status bar, Mouse & keyboard, Slideshow & overlays, Performance, and Windows & developer.
+### 📊 v4 vs v5 at a glance
 
----
+| | v4 (4.7.x) | v5.0.0 |
+|---|---|---|
+| Explorer tab | ❌ (the option was hidden and removed in 4.7.0) | ✅ full file browser with thumbnails, file operations and session restore |
+| Back / Forward history in every tab | ❌ | ✅ up to 100 steps per tab, title-bar buttons, `Alt+Left` / `Alt+Right`, mouse side buttons |
+| Mouse side buttons | ➖ did nothing until bound | ✅ Back / Forward by default |
+| Mouse gestures | ➖ a matrix of fixed slots plus separate mouse toggles; no custom gestures, no tab / title-bar / Explorer areas | ✅ one panel, 9 areas, up to 6 custom gestures per area, every row searchable |
+| Hotkeys and actions | 75 hotkey rows, 56 gesture actions | ✅ more than 260 actions in one registry behind keys, gestures, buttons and menus |
+| Settings as hotkeys or gestures | ❌ | ✅ 132 on/off and choice settings can be bound |
+| Settings window | 8 pages, each one long scrolling list; opens at 1040 x 760 | ✅ 8 pages, 39 collapsible cards, results that *Open* and highlight the setting; opens at 930 x 630 and remembers its size |
+| Searchable settings entries | 202 documented at 4.6.0 | ✅ 269 |
+| Window memory | ➖ main window and Settings | ✅ every window, including Print and the dialogs |
+| Status bar | one line in a wide window | ✅ info line stacked on its own row by default, auto-hide, reveal area equal to the bar, reserve-space option |
+| Print preview, Portrait / Landscape click | 540-570 ms (seconds on a network printer) | ✅ instant |
+| Print window opened later in a session | about 550 ms | ✅ 35-61 ms |
+| Largest image at full resolution | 256 MP | ✅ 512 MP, with a free-memory check |
+| Animated GIF controls | ❌ | ✅ pause / play and frame stepping |
+| Explorer thumbnail quality settings | ➖ saved but ignored | ✅ Fast / Balanced / High really work |
+| Zoom step setting | ➖ had no effect | ✅ works (default 15 %) |
+| Reset Glide | ❌ | ✅ wipe exactly the data you choose |
+| Security gaps from the full review | ➖ present (SVG remote images, imported profiles, malformed GIFs, installer folder rights ...) | ✅ closed |
 
-### 1. General & Startup Navigation
+### 🆕 What's new
 
-![General Settings](docs/screenshots/4.6/settings_general_settled.png)
-![General Settings Scrolled](docs/screenshots/4.6/settings_general_scroll2_settled.png)
+* 🗂️ **Explorer tab**: thumbnails, breadcrumb bar, navigation pane, rename, copy / cut / paste, Recycle Bin delete, drag and drop; *Open last session* restores each tab's folder, selection and scroll position, even after a crash.
+* ⏪ **Back / Forward** like a web browser, per tab; `Backspace` goes Back or to the previous image.
+* 🖱️ **One panel for every mouse gesture**, custom gestures, mouse side buttons, tab and title-bar clicks, Shift / Alt + wheel.
+* ⌨️ **Everything on a key or a gesture**: one master action list, 132 settings as *Toggle:* / *Cycle:* actions, sortable list, *Search hotkey*, custom presets, a prompt before a used shortcut is reassigned.
+* 🧩 **Settings in collapsible cards**, a compact 930 x 630 window, *Expand all* / *Collapse all*, *N changed* badges, search results that open the exact setting.
+* 📊 **Status bar**: stacked info line, auto-hide, hover reveal exactly where the bar appears, reserve space when fitting, tab tooltip text size.
+* 🧹 **Reset Glide** card; 🪟 every window remembers its place; 🖨️ instant print preview; 🎞️ GIF controls; 📁 folders as Custom startup / new-tab targets; 🖼️ 512 MP images.
 
-Glide provides flexible session management, folder traversal policies, and startup behaviors:
+### 🐞 Fixes in short
 
-* **History & Session Retention:** Maintain recent file and folder history with a configurable capacity (e.g., 50 items). Option to display recent files/folders directly on the Home dashboard.
-* **Window State Memory:** Automatically remembers window size, position, and maximized state across sessions.
-* **Instance Reuse:** Single-instance mode ensures file launches from Windows Explorer open into the active Glide instance instead of spawning unnecessary background processes.
-* **Image order:** Sort by Explorer-style name, plain name, type, size, or creation or modification date, with optional reverse order.
-* **Live Folder Refresh:** The open folder is watched. New, deleted and renamed images update navigation immediately, and in-progress downloads and copies are picked up once they finish.
-* **Hierarchical Folder Traversal:**
-  * Automatically advance into adjacent sibling folders when reaching the end of the current directory.
-  * Extend continuous navigation into parent/grandparent directory branches.
-  * Configurable confirmation prompts before crossing directory boundaries.
-* **Startup & Landing Modes:** Choose what Glide opens on startup:
-  * *Welcome tab*
-  * *Resume last session*
-  * *Built-in Explorer tab*
-  * *Custom file or directory path*
-* **New Tab Landing Target:** Independently configure whether new tabs open the Explorer, Welcome page, or a custom target folder.
-* **Quick Tips & Safety Guards:** Optional Quick Tips on Home and alert prompts before discarding uncommitted settings changes.
+* ⌨️ Shortcuts saved in another modifier order now work · image shortcuts no longer act on the picture of another tab · Space / Enter after clicking a button · Ctrl+Tab follows your keys · Tab and arrow combinations can be recorded · zoom step works · Fit hotkeys follow *Fit control scope* · *Exit Glide* really exits.
+* 🖱️ Right-click menu appears on release (also outside the image) · pointer stays visible over menus in fullscreen · tooltips no longer block list scrolling · no flash when leaving fullscreen.
+* 🖨️ Portrait / Landscape and the other layout options no longer lag · 🖼️ rotated and GIF Explorer thumbnails and the thumbnail quality settings · image-cache lifetime bugs · a hidden-tab Delete / rename / external-program mix-up.
 
----
+### 🔐 Security in short
 
-### 2. Tabs & Multi-Window Workspace
+SVG files can't fetch remote images · imported profiles can't change external programs or bring network folders · malformed GIFs and PSDs are bounded · 512 MP limit with a memory guard on every decode path · installer, single-instance connection and the optional FFmpeg decoder hardened · Glide no longer loads DLLs from an image's folder.
 
-![Tabs Settings](docs/screenshots/4.6/settings_status_settled.png)
+### 🙏 Thanks
 
-Glide brings modern browser-grade tab management to image viewing:
+Thanks to vertigo220 for the many detailed bug reports and feature ideas that shaped this release: the 21-point report in issue #1 (the status bar and tab tooltip options, the Settings scroll memory, the hotkey conflict prompt, sortable shortcuts, *Search hotkey*, custom presets, the right-click menu timing and more), the Explorer tab request with session restore, and the GIF controls. See [the feedback map](docs/releases/5.0.0-community-feedback.md).
 
-* **Detachable & Re-attachable Tabs:** Tear off any image tab into its own independent Glide window, or drag tabs between existing Glide windows seamlessly.
-* **Closed Tab History Stack:** Retains a buffer of recently closed tabs (e.g., 10 tabs) for instant reopening.
-* **Window Teardown Behavior:** Option to automatically close a source window when its final remaining tab is detached into another window.
-* **Last-Tab Closing Policy:** Choose whether closing the last tab maintains an empty workspace/Home tab or terminates the application.
-* **Close Protection:** Option to display a confirmation guard before closing a window containing multiple open image tabs.
-* **Tab Strip Ergonomics:** Double-click any tab header to close it; visual scroll overflow arrows appear automatically when many tabs are open.
-* **Sibling Folder Integration:**
-  * Dedicated Previous Folder, Next Folder, and Explore Parent Folder commands.
-  * Automatically skip sibling folders that contain no supported image formats.
-  * Option to include or ignore hidden directories.
-  * Directional preference: choose whether entering a new sibling folder opens the first or the last image.
-
----
-
-### 3. Viewing & Interface Presentation
-
-![Viewing Settings](docs/screenshots/4.6/settings_viewing_settled.png)
-![Viewing Settings Scrolled](docs/screenshots/4.6/settings_viewing_scroll2_settled.png)
-
-Fine-tune every visual component of the viewing canvas and window chrome:
-
-* **Translucent Status Overlay:** Overlay floating image metadata and controls with automatic bottom-edge hover reveal when collapsed.
-* **Dynamic Title Bar:** Display full image paths in the window title bar alongside customizable navigation buttons (Back, Up-to-Folder, Forward).
-* **Explorer Open Actions:** Configure whether double-clicking an image in Windows Explorer creates a new tab, opens a new window, or overwrites the current tab.
-* **Duplicate File Handling:** Choose behavior when launching an already-opened file (spawn new instance, refresh existing view, or switch to tab).
-* **Fullscreen Experience:**
-  * Auto-hide title bar and tab strip in fullscreen with smooth mouse reveal.
-  * Option to pin title/tab bars in fullscreen with automatic image letterboxing.
-  * Auto-hide the mouse cursor after 3 s of fullscreen inactivity; it returns only after about 1 s of sustained movement, so accidental bumps, clicks and key presses don't reveal it.
-  * Exact restoration of pre-fullscreen window geometry upon exit.
-* **Initial Zoom Framing:** Default view for newly opened images: *Fit to Window*, *Fit Width*, *Fit Height*, or *1:1 (100% Native Resolution)*.
-* **Navigation Zoom Lock:** Option to lock and preserve manual zoom/pan levels when flipping through consecutive images in a directory.
-* **Escape Key Behavior:** Map Escape independently to exit slideshow, exit fullscreen, close the current tab, or minimize the window.
+Full details: [5.0.0 release notes](docs/releases/release-notes-5.0.0.md) and the [changelog](CHANGELOG.md). Next up: a migration to .NET 10 LTS ([plan](docs/NET10-MIGRATION-PLAN.md)).
 
 ---
 
-### 4. Mouse Interactions & Gesture Matrix
+## Feature tour
 
-![Mouse Settings](docs/screenshots/4.6/settings_mouse_settled.png)
-![Mouse Settings Scrolled 1](docs/screenshots/4.6/settings_mouse_scroll2_settled.png)
-![Mouse Settings Scrolled 2](docs/screenshots/4.6/settings_mouse_scroll3_settled.png)
-![Mouse Settings Scrolled 3](docs/screenshots/4.6/settings_mouse_scroll4_settled.png)
+A review of every area of Glide, written from what the product does today. Screenshots are real 5.0.0 captures; where a section has none, it is written without one.
 
-Glide features one of the most comprehensive input-binding engines available:
+### Home / Welcome page
 
-* **Selection buffer:** Start a selection in the space around an image, with configurable windowed and maximized margins.
-* **Left-Drag Drag Policy:** Configure left-click-and-drag to *Create Selection Box*, *Pan Image Canvas*, or *Move Window*.
-* **Right-Drag Policy:** Choose between *Smart Mode* (pan if zoomed, move window if fit-to-screen), *Pan Only*, *Move Window*, or *Disabled*.
-* **Selection Box Actions:** Click inside a selection box to instantly crop-zoom into that exact region; right-click inside to zoom back out.
-* **Wheel Navigation & Zoom:** Configure the mouse wheel for smooth zooming (centered at the mouse cursor) or previous/next file navigation, with direction inversion options.
-* **Window Drag on Canvas:** Option to drag the native application window by grabbing empty canvas background space.
-* **Physical Gesture Matrix:** Map combinations of Left, Middle, Right, Wheel, and Modifier keys (Ctrl, Shift, Alt) directly to semantic actions.
+The Welcome tab is the quiet front door: your recent files and folders as a list, an *Open image* button and nothing else. In 4.7.0 it was stripped down from a wall of feature cards after feedback that it looked like a set of options; it is now only useful things. You choose what Glide opens at launch (Welcome tab, *Open last session*, an Explorer tab, or a *Custom* path that can be an image or a folder) and what a new tab opens independently, and the recent-history size is yours to set. A custom path that no longer exists falls back to the Welcome page and says why in the page itself, never in a dialog. *Honest limit:* there is no 5.0 screenshot of the Welcome page yet.
 
----
+![General and startup settings](docs/screenshots/5.0/settings-general.png)
 
-### 5. Performance, Memory & Staged Decoding
+### The viewer: zoom, pan, fit and fullscreen
 
-![Performance Settings](docs/screenshots/4.6/settings_performance_settled.png)
-![Performance Settings Scrolled](docs/screenshots/4.6/settings_performance_scroll2_settled.png)
+The viewer is the heart of the program. Images open at the largest size that fits (*Fit to window*, key `4`), or Fit width, Fit height or 100 %; scroll to zoom around the pointer, drag to select a region and click inside it to zoom to it, pan with a drag or the right button, rotate and flip with `L` `R` `H` `V`. The *Viewport zoom step* setting really works now (default 15 %), and the Fit keys follow *Fit control scope*, so a Fit command can apply to one image, this session, or every future image. Fullscreen hides the cursor after 3 seconds, keeps it visible over menus, and leaving it restores your exact window geometry without a flash. Images up to 512 megapixels open at full resolution; before a frame bigger than about 67 MP is decoded at full size Glide checks free memory and keeps the sharp preview if it would need more than half of it. The text overlay (`[index/total]` by default) has a token template, position, font and colour.
 
-Engineered for blazing speed even when browsing folders containing thousands of large RAW or high-megapixel images:
+![Appearance and viewing settings: theme, accent, zoom and fit](docs/screenshots/5.0/settings-appearance.png)
+![Text overlay settings](docs/screenshots/5.0/settings-text-overlay.png)
 
-* **Performance Tuning Profiles:** Instant presets for *Maximum Speed*, *Balanced*, *Maximum Quality*, or *User Custom*.
-* **Staged First-Frame Display:** Renders a decoder-scaled low-latency first frame immediately, followed by sub-millisecond background refinement to full resolution.
-* **Prefetch Engine:**
-  * Configurable prefetch depth (e.g., 2 images ahead and behind).
-  * Surrounding sibling-folder preloading for instant folder transitions.
-  * Dedicated decoded-frame cache and compressed-image memory budgets (MB limit and item count).
-* **Rapid Navigation Burst Mode:** Detects rapid wheel or arrow key scrolling and renders lightweight preview frames during bursts, restoring full quality the instant scrolling settles.
-* **Resource Optimization:** Automatic cache purging when Glide is minimized to release system memory.
+### Explorer tab
 
-#### Launch Speed Boost
+New in 5.0.0, and the part that makes Glide feel like a complete tool: a real folder browser inside a tab. A breadcrumb address bar (click a segment, or the empty part to type a path), a navigation pane with Quick access and drives, Extra large to Small icon views plus List and Details with sortable, resizable columns, a filter box (`Ctrl+F`), and thumbnails that load in the background and only for visible tiles. File operations are the ones you expect: right-click menus, inline rename (`F2`), Recycle Bin delete (`Shift+Delete` deletes permanently, with a stronger confirmation), copy / cut / paste through the real Windows file clipboard, new folder (`Ctrl+Shift+N`) and drag and drop (move; `Ctrl` copies). Double-click or `Enter` opens an image in the current tab and a middle-click in a new tab (swap them in the gesture panel). The detail that earns its place: *Open last session* saves every Explorer tab's folder, selection and scroll position about a second after each change, so it comes back exactly as you left it even after a crash. In benchmarks a 5000-file folder shows its visible thumbnails 22 % sooner than before. *Honest limit:* it is Glide's own browser, not Windows File Explorer; for anything beyond it, *Show in Windows File Explorer* is in the right-click menu.
 
-Launch Speed Boost keeps Glide's window, decoder, and external-open broker initialized in the background. When the last Glide window is closed, the window is hidden rather than tearing down the process; image caches are purged, managed memory is compacted, and the Windows working set is trimmed to a negligible **3–4 MB**. When an image is opened from File Explorer, the warm Glide process receives the request, restores its native window frame, and loads the requested file immediately. The feature can be enabled in **Settings → Performance** and can optionally start with Windows in the background.
+![Explorer tab in a wide window](docs/screenshots/5.0/explorer-full.png)
 
----
+The Explorer reflows from a compact window to an ultra-wide one:
 
-### 6. Status Bar Customization
+| Compact | Portrait | Ultra-wide |
+|---|---|---|
+| ![Compact](docs/screenshots/5.0/explorer-compact.png) | ![Portrait](docs/screenshots/5.0/explorer-portrait.png) | ![Ultra-wide](docs/screenshots/5.0/explorer-ultrawide.png) |
 
-![Status Bar Settings](docs/screenshots/4.6/settings_status_settled.png)
+#### Back, Forward and history
 
-Completely customize the information and action buttons visible in the status bar:
+Every tab keeps a browser-style history of up to 100 steps. Open an image from the Explorer, press Back (`Alt+Left`, the mouse back button or the new title-bar button) and you are in the same folder, scrolled as it was, with that image selected; Forward (`Shift+Backspace`, `Alt+Right`, the mouse forward button) shows the image again. Home to image to Back returns to Home. `Backspace` is *Back, or Previous image*: Back when there is a step back, otherwise the previous image in an image tab. Moving from image to image with the arrows is deliberately not a history step, and Back / Forward never fire while you type in the address, filter or rename boxes. A tab you drag to another window keeps its history. If the target has been deleted Glide skips it and tells you. The Back and Forward buttons lead the title bar in the banner picture above. See [docs/NAVIGATION-HISTORY.md](docs/NAVIGATION-HISTORY.md).
 
-* **Modular Element Toggles:** Individually show or hide Navigation Arrows, Zoom Controls, Slideshow Button, Fit image / Fit width / Fit height controls, Metadata Info popover, Context Menu button, and Window Close icon.
-* **Fit control scope:** Choose whether the status bar Fit controls apply to only the current image, every image this session, or this session and future sessions (the default, which also updates the default view for new images).
-* **Auto-resize:** On by default. Shrinks the status buttons only when the window is too narrow to fit them, then restores your configured status-bar size when the window grows again. Also toggleable from the status bar right-click menu.
-* **Metadata Statistics Selector:** Select which details appear in real time:
-  * *Image index in folder (e.g., 14 / 320)*
-  * *Dimensions & Megapixels (e.g., 3840 × 2160 • 8.3 MP)*
-  * *Current Zoom Percentage (e.g., 100%)*
-  * *File Size (e.g., 2.4 MB)*
-  * *Image Codec / Format (e.g., PNG, AVIF)*
-* **Adaptive layout:** Controls move into balanced rows and, at very narrow widths, an overflow menu. Six sizes include Tiny; Small is the default for new settings.
+### Tabs and multiple windows
 
----
+Tabs behave like a browser's: drag a tab out into its own Glide window, drag it back or onto another window, restore recently closed tabs (`Ctrl+Shift+T`), duplicate a tab, cycle with `Ctrl+Tab` in tab order or most-recently-used order, and let the tab strip scroll instead of overlapping when many are open. Every window keeps its own taskbar button. You can decide what happens when the last tab closes, whether a source window closes after its last tab is detached, whether closing a window with several tabs asks first, and whether middle-click or double-click closes a tab. The tab tooltip shows the file name in a text size you choose (Small, Medium, Large) above the full path. *Honest limit:* tab history lives while Glide runs; *Open last session* restores Explorer folder history but not image or Home steps.
 
-### 7. Automated Slideshow
+![Tabs and status bar settings: tabs](docs/screenshots/5.0/settings-tabs.png)
+![Moving tabs between windows](docs/screenshots/5.0/settings-tab-moving.png)
 
-![Slideshow Settings](docs/screenshots/4.6/settings_slideshow_settled.png)
+### Status bar
 
-High-performance presentation mode for image portfolios and galleries:
+The status bar adapts: its buttons rearrange into rows as the window narrows and move into an overflow menu at very narrow widths, in six sizes. In 5.0 the file info (name, position, size, zoom) sits on its own line above the buttons by default, with minimise and close at its right (switch *Always stack the information on a separate line* off to get a single line in wide windows); the banner picture shows it. It can auto-hide like the Windows taskbar and reveals exactly where it would appear: the invisible reveal area is the bar's own box, tunable from -40 to +300 DIP, never blocks clicks on the image and never triggers while a mouse button is down. *Reserve status bar space when fitting* lets images fit above the bar instead of under it; *Fit control scope* decides how the Fit buttons behave; collapse it to a very small arrow or to the lower-right corner; place it Left, Center or Right; show or hide it with `Ctrl+Shift+B`. *Honest limit:* the stacked bar is a row taller than the old default; one tick turns it off.
 
-* **Interval Timing:** Millisecond-level duration control (e.g., 5000 ms).
-* **Sequence Control:** Choose between linear loop, bidirectional playback, or randomized shuffle.
-* **Click action:** Choose whether clicking the picture pauses or resumes, moves to the next or previous image, stops the slideshow, or does nothing.
-* **Continuous Folder Playback:** Seamlessly advance across adjacent folders during slideshow playback.
-* **Fullscreen & Focus Integration:** Automatically trigger fullscreen mode upon slideshow start, and pause the timer when Glide loses window focus.
+![Status bar settings](docs/screenshots/5.0/settings-status-bar.png)
+![Status bar buttons](docs/screenshots/5.0/settings-status-bar-buttons.png)
 
----
+### Title bar buttons and the customiser
 
-### 8. Keyboard Shortcuts & Emulation Presets
+The title bar carries the buttons you actually use (the default set leads with Back and Forward, which dim when there is nothing to go to and show your assigned key in their tooltips), and *Customize title-bar buttons* lets you pick and order them from a list that now includes rotate, flip, fit width and height, status bar, Save As and Overlay mode. When the window is too narrow the buttons nearest the window controls stay and the leftmost ones hide first, so Settings is the last to go. Right-click the Always on top button to switch it on or off and choose Hard or Soft mode. The *Show in File Explorer* button opens the image's folder in Glide's own Explorer tab (the default) or in Windows File Explorer with the image selected. A title bar you have already customised is never changed by an upgrade. *Honest limit:* there is no 5.0 screenshot of the customiser window; its size and position are remembered.
 
-![Hotkeys Settings](docs/screenshots/4.6/settings_hotkeys_settled.png)
-![Keyboard shortcuts](docs/screenshots/4.6/settings_hotkeys_scroll5_settled.png)
+![Window and navigation settings](docs/screenshots/5.0/settings-window-navigation.png)
 
-Glide provides a complete keyboard shortcut manager with 1-click emulation presets:
+### Mouse gestures
 
-* **Viewer Compatibility Presets:** Instantly switch keybindings to match familiar workflows:
-  * **Glide Default**
-  * **Windows Photos**
-  * **IrfanView**
-  * **nomacs**
-  * **FastStone Image Viewer**
-  * **XnView MP**
-* **Instant Shortcut Search:** Real-time search filter across all command names, categories, and assigned keys.
-* **Custom Rebinding:** Add multiple hotkeys per command, modify key combinations, or restore defaults on a per-action basis.
+All mouse input lives in one compact panel (Settings > Mouse & keyboard). Pick an area (Windowed image, Fullscreen image, Empty background, Selection, Slideshow, Window in Window, Tabs, Title bar, Explorer) and choose what each click, double click, drag and wheel does there, including Shift + wheel, Alt + wheel and right button + wheel. Unchanged rows say what they do as *Default (...)*; changed rows are outlined, counted and can be reset per area or all at once. Each row's dropdown has *Find an action*, *Default*, *Do nothing*, suggested actions for that input, your recent picks and all actions by category; wheel rows only offer direction-aware actions, drag rows only continuous ones, and no row offers Delete, Close Glide or commands that open a dialog. The mouse back and forward side buttons are inputs too and go Back / Forward by default (choose *Do nothing* to restore the old behaviour). You can add up to 6 custom gestures per area (an input, an optional Ctrl / Shift / Alt, an action), and every row and custom gesture is a Settings search result. Mouse settings from older versions are migrated once, so behaviour is unchanged until you change it.
 
----
+![Mouse gesture panel](docs/screenshots/5.0/settings-mouse-gestures.png)
+![Gesture inputs: clicks, drags and wheel](docs/screenshots/5.0/settings-mouse-inputs.png)
+![Gesture options and custom gestures](docs/screenshots/5.0/settings-mouse-options.png)
 
-### 9. Window-in-Window / Transparent Overlays
+### Hotkeys
 
-![Slideshow and overlays settings](docs/screenshots/4.6/settings_slideshow_settled.png)
-![Overlays Settings Scrolled](docs/screenshots/4.6/settings_overlays_scroll2_settled.png)
+Behind every key, gesture, button and menu there is one list of more than 260 actions, so they cannot disagree. All 132 on/off and choice settings appear as *Toggle: ...* and *Cycle: ...* actions you can put on a key or a gesture; 22 commands that could only be clicked before now have a hotkey row; and the keys you cannot change (Explorer's `Ctrl+C` / `F2` / `Delete`, `Space` in a slideshow) are listed and findable. The list sorts by Shortcut, Action or Category, *Search hotkey* tells you what any key is assigned to without running it, and you can save, rename and delete your own presets next to the built-in Glide, Windows Photos, IrfanView, nomacs, FastStone and XnView MP ones. If a shortcut is already in use Glide names the action that owns it and asks whether to replace it. Menus show the key you assigned. Shortcuts saved in any modifier order work, and `Ctrl+Tab` follows your own keys. A few settings that need Settings itself (Windows integration, startup, title-bar button actions) are deliberately not bindable. See [docs/ACTIONS-AND-HOTKEYS.md](docs/ACTIONS-AND-HOTKEYS.md).
 
-Glide includes a dedicated non-destructive overlay system for image comparison, reference art, and HUD data:
+![Keyboard shortcuts card: presets, filter and Search hotkey](docs/screenshots/5.0/settings-hotkeys.png)
+![The shortcut list](docs/screenshots/5.0/settings-hotkey-list.png)
+![Escape and Tab keys](docs/screenshots/5.0/settings-escape-tab-keys.png)
 
-* **Video overlays:** Play supported videos in an overlay with playback, volume, loop and next-video controls.
-* **Custom animation area:** Draw an area that animated overlays stay within as the window changes size.
-* **Custom HUD Text Overlay:** Fully customizable metadata HUD using tokens:
-  * Format: [%INDEX%/%TOTAL%] %FILENAME%  %DIMS% (%MEGAPIXELS% MP)  %FILESIZE%  %ZOOM%
-* **Whole-App Overlay Mode:** Run Glide as a borderless, transparent floating overlay over reference applications with alpha-channel passthrough.
-* **Independent Overlay Controls:**
-  * Multi-image pinboard with independent zoom, pan, opacity, and rotation.
-  * Keyboard + / - and mouse wheel direct zoom on hovered or selected overlays.
-  * Automatic state restoration on next launch (retaining coordinates, scale, and opacity).
-  * Proportional scaling when the parent window resizes.
-* **Overlay animation:** Motion controls — animation region, movement speed, turn interval and angle, pause-while-interacting, avoid-overlap steering and refresh target — now live in this section (the former standalone Animation tab was folded in).
+### Settings
 
----
+Settings is eight pages (General & startup, Appearance & viewing, Window & navigation, Mouse & keyboard, Performance, Slideshow & overlays, Tabs & status bar, Windows & developer) holding 39 collapsible cards. Cards start collapsed, open with a click or the keyboard, remember their state while the window is open and show an *N changed* badge when something differs from the default. Search covers titles, descriptions and aliases, says where each result lives (*Page > Card*) and *Open* switches to the page, opens the card, scrolls to the setting and highlights it; every setting is discoverable through search. The window opens at 930 x 630 (minimum 720 x 480), works at narrow widths, remembers its size, position and page scroll positions, and *Restore defaults* resets only what the window shows. At the end of Windows & developer, **Reset Glide** wipes exactly what you tick: settings, hotkeys and gestures, profiles, window positions, recent files, the last session, caches, the downloaded video pack and Glide's own per-user registry entries, after a confirmation that lists everything, with a settings backup to `Documents\Glide backups` ticked by default. It never touches the install folder, `HKEY_LOCAL_MACHINE`, your pictures or other programs. Settings can also be saved as named profiles and exported as JSON; imports keep this PC's external programs and drop network folders.
 
-### 10. Profiles & Settings Portability
+![Windows and developer settings: collapsed cards](docs/screenshots/5.0/settings-windows.png)
+![The Reset Glide card at the end of the page](docs/screenshots/5.0/settings-reset-glide.png)
+![Profiles and presets](docs/screenshots/5.0/settings-profiles.png)
+![Settings in a wide window](docs/screenshots/5.0/settings-wide-window.png)
 
-![Profiles Settings](docs/screenshots/4.6/settings_profiles_settled.png)
+### Slideshow
 
-* **Named User Profiles:** Save distinct configurations for different workflows (e.g., Photography Review, Pixel Art Inspection, Reference Overlay).
-* **Portability:** Export and import settings as clean, human-readable JSON files.
-* **Staged Configuration:** Preview and test configuration changes before applying them permanently.
+A slideshow with an interval in milliseconds, forward or backward order, shuffle, looping, continuing across folders, optional fullscreen on start, pausing when Glide is not the active window and a playing indicator. Clicking the picture can pause, step, stop or do nothing, and the slideshow area of the gesture panel has its own rows for left, right and middle click and the wheel. `S` or `Shift+A` starts and pauses it; `Space` pauses while it runs. *Honest limit:* the hotkey list shows `Space` as a fixed key while a slideshow is running.
 
----
+![Slideshow settings](docs/screenshots/5.0/settings-slideshow.png)
 
-### 11. Windows Integration & External Tools
+### Window-in-Window overlays
 
-![Windows Integration Settings](docs/screenshots/4.6/settings_windows_settled.png)
+Pin reference images, comparison art or videos above the picture as independent, transparent overlays with their own zoom, pan, opacity and rotation, add them with `Shift+O`, save and load whole layouts (`Ctrl+Shift+S` / `Ctrl+Shift+L`), and let them restore on the next launch. Overlays can drift around a region you draw, avoiding each other; videos play in an overlay with transport, volume, loop and next-video controls using the codecs Windows already has, and if Windows cannot play a video Glide offers to download an optional FFmpeg decoder, verified every time it loads. Overlay mode turns the whole app into a borderless transparent floating window. *Honest limit:* videos stay inside overlays; they never enter image navigation.
 
-* **Open With Integration:** Register Glide with the Windows Open With context menu without overriding your default OS application associations.
-* **Per-User Registration:** Does not require administrator privileges or UAC elevation.
-* **External Tool Quick-Launch:** Assign up to three external graphics editors (e.g., Photoshop, GIMP, Paint.NET) accessible instantly via Shift + 1, Shift + 2, and Shift + 3.
+![Overlay settings: animation](docs/screenshots/5.0/settings-overlay-animation.png)
 
----
+### Animated GIFs
 
-### 12. Developer Tools & Built-In Diagnostics
+GIFs play in the viewer; `P` pauses and plays, and `,` / `.` step to the previous or next frame (stepping pauses first and wraps around). The controls also appear in the right-click menu and on the status bar, only while a GIF is open, and every one is rebindable. Frames stream straight into their bitmaps, so peak memory halves and a 1080p animation of 60 frames plays where it used to stay still. *Honest limits:* a frame larger than both the canvas and 1 MP is skipped and an animation plays at most its first 10,000 frames, which stops malformed files from exhausting memory; there is no 5.0 screenshot of the GIF controls.
 
-![Developer Settings](docs/screenshots/4.6/settings_developer_scroll2_settled.png)
+### Print window
 
-* **Diagnostic ZIP Exporter:** Generates a full diagnostic archive with UI geometry, state coverage, active settings diffs, and benchmark logs for easy issue reporting.
-* **Mathematical Tweaks:** Options for inverse zoom-out scaling and absolute coordinate locks across multi-monitor setups.
+`Ctrl+P` prints the original, full-resolution image, never a screenshot of the viewport, through a Glide-native window with a live preview: printer and native Properties, paper size and source, orientation, copies, colour or grayscale, Best fit / Fill page / Actual size (embedded DPI, with a 96 DPI fallback) / Custom scale / Stretch, nine alignments and four margins in your locale's units. In 5.0 the preview stopped waiting for the printer: Portrait / Landscape and every other layout option update instantly, the printer's capabilities are read once in the background, a second Print opens in 35-61 ms, and a 50 MP grayscale preview takes about 11 ms. Preview and print share one layout engine, and a test proves they match for every orientation, scaling mode and alignment. The window remembers its size, position and your layout. *Honest limit:* the first printer-driver read per printer per session is the driver's, not Glide's (about half a second locally, seconds over Remote Desktop). The capture below is from an earlier build; the layout is unchanged.
+
+![Glide Print window with the live preview](docs/screenshots/print-research/glide-print-dialog.png)
+
+See [docs/print-research.md](docs/print-research.md) for the reference-behaviour study.
+
+### Explorer thumbnails and Windows integration
+
+A small native provider draws real thumbnails in Windows Explorer for every format Glide can open (it runs in Explorer's isolated thumbnail host and never loads .NET or Glide's UI). The *Fast*, *Balanced* and *High* quality presets, *Maximum source decode size* and *Prefer embedded previews* now genuinely change how thumbnails are made (apply them, then *Refresh thumbnails* for ones Windows already cached), and rotated photos, small camera previews and GIFs come out right. Glide registers itself in Open With for every supported format (per machine by the installer, per user for portable copies) without taking over your default apps; removing it from Open With sticks. Three external programs (Photoshop, GIMP, Paint.NET ...) sit on `Shift+1` / `2` / `3` and in an Explorer tab they open the image you selected. See [docs/explorer-thumbnails.md](docs/explorer-thumbnails.md).
+
+![Windows integration and Explorer thumbnails](docs/screenshots/5.0/settings-explorer-thumbnails.png)
+
+### Format support
+
+Glide recognises and routes 196 filename extensions. The protected fast path covers JPEG, PNG, BMP, GIF, TIFF, WebP and ICO; built-in decoders cover SVG / SVGZ (rendered at exactly the resolution needed) and the legacy raster family TGA, PCX, PNM / PAM, QOI, Radiance HDR, WBMP, XBM, XPM and SGI with no codec install; Photoshop PSD, PSB and PDD show their stored flattened image with transparency. Everything else goes through Windows WIC, a genuine Windows Shell preview or a verified optional codec provider, and when nothing can decode a file Glide names the suffix instead of failing silently. *Honest limits:* a PSD saved without Maximize Compatibility can show an out-of-date composite; Save As writes JPEG, PNG, BMP or TIFF only and does not carry EXIF over. See [docs/format-coverage.md](docs/format-coverage.md).
+
+### Performance and multi-threading
+
+Glide is built around a staged pipeline: a decoder-scaled first frame as soon as possible, then refinement to full resolution while you look at it, with prefetch ahead of and behind your position. 5.0 reworked it: PNG, TIFF, BMP, GIF and ICO decode at full resolution straight away when they fit the budget and refinement is skipped or goes directly to the final frame; a new native entry point decodes into the bitmap you see (half the peak memory); prefetch no longer re-decodes neighbours it already has and decodes the nearest ones in parallel (1 lane on constrained PCs, 2 on mainstream, up to 6 on high-end) while cancelling stale work when you jump; every bitmap has a deterministic lifetime; and a free-memory guard protects very large frames. The quality profile (Maximum speed, Balanced, Maximum quality or your own) and the cache budgets are all in Settings, and Speed Boost keeps a warm Glide in the background (a working set of only 3-4 MB) so opening from Explorer is immediate. *Honest limit:* decoding one image is bound by the Windows codecs, which are single-threaded, and opening the Settings window takes about 50-260 ms.
+
+![Performance settings](docs/screenshots/5.0/settings-performance.png)
+![Memory and caches](docs/screenshots/5.0/settings-memory.png)
+
+### Security hardening
+
+A full security review shaped 5.0.0. SVG files can no longer make Glide contact other computers (linked web, network-share and relative images are dropped before rendering, so your IP address and Windows credentials are never sent); imported profiles keep your external programs and drop network folders and are refused above 16 MB; malformed GIFs, PSDs and very large images are bounded on every decode path; the single-instance hand-off is private to your Windows user; the installer no longer trusts a per-user registry value, starts Glide without administrator rights and locks down custom install folders; Glide no longer loads libraries from the folder of the image being opened; pasting into the Explorer tab ignores relative paths; and both native components are built with Control Flow Guard, CET and extra compiler checks. The audit found nothing in the native decoders' size checks, the IPC parser, file associations or metadata parsing.
+
+### Accessibility and privacy
+
+Glide has no telemetry and makes no network requests except the optional, confirmed download of the FFmpeg video decoder. Diagnostic exports and traces happen only when you ask for them in Settings > Windows & developer (a normal install writes nothing to your Downloads folder; local crash logs are written only if Glide crashes). Everything works from the keyboard, with rebindable shortcuts, a *Tab key button navigation* option, and themes with your own accent, glow and background colours.
+
+### Quality of life
+
+Live folder refresh adds, removes and renames images in navigation as files arrive (partial downloads are ignored until they finish); next / previous use Explorer's natural order with six sort choices and can continue into sibling and parent folders; `Ctrl+S` saves in place after a confirmation and `Ctrl+Alt+S` converts to JPEG, PNG, BMP or TIFF through a temporary file, so a failed save can never damage the original; Save, rename and delete (to the Recycle Bin) are a keystroke away; the *Escape and Tab keys* card (Settings > Mouse & keyboard) decides what Escape does; and the Home list, closed-tab history and window positions are kept the way you want.
+
+![Folders and sorting settings](docs/screenshots/5.0/settings-folders.png)
 
 ---
 
-### 13. Saving & Format Conversion
+## Default shortcuts
 
-* **Save (`Ctrl+S`)** writes the current image, including rotations and flips, back to its original format after a confirmation.
-* **Save As (`Ctrl+Alt+S`)** converts to **JPEG, PNG, BMP or TIFF**. JPEG is saved at 92% quality.
-* **Safe writes:** output goes to a temporary file in the same folder and is then swapped in, so a failed or interrupted save never corrupts the original. Images are re-decoded at full resolution, so a reduced preview is never what gets saved.
-* Files saved into the open folder appear in navigation automatically.
-* WebP, GIF and HEIC sources open Save As, because the Windows encoder cannot write them. EXIF and other metadata are not carried over.
+Every shortcut can be changed in Settings > Mouse & keyboard > Keyboard shortcuts. This is the *Glide default* preset; the other presets differ.
 
----
+| Action | Shortcut |
+|---|---|
+| Next / previous image | `Space`, `Right`, `Page Down` / `Left`, `Page Up` |
+| Back / forward (tab history) | `Alt+Left` / `Shift+Backspace`, `Alt+Right` (mouse back / forward buttons) |
+| Back, or Previous image | `Backspace`: Back through the tab history when there is a step back, otherwise the previous image in an image tab, otherwise nothing (never while typing) |
+| Up one folder (Explorer) | `Alt+Up` |
+| First / last image | `Home` / `End` (also `Ctrl+Home` / `Ctrl+End`) |
+| Previous / next sibling folder | `Shift+Left` / `Shift+Right` |
+| Toggle fullscreen | `F`, `F11`, `Enter` |
+| Zoom in / out | `+` or `=` / `-` (by the *Viewport zoom step*, default 15 %) |
+| Fit image / Fit to window / Fit width / Fit height / Actual size | `Shift+W` / `4` / `2` / `1` / `3` or `Ctrl+H` (follow *Fit control scope*) |
+| Rotate left / right, flip horizontal / vertical | `L` / `R`, `H` / `V` |
+| Animated GIF: pause / play, previous / next frame | `P`, `,` / `.` |
+| Start / pause slideshow, image information | `S` or `Shift+A`, `I` |
+| Open file / open folder / Settings | `O` or `Ctrl+O` / `Ctrl+Shift+O` / `Ctrl+,` |
+| Refresh folder | `F5`, `U`, `Ctrl+R` |
+| New tab / close tab / restore closed tab / duplicate tab | `Ctrl+T` / `Ctrl+W` or `Ctrl+F4` / `Ctrl+Shift+T` / `Ctrl+Shift+K` |
+| Next / previous tab, select tab 1-8, last tab | `Ctrl+Tab` or `Ctrl+Page Down` / `Ctrl+Shift+Tab` or `Ctrl+Page Up`, `Ctrl+1` to `Ctrl+8`, `Ctrl+9` |
+| New window with this picture / duplicate window | `Ctrl+N` / `Ctrl+Shift+N` |
+| Close Glide window | `Ctrl+Shift+W` |
+| **Show / hide status bar** | **`Ctrl+Shift+B`** |
+| **Show folder in Explorer** (*Explore/Browse containing folder*) | **`Ctrl+E`** |
+| Copy image / rename / delete (Recycle Bin) | `Ctrl+C` / `F2` or `F6` / `Delete` |
+| Print / Save / Save As | `Ctrl+P` / `Ctrl+S` / `Ctrl+Alt+S` |
+| Open in external program 1 / 2 / 3 | `Shift+1` / `Shift+2` / `Shift+3` |
+| Add overlay / save overlay layout / load overlay layout | `Shift+O` / `Ctrl+Shift+S` / `Ctrl+Shift+L` |
+| Clear selection | `Esc` |
 
-### 14. Image Printing
-
-![Glide Print window — a 1280×720 landscape photo in Best fit, shown at its true 16:9 proportions](docs/screenshots/print-research/glide-print-dialog.png)
-
-Glide prints the **original decoded image at full resolution**, not a capture of the viewport, through a
-Glide-native window with a live WYSIWYG preview. Open it with `Ctrl+P`, the viewer right-click menu, or
-the browser item menu.
-
-Above: a **1280 × 720** landscape photo in **Best fit** renders at **184.7 mm × 103.9 mm** — exactly
-16:9, with the aspect ratio preserved and no page space wasted. With **Automatically rotate for best
-fit** enabled the same photo is rotated 90° onto portrait paper instead
-([portrait-rotated capture](docs/screenshots/print-research/glide-print-dialog-autorotate.png)).
-
-* **Reference-faithful layout:** printer + native Properties, paper size/source, portrait/landscape,
-  copies, colour/grayscale, and a live preview that updates on every change.
-* **Scaling modes:** Best fit (aspect preserved), Fill page (crop to fill), Actual size (embedded DPI
-  with a 96 DPI fallback), Custom scale %, and Stretch.
-* **Alignment and margins:** nine anchor positions and four independent margins in mm or inches
-  (locale-aware). Preview and print both honour the printer's real printable rectangle, so zero
-  margins never bleed past the printable edge.
-* **Correct image handling:** EXIF orientation is respected, transparency is composited against white,
-  and high-quality downsampling is used for the printer's DPI.
-* **Remembered layout:** scaling, margins, rotation, alignment, orientation and copies persist; printer
-  capabilities are re-read live so switching printers can never leave stale settings behind.
-
-See [docs/print-research.md](docs/print-research.md) for the Phase-1 reference behaviour study of
-FastStone Image Viewer 8.5, IrfanView and XnView.
+Unassigned by default (assign them yourself): Exit Glide, Jump 10 images, Zoom to 200 %, New Explorer tab, Maximize / restore, Minimize, the *Toggle:* / *Cycle:* setting actions and the rest of the new commands. *Exit Glide* quits the whole program (tray icon and Speed Boost included); `Ctrl+Shift+W` closes only one window.
 
 ---
 
-## Recognized & Routed Formats
+## Recognized and routed formats
 
 Glide recognizes and routes **196 filename extensions**:
 
@@ -463,31 +284,42 @@ Glide recognizes and routes **196 filename extensions**:
 
 </details>
 
-### Protected Core Fast-Path Suffixes
-.jpg, .jpeg, .jpe, .png, .bmp, .gif, .tif, .tiff, .webp, .ico
+**Protected core fast-path suffixes:** .jpg, .jpeg, .jpe, .png, .bmp, .gif, .tif, .tiff, .webp, .ico
 
-### Bundled Built-in Decoder Suffixes (no optional codec required)
-.svg, .svgz, .tga, .targa, .icb, .vda, .vst, .pcx, .pnm, .ppm, .pgm, .pbm, .pam, .qoi, .hdr, .rgbe, .wbmp, .xbm, .xpm, .sgi, .rgb, .rgba, .bw
+**Bundled built-in decoder suffixes (no optional codec required):** .svg, .svgz, .tga, .targa, .icb, .vda, .vst, .pcx, .pnm, .ppm, .pgm, .pbm, .pam, .qoi, .hdr, .rgbe, .wbmp, .xbm, .xpm, .sgi, .rgb, .rgba, .bw
 
----
-
-## Building from Source
-
-On Windows:
-* Build the application: run `build.cmd`
-* Build the complete standalone installer: run `build.cmd` (or `build.cmd fast --no-pause`)
-
-Release builds produce four deliverables: `Glide-<version>-Portable.zip`, `dist-installer\Glide Setup.exe`, `Glide-<version>.exe` for direct testing, and the compact `Glide-Zero-Context-Handover.zip`.
+Whether a recognised suffix actually opens depends on the route (built-in decoder, Windows WIC, Windows Shell preview or an optional codec provider); see [docs/format-coverage.md](docs/format-coverage.md) for the full route map and a comparison with IrfanView.
 
 ---
 
-## Architectural Philosophy
+## System requirements
 
-Glide follows six core design principles:
-1. **Measured Image-Open Speed:** Zero splash screens; direct, single real-window launch.
-2. **Smooth High-Volume Navigation:** Instant folder traversal and predictive caching.
-3. **Broad Format Breadth:** 196 extensions recognized, with bundled built-in decoders for SVG and legacy raster formats and no heavy optional codecs loaded during cold startup.
-4. **Deep Customizability:** Total control over keyboard, mouse, gestures, UI layout, and performance policies.
-5. **Modern Tabbed Multitasking:** Drag-and-drop tab detachable workflows across independent windows.
-6. **Self-Documenting Architecture:** Thoroughly documented codebase with diagnostic instrumentation for easy maintenance.
+Windows x64. No .NET runtime is required (the app is self-contained and NativeAOT-compiled). The installer needs administrator rights; the portable build does not.
 
+## Building from source
+
+On Windows, run `build.cmd` (or `build.cmd fast --no-pause`). Release builds produce `Glide-<version>-Portable.zip`, `dist-installer\Glide Setup.exe`, `Glide-<version>.exe` for direct testing and the compact `Glide-Zero-Context-Handover.zip`; on GitHub the installer is published as `Glide.Setup.exe` together with `Glide.Setup.sha256` and the portable archive (for 5.0.0: `Glide-5.0.0-Portable.zip`). Building currently needs the .NET 8 SDK and the Visual Studio C++ tools (a move to .NET 10 LTS is planned; see [docs/NET10-MIGRATION-PLAN.md](docs/NET10-MIGRATION-PLAN.md)). Scripts live in `tools/`; the performance benchmark harness is `tools/perf`. Three test projects cover Core, Input and Explorer; settings and actions have static audits (`python tools/audit-settings-search.py`, `python tools/audit-action-registry.py`).
+
+## Documentation
+
+| Document | What it is |
+|---|---|
+| [CHANGELOG.md](CHANGELOG.md) | Every change in every release |
+| [docs/releases/](docs/releases/) | Release notes per version, the 5.0.0 [community feedback map](docs/releases/5.0.0-community-feedback.md) and the publish checklist |
+| [docs/ACTIONS-AND-HOTKEYS.md](docs/ACTIONS-AND-HOTKEYS.md) | The master action registry: hotkeys, gestures, menus, buttons |
+| [docs/NAVIGATION-HISTORY.md](docs/NAVIGATION-HISTORY.md) | Back / Forward design and rules |
+| [docs/format-coverage.md](docs/format-coverage.md) | Which format opens through which route |
+| [docs/explorer-thumbnails.md](docs/explorer-thumbnails.md) | The Windows Explorer thumbnail provider |
+| [docs/print-research.md](docs/print-research.md) | Print window reference study |
+| [docs/code-signing.md](docs/code-signing.md) | Signing releases |
+| [docs/GLIDE_MANIFESTO_AND_HANDOFF.md](docs/GLIDE_MANIFESTO_AND_HANDOFF.md) | Architecture and handoff for contributors |
+| [docs/README.md](docs/README.md) | Index of everything in `docs/` |
+
+## Earlier releases
+
+* **4.7.1 / 4.7.0:** animated GIFs, a *Fit to window* mode (key `4`), tabs with Ctrl+Tab in recent order, a simpler Home page, status bar position and a corner expand button, right button + wheel, Speed Boost tray icon choices, and the Always on top menu.
+* **4.6.0:** video overlays (Windows codecs first, optional FFmpeg), Settings reorganised from 14 categories into eight, an adaptive status bar and grouped menus, image sort order and Explorer-style natural sorting.
+* **4.5.0:** Photoshop PSD / PSB / PDD files open and get thumbnails. **4.4.0:** live folder refresh, Save and Save As, and an Explorer thumbnail security fix.
+* **4.3 and 4.2:** Windows Explorer thumbnails, taskbar and maximize fixes, native SVG and legacy raster decoders, a defined route for every recognised extension, automatic Open With, and complete image printing.
+
+See the [changelog](CHANGELOG.md) and the [release notes](docs/releases/) for everything.

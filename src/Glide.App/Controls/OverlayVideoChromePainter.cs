@@ -1,7 +1,6 @@
 using Avalonia;
 using Avalonia.Media;
 using Avalonia.Media.Immutable;
-using Avalonia.Rendering.SceneGraph;
 using Glide.Core;
 
 namespace Glide.App.Controls;

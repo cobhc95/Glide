@@ -1,0 +1,107 @@
+namespace Glide.Core.Settings;
+
+/// <summary>
+/// Which catalogued settings are hotkey / gesture bindable, and how. Every <see cref="SettingKind.Toggle"/>
+/// and <see cref="SettingKind.Choice"/> entry of <see cref="SettingsCatalog"/> is bindable by default and
+/// gets a generated "Toggle: ..." / "Cycle: ..." action in <see cref="Glide.Core.Commands.AppActionRegistry"/>,
+/// unless it is listed in <see cref="Excluded"/> with a reason. A Choice needs its option list here (the same
+/// strings the Settings combo box shows, in the same order), otherwise it must be excluded. The guard tests
+/// and tools/audit-action-registry.py fail when a new Toggle/Choice setting is neither bindable nor excluded,
+/// or when an option list drifts from the Settings window.
+/// Number, Text and Action settings are never bindable: numbers and paths have no meaningful flip, and
+/// Settings-window actions work on the Settings working copy.
+/// </summary>
+public static class SettingActionCatalog
+{
+    /// <summary>Choice option lists, in Settings combo-box order.</summary>
+    public static IReadOnlyDictionary<string, string[]> Choices { get; } = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+    {
+        ["navigation.hierarchicalPreviousEntry"] = ["First image", "Last image"],
+        ["navigation.rateLimitInput"] = ["Mouse only", "Keyboard only", "Both"],
+        ["navigation.rateLimitIndicatorPosition"] = ["Top left", "Top right", "Bottom left", "Bottom right", "Centre"],
+        ["appearance.theme"] = ["Dark", "Neutral", "Light"],
+        ["appearance.accent"] = ["Glide blue", "Cyan", "Teal", "Emerald", "Lime", "Violet", "Indigo", "Magenta", "Rose", "Crimson", "Orange", "Amber", "Custom"],
+        ["appearance.glowColor"] = ["Follow accent", "Ice blue", "Cyan", "Teal", "Emerald", "Violet", "Magenta", "Rose", "Amber", "White", "Custom"],
+        ["appearance.background"] = ["Follow theme", "Black", "Dark gray", "Neutral gray", "Light gray", "White", "Custom"],
+        ["window.showInExplorerTarget"] = ["Glide's Explorer tab", "Windows File Explorer"],
+        ["windows.externalOpenBehavior"] = ["Open in new tab", "Open new window", "Overwrite existing tab"],
+        ["windows.sameImageBehavior"] = ["Open new instance", "Refresh existing image", "Open new tab"],
+        ["windows.alwaysOnTopMode"] = ["Soft", "Hard"],
+        ["fullscreen.exitBehavior"] = ["Restore size and location", "Maximized", "Minimized"],
+        ["view.defaultMode"] = ["Fit image", "Fit width", "Fit height", "Fit to window", "100%"],
+        ["mouse.leftWindowDrag"] = ["Smart (normal window only)", "Never move window", "Allow move when maximized"],
+        ["mouse.rightDragPan"] = ["Smart (pan image / move window)", "Pan image only", "Move window", "Do nothing"],
+        ["performance.interactivePanQuality"] = ["Fast", "Balanced", "Full quality"],
+        ["status.size"] = ["Tiny", "Very small", "Small", "Medium", "Large", "Extra large"],
+        ["status.alignment"] = ["Center", "Left", "Right"],
+        ["status.fitScope"] = ["Only the current image", "This session", "This session and future sessions"],
+        ["slideshow.direction"] = ["Forward", "Backward"],
+        ["navigation.sortOrder"] = ["Name (like Explorer)", "Name (plain characters)", "Type", "Size", "Date modified", "Date created"],
+        ["tabs.cycleOrder"] = ["Tab order", "Most recently used"],
+        ["tabs.tooltipTextSize"] = ["Small", "Medium", "Large"],
+        ["explorer.defaultView"] = ["Extra large icons", "Large icons", "Medium icons", "Small icons", "List", "Details"],
+        ["tabs.lastTabBehavior"] = ["Open home page", "Keep last tab open", "Close program"],
+        ["tabs.homePage"] = ["Welcome page", "Recent pictures page", "Explorer page"],
+        ["folderNav.order"] = ["Alphabetical", "Modified date (oldest first)", "Creation date (oldest first)"],
+        ["overlay.picturePosition"] = ["Top left", "Top center", "Top right", "Bottom left", "Bottom center", "Bottom right"],
+        ["overlay.pictureColor"] = ["White", "Soft gray", "Accent", "Amber"],
+        ["overlay.animationRegion"] = ["Anywhere", "Top half", "Bottom half", "Top left quarter", "Top right quarter", "Bottom left quarter", "Bottom right quarter"],
+    };
+
+    /// <summary>
+    /// Option values a cycle action skips: they need extra input that only the Settings window can collect
+    /// (a custom colour from the colour picker).
+    /// </summary>
+    public static IReadOnlySet<string> SkippedCycleValues { get; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "Custom" };
+
+    /// <summary>Toggle / Choice settings that deliberately get no generated action, with the reason.</summary>
+    public static IReadOnlyDictionary<string, string> Excluded { get; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+    {
+        ["windows.alwaysOnTop"] = "Covered by the existing action window.alwaysTop (Toggle Always On Top), which also handles Overlay mode.",
+        ["general.singleInstance"] = "Process / Explorer-launch policy; only meaningful for the next launch, not as a live hotkey.",
+        ["performance.speedBoost"] = "Controls background standby and the tray icon; applied by the Settings commit path only.",
+        ["performance.speedBoostTrayIcon"] = "Tray-icon policy tied to Speed Boost standby; applied by the Settings commit path only.",
+        ["performance.startWithWindowsInBackground"] = "Writes the Windows Run registry key; must stay an explicit Settings choice.",
+        ["performance.initialQuality"] = "Choosing a profile stages a dozen dependent performance values inside the Settings window.",
+        ["general.startupAction"] = "Its Custom option needs a path chosen in Settings; only meaningful at the next start.",
+        ["general.newTabAction"] = "Its Custom option needs a path chosen in Settings.",
+        ["caption.windowedMinimize"] = "Per-button caption configuration; blindly cycling 7 window actions could turn Minimize into Close Glide.",
+        ["caption.windowedMaximize"] = "Per-button caption configuration; blindly cycling 7 window actions could turn Maximize into Close Glide.",
+        ["caption.windowedClose"] = "Per-button caption configuration; cycling would change what the Close button does without the user seeing it.",
+        ["caption.fullscreenMinimize"] = "Per-button caption configuration; see caption.windowedMinimize.",
+        ["caption.fullscreenMaximize"] = "Per-button caption configuration; see caption.windowedMaximize.",
+        ["caption.fullscreenClose"] = "Per-button caption configuration; see caption.windowedClose.",
+        ["windows.explorerThumbnails"] = "Shell thumbnail provider: applied by the thumbnail card's own Apply button, which re-registers the shell extension.",
+        ["windows.thumbnailMode"] = "Shell thumbnail provider setting; applied by the thumbnail card's own Apply button (shell registration).",
+        ["windows.thumbnailQuality"] = "Shell thumbnail provider setting; applied by the thumbnail card's own Apply button.",
+        ["windows.thumbnailMaxSource"] = "Shell thumbnail provider setting; applied by the thumbnail card's own Apply button.",
+        ["windows.thumbnailPreferEmbedded"] = "Shell thumbnail provider setting; applied by the thumbnail card's own Apply button.",
+        ["overlay.animationRefreshRateHz"] = "Numeric frame-rate target stored as a number; not meaningful as a live toggle.",
+        ["reset.card"] = "Destructive data wipe (confirmation dialog, backup, restart); a hotkey or gesture must never be able to start it.",
+        ["reset.allSettings"] = "Destructive data wipe (confirmation dialog, backup, restart); a hotkey or gesture must never be able to start it.",
+        ["reset.hotkeysGestures"] = "Destructive data wipe (confirmation dialog, backup, restart); a hotkey or gesture must never be able to start it.",
+        ["reset.profiles"] = "Destructive data wipe (confirmation dialog, backup, restart); a hotkey or gesture must never be able to start it.",
+        ["reset.windowPlacement"] = "Destructive data wipe (confirmation dialog, backup, restart); a hotkey or gesture must never be able to start it.",
+        ["reset.recentHistory"] = "Destructive data wipe (confirmation dialog, backup, restart); a hotkey or gesture must never be able to start it.",
+        ["reset.lastSession"] = "Destructive data wipe (confirmation dialog, backup, restart); a hotkey or gesture must never be able to start it.",
+        ["reset.caches"] = "Destructive data wipe (confirmation dialog, backup, restart); a hotkey or gesture must never be able to start it.",
+        ["reset.codecPack"] = "Destructive data wipe (confirmation dialog, backup, restart); a hotkey or gesture must never be able to start it.",
+        ["reset.registry"] = "Destructive data wipe (confirmation dialog, backup, restart); a hotkey or gesture must never be able to start it.",
+        ["reset.startup"] = "Destructive data wipe (confirmation dialog, backup, restart); a hotkey or gesture must never be able to start it.",
+    };
+
+    /// <summary>True when the setting gets a generated Toggle/Cycle action.</summary>
+    public static bool IsBindable(SettingDefinition setting) =>
+        setting.FuturePhase is null && !Excluded.ContainsKey(setting.Id) &&
+        (setting.Kind == SettingKind.Toggle || (setting.Kind == SettingKind.Choice && Choices.ContainsKey(setting.Id)));
+
+    /// <summary>The value a cycle action moves to after <paramref name="current"/> (wraps, skips <see cref="SkippedCycleValues"/>).</summary>
+    public static string NextChoice(string settingId, string? current)
+    {
+        if (!Choices.TryGetValue(settingId, out var options) || options.Length == 0) return current ?? string.Empty;
+        var usable = options.Where(o => !SkippedCycleValues.Contains(o)).ToArray();
+        if (usable.Length == 0) return current ?? string.Empty;
+        var index = Array.FindIndex(usable, o => string.Equals(o, current, StringComparison.OrdinalIgnoreCase));
+        return usable[(index + 1) % usable.Length];
+    }
+}

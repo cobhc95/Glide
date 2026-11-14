@@ -2,7 +2,6 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Reflection;
 using System.Runtime.InteropServices;
-using System.Runtime.Versioning;
 using System.Text.Json;
 using Glide.Core;
 using Glide.Core.Settings;
@@ -59,8 +58,8 @@ public static class DiagnosticRunner
             $"{snapshot.SettingsSchemaCount} declarative settings registered"));
         var currentSettings = SettingsCatalog.All.Count(x => x.FuturePhase is null);
         var futureSettings = SettingsCatalog.All.Count(x => x.FuturePhase is not null);
-        checks.Add(Check("settings_schema_glide30_contract", snapshot.SettingsSchemaCount == 235 && currentSettings == 235 && futureSettings == 0,
-            $"Glide catalogue contract: total={snapshot.SettingsSchemaCount}, current={currentSettings}, future={futureSettings}; expected 235/235/0."));
+        checks.Add(Check("settings_schema_glide30_contract", snapshot.SettingsSchemaCount == 269 && currentSettings == 269 && futureSettings == 0,
+            $"Glide catalogue contract: total={snapshot.SettingsSchemaCount}, current={currentSettings}, future={futureSettings}; expected 269/269/0."));
         var overlayAvoidOverlap = SettingsCatalog.All.FirstOrDefault(x => string.Equals(x.Id, "overlay.animationAvoidOverlap", StringComparison.OrdinalIgnoreCase));
         checks.Add(Check("overlay_animation_avoid_overlap_contract",
             overlayAvoidOverlap is not null && overlayAvoidOverlap.FuturePhase is null && overlayAvoidOverlap.DefaultValue is bool avoidOverlapEnabled && avoidOverlapEnabled,
@@ -106,8 +105,14 @@ public static class DiagnosticRunner
             .GroupBy(x => x.shortcut, StringComparer.OrdinalIgnoreCase)
             .Where(group => group.Select(x => x.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count() > 1)
             .ToArray();
-        checks.Add(Check("hotkey_contract", HotkeyCatalog.All.Count == 72 &&
-            HotkeyCatalog.All.Select(x => x.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count() == 72 &&
+        // 5.0.x: the hotkey list is read from the master action registry. The 75 historical rows must all still exist
+        // (saved maps and presets use their ids); everything the registry added follows them.
+        var registryIssues = AppActionRegistry.Validate();
+        checks.Add(Check("action_registry_contract", registryIssues.Count == 0,
+            registryIssues.Count == 0 ? $"{AppActionRegistry.All.Count} registry actions validated." : string.Join("; ", registryIssues.Take(8))));
+        checks.Add(Check("hotkey_contract", HotkeyCatalog.LegacyIds.All(id => HotkeyCatalog.Find(id) is not null) &&
+            HotkeyCatalog.All.Count >= 75 &&
+            HotkeyCatalog.All.Select(x => x.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count() == HotkeyCatalog.All.Count &&
             HotkeyCatalog.ShortcutsForCommand(GlideCommand.AddOverlay, defaultHotkeys).Contains("Shift+O") &&
             defaultHotkeys["overlay.saveLayout"].SequenceEqual(new[] { "Ctrl+Shift+S" }, StringComparer.OrdinalIgnoreCase) &&
             defaultHotkeys["overlay.loadLayout"].SequenceEqual(new[] { "Ctrl+Shift+L" }, StringComparer.OrdinalIgnoreCase) &&
@@ -147,11 +152,14 @@ public static class DiagnosticRunner
             SettingsCatalog.All.Any(x => x.Id == "navigation.confirmHierarchicalBoundary") &&
             SettingsCatalog.All.Any(x => x.Id == "developer.reverseSelectionZoomOut"),
             "Glide 3.0 appearance, independent picker directories, external-open policy, multi-tab close policy, responsive-status, proportional overlays, custom colours and performance-preset controls are structurally registered."));
-        checks.Add(Check("gesture_contract_25x23", GestureCatalog.Slots.Count == 25 && GestureCatalog.Actions.Count == 23,
-            $"{GestureCatalog.Slots.Count} gesture slots and {GestureCatalog.Actions.Count} gesture actions registered."));
+        checks.Add(Check("gesture_contract_54x56", GestureCatalog.Slots.Count == 54 &&
+            GestureCatalog.LegacyActionIds.All(id => GestureCatalog.FindAction(id) is not null),
+            $"{GestureCatalog.Slots.Count} gesture slots and {GestureCatalog.Actions.Count} gesture actions registered (all 56 historical actions present)."));
+        checks.Add(Check("navigation_history_contract", VerifyNavigationHistory(),
+            "Back / Forward (nav.back Alt+Left, nav.backOrPrevious Backspace, nav.forward Shift+Backspace / Alt+Right, mouse side buttons by default) step through a per-tab history; image-to-image navigation replaces the current entry."));
         checks.Add(Check("gesture_unique_ids",
-            GestureCatalog.Slots.Select(x => x.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count() == 25 &&
-            GestureCatalog.Actions.Select(x => x.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count() == 23,
+            GestureCatalog.Slots.Select(x => x.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count() == 54 &&
+            GestureCatalog.Actions.Select(x => x.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count() == GestureCatalog.Actions.Count,
             "Gesture slot/action IDs are unique."));
         var fixtureIssues = ImageDiagnosticFixtures.Validate();
         checks.Add(Check("image_fixture_registry", fixtureIssues.Count == 0,
@@ -160,7 +168,7 @@ public static class DiagnosticRunner
                 : string.Join("; ", fixtureIssues)));
 
         // These are deliberately SKIP/WARN here. Live Glide.App diagnostic export performs them with real controls.
-        checks.Add(new("ui_screenshots", "SKIP", "Requires a live Avalonia window; Settings > Developer Options export captures immediate/settled screenshots."));
+        checks.Add(new("ui_screenshots", "SKIP", "Requires a live Avalonia window; Settings > Windows & developer > Diagnostics export captures immediate/settled screenshots."));
         checks.Add(new("ui_geometry", "SKIP", "Requires a live Avalonia window; app-level export records application logical-control bounds and layout audit."));
         checks.Add(new("input_behaviour_trace", "SKIP", "Requires live interaction; app-level event trace records window drag, selection, navigation, fullscreen, slideshow and settings actions."));
         var speed = ImagePerformancePolicy.ForProfile("Maximum speed");
@@ -278,9 +286,37 @@ public static class DiagnosticRunner
                 ? CodecProviderRuntime.Shared.Artifacts
                 : Array.Empty<CodecProviderArtifact>(), DiagnosticsJsonContext.Default.IReadOnlyListCodecProviderArtifact));
         File.WriteAllText(Path.Combine(folder, "README.txt"),
-            "Glide 4.5.0 evidence bundle. PASS means a named assertion actually ran. SKIP means the owning subsystem is absent or the check requires a live UI. codec_capabilities.json separates recognised/routed suffixes from guaranteed decode; codec_providers.json reports only providers already indexed/verified in this process and never wakes optional providers during export. When exported from Settings > Developer Options, Glide.App appends immediate/settled screenshots, logical-control geometry/layout audit, settings-effect coverage, current settings, capability/provider inventory and a live behaviour event trace. Do not infer UI parity from headless structural PASS.\n");
+            "Glide 4.5.0 evidence bundle. PASS means a named assertion actually ran. SKIP means the owning subsystem is absent or the check requires a live UI. codec_capabilities.json separates recognised/routed suffixes from guaranteed decode; codec_providers.json reports only providers already indexed/verified in this process and never wakes optional providers during export. When exported from Settings > Windows & developer > Diagnostics, Glide.App appends immediate/settled screenshots, logical-control geometry/layout audit, settings-effect coverage, current settings, capability/provider inventory and a live behaviour event trace. Do not infer UI parity from headless structural PASS.\n");
         output.WriteLine($"Diagnostics exported to: {Path.GetFullPath(folder)}");
         return checks.Any(x => x.Status == "FAIL") ? 1 : 0;
+    }
+
+    /// <summary>5.0.0 browser-style Back / Forward: registry wiring, defaults and the per-tab history rules.</summary>
+    private static bool VerifyNavigationHistory()
+    {
+        try
+        {
+            var defaults = HotkeyCatalog.CreateDefaultMap();
+            if (AppActionRegistry.Find("nav.back") is not { Command: GlideCommand.NavigateBack, Icon: not null } ||
+                AppActionRegistry.Find("nav.forward") is not { Command: GlideCommand.NavigateForward, Icon: not null }) return false;
+            if (!defaults["nav.back"].SequenceEqual(new[] { "Alt+Left" }) || !defaults["nav.forward"].SequenceEqual(new[] { "Shift+Backspace", "Alt+Right" })) return false;
+            // Backspace belongs to the composite "Back, or Previous image" (one owner per default key); Back is strict and the old
+            // Previous image row keeps its id but has no default.
+            if (AppActionRegistry.Find("nav.backOrPrevious") is not { Command: GlideCommand.BackOrPrevious } ||
+                !defaults["nav.backOrPrevious"].SequenceEqual(new[] { "Backspace" }) || defaults["nav.previousBack"].Count != 0 ||
+                defaults.Count(p => p.Value.Contains("Backspace")) != 1) return false;
+            foreach (var slot in GestureCatalog.Slots.Where(s => s.Input is GestureInputs.BackButton or GestureInputs.ForwardButton))
+                if (GestureCatalog.DefaultActionFor(slot.Id) != (slot.Input == GestureInputs.BackButton ? GestureCatalog.NavigateBack : GestureCatalog.NavigateForward)) return false;
+            var history = new Glide.Core.Navigation.NavigationHistory();
+            history.Record(Glide.Core.Navigation.NavigationEntry.Explorer(@"C:\Pictures"));
+            history.Record(Glide.Core.Navigation.NavigationEntry.Image(@"C:\Pictures\a.png"));
+            history.Record(Glide.Core.Navigation.NavigationEntry.Image(@"C:\Pictures\b.png")); // arrow keys: replaced, not a step
+            if (history.Count != 2 || !history.CanGoBack || history.CanGoForward) return false;
+            var back = history.Step(-1, entry => entry, out _);
+            return back?.Kind == Glide.Core.Navigation.NavigationEntryKind.Explorer && history.CanGoForward &&
+                   history.Entries[1].Path == @"C:\Pictures\b.png";
+        }
+        catch { return false; }
     }
 
     private static bool VerifyWorkspaceTransferModel()

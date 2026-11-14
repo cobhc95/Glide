@@ -1,8 +1,5 @@
-﻿using System;
-using System.IO;
-using System.Text;
+﻿using System.Text;
 using Glide.Diagnostics.Runtime;
-using Xunit;
 
 namespace Glide.Core.Tests;
 

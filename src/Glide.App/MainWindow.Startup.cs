@@ -1,34 +1,18 @@
-﻿using System.Diagnostics;
-using System.Collections.ObjectModel;
-using System.Runtime.InteropServices;
-using System.Text.Json;
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Controls.ApplicationLifetimes;
-using Avalonia.Controls.Primitives;
-using Avalonia.Controls.Templates;
 using Avalonia.Input;
 using Avalonia.Interactivity;
-using Avalonia.Layout;
 using Avalonia.Media;
-using Avalonia.Media.Imaging;
-using Avalonia.Platform.Storage;
-using Avalonia.Styling;
 using Avalonia.Threading;
-using Avalonia.VisualTree;
 using Glide.App.Controls;
-using Glide.App.Diagnostics;
+using Glide.App.Explorer;
 using Glide.App.Platform;
-using Glide.App.Printing;
 using Glide.App.Settings;
 using Glide.App.Services;
 using Glide.Core;
 using Glide.Core.Commands;
 using Glide.Core.Workspace;
 using Glide.Imaging;
-using Glide.Input;
-using Glide.Diagnostics.Runtime;
-using Microsoft.VisualBasic.FileIO;
 
 namespace Glide.App;
 
@@ -114,7 +98,7 @@ public partial class MainWindow
             if (open) _overlayContextTopmostScope ??= EnterTopmostTransient();
             else { _overlayContextTopmostScope?.Dispose(); _overlayContextTopmostScope = null; }
         };
-        overlays.OpenFileLocationRequested = path => RevealInWindowsExplorer(path, directory: false);
+        overlays.OpenFileLocationRequested = path => ExplorerShell.Reveal(path, directory: false);
         overlays.OpenInNewTabRequested = path => Dispatcher.UIThread.Post(async () => await OpenAsImageTabAsync(path, openInNewTab: true));
         overlays.OpenWithRequested = path => WindowsOpenWith.Show(path);
         VideoOverlaySession.DecoderPackRequested ??= RequestVideoDecoderPackAsync;
@@ -127,9 +111,11 @@ public partial class MainWindow
     private void ApplyOverlaySettingsToManager(WindowInWindowOverlayManager overlays)
     {
         overlays.DefaultOpacity = Math.Clamp(_settings.OverlayDefaultOpacity / 100.0, .1, 1.0);
-        overlays.WheelZoomEnabled = _settings.OverlayWheelZoom;
-        overlays.CtrlWheelZoomEnabled = _settings.CtrlWheelZoom;
-        overlays.RightDragPanEnabled = _settings.OverlayRightDragPan;
+        // 4.8.0: overlay wheel zoom, Ctrl+wheel zoom and right-drag pan are Window in Window gesture
+        // rows ("Do nothing" = the old toggle off); the built-in defaults are on.
+        overlays.WheelZoomEnabled = true;
+        overlays.CtrlWheelZoomEnabled = true;
+        overlays.RightDragPanEnabled = !string.Equals(_inputRouter.ResolveGesture("overlay.rightDrag", _settings.Gestures), GestureCatalog.Nothing, StringComparison.OrdinalIgnoreCase);
         overlays.HighlightSelected = _settings.OverlaySelectedHighlight;
         overlays.RememberZoom = _settings.OverlayRememberZoom;
         overlays.ZoomStepPercent = Math.Clamp(_settings.OverlayZoomStepPercent, 1, 100);
@@ -143,7 +129,7 @@ public partial class MainWindow
         overlays.AnimationAvoidOverlap = _settings.OverlayAnimationAvoidOverlap;
         overlays.AnimationRefreshRateHz = Math.Clamp(_settings.OverlayAnimationRefreshRateHz, 60, 360);
         overlays.AccentBrush = new SolidColorBrush(Color.Parse(CurrentAccentHex()));
-        overlays.ResolveGesture = slot => _inputRouter.ResolveGesture(slot, _settings.Gestures);
+        overlays.ResolveGesture = (slot, modifiers) => ResolveGestureSlot(slot, modifiers);
         overlays.RefreshTheme();
     }
 

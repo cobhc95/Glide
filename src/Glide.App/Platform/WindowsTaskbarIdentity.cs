@@ -22,7 +22,7 @@ internal static unsafe class WindowsTaskbarIdentity
 
     // IUnknown: 0 QueryInterface, 1 AddRef, 2 Release. IPropertyStore: 3 GetCount, 4 GetAt,
     // 5 GetValue, 6 SetValue, 7 Commit.
-    private const int SlotRelease = 2, SlotGetValue = 5, SlotSetValue = 6, SlotCommit = 7;
+    private const int SlotRelease = 2, SlotSetValue = 6, SlotCommit = 7;
 
     [DllImport("shell32.dll")]
     private static extern int SHGetPropertyStoreForWindow(IntPtr hwnd, ref Guid riid, out IntPtr propertyStore);
@@ -41,31 +41,6 @@ internal static unsafe class WindowsTaskbarIdentity
     {
         var iid = IidPropertyStore;
         return SHGetPropertyStoreForWindow(hwnd, ref iid, out var pointer) == 0 ? pointer : IntPtr.Zero;
-    }
-
-    /// <summary>Reads the window's AppUserModelID (used by diagnostics and the round-trip test).</summary>
-    public static string? TryGetWindowAppUserModelId(IntPtr hwnd)
-    {
-        if (hwnd == IntPtr.Zero) return null;
-        var store = IntPtr.Zero;
-        try
-        {
-            store = TryGetStore(hwnd);
-            if (store == IntPtr.Zero) return null;
-            var key = AppUserModelIdKey;
-            PropVariant value = default;
-            var hr = ((delegate* unmanaged[Stdcall]<IntPtr, PropertyKey*, PropVariant*, int>)Slot(store, SlotGetValue))(store, &key, &value);
-            if (hr < 0) return null;
-            try
-            {
-                return value.VariantType == VtLpwstr && value.Pointer != IntPtr.Zero
-                    ? Marshal.PtrToStringUni(value.Pointer)
-                    : null;
-            }
-            finally { PropVariantClear(ref value); }
-        }
-        catch { return null; }
-        finally { ReleaseStore(store); }
     }
 
     /// <summary>

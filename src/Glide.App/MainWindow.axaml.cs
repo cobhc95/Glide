@@ -1,25 +1,18 @@
 using System.Diagnostics;
-using System.Collections.ObjectModel;
 using System.Runtime.InteropServices;
-using System.Text.Json;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Controls.Primitives;
-using Avalonia.Controls.Templates;
 using Avalonia.Input;
 using Avalonia.Interactivity;
-using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
-using Avalonia.Platform.Storage;
 using Avalonia.Styling;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Glide.App.Controls;
-using Glide.App.Diagnostics;
 using Glide.App.Platform;
-using Glide.App.Printing;
 using Glide.App.Settings;
 using Glide.App.Services;
 using Glide.Core;
@@ -27,8 +20,6 @@ using Glide.Core.Commands;
 using Glide.Core.Workspace;
 using Glide.Imaging;
 using Glide.Input;
-using Glide.Diagnostics.Runtime;
-using Microsoft.VisualBasic.FileIO;
 
 namespace Glide.App;
 
@@ -92,19 +83,13 @@ public partial class MainWindow : Window
         public bool Accepted => Status == PresentationStatus.Accepted;
     }
 
-    private Guid? _suppressNextTabClick;
-
     // Once a tab crosses the source-window boundary while the physical left button is still down,
     // ownership moves to the detached HWND's native Windows move loop. PositionChanged callbacks
     // only observe attach targets; Windows itself owns pointer tracking, Snap and monitor edges.
     private Guid? _physicalDraggedTabId;
     private MainWindow? _physicalDragSource;
     private bool _deferWorkspaceActivation;
-    private readonly Dictionary<Guid, BrowserSession> _browserSessions = new();
-    // Browser-like Back/Forward state is tab-local. When Back is pressed from an image, that same
-    // tab becomes an Explorer view and remembers the image as the terminal Forward destination.
-    private readonly Dictionary<Guid, string> _tabForwardImageTargets = new();
-    private readonly Dictionary<Guid, Stack<string>> _tabForwardFolderTargets = new();
+    // Browser-like Back / Forward state is tab-local: one NavigationHistory per tab (_tabHistories, MainWindow.History.cs).
     private readonly Dictionary<Guid, string> _browserHighlightTargets = new();
     private bool _titleNavCanBack;
     private bool _titleNavCanForward;
@@ -139,25 +124,24 @@ public partial class MainWindow : Window
     private int _navigationCommandEpoch;
     private int _suppressedHeldNavigationDirection;
     private CancellationTokenSource? _browserThumbnailCts;
-    private readonly SemaphoreSlim _browserThumbnailGate = new(4, 4);
+    // Explorer thumbnail decode lanes scale with the machine (a quarter of the logical CPUs, 2..6);
+    // was a fixed 4.
+    private readonly SemaphoreSlim _browserThumbnailGate = new(ImagePerformanceGovernor.ThumbnailDecodeLanes, ImagePerformanceGovernor.ThumbnailDecodeLanes);
     // TODO(perf): a trivial shared thumbnail MemoryCache could reuse decoded bitmaps across folder
     // revisits. Deliberately not re-architecting virtualization here (too risky); ItemsRepeater
     // realization stays the single owner of per-tile CTS/bitmap lifetime.
     private readonly Dictionary<Control, CancellationTokenSource> _browserRealizationCts = new();
     private readonly HashSet<string> _browserSelection = new(StringComparer.OrdinalIgnoreCase);
-    private List<BrowserEntry> _browserEntries = new();
+    private List<Glide.App.Explorer.ExplorerEntry> _browserEntries = new();
     private int _browserSelectionAnchor = -1;
     private int _browserCurrentIndex = -1;
     private long _browserGeneration;
-    private int _browserViewMode; // 0 large icons, 1 medium icons, 2 compact
+    private int _browserViewMode = 1; // index into ExplorerViewModes.Names (1 = Large icons)
     private bool _browserUiReady;
     private string? _queuedOpen;
     private bool _statusCollapsed;
     private bool _statusSessionClosed;
     private bool _statusHoverRevealed;
-    private bool _collapseAnchorsCaptured;
-    private double? _collapseAnchorViewer;
-    private double? _collapseAnchorHome;
     private bool _closeConfirmationInProgress;
     private bool _closeConfirmed;
     private bool _forceProcessExit;
@@ -221,9 +205,6 @@ public partial class MainWindow : Window
     private bool _speedBoostStandbyActive;
     private bool _standbyClosePending;
     private bool _pendingExternalReceiver;
-    // Secondary windows may temporarily be the only visible window during Speed Boost delegation,
-    // but a newly restored primary must always reclaim the single taskbar representative slot.
-    internal bool IsSecondaryWindow { get; private set; }
     internal bool IsStandbyClosePending => _standbyClosePending;
     // A hidden warm HWND can retain its last DWM-composed pixels across Hide/Show. Keep the HWND
     // visually suppressed until a new image or Home surface has completed a safe composition.
@@ -234,7 +215,6 @@ public partial class MainWindow : Window
     private Grid? _wholeAppOverlayControlsHost;
     private LegacyOverlayChrome? _wholeAppOverlayChromeVisual;
     private Slider? _wholeAppOverlayOpacityHitTarget;
-    private Thumb? _wholeAppOverlayResizeGrip;
     private string? _wholeAppOverlayPlacementPath;
     private bool _applyingWholeAppOverlayPlacement;
 
@@ -342,11 +322,6 @@ public partial class MainWindow : Window
         _physicalAttach = new TabAttachCoordinator(this, (category, name, data) => _diagnostics.Write(category, name, data));
         _tabDrag = new TabDragController(CreateTabDragHost(), _tabAttach);
         Viewport.SelectionOverlayTarget = SelectionOverlay;
-        Viewport.PriorBitmapReleased += bitmap =>
-        {
-            if (bitmap is not null && !_loader.IsBitmapCached(bitmap))
-                bitmap.Dispose();
-        };
         // Window-in-window overlay decoding and slideshow infrastructure are intentionally lazy.
         // A plain cold file-open should construct only the primary image path before first pixels.
         GlidePerformanceTrace.Mark("ctor_create_commands_start");
@@ -364,6 +339,18 @@ public partial class MainWindow : Window
         ChromeBorder.AddHandler(InputElement.PointerReleasedEvent, (_, _) => ClearPendingChromeDrag(), RoutingStrategies.Bubble, true);
         ChromeBorder.PointerCaptureLost += (_, _) => _pendingChromeDragPress = null;
         ViewerStatusSurface.AddHandler(InputElement.PointerPressedEvent, StatusSurfacePointerPressed, RoutingStrategies.Tunnel, true);
+        // Right-click on "+" offers the explicit tab kinds, including the Explorer tab.
+        NewTabButton.ContextRequested += (_, e) =>
+        {
+            e.Handled = true;
+            BuildNewTabMenu().Open(NewTabButton);
+        };
+        // "Reserve status bar space when fitting": re-fit whenever the bar's real geometry changes.
+        ViewerStatusSurface.PropertyChanged += (_, e) =>
+        {
+            if (e.Property == BoundsProperty || e.Property == IsVisibleProperty) UpdateViewportStatusInset();
+        };
+        Viewport.PropertyChanged += (_, e) => { if (e.Property == BoundsProperty) UpdateViewportStatusInset(); };
         // Ctrl+Tab MRU cycling: remember whether the triggering key was chorded with Ctrl, and end the
         // cycle (committing the landed-on tab as most recent) when Ctrl is released or focus leaves.
         AddHandler(InputElement.KeyDownEvent, (_, e) => _lastKeyDownHadCtrl = e.KeyModifiers.HasFlag(KeyModifiers.Control), RoutingStrategies.Tunnel, true);
@@ -378,8 +365,27 @@ public partial class MainWindow : Window
                 !IsWithinControl(e.Source, open)) CloseActiveOwnedMenu();
         }, RoutingStrategies.Tunnel, true);
         // Tabs no longer shrink until they overlap; when they overflow, the wheel scrolls the strip.
-        TabStripScroll.AddHandler(InputElement.PointerWheelChangedEvent, (_, e) =>
+        // Title bar wheel row (empty title bar; the tab strip has its own row below). Default: nothing.
+        ChromeBorder.AddHandler(InputElement.PointerWheelChangedEvent, async (_, e) =>
         {
+            if (e.Handled || IsInteractiveSource(e.Source)) return;
+            if (e.Source is Visual sourceVisual && (ReferenceEquals(sourceVisual, TabStripScroll) ||
+                sourceVisual.GetVisualAncestors().Any(a => ReferenceEquals(a, TabStripScroll)))) return;
+            var configured = ResolveGestureSlot("titleBar.wheel", e.KeyModifiers);
+            if (string.Equals(configured, GestureCatalog.Default, StringComparison.OrdinalIgnoreCase)) return;
+            e.Handled = true;
+            await ExecuteGestureActionAsync(configured, ImageViewport.WheelNavigationStep(e.Delta.Y, _settings.InvertWheelDirection));
+        }, RoutingStrategies.Bubble);
+        TabStripScroll.AddHandler(InputElement.PointerWheelChangedEvent, async (_, e) =>
+        {
+            // Tabs wheel row: Default scrolls an overflowing tab strip (unchanged).
+            var configuredTabWheel = ResolveGestureSlot("tabs.wheel", e.KeyModifiers);
+            if (!string.Equals(configuredTabWheel, GestureCatalog.Default, StringComparison.OrdinalIgnoreCase))
+            {
+                e.Handled = true;
+                await ExecuteGestureActionAsync(configuredTabWheel, ImageViewport.WheelNavigationStep(e.Delta.Y, _settings.InvertWheelDirection));
+                return;
+            }
             var maxOffset = Math.Max(0, TabStripScroll.Extent.Width - TabStripScroll.Viewport.Width);
             if (maxOffset <= 1) return;
             var delta = Math.Abs(e.Delta.X) > Math.Abs(e.Delta.Y) ? e.Delta.X : e.Delta.Y;
@@ -426,6 +432,7 @@ public partial class MainWindow : Window
         KeyUp += OnKeyUp;
         AddHandler(InputElement.KeyDownEvent, GlobalKeyDown, RoutingStrategies.Tunnel, true);
         PointerMoved += MainWindowPointerMoved;
+        PointerExited += MainWindowPointerExited;
         PointerReleased += MainWindowPointerReleased;
         SizeChanged += (_, _) =>
         {
@@ -515,29 +522,25 @@ public partial class MainWindow : Window
         {
             var fullscreen = WindowState == WindowState.FullScreen;
             var position = e.GetPosition(Viewport);
-            // The authoritative 24-slot gesture contract has a windowed image double-click and
-            // an empty-background double-click, but no separate fullscreen double-click slot.
-            // Fullscreen double-click therefore remains governed by the explicit fullscreen setting.
-            var slot = !fullscreen
-                ? (Viewport.IsPointOverImage(position) ? "windowed.doubleLeftImage" : "background.doubleLeft")
-                : null;
-            if (slot is not null)
+            // Windowed double-click on the image / the empty background default to entering
+            // fullscreen; the fullscreen double-click row (4.8.0) defaults to nothing. These Defaults
+            // equal the folded 4.7 "Double-click enters / exits fullscreen" toggles at stock values.
+            var slot = fullscreen ? "fullscreen.doubleLeftImage"
+                : Viewport.IsPointOverImage(position) ? "windowed.doubleLeftImage" : "background.doubleLeft";
+            var configured = ResolveGestureSlot(slot, e.KeyModifiers);
+            if (!string.Equals(configured, GestureCatalog.Default, StringComparison.OrdinalIgnoreCase))
             {
-                var configured = _inputRouter.ResolveGesture(slot, _settings.Gestures);
-                if (!string.Equals(configured, GestureCatalog.Default, StringComparison.OrdinalIgnoreCase))
-                {
-                    await ExecuteGestureActionAsync(configured);
-                    e.Handled = true;
-                    return;
-                }
+                await ExecuteGestureActionAsync(configured);
+                e.Handled = true;
+                return;
             }
-            if ((!fullscreen && _settings.DoubleClickFullscreen) || (fullscreen && _settings.DoubleClickExitFullscreen))
+            if (!fullscreen)
             {
                 ToggleFullscreen();
                 e.Handled = true;
             }
         };
-        Viewport.GestureActionRequested += async (_, e) => await ExecuteGestureActionAsync(e.ActionId);
+        Viewport.GestureActionRequested += async (_, e) => await ExecuteGestureActionAsync(e.ActionId, e.WheelStep, e.SlotId);
         Viewport.InteractionDiagnostic += (name, data) =>
         {
             if (string.Equals(name, "selection_zoom_in", StringComparison.OrdinalIgnoreCase)) _selectionZoomDemandPath = _currentPath;
@@ -591,6 +594,7 @@ public partial class MainWindow : Window
         AddHandler(InputElement.KeyDownEvent, OverlayKeyboardShortcut, RoutingStrategies.Tunnel, true);
 
         _fullscreenCursorTimer.Interval = FullscreenCursorAutoHide.TickInterval;
+        AttachPopupCursorGuard();
         _fullscreenCursorTimer.Tick += (_, _) =>
         {
             if (WindowState != WindowState.FullScreen || !_settings.HideCursorFullscreen || !IsActive)
@@ -598,6 +602,7 @@ public partial class MainWindow : Window
                 StopFullscreenCursorAutoHide();
                 return;
             }
+            SyncPopupCursorState();
             if (_cursorAutoHide.Tick(DateTime.UtcNow)) ApplyFullscreenCursorVisibility();
         };
 
@@ -625,11 +630,13 @@ public partial class MainWindow : Window
             }
             _overlays?.Dispose();
             _slideshow?.Dispose();
+            Viewport.SetInteractionBitmap(null);
+            // Release (not Dispose) before the loader goes away: the interaction preview may also be a
+            // cached or retired loader bitmap, which the loader then disposes exactly once.
+            _loader.ReleaseBitmap(_interactionPreviewBitmap);
+            _interactionPreviewBitmap = null;
             _loader.Dispose();
             _overlayLoader?.Dispose();
-            Viewport.SetInteractionBitmap(null);
-            _interactionPreviewBitmap?.Dispose();
-            _interactionPreviewBitmap = null;
             _decoderBackend.ProviderFailure -= _providerFailureHandler;
             _decoderBackend.Dispose();
             _loadCts?.Cancel(); _loadCts?.Dispose(); _loadCts = null;
@@ -727,9 +734,7 @@ public partial class MainWindow : Window
                 _closeConfirmationInProgress = true;
                 try
                 {
-                    var choice = _settings.RememberedMultiTabCloseChoice;
-                    if (string.Equals(choice, "Ask", StringComparison.OrdinalIgnoreCase))
-                        choice = await ShowMultiTabCloseDialogAsync();
+                    var choice = await ResolveMultiTabCloseChoiceAsync();
                     if (string.Equals(choice, "Close current tab", StringComparison.OrdinalIgnoreCase))
                     {
                         if (_workspace.Active is { } active) await CloseTabWithPolicyAsync(active.Id, "window_close_dialog");
@@ -767,6 +772,7 @@ public partial class MainWindow : Window
             // The internal Speed Boost standby close must not overwrite the user's placement.
             if (!_closeForSpeedBoostStandby)
             {
+                CancelPendingExplorerSessionSave();
                 CaptureActiveTabRuntimeState();
                 WorkspaceSessionStore.Save(_workspace.Tabs, _workspace.ActiveIndex);
                 await RecentHistoryStore.FlushAsync();

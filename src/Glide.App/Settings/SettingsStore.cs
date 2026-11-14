@@ -21,7 +21,10 @@ public static class SettingsStore
     /// complete settings load runs in parallel with Avalonia startup and is adopted non-blockingly.
     /// </summary>
     private const int LaunchPolicySchema = 4;
-    private const int CurrentSettingsSchema = 6;
+    // 9 (5.0.0 Back / Forward): the one-time title-bar default migration below is gated on it.
+    internal const int CurrentSettingsSchema = 11;
+    /// <summary>Settings schema that added Back / Forward to the default title-bar buttons.</summary>
+    internal const int TitleBarNavigationSchema = 9;
 
     public readonly record struct LaunchPolicy(bool ReuseSingleInstance, string ExternalOpenBehavior);
 
@@ -72,17 +75,17 @@ public static class SettingsStore
         ReuseSingleInstance: true,
         ExternalOpenBehavior: "Open in new tab",
         DefaultViewMode: "Fit image",
-        InitialImageQuality: "Balanced",
+        InitialImageQuality: "Maximum quality",
         AdaptiveFastPreview: true,
-        RapidPreviewLongestSide: 3000,
+        RapidPreviewLongestSide: 2400,
         BackgroundRefinement: true,
-        AdaptivePreviewDelayMs: 20,
+        AdaptivePreviewDelayMs: 5,
         SequentialForegroundReads: true,
         PredictivePrefetch: true,
-        PrefetchDepth: 5,
-        CacheItems: 16,
-        CompressedCacheMegabytes: 256,
-        DecodedCacheMegabytes: 256,
+        PrefetchDepth: 15,
+        CacheItems: 20,
+        CompressedCacheMegabytes: 999,
+        DecodedCacheMegabytes: 999,
         ProgressiveColorFirstPreview: true,
         AlwaysStartWholeAppOverlayMode: false,
         RememberWindowPlacement: true,
@@ -206,15 +209,6 @@ public static class SettingsStore
         return state;
     }
 
-    private static FirstFramePolicy FirstFramePolicyFrom(GlideSettingsState settings) => new(
-        settings.ReuseSingleInstance, settings.ExternalOpenBehavior, settings.DefaultViewMode,
-        settings.InitialImageQuality, settings.AdaptiveFastPreview, settings.RapidPreviewLongestSide,
-        settings.BackgroundRefinement, settings.AdaptivePreviewDelayMs, settings.SequentialForegroundReads,
-        settings.PredictivePrefetch, settings.PrefetchDepth, settings.CacheItems, settings.CompressedCacheMegabytes,
-        settings.DecodedCacheMegabytes, settings.ProgressiveColorFirstPreview, settings.AlwaysStartWholeAppOverlayMode,
-        settings.RememberWindowPlacement, settings.WindowX, settings.WindowY, settings.WindowWidth, settings.WindowHeight,
-        settings.WindowWasMaximized, settings.ThemeChoice);
-
     private static string GetLaunchPolicyPath() => Path.Combine(GetSettingsDirectory(), LaunchPolicyFileName);
 
     private static void AtomicWriteAllText(string path, string text)
@@ -245,7 +239,7 @@ public static class SettingsStore
         catch { }
     }
 
-    private static void SaveLaunchPolicyCache(GlideSettingsState settings)
+    private static void SaveLaunchPolicyCache()
     {
         try
         {
@@ -293,6 +287,51 @@ public static class SettingsStore
 
     internal static bool MigrateWheelDirection(int sourceSchema, bool invert) => sourceSchema >= 6 && invert;
 
+    /// <summary>Schema at which the 4.7 mouse toggles were folded into gesture bindings.</summary>
+    internal const int GestureFoldSchema = 7;
+
+    /// <summary>
+    /// Runs the one-time 4.8.0 mouse-toggle fold for a state loaded from an older schema (settings
+    /// file, imported profile or settings transfer). Newer states are left untouched.
+    /// </summary>
+    public static void MigrateLegacyMouseToggles(GlideSettingsState state, int sourceSchema)
+    {
+        if (sourceSchema >= GestureFoldSchema) return;
+        state.SlideshowLeftClickAction = Glide.Core.Settings.SlideshowLeftClickActions.Normalize(state.SlideshowLeftClickAction);
+        state.FoldLegacyMouseToggles();
+    }
+
+    /// <summary>
+    /// Schema 8 (5.0.0 audit items): (1) "Viewport zoom step" now works and defaults to 15% (the zoom keys' historical
+    /// hard-coded step). The setting never had an effect before, so a stored 10 (the old default) is an untouched
+    /// default and moves to 15; any other value is the user's choice and is kept. (2) "Show / hide status bar" moves from
+    /// Alt+Shift+S to Ctrl+Shift+B when the file shows exactly the old default (see HotkeyDefaultMigrations).
+    /// Newer states are left untouched.
+    /// </summary>
+    public static void MigrateDefaultsSchema8(GlideSettingsState state, int sourceSchema)
+    {
+        state.Hotkeys ??= HotkeyCatalog.CreateDefaultMap();
+        // Schema 10: "Explore/Browse containing folder" gains Ctrl+E (only where it is unassigned and the key is free).
+        HotkeyDefaultMigrations.MigrateExploreParent(state.Hotkeys, sourceSchema);
+        // Schema 11: Backspace moves from "Previous image" to "Back, or Previous image" (only an untouched old default; nobody's binding is taken).
+        HotkeyDefaultMigrations.MigrateBackspaceToBackOrPrevious(state.Hotkeys, sourceSchema);
+        if (sourceSchema >= HotkeyDefaultMigrations.StatusToggleMovedSchema) return;
+        if (state.ViewportZoomStepPercent == 10) state.ViewportZoomStepPercent = Glide.Core.ZoomStepPolicy.DefaultStepPercent;
+        HotkeyDefaultMigrations.MigrateStatusToggle(state.Hotkeys, sourceSchema);
+    }
+
+    internal static List<string> NormalizeRecentGestureActions(IEnumerable<string>? recent) =>
+        (recent ?? [])
+            .Select(GestureCatalog.NormalizeAction)
+            .Where(id => id is not GestureCatalog.Default and not GestureCatalog.Nothing)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(6)
+            .ToList();
+
+    /// <summary>Default keys of newly added hotkey rows that the last <see cref="Load"/> held back because a saved binding
+    /// of another action already uses them (diagnostics and tests).</summary>
+    internal static IReadOnlyList<HotkeyDefaultMigrations.SkippedDefault> LastSkippedHotkeyDefaults { get; private set; } = [];
+
     public static GlideSettingsState Load()
     {
         try
@@ -333,6 +372,15 @@ public static class SettingsStore
             loaded.ThemeChoice = loaded.ThemeChoice is "Dark" or "Neutral" or "Light" ? loaded.ThemeChoice : "Dark";
             loaded.ExplorerThemeChoice = loaded.ExplorerThemeChoice is "Follow Glide theme" or "Dark" or "Neutral" or "Light" ? loaded.ExplorerThemeChoice : "Follow Glide theme";
             loaded.LightTheme = string.Equals(loaded.ThemeChoice, "Light", StringComparison.OrdinalIgnoreCase);
+            loaded.ExplorerOpenImagesWith = string.Equals(loaded.ExplorerOpenImagesWith, LegacyMouseToggles.ExplorerNewTab, StringComparison.OrdinalIgnoreCase)
+                ? LegacyMouseToggles.ExplorerNewTab : LegacyMouseToggles.ExplorerCurrentTab;
+            loaded.TabToolTipTextSize = loaded.TabToolTipTextSize is "Small" or "Large" ? loaded.TabToolTipTextSize : "Medium";
+            // 4.8.0: the title-bar Show in Explorer button opens Glide's own Explorer tab by default. Files saved
+            // before the setting existed omit it (so the new default applies; their hidden legacy
+            // NavigateToFolderBehavior value never reflected a user choice); only an explicit
+            // "Windows File Explorer" is kept.
+            loaded.ShowInExplorerTarget = ShowInExplorerTargets.Normalize(loaded.ShowInExplorerTarget);
+            loaded.ExplorerDefaultView = ExplorerDefaultViews.Normalize(loaded.ExplorerDefaultView);
 
             // 2.9-9 changes the fresh/default selection zoom-out mapping to reverse proportional scale.
             // If the property was absent in an older settings payload, adopt the new default. If an
@@ -341,8 +389,9 @@ public static class SettingsStore
                 loaded.ReverseSelectionZoomOutScale = true;
 
             // 3.3-1 changes status hover reveal from an implicit-on close behavior to an explicit
-            // opt-in collapse behavior. Migrate older schemas to the new safe default once.
-            if (sourceSchema < 3)
+            // opt-in collapse behavior. Migrate older schemas that stored a value to the opt-in default once.
+            // 5.0.0 turns the reveal on by default: a file that never stored the key simply gets true.
+            if (sourceSchema < 3 && document.RootElement.TryGetProperty(nameof(GlideSettingsState.StatusShowOnHoverWhenClosed), out _))
                 loaded.StatusShowOnHoverWhenClosed = false;
 
             // Schema 4 retunes the stock refinement delays. Migrate only untouched stock values;
@@ -406,6 +455,9 @@ public static class SettingsStore
             loaded.PrefetchSiblingFolderImageCount = Math.Clamp(loaded.PrefetchSiblingFolderImageCount, 1, 30);
             loaded.StatusBarGlobalScalePercent = Math.Clamp(loaded.StatusBarGlobalScalePercent, 60, 160);
             loaded.StatusBarMaximizedBoostPercent = Math.Clamp(loaded.StatusBarMaximizedBoostPercent, 0, 30);
+            // Files written before the reveal-area adjustment existed load 0 (exactly the bar's box); a bad value is clamped.
+            // (An earlier unreleased 5.0.0 build stored StatusRevealZoneHeight; that key is gone and is ignored when present.)
+            loaded.StatusRevealZoneExpand = Glide.Core.StatusBarAutoHide.NormalizeRevealZoneExpand(loaded.StatusRevealZoneExpand);
             loaded.SlideshowLeftClickAction = Glide.Core.Settings.SlideshowLeftClickActions.Normalize(loaded.SlideshowLeftClickAction);
             loaded.NavigationSortOrder = Glide.Core.ImageSortOrder.NormalizeDisplayName(loaded.NavigationSortOrder);
             // Activate the chosen order before any folder is enumerated.
@@ -413,9 +465,21 @@ public static class SettingsStore
             loaded.SelectionBufferWindowedPercent = Math.Clamp(loaded.SelectionBufferWindowedPercent, 0, 100);
             loaded.SelectionBufferMaximizedPercent = Math.Clamp(loaded.SelectionBufferMaximizedPercent, 0, 100);
             loaded.Hotkeys ??= HotkeyCatalog.CreateDefaultMap();
-            foreach (var action in HotkeyCatalog.All)
-                if (!loaded.Hotkeys.ContainsKey(action.Id)) loaded.Hotkeys[action.Id] = action.DefaultShortcuts.ToList();
+            // Rows added by a later version (5.0.0: Back / Forward) get their defaults, except a key the saved map already
+            // gives to another action: the user's binding is respected, never silently taken away.
+            LastSkippedHotkeyDefaults = HotkeyDefaultMigrations.AddMissingRows(loaded.Hotkeys);
             loaded.Gestures ??= GestureCatalog.CreateDefaultMap();
+            // Schema 7 (4.8.0) folds the separate mouse toggles into explicit gesture bindings once,
+            // so every user keeps exactly the behaviour they had (see GestureLegacyMigration).
+            MigrateLegacyMouseToggles(loaded, sourceSchema);
+            MigrateDefaultsSchema8(loaded, sourceSchema);
+            loaded.CustomGestures = GestureCatalog.NormalizeCustomGestures(loaded.CustomGestures);
+            // User-saved hotkey presets. Absent in older files (empty list), no schema bump needed.
+            loaded.CustomHotkeyPresets = HotkeyPresetLibrary.Normalize(loaded.CustomHotkeyPresets);
+            loaded.GestureRecentActions = NormalizeRecentGestureActions(loaded.GestureRecentActions);
+            // Per-window placements (absent in older files). The Settings window's own older properties are folded into
+            // the shared store once, so a placement saved before the store existed is kept.
+            loaded.WindowPlacements = NormalizeWindowPlacements(loaded.WindowPlacements, loaded);
             loaded.TitleBarButtons = loaded.TitleBarButtons is null
                 ? TitleBarButtonCatalog.DefaultButtonIds.ToList()
                 : TitleBarButtonCatalog.Normalize(loaded.TitleBarButtons).ToList();
@@ -427,6 +491,12 @@ public static class SettingsStore
                 loaded.TitleBarButtons = TitleBarButtonCatalog.DefaultButtonIds.ToList();
             string[] previous28TitleBarDefault = ["folder.previous", "folder.next", "file.open", "window.alwaysOnTop", "settings"];
             if (loaded.TitleBarButtons.SequenceEqual(previous28TitleBarDefault, StringComparer.OrdinalIgnoreCase))
+                loaded.TitleBarButtons = TitleBarButtonCatalog.DefaultButtonIds.ToList();
+            // Schema 9 (5.0.0 Back / Forward): the untouched previous default gains the Back / Forward buttons once. Any
+            // other (customised) layout is kept exactly as it is; a file already at schema 9 is never migrated again, so
+            // a user who removes Back / Forward later does not get them back on the next start.
+            if (sourceSchema < TitleBarNavigationSchema &&
+                loaded.TitleBarButtons.SequenceEqual(TitleBarButtonCatalog.PreviousDefaultButtonIds, StringComparer.OrdinalIgnoreCase))
                 loaded.TitleBarButtons = TitleBarButtonCatalog.DefaultButtonIds.ToList();
             // Legacy profiles used one Boolean for the fullscreen X. Preserve an explicit historical
             // "X closes Glide" preference when the new per-button action fields are first introduced.
@@ -457,7 +527,7 @@ public static class SettingsStore
                 if (!loaded.Hotkeys.ContainsKey(action.Id)) loaded.Hotkeys[action.Id] = action.DefaultShortcuts.ToList();
             foreach (var slot in GestureCatalog.Slots)
                 if (!loaded.Gestures.ContainsKey(slot.Id)) loaded.Gestures[slot.Id] = slot.DefaultActionId;
-            SaveLaunchPolicyCache(loaded);
+            SaveLaunchPolicyCache();
             return loaded;
         }
         catch
@@ -474,7 +544,7 @@ public static class SettingsStore
             settings.SettingsSchemaVersion = CurrentSettingsSchema;
             var path = GetSettingsPath();
             AtomicWriteAllText(path, JsonSerializer.Serialize(settings, AppJsonContext.Default.GlideSettingsState));
-            SaveLaunchPolicyCache(settings);
+            SaveLaunchPolicyCache();
         }
         catch
         {
@@ -489,6 +559,94 @@ public static class SettingsStore
         return state;
     }
 
+
+    /// <summary>
+    /// Reads only the per-window placement store (plus the older Settings window properties) from glide.settings.json,
+    /// without building the whole settings graph. Missing or unreadable file: empty store.
+    /// </summary>
+    public static Dictionary<string, WindowPlacementState> LoadWindowPlacements()
+    {
+        try
+        {
+            var path = GetSettingsPath();
+            if (!File.Exists(path)) return new(StringComparer.OrdinalIgnoreCase);
+            using var document = JsonDocument.Parse(File.ReadAllBytes(path));
+            var root = document.RootElement;
+            Dictionary<string, WindowPlacementState>? store = null;
+            if (root.TryGetProperty(nameof(GlideSettingsState.WindowPlacements), out var node) && node.ValueKind == JsonValueKind.Object)
+                store = node.Deserialize(AppJsonContext.Default.DictionaryStringWindowPlacementState);
+            static int I(JsonElement r, string n) => r.TryGetProperty(n, out var v) && v.ValueKind == JsonValueKind.Number && v.TryGetInt32(out var x) ? x : int.MinValue;
+            static double D(JsonElement r, string n) => r.TryGetProperty(n, out var v) && v.ValueKind == JsonValueKind.Number && v.TryGetDouble(out var x) ? x : 0;
+            var legacy = new GlideSettingsState
+            {
+                SettingsWindowX = I(root, nameof(GlideSettingsState.SettingsWindowX)),
+                SettingsWindowY = I(root, nameof(GlideSettingsState.SettingsWindowY)),
+                SettingsWindowWidth = D(root, nameof(GlideSettingsState.SettingsWindowWidth)),
+                SettingsWindowHeight = D(root, nameof(GlideSettingsState.SettingsWindowHeight)),
+                SettingsWindowWasMaximized = root.TryGetProperty(nameof(GlideSettingsState.SettingsWindowWasMaximized), out var m) && m.ValueKind == JsonValueKind.True
+            };
+            return NormalizeWindowPlacements(store, legacy);
+        }
+        catch
+        {
+            return new(StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
+    /// <summary>
+    /// Writes only the "WindowPlacements" property of glide.settings.json, leaving every other value exactly as it is on
+    /// disk. Used when a dialog closes: saving the main window's whole in-memory state there could persist Settings
+    /// changes that are still only being previewed. Without a settings file nothing is written here; the next full save
+    /// (which always includes the live store) creates it.
+    /// </summary>
+    public static bool SaveWindowPlacements(Dictionary<string, WindowPlacementState> placements)
+    {
+        try
+        {
+            var path = GetSettingsPath();
+            if (!File.Exists(path)) return false;
+            if (System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path)) is not System.Text.Json.Nodes.JsonObject root) return false;
+            root[nameof(GlideSettingsState.WindowPlacements)] = JsonSerializer.SerializeToNode(
+                GlideSettingsState.ClonePlacements(placements), AppJsonContext.Default.DictionaryStringWindowPlacementState);
+            // Written with a plain Utf8JsonWriter (no reflection-based serializer options: NativeAOT safe).
+            using var buffer = new MemoryStream();
+            using (var writer = new Utf8JsonWriter(buffer, new JsonWriterOptions { Indented = true }))
+                root.WriteTo(writer);
+            AtomicWriteAllText(path, System.Text.Encoding.UTF8.GetString(buffer.ToArray()));
+            SaveLaunchPolicyCache();
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>Most remembered window placements kept; the least recently used are dropped beyond this.</summary>
+    internal const int MaxWindowPlacements = 64;
+
+    /// <summary>
+    /// Drops null/blank entries, keeps the newest <see cref="MaxWindowPlacements"/>, and migrates the older
+    /// SettingsWindow* properties into the "settings" entry when the store has none yet.
+    /// </summary>
+    internal static Dictionary<string, WindowPlacementState> NormalizeWindowPlacements(Dictionary<string, WindowPlacementState>? source, GlideSettingsState state)
+    {
+        var store = GlideSettingsState.ClonePlacements(source);
+        if (!store.ContainsKey(SettingsWindowPlacement.StoreKey) && state.SettingsWindowWidth > 0 && state.SettingsWindowHeight > 0 &&
+            !double.IsNaN(state.SettingsWindowWidth) && !double.IsNaN(state.SettingsWindowHeight))
+        {
+            store[SettingsWindowPlacement.StoreKey] = new WindowPlacementState
+            {
+                X = state.SettingsWindowX, Y = state.SettingsWindowY,
+                Width = state.SettingsWindowWidth, Height = state.SettingsWindowHeight,
+                Maximized = state.SettingsWindowWasMaximized
+            };
+        }
+        if (store.Count > MaxWindowPlacements)
+            foreach (var stale in store.OrderBy(kv => kv.Value.LastUsedUtcTicks).Take(store.Count - MaxWindowPlacements).Select(kv => kv.Key).ToArray())
+                store.Remove(stale);
+        return store;
+    }
 
     private static bool IsMouseShortcut(string shortcut) =>
         shortcut.Contains("Mouse", StringComparison.OrdinalIgnoreCase);
@@ -531,6 +689,12 @@ public static class SettingsStore
         }
         if (type == typeof(List<string>))
             return ((List<string>)left).SequenceEqual((List<string>)right, StringComparer.OrdinalIgnoreCase);
+        if (type == typeof(List<CustomGesture>))
+            return GlideSettingsState.CustomGesturesEqual((List<CustomGesture>)left, (List<CustomGesture>)right);
+        if (type == typeof(List<CustomHotkeyPreset>))
+            return GlideSettingsState.CustomHotkeyPresetsEqual((List<CustomHotkeyPreset>)left, (List<CustomHotkeyPreset>)right);
+        if (type == typeof(Dictionary<string, WindowPlacementState>))
+            return GlideSettingsState.WindowPlacementsEqual((Dictionary<string, WindowPlacementState>)left, (Dictionary<string, WindowPlacementState>)right);
         return Equals(left, right);
     }
 
@@ -544,6 +708,12 @@ public static class SettingsStore
             return new Dictionary<string, string>((Dictionary<string, string>)value, StringComparer.OrdinalIgnoreCase);
         if (type == typeof(List<string>))
             return ((List<string>)value).ToList();
+        if (type == typeof(List<CustomGesture>))
+            return ((List<CustomGesture>)value).Select(x => x.Clone()).ToList();
+        if (type == typeof(List<CustomHotkeyPreset>))
+            return ((List<CustomHotkeyPreset>)value).Select(x => x.Clone()).ToList();
+        if (type == typeof(Dictionary<string, WindowPlacementState>))
+            return GlideSettingsState.ClonePlacements((Dictionary<string, WindowPlacementState>)value);
         return value;
     }
 

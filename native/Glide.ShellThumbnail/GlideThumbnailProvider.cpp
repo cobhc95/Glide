@@ -15,6 +15,7 @@
 #include <propvarutil.h>
 
 #include <atomic>
+#include <cstdio>
 #include <cstdint>
 #include <cstring>
 #include <new>
@@ -34,7 +35,6 @@ namespace
 
     constexpr wchar_t kProviderFriendlyName[] = L"Glide Explorer Thumbnail Provider";
     constexpr wchar_t kProviderThreadingModel[] = L"Apartment";
-    constexpr std::size_t kMaxStreamBytes = 1ull << 30; // 1 GiB safety cap
 
     HMODULE g_module = nullptr;
     std::atomic<long> g_objectCount{ 0 };
@@ -79,22 +79,86 @@ namespace
         return dot ? dot : L"";
     }
 
-    bool ReadStreamIntoBuffer(IStream* stream, std::vector<std::uint8_t>& buffer)
+    // ------------------------------------------------------------------ configuration ---------
+    //
+    // Glide.exe (Settings -> Explorer thumbnails -> Apply) writes the presets as DWORDs under
+    // HKCU\Software\Glide\ExplorerThumbnails; a machine-wide default may live under the same path in
+    // HKLM. They are read on every GetThumbnail call (a few registry reads, microseconds) so a change
+    // applies to the next thumbnail Explorer requests without restarting its thumbnail host.
+
+    constexpr wchar_t kConfigKey[] = L"Software\\Glide\\ExplorerThumbnails";
+
+    struct ThumbnailConfig
     {
-        if (!stream) return false;
-        LARGE_INTEGER zero{};
-        stream->Seek(zero, STREAM_SEEK_SET, nullptr);
-        buffer.clear();
-        std::uint8_t chunk[64 * 1024];
-        for (;;)
+        int quality = 1;              // 0 Fast, 1 Balanced, 2 High
+        std::uint32_t maxSource = 0;  // 0 Automatic, else 512 / 1024 / 2048
+        bool preferEmbedded = true;
+    };
+
+    // In-process override used only by the headless test harness (GlideThumbnailSetTestOverrides).
+    std::atomic<bool> g_overrideActive{ false };
+    std::atomic<int> g_overrideQuality{ 1 };
+    std::atomic<std::uint32_t> g_overrideMaxSource{ 0 };
+    std::atomic<bool> g_overridePreferEmbedded{ true };
+
+    bool ReadDword(HKEY root, const wchar_t* name, DWORD& value)
+    {
+        DWORD size = sizeof(value);
+        return RegGetValueW(root, kConfigKey, name, RRF_RT_REG_DWORD, nullptr, &value, &size) == ERROR_SUCCESS;
+    }
+
+    bool ValidMaxSource(DWORD value) { return value == 0 || value == 512 || value == 1024 || value == 2048; }
+
+    ThumbnailConfig LoadConfig()
+    {
+        ThumbnailConfig config;
+        if (g_overrideActive.load())
         {
-            ULONG read = 0;
-            const HRESULT hr = stream->Read(chunk, static_cast<ULONG>(sizeof(chunk)), &read);
-            if (FAILED(hr) || read == 0) break;
-            if (buffer.size() + read > kMaxStreamBytes) return false;
-            buffer.insert(buffer.end(), chunk, chunk + read);
+            config.quality = g_overrideQuality.load();
+            config.maxSource = g_overrideMaxSource.load();
+            config.preferEmbedded = g_overridePreferEmbedded.load();
+            return config;
         }
-        return !buffer.empty();
+        // HKLM first (machine default), then HKCU (the user's own choice) wins.
+        for (HKEY root : { HKEY_LOCAL_MACHINE, HKEY_CURRENT_USER })
+        {
+            DWORD value = 0;
+            if (ReadDword(root, L"Quality", value) && value <= 2) config.quality = static_cast<int>(value);
+            if (ReadDword(root, L"MaxSourceSize", value) && ValidMaxSource(value)) config.maxSource = value;
+            if (ReadDword(root, L"PreferEmbedded", value)) config.preferEmbedded = value != 0;
+        }
+        return config;
+    }
+
+    // -------------------------------------------------------------------- diagnostics ---------
+
+    struct GlideThumbnailDiagnostics
+    {
+        std::uint32_t size;
+        std::int32_t quality;
+        std::int32_t embedded;
+        std::uint32_t sourceWidth;
+        std::uint32_t sourceHeight;
+        std::uint32_t decodedWidth;
+        std::uint32_t decodedHeight;
+        std::uint32_t outputWidth;
+        std::uint32_t outputHeight;
+        std::uint64_t decodeMicros;
+        std::uint64_t totalMicros;
+        std::uint64_t bytesRead;
+        char decoder[16];
+    };
+
+    thread_local GlideThumbnailDiagnostics t_lastDiagnostics{};
+    thread_local bool t_hasDiagnostics = false;
+
+    std::uint64_t MicrosSince(const LARGE_INTEGER& started)
+    {
+        LARGE_INTEGER now{}, frequency{};
+        QueryPerformanceCounter(&now);
+        QueryPerformanceFrequency(&frequency);
+        if (frequency.QuadPart == 0) return 0;
+        return static_cast<std::uint64_t>(((now.QuadPart - started.QuadPart) * 1'000'000ll) / frequency.QuadPart);
     }
 
     bool CreateThumbnailBitmap(const glide::thumb::Image& image, HBITMAP* bitmap)
@@ -124,7 +188,11 @@ namespace
     {
     public:
         GlideThumbnailProvider() { g_objectCount.fetch_add(1); }
-        ~GlideThumbnailProvider() { g_objectCount.fetch_sub(1); }
+        ~GlideThumbnailProvider()
+        {
+            if (stream_) stream_->Release();
+            g_objectCount.fetch_sub(1);
+        }
 
         // IUnknown
         IFACEMETHODIMP QueryInterface(REFIID riid, void** ppv) override
@@ -161,7 +229,11 @@ namespace
                 extension_ = ExtensionFromPath(stat.pwcsName);
                 CoTaskMemFree(stat.pwcsName);
             }
-            if (!ReadStreamIntoBuffer(stream, buffer_)) return E_FAIL;
+            // Keep the stream and read it lazily in GetThumbnail: WIC formats pull only the blocks
+            // they need (an embedded preview, the first GIF frame) instead of the whole file.
+            if (stream_) stream_->Release();
+            stream_ = stream;
+            stream_->AddRef();
             return S_OK;
         }
 
@@ -185,28 +257,51 @@ namespace
             if (!phbmp || !pdwAlpha) return E_POINTER;
             *phbmp = nullptr;
             *pdwAlpha = WTSAT_UNKNOWN;
-            if (buffer_.empty()) return E_FAIL;
-            if (cx == 0) cx = 256;
+            if (!stream_) return E_FAIL;
+            // Never trust the host's requested size: Explorer asks for <= 2560, other hosts could ask for
+            // anything. The provider renders at most MaxThumbnailEdge (2048) per side.
+            cx = glide::thumb::ClampRequestedEdge(cx);
 
             try
             {
-                const ULONGLONG started = GetTickCount64();
+                LARGE_INTEGER started{};
+                QueryPerformanceCounter(&started);
+                const ThumbnailConfig config = LoadConfig();
                 glide::thumb::DecodeOptions options;
                 options.maxWidth = cx;
                 options.maxHeight = cx;
-                options.preferEmbedded = true;
-                options.quality = 1;
+                options.maxSourceEdge = config.maxSource;
+                options.preferEmbedded = config.preferEmbedded;
+                options.quality = config.quality;
 
-                const auto result = glide::thumb::DecodeForThumbnail(
-                    buffer_.data(), buffer_.size(), extension_.c_str(), options);
+                const auto result = glide::thumb::DecodeStreamForThumbnail(stream_, extension_.c_str(), options);
                 if (!result.ok || !result.image.Valid()) return E_FAIL;
 
-                const auto composed = glide::thumb::ComposeThumbnail(result.image, cx);
+                const auto composed = glide::thumb::ComposeThumbnail(result.image, cx, config.quality);
                 if (!composed.Valid()) return E_FAIL;
 
                 if (!CreateThumbnailBitmap(composed, phbmp)) return E_FAIL;
                 *pdwAlpha = WTSAT_ARGB;
-                Trace(result.decoder, extension_.c_str(), cx, result.embedded, result.decodeMicros, GetTickCount64() - started);
+                const std::uint64_t total = MicrosSince(started);
+
+                GlideThumbnailDiagnostics diagnostics{};
+                diagnostics.size = sizeof(diagnostics);
+                diagnostics.quality = config.quality;
+                diagnostics.embedded = result.embedded ? 1 : 0;
+                diagnostics.sourceWidth = result.sourceWidth;
+                diagnostics.sourceHeight = result.sourceHeight;
+                diagnostics.decodedWidth = result.image.width;
+                diagnostics.decodedHeight = result.image.height;
+                diagnostics.outputWidth = composed.width;
+                diagnostics.outputHeight = composed.height;
+                diagnostics.decodeMicros = result.decodeMicros;
+                diagnostics.totalMicros = total;
+                diagnostics.bytesRead = result.bytesRead;
+                strncpy_s(diagnostics.decoder, result.decoder ? result.decoder : "?", _TRUNCATE);
+                t_lastDiagnostics = diagnostics;
+                t_hasDiagnostics = true;
+
+                Trace(result.decoder, extension_.c_str(), cx, result.embedded, result.decodeMicros, total);
                 return S_OK;
             }
             catch (...)
@@ -220,7 +315,7 @@ namespace
 
     private:
         long referenceCount_ = 1;
-        std::vector<std::uint8_t> buffer_;
+        IStream* stream_ = nullptr;
         std::wstring extension_;
     };
 
@@ -320,4 +415,54 @@ STDAPI DllUnregisterServer()
     std::wstring clsidKey = std::wstring(L"CLSID\\") + clsid;
     SHDeleteKeyW(HKEY_CLASSES_ROOT, clsidKey.c_str());
     return S_OK;
+}
+
+// ------------------------------------------------------------------ test/diagnostic exports ------
+//
+// These exist so the provider can be exercised headlessly and in-process (tests/Glide.Core.Tests,
+// tools/thumbnail-preset-benchmark.py) without registering it, touching Explorer or the thumbnail
+// cache. They only affect the calling process.
+
+/// Forces the presets for this process. quality < 0 removes the override (registry is used again).
+extern "C" void __stdcall GlideThumbnailSetTestOverrides(int quality, unsigned int maxSource, int preferEmbedded)
+{
+    if (quality < 0)
+    {
+        g_overrideActive.store(false);
+        return;
+    }
+    g_overrideQuality.store(quality > 2 ? 1 : quality);
+    g_overrideMaxSource.store(ValidMaxSource(maxSource) ? maxSource : 0);
+    g_overridePreferEmbedded.store(preferEmbedded != 0);
+    g_overrideActive.store(true);
+}
+
+/// Copies the diagnostics of the last successful GetThumbnail on the calling thread.
+extern "C" int __stdcall GlideThumbnailGetLastDiagnostics(GlideThumbnailDiagnostics* diagnostics)
+{
+    if (!diagnostics || diagnostics->size < sizeof(GlideThumbnailDiagnostics) || !t_hasDiagnostics) return 0;
+    *diagnostics = t_lastDiagnostics;
+    return 1;
+}
+
+/// Largest thumbnail edge the provider renders (any larger host request is clamped to it).
+extern "C" unsigned int __stdcall GlideThumbnailMaxEdge()
+{
+    return glide::thumb::MaxThumbnailEdge;
+}
+
+/// Resolved preset knobs, so tests can prove Fast/Balanced/High differ without decoding anything.
+/// Layout: supersample, embeddedMinPercent, interpolation, gifFrameSearch, webpBypassFiltering,
+/// webpNoFancyUpsampling (all int32).
+extern "C" int __stdcall GlideThumbnailDescribeQuality(int quality, std::int32_t* values, int count)
+{
+    if (!values || count < 6) return 0;
+    const auto profile = glide::thumb::ProfileFor(quality);
+    values[0] = static_cast<std::int32_t>(profile.supersample);
+    values[1] = static_cast<std::int32_t>(profile.embeddedMinPercent);
+    values[2] = profile.interpolation;
+    values[3] = static_cast<std::int32_t>(profile.gifFrameSearch);
+    values[4] = profile.webpBypassFiltering ? 1 : 0;
+    values[5] = profile.webpNoFancyUpsampling ? 1 : 0;
+    return 6;
 }

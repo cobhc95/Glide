@@ -1,0 +1,28 @@
+One sentence for the GitHub repository About box (max 160 characters):
+
+Fast, customizable Windows image viewer: tabs, built-in Explorer, mouse gestures, hotkeys for everything, GIFs, overlays, SVG and PSD. No .NET needed.
+
+Suggested topics (GitHub allows up to 20; lowercase, hyphens only):
+
+image-viewer
+photo-viewer
+windows
+windows-11
+csharp
+avalonia
+nativeaot
+desktop-app
+svg
+gif
+psd
+webp
+thumbnails
+file-explorer
+image-gallery
+multi-tab
+mouse-gestures
+keyboard-shortcuts
+
+Notes:
+- Keep the version number out of the About text; the release and its notes carry the version.
+- Suggested website field: https://github.com/cobhc95/Glide/releases/latest

@@ -1,34 +1,16 @@
-﻿using System.Diagnostics;
-using System.Collections.ObjectModel;
-using System.Runtime.InteropServices;
-using System.Text.Json;
+﻿using System.Runtime.InteropServices;
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Controls.ApplicationLifetimes;
-using Avalonia.Controls.Primitives;
-using Avalonia.Controls.Templates;
 using Avalonia.Input;
 using Avalonia.Interactivity;
-using Avalonia.Layout;
-using Avalonia.Media;
-using Avalonia.Media.Imaging;
-using Avalonia.Platform.Storage;
-using Avalonia.Styling;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
-using Glide.App.Controls;
-using Glide.App.Diagnostics;
 using Glide.App.Platform;
-using Glide.App.Printing;
 using Glide.App.Settings;
 using Glide.App.Services;
 using Glide.Core;
 using Glide.Core.Commands;
-using Glide.Core.Workspace;
 using Glide.Imaging;
-using Glide.Input;
-using Glide.Diagnostics.Runtime;
-using Microsoft.VisualBasic.FileIO;
 
 namespace Glide.App;
 
@@ -87,12 +69,11 @@ public partial class MainWindow
             oldIndex, failedTargetIndex = targetIndex, outcome = outcome.Status.ToString()
         });
     });
-    private void FitClicked(object? sender, RoutedEventArgs e) { _selectionZoomDemandPath = null; Viewport.Fit(); }
     private void FitImageClicked(object? sender, RoutedEventArgs e) => ApplyStatusBarFit("Fit image", Viewport.Fit);
     private void FitWidthClicked(object? sender, RoutedEventArgs e) => ApplyStatusBarFit("Fit width", Viewport.FitWidth);
     private void FitWindowClicked(object? sender, RoutedEventArgs e) => ApplyStatusBarFit("Fit to window", Viewport.FitWindow);
     private void FitHeightClicked(object? sender, RoutedEventArgs e) => ApplyStatusBarFit("Fit height", Viewport.FitHeight);
-    private void ActualSizeClicked(object? sender, RoutedEventArgs e) { _selectionZoomDemandPath = null; Viewport.ActualSize(); }
+    private void ActualSizeClicked(object? sender, RoutedEventArgs e) => ApplyStatusBarFit("100%", Viewport.ActualSize);
 
     /// <summary>
     /// Applies a status bar Fit command to the current image and then, according to the configured
@@ -122,9 +103,8 @@ public partial class MainWindow
     private string EffectiveDefaultViewMode() =>
         string.IsNullOrWhiteSpace(_sessionDefaultViewMode) ? _settings.DefaultViewMode : _sessionDefaultViewMode;
 
-    private void ZoomInClicked(object? sender, RoutedEventArgs e) => Viewport.ZoomBy(1.15);
-    private void ZoomOutClicked(object? sender, RoutedEventArgs e) => Viewport.ZoomBy(1 / 1.15);
-    private async void SlideshowClicked(object? sender, RoutedEventArgs e) => await ToggleSlideshowAsync();
+    private void ZoomInClicked(object? sender, RoutedEventArgs e) => Viewport.ZoomStep(true);
+    private void ZoomOutClicked(object? sender, RoutedEventArgs e) => Viewport.ZoomStep(false);
     private void ReliableStatusSurfaceButtonPressed(object? sender, PointerPressedEventArgs e)
     {
         var button = (e.Source as Visual)?.FindAncestorOfType<Button>() ?? (e.Source as Button);
@@ -151,8 +131,11 @@ public partial class MainWindow
         else if (ReferenceEquals(button, StatusLastButton)) await ExecuteCommandAsync(GlideCommand.LastImage);
         else if (ReferenceEquals(button, SlideshowButton)) await ToggleSlideshowAsync();
         else if (ReferenceEquals(button, SlideshowStopButton)) SlideshowStopClicked(button, new RoutedEventArgs());
-        else if (ReferenceEquals(button, StatusZoomOutButton)) Viewport.ZoomBy(1 / 1.15);
-        else if (ReferenceEquals(button, StatusZoomInButton)) Viewport.ZoomBy(1.15);
+        else if (ReferenceEquals(button, GifPlayPauseButton)) await ExecuteCommandAsync(GlideCommand.GifPlayPause);
+        else if (ReferenceEquals(button, GifPreviousFrameButton)) await ExecuteCommandAsync(GlideCommand.GifPreviousFrame);
+        else if (ReferenceEquals(button, GifNextFrameButton)) await ExecuteCommandAsync(GlideCommand.GifNextFrame);
+        else if (ReferenceEquals(button, StatusZoomOutButton)) Viewport.ZoomStep(false);
+        else if (ReferenceEquals(button, StatusZoomInButton)) Viewport.ZoomStep(true);
         else if (ReferenceEquals(button, StatusFitImageButton)) ApplyStatusBarFit("Fit image", Viewport.Fit);
         else if (ReferenceEquals(button, StatusFitWidthButton)) ApplyStatusBarFit("Fit width", Viewport.FitWidth);
         else if (ReferenceEquals(button, StatusFitWindowButton)) ApplyStatusBarFit("Fit to window", Viewport.FitWindow);
@@ -487,6 +470,8 @@ public partial class MainWindow
             scope?.Dispose(); scope = null;
             if (ReferenceEquals(_activeOwnedMenu, menu)) _activeOwnedMenu = null;
             _ownedMenuClosedTick = Environment.TickCount64;
+            // An auto-hidden status bar was held open by this menu; re-check with the last known pointer position.
+            UpdateStatusHoverReveal(_lastWindowPointer);
         };
         // Picking an item can restyle/re-create the window (overlay mode, always-on-top changes);
         // close the popup explicitly afterwards so it never lingers as a ghost.

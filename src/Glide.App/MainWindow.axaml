@@ -4,7 +4,7 @@
         xmlns:platform="using:Glide.App.Platform"
         x:Class="Glide.App.MainWindow"
         Width="1064" Height="687" MinWidth="180" MinHeight="360"
-    Title="Glide 4.6.2 — Home"
+    Title="Glide — Home"
         Icon="/Assets/Glide.ico"
         SystemDecorations="None"
         ExtendClientAreaToDecorationsHint="False"
@@ -173,6 +173,12 @@
                 <Button x:Name="OverlayLoadButton" Classes="statusIcon legacyStatusIcon" Click="OverlayLoadClicked" ToolTip.Tip="Load overlay layout"><controls:GlideIconView Kind="OverlayLoad" Classes="statusGlyph"/></Button>
                 <Slider x:Name="OverlayOpacitySlider" IsVisible="False" Minimum="10" Maximum="100" Value="100" Width="1"/>
               </WrapPanel></Border>
+              <!-- Animated GIF playback: visible only while an animated GIF is the current image. -->
+              <Border x:Name="GifGroupBorder" Classes="statusGroup gifGroup"><StackPanel x:Name="GifGroup" Orientation="Horizontal" Spacing="2" IsVisible="False">
+                <Button x:Name="GifPreviousFrameButton" Classes="statusIcon legacyStatusIcon" ToolTip.Tip="Previous GIF frame"><controls:GlideIconView Kind="FramePrevious" Classes="statusGlyph"/></Button>
+                <Button x:Name="GifPlayPauseButton" Classes="statusIcon legacyStatusIcon" ToolTip.Tip="Pause GIF"><controls:GlideIconView x:Name="GifPlayPauseIcon" Kind="Pause" Classes="statusGlyph"/></Button>
+                <Button x:Name="GifNextFrameButton" Classes="statusIcon legacyStatusIcon" ToolTip.Tip="Next GIF frame"><controls:GlideIconView Kind="FrameNext" Classes="statusGlyph"/></Button>
+              </StackPanel></Border>
               <Border x:Name="SlideshowGroupBorder" Classes="statusGroup slideshowGroup"><StackPanel x:Name="SlideshowGroup" Orientation="Horizontal" Spacing="2">
                 <Button x:Name="SlideshowButton" Classes="statusIcon legacyStatusIcon" ToolTip.Tip="Start slideshow"><controls:GlideIconView x:Name="SlideshowIcon" Kind="Play" Classes="statusGlyph"/></Button>
                 <Button x:Name="SlideshowStopButton" Classes="statusIcon legacyStatusIcon" Click="SlideshowStopClicked" ToolTip.Tip="Stop slideshow session" IsVisible="False"><controls:GlideIconView Kind="Stop" Classes="statusGlyph"/></Button>
@@ -199,7 +205,7 @@
       </Grid>
 
       <!-- EXPLORER: toolbar/grid/virtualizer are instantiated only when a Browser tab is activated. -->
-      <ContentControl x:Name="BrowserView" IsVisible="False" IsHitTestVisible="False" Background="{DynamicResource BrushViewport}"/>
+      <ContentControl x:Name="BrowserView" IsVisible="False" Background="{DynamicResource BrushViewport}"/>
 
       <!-- Session-only collapsed status affordance. Close persists hidden; collapse does not. -->
       <Button x:Name="StatusRestoreButton" Classes="statusRestore" IsVisible="False"

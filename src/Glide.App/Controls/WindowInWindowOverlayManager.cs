@@ -9,7 +9,6 @@ using Avalonia.Interactivity;
 using Avalonia.VisualTree;
 using System.Diagnostics;
 using Glide.Core;
-using Glide.Core.Commands;
 using Glide.Imaging;
 
 namespace Glide.App.Controls;
@@ -113,14 +112,13 @@ public sealed class WindowInWindowOverlayManager : IDisposable
     public event Action<bool>? ContextMenuVisibilityChanged;
     public Func<Size, Rect?>? ImageRectForSize { get; set; }
     public IBrush AccentBrush { get; set; } = new SolidColorBrush(Color.Parse("#36B8F4"));
-    public Func<string, string?>? ResolveGesture { get; set; }
+    public Func<string, KeyModifiers, string?>? ResolveGesture { get; set; }
     public Func<bool>? IsFullscreen { get; set; }
     /// <summary>Called once when a fullscreen overlay press is released without becoming a drag.</summary>
     public Action<int>? FullscreenNavigationRequested { get; set; }
     public IReadOnlyList<OverlayState> States => _items.Select(x => x.State).ToArray();
     public bool HasOverlays => _items.Count > 0;
     public bool HasSelection => _selected is Guid id && FindIndex(id) >= 0;
-    public bool HasRunningAnimations => _animations.Values.Any(animation => animation.IsRunning);
 
     // Pointer capture is also used for a deferred fullscreen click. Capture by itself is not an
     // edit operation and must never pause native motion while the viewer decides whether the press
@@ -521,36 +519,6 @@ public sealed class WindowInWindowOverlayManager : IDisposable
             else if (_suspendedVideos.Remove(video)) video.SetPlaying(true);
         }
         if (!suspended) _suspendedVideos.Clear();
-    }
-
-    public async Task RestoreAsync(IEnumerable<OverlayState> states, CancellationToken cancellationToken = default)
-    {
-        if (_disposed) return;
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifetime.Token);
-        foreach (var state in states)
-        {
-            linked.Token.ThrowIfCancellationRequested();
-            if (!File.Exists(state.Path)) continue;
-            try
-            {
-                var content = await LoadContentAsync(state.Path, linked.Token, VideoOptionsOf(state)).ConfigureAwait(true);
-                if (_disposed || linked.IsCancellationRequested)
-                {
-                    if (content is { } late) { if (late.Video is not null) ReleaseVideo(late.Video); else late.Bitmap.Dispose(); }
-                    return;
-                }
-                if (content is { } loaded)
-                {
-                    _items.Add(new Item(ClampTransform(state.Normalize(), loaded.Bitmap), loaded.Bitmap, loaded.Video));
-                    if (loaded.Video is not null) AttachVideo(loaded.Video);
-                }
-            }
-            catch (OperationCanceledException) { throw; }
-            catch { Diagnostic?.Invoke("overlay_restore_failed", new { state.Path }); }
-        }
-        SortZ();
-        Invalidate();
-        OverlayCountChanged?.Invoke();
     }
 
     public void Clear()
@@ -1174,7 +1142,7 @@ public sealed class WindowInWindowOverlayManager : IDisposable
         ClearPointerState(releaseCapture: false);
         if (middle)
         {
-            var action = OverlayGesturePolicy.Click(ResolveGesture?.Invoke("overlay.middleClick"));
+            var action = OverlayGesturePolicy.Click(ResolveGesture?.Invoke("overlay.middleClick", e.KeyModifiers));
             if (action == OverlayGestureAction.BringToFront) BringSelectedToFront();
             else if (action == OverlayGestureAction.ResetZoom) ResetSelectedZoom();
         }
@@ -1213,7 +1181,7 @@ public sealed class WindowInWindowOverlayManager : IDisposable
             return;
         }
         var ctrl = (e.KeyModifiers & KeyModifiers.Control) != 0;
-        var configured = ResolveGesture?.Invoke(ctrl ? "overlay.ctrlWheel" : "overlay.wheel");
+        var configured = ResolveGesture?.Invoke(ctrl ? "overlay.ctrlWheel" : "overlay.wheel", e.KeyModifiers);
         var enabled = ctrl ? CtrlWheelZoomEnabled : WheelZoomEnabled;
         var action = OverlayGesturePolicy.Wheel(configured, enabled, e.Delta.Y);
         if (action == OverlayGestureAction.None) return;
@@ -1235,7 +1203,7 @@ public sealed class WindowInWindowOverlayManager : IDisposable
 
         var i = HitTest(e.GetPosition(_inputHost)); if (i < 0) return;
         _selected = _items[i].State.Id;
-        var action = OverlayGesturePolicy.Click(ResolveGesture?.Invoke("overlay.doubleClick"));
+        var action = OverlayGesturePolicy.Click(ResolveGesture?.Invoke("overlay.doubleClick", e.KeyModifiers));
         if (action == OverlayGestureAction.BringToFront) BringSelectedToFront();
         else if (action == OverlayGestureAction.ResetZoom) ResetSelectedZoom();
         if (action != OverlayGestureAction.None) e.Handled = true;

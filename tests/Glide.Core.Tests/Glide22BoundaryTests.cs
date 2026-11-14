@@ -1,6 +1,5 @@
 using Glide.App.Services;
 using Glide.Imaging;
-using Xunit;
 
 namespace Glide.Core.Tests;
 

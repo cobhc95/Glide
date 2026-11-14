@@ -1,7 +1,5 @@
-using Avalonia.Headless;
 using Avalonia.Media.Imaging;
 using Glide.App.Printing;
-using Xunit;
 
 namespace Glide.Core.Tests;
 

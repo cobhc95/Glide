@@ -94,6 +94,10 @@ public static class SettingsPresetCatalog
                 s.SelectionClickZoom = false;
                 break;
         }
+        // 4.8.0: the mouse toggles above are folded into gesture rows. Presets still describe
+        // themselves through the familiar toggles; convert them into explicit gesture bindings
+        // exactly like the one-time settings migration (the gesture map was reset above).
+        s.FoldLegacyMouseToggles();
         return s;
     }
 }

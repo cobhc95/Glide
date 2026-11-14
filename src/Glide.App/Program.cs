@@ -1,154 +1,30 @@
 using Avalonia;
 using Glide.Core;
-using Glide.Diagnostics;
 using Glide.Diagnostics.Runtime;
 using Glide.App.Services;
 using Glide.App.Settings;
-using System.Text.Json;
 
 namespace Glide.App;
 
-internal static class Program
+internal static partial class Program
 {
     [STAThread]
     public static int Main(string[] args)
     {
+        // Security (DLL planting): a file-association or command-line launch can run Glide with the opened
+        // image's folder (often Downloads) as its current directory. Remove the current directory from
+        // the DLL search order so a
+        // planted DLL there can never be loaded. Glide's own and Avalonia's natives load from the app folder.
+        if (OperatingSystem.IsWindows())
+        {
+            try { SetDllDirectoryW(string.Empty); } catch { }
+        }
+
         // Pre-warm thread pool to eliminate cold-launch worker thread dispatch delays
         ThreadPool.SetMinThreads(Math.Max(8, Environment.ProcessorCount), 8);
 
-        // Machine-wide Windows Open With integration, invoked by the installer so a fresh install is
-        // immediately associated with every recognised extension. Runs before Avalonia; no window.
-        if (args.Length >= 1 && args[0].Equals("--register-file-associations", StringComparison.OrdinalIgnoreCase))
-        {
-            var ok = Platform.WindowsFileAssociationRegistration.RegisterMachineWide(out var message);
-            Console.WriteLine(message);
-            return ok ? 0 : 1;
-        }
-        if (args.Length >= 1 && args[0].Equals("--unregister-file-associations", StringComparison.OrdinalIgnoreCase))
-        {
-            var ok = Platform.WindowsFileAssociationRegistration.UnregisterMachineWide(out var message);
-            Console.WriteLine(message);
-            return ok ? 0 : 1;
-        }
-
-        // Machine-wide Explorer thumbnail provider registration, invoked by the installer.
-        if (args.Length >= 1 && args[0].Equals("--register-thumbnails", StringComparison.OrdinalIgnoreCase))
-        {
-            var extensions = Platform.WindowsThumbnailRegistration.ExtensionsFor(Platform.ThumbnailProviderMode.Recommended);
-            var ok = Platform.WindowsThumbnailRegistration.Register(perUser: false, extensions, out var message);
-            Console.WriteLine(message);
-            return ok ? 0 : 1;
-        }
-        if (args.Length >= 1 && args[0].Equals("--unregister-thumbnails", StringComparison.OrdinalIgnoreCase))
-        {
-            var ok = Platform.WindowsThumbnailRegistration.Unregister(perUser: false, ImageFormatRegistry.Extensions, out var message);
-            Console.WriteLine(message);
-            return ok ? 0 : 1;
-        }
-
-        // Build-time fixture generation also runs before Avalonia initialization.
-        if (args.Length >= 2 && args[0].Equals("--write-diagnostic-fixtures", StringComparison.OrdinalIgnoreCase))
-        {
-            var issues = ImageDiagnosticFixtures.Validate();
-            if (issues.Count > 0)
-            {
-                foreach (var issue in issues) Console.Error.WriteLine(issue);
-                return 2;
-            }
-            var written = ImageDiagnosticFixtures.WriteTo(args[1]);
-            Console.WriteLine($"Diagnostic fixtures written: {Path.GetFullPath(args[1])}");
-            Console.WriteLine($"  Core real fixtures: {written.Count}");
-            Console.WriteLine($"  Routing probes: {ImageFormatRegistry.Extensions.Count}");
-            var corpusStatusPath = Path.Combine(args[1], "performance_corpus_status.json");
-            var corpusDirectory = Path.Combine(args[1], "navigation-stress-240");
-            var corpusFiles = Directory.Exists(corpusDirectory)
-                ? Directory.EnumerateFiles(corpusDirectory, "browse_*.jpg").Count()
-                : 0;
-            var corpusGenerated = false;
-            var corpusStatus = "SKIP";
-            var corpusReason = "Performance corpus status was not written.";
-            try
-            {
-                using var statusDocument = JsonDocument.Parse(File.ReadAllText(corpusStatusPath));
-                var root = statusDocument.RootElement;
-                corpusGenerated = root.TryGetProperty("generated", out var generated) && generated.GetBoolean();
-                corpusStatus = root.TryGetProperty("status", out var status) ? status.GetString() ?? "UNKNOWN" : "UNKNOWN";
-                corpusReason = root.TryGetProperty("reason", out var reason) ? reason.GetString() ?? "" : "";
-            }
-            catch (Exception ex) { corpusReason = "Unable to read corpus status: " + ex.Message; }
-            if (corpusGenerated)
-                Console.WriteLine($"  Navigation stress JPEGs: {corpusFiles} generated browse files");
-            else
-                Console.WriteLine($"  Navigation stress JPEGs: {corpusStatus} ({corpusReason})");
-            Console.WriteLine("  Legacy real-format corpus: staged when diagnostic_corpus is present");
-            return 0;
-        }
-
-        // Image-printing acceptance harness. Runs before Avalonia: GDI+ decodes the oriented image and
-        // the shared PrintService geometry/render path spools to a file (Microsoft Print to PDF, etc.).
-        if (args.Length >= 3 && args[0].Equals("--print-to-pdf", StringComparison.OrdinalIgnoreCase))
-        {
-            var image = args[1];
-            var output = args[2];
-            var printer = "Microsoft Print to PDF";
-            var scaling = "Best fit";
-            var landscape = false;
-            var keepAspect = true;
-            var autoRotate = true;
-            var hAlign = "Centre";
-            var vAlign = "Centre";
-            var color = true;
-            short copies = 1;
-            double ml = 50, mt = 50, mr = 50, mb = 50, custom = 100;
-            for (var i = 3; i + 1 < args.Length; i += 2)
-            {
-                var (key, value) = (args[i], args[i + 1]);
-                if (key.Equals("--printer", StringComparison.OrdinalIgnoreCase)) printer = value;
-                else if (key.Equals("--scaling", StringComparison.OrdinalIgnoreCase)) scaling = value;
-                else if (key.Equals("--landscape", StringComparison.OrdinalIgnoreCase)) landscape = value == "1";
-                else if (key.Equals("--keep-aspect", StringComparison.OrdinalIgnoreCase)) keepAspect = value == "1";
-                else if (key.Equals("--auto-rotate", StringComparison.OrdinalIgnoreCase)) autoRotate = value == "1";
-                else if (key.Equals("--h", StringComparison.OrdinalIgnoreCase)) hAlign = value;
-                else if (key.Equals("--v", StringComparison.OrdinalIgnoreCase)) vAlign = value;
-                else if (key.Equals("--color", StringComparison.OrdinalIgnoreCase)) color = value == "1";
-                else if (key.Equals("--copies", StringComparison.OrdinalIgnoreCase) && short.TryParse(value, out var c)) copies = c;
-                else if (key.Equals("--margin", StringComparison.OrdinalIgnoreCase) && double.TryParse(value, out var m)) { ml = mt = mr = mb = m; }
-                else if (key.Equals("--scale", StringComparison.OrdinalIgnoreCase) && double.TryParse(value, out var s)) custom = s;
-            }
-            return Printing.PrintAcceptance.PrintToFileAsync(image, output, printer, scaling, landscape,
-                ml, mt, mr, mb, keepAspect, autoRotate, hAlign, vAlign, custom, copies, color, Console.Out)
-                .GetAwaiter().GetResult();
-        }
-
-        // Diagnostics run before Avalonia initialization so broken UI startup can still be diagnosed.
-        if (args.Length >= 2 && args[0].Equals("--diagnostics", StringComparison.OrdinalIgnoreCase))
-        {
-            if (args[1].Equals("self-test", StringComparison.OrdinalIgnoreCase))
-                return DiagnosticRunner.SelfTest(Console.Out);
-
-            if (args[1].Equals("export", StringComparison.OrdinalIgnoreCase))
-            {
-                var folder = args.Length >= 3 ? args[2] : "Glide Diagnostics";
-                return DiagnosticRunner.Export(folder, Console.Out);
-            }
-
-            if (args[1].Equals("measure-launch", StringComparison.OrdinalIgnoreCase) ||
-                args[1].Equals("cold-launch", StringComparison.OrdinalIgnoreCase))
-            {
-                var target = args.Length >= 3 && !args[2].StartsWith("--") ? args[2] : null;
-                var runs = args.Length >= 4 && int.TryParse(args[3], out var parsedRuns) ? parsedRuns :
-                           (args.Length >= 3 && int.TryParse(args[2], out var r2) ? r2 : 3);
-                return DiagnosticRunner.MeasureLaunch(target, runs, Console.Out);
-            }
-        }
-        if (args.Length >= 1 && (args[0].Equals("--measure-launch", StringComparison.OrdinalIgnoreCase) ||
-                                args[0].Equals("--measure-cold-launch", StringComparison.OrdinalIgnoreCase)))
-        {
-            var target = args.Length >= 2 && !args[1].StartsWith("--") ? args[1] : null;
-            var runs = args.Length >= 3 && int.TryParse(args[2], out var parsedRuns) ? parsedRuns :
-                       (args.Length >= 2 && int.TryParse(args[1], out var r2) ? r2 : 3);
-            return DiagnosticRunner.MeasureLaunch(target, runs, Console.Out);
-        }
+        // Installer, build and diagnostics command-line modes run before Avalonia and exit.
+        if (CommandLineTools.TryRun(args, out var toolExitCode)) return toolExitCode;
 
         // Crash breadcrumbs are opt-in only: a consumer install must never drop diagnostic text into
         // the user's Downloads folder. Crash investigations and benchmarks enable the trace with
@@ -214,13 +90,15 @@ internal static class Program
                 return 0;
 
             App.StartupPaths = appArgs.Where(a => File.Exists(a) || Directory.Exists(a)).ToArray();
-            if (App.StartupPaths.Count > 0 && File.Exists(App.StartupPaths[0]) && ImageNavigator.IsSupported(App.StartupPaths[0]))
-            {
-                Glide.Imaging.StartupImagePreloader.Start(App.StartupPaths[0]);
-            }
-
+            // The compact first-frame policy (a few ms) is read before the preloader starts so the
+            // overlapped decode targets the same first-frame box the viewer will ask for.
             var firstFramePolicy = SettingsStore.LoadFirstFramePolicy();
             App.StartupFirstFramePolicy = firstFramePolicy;
+            if (App.StartupPaths.Count > 0 && File.Exists(App.StartupPaths[0]) && ImageNavigator.IsSupported(App.StartupPaths[0]))
+            {
+                var (boxWidth, boxHeight) = StartupPreviewBox(firstFramePolicy);
+                Glide.Imaging.StartupImagePreloader.Start(App.StartupPaths[0], boxWidth, boxHeight);
+            }
             var launchPolicy = new SettingsStore.LaunchPolicy(firstFramePolicy.ReuseSingleInstance, firstFramePolicy.ExternalOpenBehavior);
 
             // Image launches prefer an already-running Glide by default. The launch-only parser above
@@ -307,6 +185,32 @@ internal static class Program
         }
     }
 
+
+    [System.Runtime.InteropServices.LibraryImport("user32.dll")]
+    private static partial int GetSystemMetrics(int index);
+
+    [System.Runtime.InteropServices.LibraryImport("kernel32.dll", StringMarshalling = System.Runtime.InteropServices.StringMarshalling.Utf16)]
+    [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
+    private static partial bool SetDllDirectoryW(string? pathName);
+
+    /// <summary>
+    /// First-frame box for the cold-start preloader: the primary screen in physical pixels (the
+    /// manifest makes the process DPI aware, so these are device pixels), bounded by the user's preview
+    /// size exactly like MainWindow.BuildPerformancePolicy. (0,0) = decode at full resolution, used when
+    /// the decoder-scaled first frame is switched off.
+    /// </summary>
+    internal static (int Width, int Height) StartupPreviewBox(SettingsStore.FirstFramePolicy policy)
+    {
+        if (!policy.AdaptiveFastPreview || !OperatingSystem.IsWindows()) return (0, 0);
+        try
+        {
+            var width = GetSystemMetrics(0);  // SM_CXSCREEN
+            var height = GetSystemMetrics(1); // SM_CYSCREEN
+            if (width <= 0 || height <= 0) return (0, 0);
+            return Glide.Imaging.ImagePerformanceGovernor.ChoosePreviewBounds(policy.RapidPreviewLongestSide, width, height);
+        }
+        catch { return (0, 0); }
+    }
 
     internal static void AppendCrashLog(string kind, string? detail)
     {

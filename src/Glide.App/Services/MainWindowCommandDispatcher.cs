@@ -20,8 +20,10 @@ public sealed class MainWindowCommandDispatcher
     public static IReadOnlyList<GlideCommand> MissingCommands(IEnumerable<GlideCommand> commands)
     {
         var supplied = commands.ToHashSet();
+        // ChangeSetting is parameterised by the registry action (which setting), so it is executed by
+        // MainWindow.ExecuteActionAsync / ChangeSettingAsync rather than through this per-command table.
         return Enum.GetValues<GlideCommand>()
-            .Where(command => command != GlideCommand.None && !supplied.Contains(command))
+            .Where(command => command is not (GlideCommand.None or GlideCommand.ChangeSetting) && !supplied.Contains(command))
             .ToArray();
     }
 

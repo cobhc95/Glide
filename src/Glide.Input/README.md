@@ -2,7 +2,7 @@
 
 PURPOSE: translate physical input into semantic Glide commands.
 
-OWNS: input mapping, future gesture-slot resolution, future explicit drag ownership state.
+OWNS: input mapping. The mouse gesture rows, custom gestures and their default actions live in `Glide.Core/Commands/GestureCatalog.cs` (see `docs/ACTIONS-AND-HOTKEYS.md`).
 
 DOES NOT OWN: navigation, decoding, rendering, tab business logic, window geometry.
 

@@ -192,8 +192,8 @@ public static class ImageHeaderProbe
     private static uint ReadU32(ReadOnlySpan<byte> data, int offset, bool littleEndian) =>
         littleEndian ? BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(offset, 4)) : BinaryPrimitives.ReadUInt32BigEndian(data.Slice(offset, 4));
 
-    public const int MaxDimension = 65_535;
-    public const long MaxTotalPixels = 256_000_000L; // 256 Megapixels (~1.0 GB uncompressed in 32bpp)
+    public const int MaxDimension = DecodeMemoryGuard.MaxDimension;
+    public const long MaxTotalPixels = DecodeMemoryGuard.MaxTotalPixels; // 512 Megapixels (~2.05 GB uncompressed in 32bpp)
 
     private static bool Set(int width, int height, out ImageDimensions d)
     {

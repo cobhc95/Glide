@@ -10,18 +10,11 @@ namespace Glide.App;
 public static class ThemePalette
 {
     public const string GlideBlue = "#38A9F5";
-    public const string OverlayBlue = "#36B8F4";
-    public const string NavAccent = "#39A9E5";
-    public const string OverlayAccent = "#AE94FF";
     public const string MutedDark = "#AAB5C2";
     public const string MutedLight = "#56616B";
-    public const string Muted2Dark = "#7E8995";
-    public const string Border = "#343C42";
     public const string Warning = "#E5B53B";
     public const string WarningWash = "#1AE5B53B";
     public const string FallbackBackground = "#101214";
-    public const string CloseDanger = "#C42B1C";
-    public const string CloseDangerPressed = "#A92317";
 
     public static string ResolveAccentHex(string? choice) => choice switch
     {

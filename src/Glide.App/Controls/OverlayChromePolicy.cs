@@ -11,9 +11,7 @@ internal static class OverlayChromePolicy
 {
     public const double MinimumOpacity = 0.10;
     public const double WholeWindowMinimumOpacity = 0.35;
-    public const double RevealEdgeDip = 20;
     public const double HoverDismissPaddingDip = 16;
-    public const double ResizeGripDip = 24;
     public const double FrameDragBandDip = 34;
 
     public static Rect CloseRect(Size size) => new(Math.Max(0, size.Width - 34), 7, 27, 27);
@@ -29,11 +27,6 @@ internal static class OverlayChromePolicy
 
     public static double ClampItemOpacity(double value) => Math.Clamp(value, MinimumOpacity, 1.0);
     public static double ClampWholeWindowOpacity(double value) => Math.Clamp(value, WholeWindowMinimumOpacity, 1.0);
-    public static double RevealEdge(double renderScaling) => Math.Max(16, RevealEdgeDip / Math.Max(1.0, renderScaling));
-    public static bool IsNearFrameEdge(Point pointer, Size size, double threshold) =>
-        pointer.X <= threshold || pointer.Y <= threshold ||
-        pointer.X >= Math.Max(0, size.Width - threshold) ||
-        pointer.Y >= Math.Max(0, size.Height - threshold);
 
     public static bool ShouldDismissChrome(Point pointer, Size size)
     {

@@ -4,6 +4,18 @@
 // or any Glide UI component, must never show UI, and must never throw across a COM boundary. Every
 // path is total: malformed, truncated, hostile or gigantic input returns a failed DecodeResult so
 // Explorer can fall back to its normal icon.
+//
+// Pipeline (see docs/explorer-thumbnails.md):
+//   outputEdge = Explorer's cx (capped at 2048)
+//   decodeEdge = outputEdge x preset supersample, capped by "Maximum source decode size"
+//   1. SVG renders straight at the output size (Direct2D).
+//   2. WebP decodes through the vendored libwebp with decoder-side scaling.
+//   3. WIC decodes from the stream: embedded preview if it is large enough for the preset, otherwise
+//      the first frame with decoder-native reduction (IWICBitmapSourceTransform, e.g. JPEG DCT
+//      scaling); GIFs are composited on their logical screen.
+//   4. Compact native decoders for the simple formats WIC does not cover.
+//   Every resample uses the preset's WIC interpolation mode on premultiplied BGRA, so transparent
+//   pixels never bleed dark fringes into the thumbnail.
 
 #include "ThumbnailCore.h"
 
@@ -25,6 +37,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <limits>
+#include <memory>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -37,12 +50,51 @@
 
 namespace glide::thumb
 {
+    QualityProfile ProfileFor(int quality)
+    {
+        QualityProfile profile;
+        switch (quality)
+        {
+        case 0:
+            profile.quality = Quality::Fast;
+            profile.supersample = 1;
+            profile.embeddedMinPercent = 50;
+            profile.interpolation = WICBitmapInterpolationModeLinear;
+            profile.gifFrameSearch = 1;
+            profile.webpBypassFiltering = true;
+            profile.webpNoFancyUpsampling = true;
+            break;
+        case 2:
+            profile.quality = Quality::High;
+            profile.supersample = 2;
+            profile.embeddedMinPercent = 100;
+            profile.interpolation = WICBitmapInterpolationModeHighQualityCubic;
+            profile.gifFrameSearch = 8;
+            profile.webpBypassFiltering = false;
+            profile.webpNoFancyUpsampling = false;
+            break;
+        default:
+            profile.quality = Quality::Balanced;
+            profile.supersample = 1;
+            profile.embeddedMinPercent = 100;
+            profile.interpolation = WICBitmapInterpolationModeFant;
+            profile.gifFrameSearch = 8;
+            profile.webpBypassFiltering = false;
+            // Chroma "fancy" upsampling is invisible once the image is shrunk at least 2x; the
+            // decoder only applies this shortcut in that case.
+            profile.webpNoFancyUpsampling = true;
+            break;
+        }
+        return profile;
+    }
+
     namespace
     {
         constexpr std::uint32_t MaxDimension = 65'535;
         constexpr std::uint64_t MaxPixels = 256'000'000ull;   // ~1 GiB at 32bpp
         constexpr std::size_t MaxSourceBytes = 1ull << 30;     // 1 GiB
-        constexpr std::uint32_t HardCapLongestSide = 2048;     // never render a 6000px source for a 256px thumb
+        constexpr std::uint32_t HardCapLongestSide = MaxThumbnailEdge; // never render a 6000px source for a 256px thumb
+        constexpr std::uint32_t DefaultEdge = 256;
 
         std::uint64_t NowMicros()
         {
@@ -73,41 +125,93 @@ namespace glide::thumb
             const std::size_t bytes = static_cast<std::size_t>(width) * height * 4u;
             image.width = width;
             image.height = height;
+            image.premultiplied = false;
             try
             {
                 image.pixels.assign(bytes, 0);
             }
             catch (...)
             {
+                image.pixels.clear();
+                image.width = image.height = 0;
                 return false;
             }
             return true;
         }
 
-        std::uint32_t ClampEdge(std::uint32_t value, std::uint32_t fallback)
+        /// Aspect-fits width x height into a square of `edge`; never enlarges.
+        void FitWithin(std::uint32_t width, std::uint32_t height, std::uint32_t edge,
+                       std::uint32_t& outWidth, std::uint32_t& outHeight)
         {
-            if (value == 0) value = fallback;
-            if (value > HardCapLongestSide) value = HardCapLongestSide;
-            return value;
+            outWidth = width;
+            outHeight = height;
+            if (edge == 0 || (width <= edge && height <= edge)) return;
+            const double ratio = std::min(static_cast<double>(edge) / width, static_cast<double>(edge) / height);
+            outWidth = std::max<std::uint32_t>(1, static_cast<std::uint32_t>(std::floor(width * ratio)));
+            outHeight = std::max<std::uint32_t>(1, static_cast<std::uint32_t>(std::floor(height * ratio)));
         }
 
-        // Bilinear downscale. Only ever shrinks; callers bound the source first.
-        void Downscale(const Image& source, std::uint32_t targetWidth, std::uint32_t targetHeight, Image& target)
+        /// Aspect-fits width x height into a square of `edge`, enlarging when smaller.
+        void FitExactly(std::uint32_t width, std::uint32_t height, std::uint32_t edge,
+                        std::uint32_t& outWidth, std::uint32_t& outHeight)
+        {
+            const double ratio = std::min(static_cast<double>(edge) / width, static_cast<double>(edge) / height);
+            outWidth = std::clamp<std::uint32_t>(static_cast<std::uint32_t>(std::floor(width * ratio)), 1, edge);
+            outHeight = std::clamp<std::uint32_t>(static_cast<std::uint32_t>(std::floor(height * ratio)), 1, edge);
+        }
+
+        struct Edges
+        {
+            std::uint32_t output = DefaultEdge;   // what Explorer asked for
+            std::uint32_t decode = DefaultEdge;   // intermediate decode bound
+        };
+
+        Edges ResolveEdges(const DecodeOptions& options, const QualityProfile& profile)
+        {
+            Edges edges;
+            std::uint32_t requested = std::max(options.maxWidth, options.maxHeight);
+            if (requested == 0) requested = DefaultEdge;
+            edges.output = std::min(requested, HardCapLongestSide);
+            std::uint64_t decode = static_cast<std::uint64_t>(edges.output) * std::max<std::uint32_t>(1, profile.supersample);
+            decode = std::min<std::uint64_t>(decode, HardCapLongestSide);
+            if (options.maxSourceEdge > 0) decode = std::min<std::uint64_t>(decode, std::max<std::uint32_t>(16, options.maxSourceEdge));
+            edges.decode = static_cast<std::uint32_t>(decode);
+            return edges;
+        }
+
+        // Straight -> premultiplied, in place. Opaque images are left untouched (no work).
+        void Premultiply(Image& image)
+        {
+            if (image.premultiplied || !image.Valid()) return;
+            for (std::size_t i = 0; i < image.pixels.size(); i += 4)
+            {
+                const unsigned alpha = image.pixels[i + 3];
+                if (alpha == 255) continue;
+                image.pixels[i + 0] = static_cast<std::uint8_t>((image.pixels[i + 0] * alpha + 127) / 255);
+                image.pixels[i + 1] = static_cast<std::uint8_t>((image.pixels[i + 1] * alpha + 127) / 255);
+                image.pixels[i + 2] = static_cast<std::uint8_t>((image.pixels[i + 2] * alpha + 127) / 255);
+            }
+            image.premultiplied = true;
+        }
+
+        // CPU bilinear fallback, used only if WIC cannot be created (never in practice).
+        void BilinearResize(const Image& source, std::uint32_t targetWidth, std::uint32_t targetHeight, Image& target)
         {
             if (!AllocateImage(targetWidth, targetHeight, target)) return;
+            target.premultiplied = source.premultiplied;
             const double scaleX = static_cast<double>(source.width) / targetWidth;
             const double scaleY = static_cast<double>(source.height) / targetHeight;
             for (std::uint32_t y = 0; y < targetHeight; ++y)
             {
-                const double sy = (y + 0.5) * scaleY - 0.5;
-                std::uint32_t y0 = static_cast<std::uint32_t>(std::max(0.0, std::floor(sy)));
-                std::uint32_t y1 = std::min(y0 + 1, source.height - 1);
+                const double sy = std::max(0.0, (y + 0.5) * scaleY - 0.5);
+                const std::uint32_t y0 = std::min(static_cast<std::uint32_t>(sy), source.height - 1);
+                const std::uint32_t y1 = std::min(y0 + 1, source.height - 1);
                 const double fy = std::clamp(sy - y0, 0.0, 1.0);
                 for (std::uint32_t x = 0; x < targetWidth; ++x)
                 {
-                    const double sx = (x + 0.5) * scaleX - 0.5;
-                    std::uint32_t x0 = static_cast<std::uint32_t>(std::max(0.0, std::floor(sx)));
-                    std::uint32_t x1 = std::min(x0 + 1, source.width - 1);
+                    const double sx = std::max(0.0, (x + 0.5) * scaleX - 0.5);
+                    const std::uint32_t x0 = std::min(static_cast<std::uint32_t>(sx), source.width - 1);
+                    const std::uint32_t x1 = std::min(x0 + 1, source.width - 1);
                     const double fx = std::clamp(sx - x0, 0.0, 1.0);
                     const std::uint8_t* p00 = source.pixels.data() + (static_cast<std::size_t>(y0) * source.width + x0) * 4;
                     const std::uint8_t* p10 = source.pixels.data() + (static_cast<std::size_t>(y0) * source.width + x1) * 4;
@@ -118,24 +222,10 @@ namespace glide::thumb
                     {
                         const double top = p00[c] + (p10[c] - p00[c]) * fx;
                         const double bottom = p01[c] + (p11[c] - p01[c]) * fx;
-                        dst[c] = static_cast<std::uint8_t>(std::clamp(top + (bottom - top) * fy, 0.0, 255.0));
+                        dst[c] = static_cast<std::uint8_t>(std::clamp(top + (bottom - top) * fy + 0.5, 0.0, 255.0));
                     }
                 }
             }
-        }
-
-        void ShrinkToFit(Image& image, std::uint32_t maxWidth, std::uint32_t maxHeight)
-        {
-            if (!image.Valid() || maxWidth == 0 || maxHeight == 0) return;
-            const std::uint32_t longest = std::max(image.width, image.height);
-            const std::uint32_t cap = std::max(maxWidth, maxHeight);
-            if (longest <= cap) return;
-            const double ratio = static_cast<double>(cap) / longest;
-            const auto targetWidth = std::max<std::uint32_t>(1, static_cast<std::uint32_t>(std::floor(image.width * ratio)));
-            const auto targetHeight = std::max<std::uint32_t>(1, static_cast<std::uint32_t>(std::floor(image.height * ratio)));
-            Image scaled;
-            Downscale(image, targetWidth, targetHeight, scaled);
-            if (scaled.Valid()) image = std::move(scaled);
         }
 
         // ---------------------------------------------------------------- WIC ----------------
@@ -145,51 +235,166 @@ namespace glide::thumb
             template <typename T> static void Release(T*& p) { if (p) { p->Release(); p = nullptr; } }
         };
 
-        bool CopySourceToImage(IWICImagingFactory* factory, IWICBitmapSource* source,
-                               std::uint32_t maxWidth, std::uint32_t maxHeight, Image& out)
+        template <typename T>
+        struct Com
         {
-            if (!factory || !source) return false;
+            T* p = nullptr;
+            Com() = default;
+            Com(const Com&) = delete;
+            Com& operator=(const Com&) = delete;
+            ~Com() { if (p) p->Release(); }
+            T** put() { if (p) { p->Release(); p = nullptr; } return &p; }
+            T* operator->() const { return p; }
+            explicit operator bool() const { return p != nullptr; }
+        };
+
+        IWICImagingFactory* CreateFactory()
+        {
+            IWICImagingFactory* factory = nullptr;
+            if (FAILED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&factory))))
+                return nullptr;
+            return factory;
+        }
+
+        /// Zero-copy IWICBitmapSource over an Image, so WIC's scalers can resample decoder output
+        /// that did not come from WIC (compact decoders, composited GIF canvases) without a copy.
+        class ImageBitmapSource final : public IWICBitmapSource
+        {
+        public:
+            explicit ImageBitmapSource(const Image& image) : image_(image) {}
+
+            IFACEMETHODIMP QueryInterface(REFIID riid, void** ppv) override
+            {
+                if (!ppv) return E_POINTER;
+                *ppv = nullptr;
+                if (riid == IID_IUnknown || riid == IID_IWICBitmapSource)
+                {
+                    *ppv = static_cast<IWICBitmapSource*>(this);
+                    AddRef();
+                    return S_OK;
+                }
+                return E_NOINTERFACE;
+            }
+            // Stack-owned: lifetime is the enclosing scope, which always outlives the scaler.
+            IFACEMETHODIMP_(ULONG) AddRef() override { return 2; }
+            IFACEMETHODIMP_(ULONG) Release() override { return 1; }
+
+            IFACEMETHODIMP GetSize(UINT* width, UINT* height) override
+            {
+                if (!width || !height) return E_INVALIDARG;
+                *width = image_.width;
+                *height = image_.height;
+                return S_OK;
+            }
+            IFACEMETHODIMP GetPixelFormat(WICPixelFormatGUID* format) override
+            {
+                if (!format) return E_INVALIDARG;
+                *format = image_.premultiplied ? GUID_WICPixelFormat32bppPBGRA : GUID_WICPixelFormat32bppBGRA;
+                return S_OK;
+            }
+            IFACEMETHODIMP GetResolution(double* dpiX, double* dpiY) override
+            {
+                if (!dpiX || !dpiY) return E_INVALIDARG;
+                *dpiX = *dpiY = 96.0;
+                return S_OK;
+            }
+            IFACEMETHODIMP CopyPalette(IWICPalette*) override { return WINCODEC_ERR_PALETTEUNAVAILABLE; }
+            IFACEMETHODIMP CopyPixels(const WICRect* rect, UINT stride, UINT bufferSize, BYTE* buffer) override
+            {
+                if (!buffer) return E_INVALIDARG;
+                WICRect full{ 0, 0, static_cast<INT>(image_.width), static_cast<INT>(image_.height) };
+                const WICRect r = rect ? *rect : full;
+                if (r.X < 0 || r.Y < 0 || r.Width <= 0 || r.Height <= 0 ||
+                    static_cast<std::uint32_t>(r.X + r.Width) > image_.width ||
+                    static_cast<std::uint32_t>(r.Y + r.Height) > image_.height)
+                    return E_INVALIDARG;
+                const std::size_t rowBytes = static_cast<std::size_t>(r.Width) * 4;
+                if (stride < rowBytes) return E_INVALIDARG;
+                if (static_cast<std::uint64_t>(stride) * (r.Height - 1) + rowBytes > bufferSize) return E_INVALIDARG;
+                for (INT y = 0; y < r.Height; ++y)
+                {
+                    std::memcpy(buffer + static_cast<std::size_t>(y) * stride,
+                                image_.pixels.data() + (static_cast<std::size_t>(r.Y + y) * image_.width + r.X) * 4,
+                                rowBytes);
+                }
+                return S_OK;
+            }
+
+        private:
+            const Image& image_;
+        };
+
+        /// Converts `source` to premultiplied BGRA and resamples it to exactly targetWidth x
+        /// targetHeight with the given interpolation. Conversion happens before scaling so alpha
+        /// edges are filtered in premultiplied space.
+        bool CopySourceToImage(IWICImagingFactory* factory, IWICBitmapSource* source,
+                               std::uint32_t targetWidth, std::uint32_t targetHeight,
+                               int interpolation, Image& out)
+        {
+            if (!factory || !source || targetWidth == 0 || targetHeight == 0) return false;
             UINT sourceWidth = 0, sourceHeight = 0;
             if (FAILED(source->GetSize(&sourceWidth, &sourceHeight)) || sourceWidth == 0 || sourceHeight == 0) return false;
             if (sourceWidth > MaxDimension || sourceHeight > MaxDimension) return false;
 
-            UINT targetWidth = sourceWidth;
-            UINT targetHeight = sourceHeight;
-            if (maxWidth > 0 && maxHeight > 0 && (sourceWidth > maxWidth || sourceHeight > maxHeight))
-            {
-                const double ratio = std::min(static_cast<double>(maxWidth) / sourceWidth,
-                                              static_cast<double>(maxHeight) / sourceHeight);
-                targetWidth = std::max<UINT>(1, static_cast<UINT>(std::floor(sourceWidth * ratio)));
-                targetHeight = std::max<UINT>(1, static_cast<UINT>(std::floor(sourceHeight * ratio)));
-            }
+            Com<IWICFormatConverter> converter;
+            Com<IWICBitmapScaler> scaler;
+            IWICBitmapSource* pipeline = source;
 
-            IWICBitmapScaler* scaler = nullptr;
-            IWICFormatConverter* converter = nullptr;
-            bool ok = false;
-            IWICBitmapSource* decodeSource = source;
+            WICPixelFormatGUID format{};
+            const bool alreadyPbgra = SUCCEEDED(source->GetPixelFormat(&format)) && format == GUID_WICPixelFormat32bppPBGRA;
+            if (!alreadyPbgra)
+            {
+                if (FAILED(factory->CreateFormatConverter(converter.put())) || !converter) return false;
+                if (FAILED(converter->Initialize(source, GUID_WICPixelFormat32bppPBGRA,
+                                                 WICBitmapDitherTypeNone, nullptr, 0.0, WICBitmapPaletteTypeCustom)))
+                    return false;
+                pipeline = converter.p;
+            }
             if (targetWidth != sourceWidth || targetHeight != sourceHeight)
             {
-                if (FAILED(factory->CreateBitmapScaler(&scaler)) || !scaler) goto cleanup;
-                if (FAILED(scaler->Initialize(source, targetWidth, targetHeight, WICBitmapInterpolationModeFant))) goto cleanup;
-                decodeSource = scaler;
+                if (FAILED(factory->CreateBitmapScaler(scaler.put())) || !scaler) return false;
+                if (FAILED(scaler->Initialize(pipeline, targetWidth, targetHeight,
+                                              static_cast<WICBitmapInterpolationMode>(interpolation))))
+                {
+                    // HighQualityCubic needs Windows 10; fall back to Fant rather than failing.
+                    if (interpolation == WICBitmapInterpolationModeFant ||
+                        FAILED(scaler->Initialize(pipeline, targetWidth, targetHeight, WICBitmapInterpolationModeFant)))
+                        return false;
+                }
+                pipeline = scaler.p;
             }
-            if (FAILED(factory->CreateFormatConverter(&converter)) || !converter) goto cleanup;
-            if (FAILED(converter->Initialize(decodeSource, GUID_WICPixelFormat32bppBGRA,
-                                             WICBitmapDitherTypeNone, nullptr, 0.0, WICBitmapPaletteTypeCustom)))
-                goto cleanup;
 
-            if (AllocateImage(targetWidth, targetHeight, out))
+            if (!AllocateImage(targetWidth, targetHeight, out)) return false;
+            const UINT stride = targetWidth * 4;
+            if (FAILED(pipeline->CopyPixels(nullptr, stride, stride * targetHeight, out.pixels.data())))
             {
-                const UINT stride = targetWidth * 4;
-                if (SUCCEEDED(converter->CopyPixels(nullptr, stride, stride * targetHeight, out.pixels.data())))
-                    ok = true;
+                out = {};
+                return false;
             }
+            out.premultiplied = true;
+            return true;
+        }
 
-        cleanup:
-            ComPtr::Release(converter);
-            ComPtr::Release(scaler);
-            if (!ok) out = {};
-            return ok;
+        /// Resamples a decoded image to exactly width x height with the preset's filter.
+        bool ResampleImage(IWICImagingFactory* factory, Image& image, std::uint32_t width, std::uint32_t height, int interpolation)
+        {
+            if (!image.Valid()) return false;
+            if (image.width == width && image.height == height) return true;
+            Image scaled;
+            if (factory)
+            {
+                Premultiply(image);
+                ImageBitmapSource source(image);
+                if (CopySourceToImage(factory, &source, width, height, interpolation, scaled))
+                {
+                    image = std::move(scaled);
+                    return true;
+                }
+            }
+            BilinearResize(image, width, height, scaled);
+            if (!scaled.Valid()) return false;
+            image = std::move(scaled);
+            return true;
         }
 
         std::uint16_t ReadOrientation(IWICBitmapFrameDecode* frame)
@@ -198,7 +403,7 @@ namespace glide::thumb
             IWICMetadataQueryReader* reader = nullptr;
             if (FAILED(frame->GetMetadataQueryReader(&reader)) || !reader) return 1;
             std::uint16_t orientation = 1;
-            const wchar_t* paths[] = { L"/ifd/{ushort=274}", L"/app1/ifd/{ushort=274}" };
+            const wchar_t* paths[] = { L"/app1/ifd/{ushort=274}", L"/ifd/{ushort=274}" };
             for (const auto* query : paths)
             {
                 PROPVARIANT value;
@@ -228,6 +433,9 @@ namespace glide::thumb
             const std::uint32_t outHeight = swap ? image.width : image.height;
             Image oriented;
             if (!AllocateImage(outWidth, outHeight, oriented)) return;
+            oriented.premultiplied = image.premultiplied;
+            const auto* source = reinterpret_cast<const std::uint32_t*>(image.pixels.data());
+            auto* target = reinterpret_cast<std::uint32_t*>(oriented.pixels.data());
             for (std::uint32_t y = 0; y < image.height; ++y)
             {
                 for (std::uint32_t x = 0; x < image.width; ++x)
@@ -244,64 +452,595 @@ namespace glide::thumb
                     case 8: dx = y; dy = image.width - 1 - x; break;
                     default: break;
                     }
-                    std::memcpy(oriented.pixels.data() + (static_cast<std::size_t>(dy) * outWidth + dx) * 4,
-                                image.pixels.data() + (static_cast<std::size_t>(y) * image.width + x) * 4, 4);
+                    target[static_cast<std::size_t>(dy) * outWidth + dx] = source[static_cast<std::size_t>(y) * image.width + x];
                 }
             }
             image = std::move(oriented);
         }
 
-        bool DecodeWithWic(const std::uint8_t* data, std::size_t size,
-                           std::uint32_t maxWidth, std::uint32_t maxHeight,
-                           bool preferEmbedded, Image& out, bool& embeddedUsed)
+        // ------------------------------------------------------------ source access ----------
+
+        /// Read-only IStream over another stream with an on-demand block cache. WIC pulls only the
+        /// blocks it touches (an embedded preview, the first GIF frame), and each block crosses the
+        /// Explorer -> thumbnail-host boundary once, in large reads, however small WIC's reads are.
+        /// Backed by one reserved-and-committed region, so untouched blocks never cost physical memory.
+        class BlockStream final : public IStream
         {
-            embeddedUsed = false;
-            if (size == 0 || size > static_cast<std::size_t>(std::numeric_limits<DWORD>::max())) return false;
+        public:
+            static constexpr std::size_t BlockSize = 256 * 1024;
 
-            IWICImagingFactory* factory = nullptr;
-            IWICStream* stream = nullptr;
-            IWICBitmapDecoder* decoder = nullptr;
-            IWICBitmapFrameDecode* frame = nullptr;
-            IWICBitmapSource* embedded = nullptr;
+            static BlockStream* Create(IStream* source, std::uint64_t size)
+            {
+                if (!source || size == 0 || size > MaxSourceBytes) return nullptr;
+                void* memory = VirtualAlloc(nullptr, static_cast<SIZE_T>(size), MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+                if (!memory) return nullptr;
+                auto* stream = new (std::nothrow) BlockStream(source, static_cast<std::size_t>(size), static_cast<std::uint8_t*>(memory));
+                if (!stream) VirtualFree(memory, 0, MEM_RELEASE);
+                return stream;
+            }
+
+            /// Ensures [offset, offset + count) is loaded; returns how many bytes are available.
+            std::size_t Ensure(std::size_t offset, std::size_t count)
+            {
+                if (offset >= size_) return 0;
+                count = std::min(count, size_ - offset);
+                const std::size_t first = offset / BlockSize;
+                const std::size_t last = (offset + count - 1) / BlockSize;
+                for (std::size_t block = first; block <= last; ++block)
+                {
+                    if (!LoadBlock(block)) break;
+                }
+                if (offset >= size_) return 0;
+                return std::min(count, size_ - offset);
+            }
+
+            /// Loads everything and returns the contiguous buffer.
+            const std::uint8_t* All(std::size_t& size)
+            {
+                Ensure(0, size_);
+                size = size_;
+                return failed_ ? nullptr : memory_;
+            }
+
+            std::uint64_t BytesRead() const { return bytesRead_; }
+
+            /// Start of the contiguous backing store; only bytes loaded via Ensure() are valid.
+            const std::uint8_t* Data() const { return memory_; }
+
+            // IUnknown
+            IFACEMETHODIMP QueryInterface(REFIID riid, void** ppv) override
+            {
+                if (!ppv) return E_POINTER;
+                *ppv = nullptr;
+                if (riid == IID_IUnknown || riid == IID_ISequentialStream || riid == IID_IStream)
+                {
+                    *ppv = static_cast<IStream*>(this);
+                    AddRef();
+                    return S_OK;
+                }
+                return E_NOINTERFACE;
+            }
+            IFACEMETHODIMP_(ULONG) AddRef() override { return static_cast<ULONG>(InterlockedIncrement(&references_)); }
+            IFACEMETHODIMP_(ULONG) Release() override
+            {
+                const long count = InterlockedDecrement(&references_);
+                if (count == 0) delete this;
+                return static_cast<ULONG>(count);
+            }
+
+            // ISequentialStream
+            IFACEMETHODIMP Read(void* buffer, ULONG count, ULONG* read) override
+            {
+                if (read) *read = 0;
+                if (!buffer) return STG_E_INVALIDPOINTER;
+                if (position_ >= size_ || count == 0) return count == 0 ? S_OK : S_FALSE;
+                const std::size_t available = Ensure(static_cast<std::size_t>(position_), count);
+                std::memcpy(buffer, memory_ + position_, available);
+                position_ += available;
+                if (read) *read = static_cast<ULONG>(available);
+                return available == count ? S_OK : S_FALSE;
+            }
+            IFACEMETHODIMP Write(const void*, ULONG, ULONG*) override { return STG_E_ACCESSDENIED; }
+
+            // IStream
+            IFACEMETHODIMP Seek(LARGE_INTEGER move, DWORD origin, ULARGE_INTEGER* newPosition) override
+            {
+                std::int64_t base = 0;
+                switch (origin)
+                {
+                case STREAM_SEEK_SET: base = 0; break;
+                case STREAM_SEEK_CUR: base = static_cast<std::int64_t>(position_); break;
+                case STREAM_SEEK_END: base = static_cast<std::int64_t>(size_); break;
+                default: return STG_E_INVALIDFUNCTION;
+                }
+                const std::int64_t target = base + move.QuadPart;
+                if (target < 0) return STG_E_INVALIDFUNCTION;
+                position_ = static_cast<std::uint64_t>(target);
+                if (newPosition) newPosition->QuadPart = position_;
+                return S_OK;
+            }
+            IFACEMETHODIMP SetSize(ULARGE_INTEGER) override { return STG_E_ACCESSDENIED; }
+            IFACEMETHODIMP CopyTo(IStream*, ULARGE_INTEGER, ULARGE_INTEGER*, ULARGE_INTEGER*) override { return E_NOTIMPL; }
+            IFACEMETHODIMP Commit(DWORD) override { return S_OK; }
+            IFACEMETHODIMP Revert() override { return S_OK; }
+            IFACEMETHODIMP LockRegion(ULARGE_INTEGER, ULARGE_INTEGER, DWORD) override { return STG_E_INVALIDFUNCTION; }
+            IFACEMETHODIMP UnlockRegion(ULARGE_INTEGER, ULARGE_INTEGER, DWORD) override { return STG_E_INVALIDFUNCTION; }
+            IFACEMETHODIMP Stat(STATSTG* stat, DWORD) override
+            {
+                if (!stat) return STG_E_INVALIDPOINTER;
+                std::memset(stat, 0, sizeof(*stat));
+                stat->type = STGTY_STREAM;
+                stat->cbSize.QuadPart = size_;
+                stat->grfMode = STGM_READ;
+                return S_OK;
+            }
+            IFACEMETHODIMP Clone(IStream**) override { return E_NOTIMPL; }
+
+        private:
+            BlockStream(IStream* source, std::size_t size, std::uint8_t* memory)
+                : source_(source), size_(size), memory_(memory),
+                  loaded_((size + BlockSize - 1) / BlockSize, false)
+            {
+                source_->AddRef();
+            }
+            ~BlockStream()
+            {
+                if (source_) source_->Release();
+                if (memory_) VirtualFree(memory_, 0, MEM_RELEASE);
+            }
+
+            bool LoadBlock(std::size_t block)
+            {
+                if (block >= loaded_.size()) return false;
+                if (loaded_[block]) return true;
+                if (failed_) return false;
+                const std::size_t offset = block * BlockSize;
+                const std::size_t wanted = std::min(BlockSize, size_ - offset);
+                LARGE_INTEGER seek{};
+                seek.QuadPart = static_cast<LONGLONG>(offset);
+                if (FAILED(source_->Seek(seek, STREAM_SEEK_SET, nullptr))) { failed_ = true; return false; }
+                std::size_t got = 0;
+                while (got < wanted)
+                {
+                    ULONG read = 0;
+                    const HRESULT hr = source_->Read(memory_ + offset + got, static_cast<ULONG>(wanted - got), &read);
+                    if (FAILED(hr) || read == 0) break;
+                    got += read;
+                }
+                bytesRead_ += got;
+                if (got < wanted)
+                {
+                    // The file shrank (or the read failed) mid-way: expose only what really exists.
+                    size_ = offset + got;
+                    failed_ = got == 0 && offset == 0;
+                }
+                loaded_[block] = true;
+                return got > 0;
+            }
+
+            long references_ = 1;
+            IStream* source_ = nullptr;
+            std::size_t size_ = 0;
+            std::uint8_t* memory_ = nullptr;
+            std::vector<bool> loaded_;
+            std::uint64_t position_ = 0;
+            std::uint64_t bytesRead_ = 0;
+            bool failed_ = false;
+        };
+
+        /// The bytes being thumbnailed: either a caller-owned buffer or a stream read on demand.
+        class Source
+        {
+        public:
+            Source(const std::uint8_t* data, std::size_t size) : data_(data), size_(size) {}
+
+            explicit Source(IStream* stream)
+            {
+                if (!stream) return;
+                STATSTG stat{};
+                std::uint64_t size = 0;
+                if (SUCCEEDED(stream->Stat(&stat, STATFLAG_NONAME))) size = stat.cbSize.QuadPart;
+                LARGE_INTEGER zero{};
+                if (size > 0 && size <= MaxSourceBytes && SUCCEEDED(stream->Seek(zero, STREAM_SEEK_SET, nullptr)))
+                    blocks_ = BlockStream::Create(stream, size);
+                if (!blocks_)
+                {
+                    // Unknown size or unseekable: fall back to one sequential read (still capped).
+                    stream->Seek(zero, STREAM_SEEK_SET, nullptr);
+                    std::uint8_t chunk[64 * 1024];
+                    for (;;)
+                    {
+                        ULONG read = 0;
+                        const HRESULT hr = stream->Read(chunk, static_cast<ULONG>(sizeof(chunk)), &read);
+                        if (FAILED(hr) || read == 0) break;
+                        if (owned_.size() + read > MaxSourceBytes) { owned_.clear(); break; }
+                        try { owned_.insert(owned_.end(), chunk, chunk + read); }
+                        catch (...) { owned_.clear(); break; }
+                    }
+                    data_ = owned_.data();
+                    size_ = owned_.size();
+                    fallbackRead_ = size_;
+                }
+                else
+                {
+                    size_ = static_cast<std::size_t>(size);
+                }
+            }
+
+            ~Source() { if (blocks_) blocks_->Release(); }
+            Source(const Source&) = delete;
+            Source& operator=(const Source&) = delete;
+
+            std::size_t Size() const { return size_; }
+
+            /// First `count` bytes (for signature sniffing).
+            const std::uint8_t* Head(std::size_t count, std::size_t& available)
+            {
+                if (blocks_)
+                {
+                    available = blocks_->Ensure(0, count);
+                    return available > 0 ? blocks_->Data() : nullptr;
+                }
+                available = std::min(count, size_);
+                return data_;
+            }
+
+            /// Whole source as one buffer (reads the rest of the stream on first use).
+            const std::uint8_t* All(std::size_t& size)
+            {
+                if (blocks_)
+                {
+                    const std::uint8_t* all = blocks_->All(size);
+                    size_ = size;
+                    return all;
+                }
+                size = size_;
+                return data_;
+            }
+
+            /// A stream WIC can decode from. Caller releases.
+            IStream* WicStream(IWICImagingFactory* factory)
+            {
+                if (blocks_)
+                {
+                    blocks_->AddRef();
+                    blocks_->Seek(LARGE_INTEGER{}, STREAM_SEEK_SET, nullptr);
+                    return blocks_;
+                }
+                if (!factory || !data_ || size_ == 0 || size_ > std::numeric_limits<DWORD>::max()) return nullptr;
+                IWICStream* stream = nullptr;
+                if (FAILED(factory->CreateStream(&stream)) || !stream) return nullptr;
+                if (FAILED(stream->InitializeFromMemory(const_cast<BYTE*>(data_), static_cast<DWORD>(size_))))
+                {
+                    stream->Release();
+                    return nullptr;
+                }
+                return stream;
+            }
+
+            std::uint64_t BytesRead() const { return blocks_ ? blocks_->BytesRead() : fallbackRead_; }
+
+        private:
+            const std::uint8_t* data_ = nullptr;
+            std::size_t size_ = 0;
+            std::vector<std::uint8_t> owned_;
+            BlockStream* blocks_ = nullptr;
+            std::uint64_t fallbackRead_ = 0;
+        };
+
+        // ------------------------------------------------------------------ WIC decode ----------
+
+        bool ReadMetadataUInt(IWICMetadataQueryReader* reader, const wchar_t* query, std::uint32_t& value)
+        {
+            if (!reader) return false;
+            PROPVARIANT variant;
+            PropVariantInit(&variant);
             bool ok = false;
-
-            if (FAILED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&factory))) || !factory)
-                goto cleanup;
-            if (FAILED(factory->CreateStream(&stream)) || !stream) goto cleanup;
-            if (FAILED(stream->InitializeFromMemory(const_cast<BYTE*>(data), static_cast<DWORD>(size)))) goto cleanup;
-            if (FAILED(factory->CreateDecoderFromStream(stream, nullptr, WICDecodeMetadataCacheOnDemand, &decoder)) || !decoder)
-                goto cleanup;
-            if (FAILED(decoder->GetFrame(0, &frame)) || !frame) goto cleanup;
-
-            if (preferEmbedded && SUCCEEDED(frame->GetThumbnail(&embedded)) && embedded)
+            if (SUCCEEDED(reader->GetMetadataByName(query, &variant)))
             {
-                UINT tw = 0, th = 0;
-                if (SUCCEEDED(embedded->GetSize(&tw, &th)) && tw > 0 && th > 0 &&
-                    CopySourceToImage(factory, embedded, maxWidth, maxHeight, out))
+                switch (variant.vt)
                 {
-                    embeddedUsed = true;
-                    ok = true;
-                    goto cleanup;
+                case VT_UI1: value = variant.bVal; ok = true; break;
+                case VT_UI2: value = variant.uiVal; ok = true; break;
+                case VT_UI4: value = variant.ulVal; ok = true; break;
+                default: break;
                 }
             }
-
-            {
-                const std::uint16_t orientation = ReadOrientation(frame);
-                if (CopySourceToImage(factory, frame, maxWidth, maxHeight, out))
-                {
-                    ApplyOrientation(out, orientation);
-                    ok = out.Valid();
-                }
-            }
-
-        cleanup:
-            ComPtr::Release(embedded);
-            ComPtr::Release(frame);
-            ComPtr::Release(decoder);
-            ComPtr::Release(stream);
-            ComPtr::Release(factory);
-            if (!ok) out = {};
+            PropVariantClear(&variant);
             return ok;
+        }
+
+        /// Decides whether an embedded preview is good enough for the preset, and centre-crops
+        /// letterboxed previews (cameras often store a 4:3 thumbnail with black bars for a 3:2
+        /// photo) to the main image's aspect ratio. Returns false to fall back to a real decode.
+        bool UseEmbedded(IWICImagingFactory* factory, IWICBitmapSource* preview,
+                         std::uint32_t frameWidth, std::uint32_t frameHeight,
+                         const Edges& edges, const QualityProfile& profile, Image& out)
+        {
+            UINT width = 0, height = 0;
+            if (!preview || FAILED(preview->GetSize(&width, &height)) || width == 0 || height == 0) return false;
+            const std::uint32_t needed = std::min(edges.output, edges.decode);
+            if (static_cast<std::uint64_t>(std::max(width, height)) * 100 < static_cast<std::uint64_t>(needed) * profile.embeddedMinPercent)
+                return false;
+
+            WICRect crop{ 0, 0, static_cast<INT>(width), static_cast<INT>(height) };
+            if (frameWidth > 0 && frameHeight > 0)
+            {
+                const double frameAspect = static_cast<double>(frameWidth) / frameHeight;
+                const double previewAspect = static_cast<double>(width) / height;
+                const double mismatch = std::abs(previewAspect - frameAspect) / frameAspect;
+                // A rotated preview (portrait vs landscape) or a wildly different shape is not a
+                // preview of this frame; anything beyond a letterbox is rejected.
+                if (mismatch > 0.35) return false;
+                if (mismatch > 0.02)
+                {
+                    if (previewAspect > frameAspect)
+                    {
+                        crop.Width = std::max<INT>(1, static_cast<INT>(std::lround(height * frameAspect)));
+                        crop.X = (static_cast<INT>(width) - crop.Width) / 2;
+                    }
+                    else
+                    {
+                        crop.Height = std::max<INT>(1, static_cast<INT>(std::lround(width / frameAspect)));
+                        crop.Y = (static_cast<INT>(height) - crop.Height) / 2;
+                    }
+                }
+            }
+
+            Com<IWICBitmapClipper> clipper;
+            IWICBitmapSource* source = preview;
+            if (crop.Width != static_cast<INT>(width) || crop.Height != static_cast<INT>(height))
+            {
+                if (FAILED(factory->CreateBitmapClipper(clipper.put())) || !clipper) return false;
+                if (FAILED(clipper->Initialize(preview, &crop))) return false;
+                source = clipper.p;
+            }
+            std::uint32_t targetWidth = 0, targetHeight = 0;
+            FitWithin(static_cast<std::uint32_t>(crop.Width), static_cast<std::uint32_t>(crop.Height), edges.decode, targetWidth, targetHeight);
+            return CopySourceToImage(factory, source, targetWidth, targetHeight, profile.interpolation, out);
+        }
+
+        /// Decodes a frame at (at least) the target size, letting the decoder reduce natively when
+        /// it can (JPEG DCT scaling to 1/2, 1/4, 1/8): a 24 MP JPEG is never fully materialised for
+        /// a 256 px thumbnail.
+        bool DecodeFrameReduced(IWICImagingFactory* factory, IWICBitmapFrameDecode* frame,
+                                std::uint32_t sourceWidth, std::uint32_t sourceHeight,
+                                std::uint32_t targetWidth, std::uint32_t targetHeight,
+                                int interpolation, Image& out, bool& reduced)
+        {
+            reduced = false;
+            Com<IWICBitmapSourceTransform> transform;
+            if ((targetWidth < sourceWidth || targetHeight < sourceHeight) &&
+                SUCCEEDED(frame->QueryInterface(IID_PPV_ARGS(transform.put()))) && transform)
+            {
+                UINT width = targetWidth, height = targetHeight;
+                WICPixelFormatGUID format = GUID_WICPixelFormat32bppPBGRA;
+                if (SUCCEEDED(transform->GetClosestSize(&width, &height)) &&
+                    width >= targetWidth && height >= targetHeight &&
+                    width < sourceWidth && height < sourceHeight &&
+                    SUCCEEDED(transform->GetClosestPixelFormat(&format)))
+                {
+                    Com<IWICBitmap> bitmap;
+                    if (SUCCEEDED(factory->CreateBitmap(width, height, format, WICBitmapCacheOnLoad, bitmap.put())) && bitmap)
+                    {
+                        bool copied = false;
+                        {
+                            Com<IWICBitmapLock> lock;
+                            WICRect rect{ 0, 0, static_cast<INT>(width), static_cast<INT>(height) };
+                            if (SUCCEEDED(bitmap->Lock(&rect, WICBitmapLockWrite, lock.put())) && lock)
+                            {
+                                UINT bufferSize = 0, stride = 0;
+                                BYTE* pointer = nullptr;
+                                if (SUCCEEDED(lock->GetDataPointer(&bufferSize, &pointer)) && pointer &&
+                                    SUCCEEDED(lock->GetStride(&stride)))
+                                {
+                                    copied = SUCCEEDED(transform->CopyPixels(&rect, width, height, &format,
+                                                                             WICBitmapTransformRotate0, stride, bufferSize, pointer));
+                                }
+                            }
+                        }
+                        if (copied && CopySourceToImage(factory, bitmap.p, targetWidth, targetHeight, interpolation, out))
+                        {
+                            reduced = true;
+                            return true;
+                        }
+                    }
+                }
+            }
+            // Scale straight off the frame decoder. Measured: materialising the full frame first
+            // (CreateBitmapFromSource) is slower for TIFF/BMP/PNG, and the bilinear (Fast) scaler
+            // lets strip-based TIFFs skip strips it never samples.
+            return CopySourceToImage(factory, frame, targetWidth, targetHeight, interpolation, out);
+        }
+
+        /// GIF: composites frame 0 onto the logical screen (frames may be smaller than the canvas
+        /// and offset), working at thumbnail scale so a large canvas is never materialised. When
+        /// frame 0 is fully transparent (fade-in animations), later frames are composited, honouring
+        /// disposal, up to the preset's frame budget. Transparent areas stay transparent and are
+        /// composited onto white by ComposeThumbnail like every other format.
+        bool DecodeGif(IWICImagingFactory* factory, IWICBitmapDecoder* decoder,
+                       const Edges& edges, const QualityProfile& profile, Image& out,
+                       std::uint32_t& sourceWidth, std::uint32_t& sourceHeight)
+        {
+            std::uint32_t screenWidth = 0, screenHeight = 0;
+            {
+                Com<IWICMetadataQueryReader> reader;
+                if (SUCCEEDED(decoder->GetMetadataQueryReader(reader.put())) && reader)
+                {
+                    ReadMetadataUInt(reader.p, L"/logscrdesc/Width", screenWidth);
+                    ReadMetadataUInt(reader.p, L"/logscrdesc/Height", screenHeight);
+                }
+            }
+
+            struct FrameInfo { std::uint32_t left = 0, top = 0, width = 0, height = 0, disposal = 0; };
+            auto describe = [](IWICBitmapFrameDecode* frame, FrameInfo& info) -> bool
+            {
+                UINT width = 0, height = 0;
+                if (FAILED(frame->GetSize(&width, &height)) || width == 0 || height == 0) return false;
+                info.width = width;
+                info.height = height;
+                Com<IWICMetadataQueryReader> reader;
+                if (SUCCEEDED(frame->GetMetadataQueryReader(reader.put())) && reader)
+                {
+                    ReadMetadataUInt(reader.p, L"/imgdesc/Left", info.left);
+                    ReadMetadataUInt(reader.p, L"/imgdesc/Top", info.top);
+                    ReadMetadataUInt(reader.p, L"/grctlext/Disposal", info.disposal);
+                }
+                return true;
+            };
+
+            Com<IWICBitmapFrameDecode> first;
+            if (FAILED(decoder->GetFrame(0, first.put())) || !first) return false;
+            FrameInfo firstInfo;
+            if (!describe(first.p, firstInfo)) return false;
+
+            // Some encoders write a logical screen smaller than (or missing) the frame; browsers
+            // then use the frame bounds, and so do we.
+            const std::uint32_t canvasWidth = std::max<std::uint32_t>(screenWidth, firstInfo.left + firstInfo.width);
+            const std::uint32_t canvasHeight = std::max<std::uint32_t>(screenHeight, firstInfo.top + firstInfo.height);
+            if (canvasWidth == 0 || canvasHeight == 0 || canvasWidth > MaxDimension || canvasHeight > MaxDimension) return false;
+            if (static_cast<std::uint64_t>(canvasWidth) * canvasHeight > MaxPixels) return false;
+            sourceWidth = canvasWidth;
+            sourceHeight = canvasHeight;
+
+            std::uint32_t outWidth = 0, outHeight = 0;
+            FitWithin(canvasWidth, canvasHeight, edges.decode, outWidth, outHeight);
+            const double scaleX = static_cast<double>(outWidth) / canvasWidth;
+            const double scaleY = static_cast<double>(outHeight) / canvasHeight;
+            if (!AllocateImage(outWidth, outHeight, out)) return false;
+            out.premultiplied = true; // all zero = fully transparent
+
+            struct Rect { std::uint32_t x0, y0, x1, y1; };
+            auto scaledRect = [&](const FrameInfo& info) -> Rect
+            {
+                Rect r{};
+                r.x0 = std::min<std::uint32_t>(outWidth, static_cast<std::uint32_t>(std::floor(info.left * scaleX)));
+                r.y0 = std::min<std::uint32_t>(outHeight, static_cast<std::uint32_t>(std::floor(info.top * scaleY)));
+                r.x1 = std::min<std::uint32_t>(outWidth, static_cast<std::uint32_t>(std::ceil((info.left + info.width) * scaleX)));
+                r.y1 = std::min<std::uint32_t>(outHeight, static_cast<std::uint32_t>(std::ceil((info.top + info.height) * scaleY)));
+                if (r.x1 <= r.x0) r.x1 = std::min(outWidth, r.x0 + 1);
+                if (r.y1 <= r.y0) r.y1 = std::min(outHeight, r.y0 + 1);
+                return r;
+            };
+
+            // Premultiplied "source over" of a scaled frame into the canvas.
+            auto composite = [&](IWICBitmapFrameDecode* frame, const FrameInfo& info, bool& visible) -> bool
+            {
+                const Rect r = scaledRect(info);
+                if (r.x0 >= r.x1 || r.y0 >= r.y1) return true;
+                Image scaled;
+                if (!CopySourceToImage(factory, frame, r.x1 - r.x0, r.y1 - r.y0, profile.interpolation, scaled)) return false;
+                for (std::uint32_t y = 0; y < scaled.height; ++y)
+                {
+                    const std::uint8_t* src = scaled.pixels.data() + static_cast<std::size_t>(y) * scaled.width * 4;
+                    std::uint8_t* dst = out.pixels.data() + ((static_cast<std::size_t>(r.y0) + y) * outWidth + r.x0) * 4;
+                    for (std::uint32_t x = 0; x < scaled.width; ++x, src += 4, dst += 4)
+                    {
+                        const unsigned a = src[3];
+                        if (a == 0) continue;
+                        visible = true;
+                        if (a == 255) { std::memcpy(dst, src, 4); continue; }
+                        const unsigned inverse = 255 - a;
+                        for (int c = 0; c < 4; ++c)
+                            dst[c] = static_cast<std::uint8_t>(std::min(255u, src[c] + (dst[c] * inverse + 127) / 255));
+                    }
+                }
+                return true;
+            };
+            auto clearRect = [&](const FrameInfo& info)
+            {
+                const Rect r = scaledRect(info);
+                for (std::uint32_t y = r.y0; y < r.y1; ++y)
+                    std::memset(out.pixels.data() + (static_cast<std::size_t>(y) * outWidth + r.x0) * 4, 0, static_cast<std::size_t>(r.x1 - r.x0) * 4);
+            };
+
+            bool visible = false;
+            if (!composite(first.p, firstInfo, visible)) return false;
+            if (visible || profile.gifFrameSearch <= 1) return true;
+
+            // Frame 0 drew nothing. Walk forward (without GetFrameCount, which would scan the
+            // whole file) until something is visible or the budget is spent.
+            FrameInfo previous = firstInfo;
+            Image beforePrevious;
+            for (UINT index = 1; index < profile.gifFrameSearch && !visible; ++index)
+            {
+                if (previous.disposal == 2) clearRect(previous);
+                else if (previous.disposal == 3 && beforePrevious.Valid()) out = beforePrevious;
+
+                Com<IWICBitmapFrameDecode> frame;
+                if (FAILED(decoder->GetFrame(index, frame.put())) || !frame) break;
+                FrameInfo info;
+                if (!describe(frame.p, info)) break;
+                if (info.disposal == 3) beforePrevious = out;
+                if (!composite(frame.p, info, visible)) break;
+                previous = info;
+            }
+            return true; // a genuinely blank animation still yields a (white) thumbnail
+        }
+
+        bool DecodeWithWic(IWICImagingFactory* factory, IStream* stream, const Edges& edges,
+                           const QualityProfile& profile, bool preferEmbedded, DecodeResult& result)
+        {
+            if (!factory || !stream) return false;
+            Com<IWICBitmapDecoder> decoder;
+            if (FAILED(factory->CreateDecoderFromStream(stream, nullptr, WICDecodeMetadataCacheOnDemand, decoder.put())) || !decoder)
+                return false;
+
+            GUID container{};
+            decoder->GetContainerFormat(&container);
+            if (container == GUID_ContainerFormatGif)
+            {
+                std::uint32_t width = 0, height = 0;
+                if (!DecodeGif(factory, decoder.p, edges, profile, result.image, width, height)) return false;
+                result.decoder = "gif";
+                result.sourceWidth = width;
+                result.sourceHeight = height;
+                return result.image.Valid();
+            }
+
+            Com<IWICBitmapFrameDecode> frame;
+            if (FAILED(decoder->GetFrame(0, frame.put())) || !frame) return false;
+            UINT sourceWidth = 0, sourceHeight = 0;
+            if (FAILED(frame->GetSize(&sourceWidth, &sourceHeight)) || sourceWidth == 0 || sourceHeight == 0) return false;
+            if (sourceWidth > MaxDimension || sourceHeight > MaxDimension) return false;
+            result.sourceWidth = sourceWidth;
+            result.sourceHeight = sourceHeight;
+            const std::uint16_t orientation = ReadOrientation(frame.p);
+
+            if (preferEmbedded)
+            {
+                // 1. The frame's own thumbnail (EXIF IFD1 in JPEG, TIFF sub-IFD, RAW thumbnails).
+                Com<IWICBitmapSource> preview;
+                if (SUCCEEDED(frame->GetThumbnail(preview.put())) && preview &&
+                    UseEmbedded(factory, preview.p, sourceWidth, sourceHeight, edges, profile, result.image))
+                {
+                    // Embedded previews are stored in sensor orientation like the main image.
+                    ApplyOrientation(result.image, orientation);
+                    result.decoder = "embedded";
+                    result.embedded = true;
+                    return result.image.Valid();
+                }
+                // 2. The container's preview (RAW codecs expose their large JPEG preview here).
+                Com<IWICBitmapSource> containerPreview;
+                if (SUCCEEDED(decoder->GetPreview(containerPreview.put())) && containerPreview &&
+                    UseEmbedded(factory, containerPreview.p, sourceWidth, sourceHeight, edges, profile, result.image))
+                {
+                    ApplyOrientation(result.image, orientation);
+                    result.decoder = "preview";
+                    result.embedded = true;
+                    return result.image.Valid();
+                }
+            }
+
+            std::uint32_t targetWidth = 0, targetHeight = 0;
+            FitWithin(sourceWidth, sourceHeight, edges.decode, targetWidth, targetHeight);
+            bool reduced = false;
+            if (!DecodeFrameReduced(factory, frame.p, sourceWidth, sourceHeight, targetWidth, targetHeight,
+                                    profile.interpolation, result.image, reduced))
+                return false;
+            ApplyOrientation(result.image, orientation);
+            result.decoder = reduced ? "wic-reduced" : "wic";
+            return result.image.Valid();
         }
 
         // ------------------------------------------------------- compact decoders --------------
@@ -1402,7 +2141,7 @@ namespace glide::thumb
                 if (at != std::string::npos)
                 {
                     double x = 0, y = 0, vbw = 0, vbh = 0;
-                    if (std::sscanf(head.c_str() + at + 9, "%lf %lf %lf %lf", &x, &y, &vbw, &vbh) == 4 && vbw > 0 && vbh > 0)
+                    if (sscanf_s(head.c_str() + at + 9, "%lf %lf %lf %lf", &x, &y, &vbw, &vbh) == 4 && vbw > 0 && vbh > 0)
                     {
                         if (w <= 0) w = vbw;
                         if (h <= 0) h = vbh;
@@ -1536,12 +2275,12 @@ namespace glide::thumb
             return extension == L".webp";
         }
 
-        // Decodes a still WebP (lossy VP8 or lossless VP8L) straight to straight-alpha BGRA. libwebp
-        // performs any requested scaled decode itself, so a large source is never materialised at
-        // full resolution just to be shrunk afterwards. Returns false for anything it cannot decode
+        // Decodes a still WebP (lossy VP8 or lossless VP8L) straight to premultiplied BGRA. libwebp
+        // performs the scaled decode itself, so a large source is never materialised at full
+        // resolution just to be shrunk afterwards. Returns false for anything it cannot decode
         // (including multi-frame animations), leaving the WIC/icon fallback intact.
-        bool DecodeWebp(const std::uint8_t* data, std::size_t size,
-                        std::uint32_t maxWidth, std::uint32_t maxHeight, Image& out)
+        bool DecodeWebp(const std::uint8_t* data, std::size_t size, std::uint32_t maxEdge,
+                        const QualityProfile& profile, Image& out, std::uint32_t& sourceWidth, std::uint32_t& sourceHeight)
         {
             if (!data || size == 0 || size > static_cast<std::size_t>(std::numeric_limits<int>::max()))
                 return false;
@@ -1553,31 +2292,26 @@ namespace glide::thumb
             if (static_cast<std::uint32_t>(width) > MaxDimension ||
                 static_cast<std::uint32_t>(height) > MaxDimension)
                 return false;
+            sourceWidth = static_cast<std::uint32_t>(width);
+            sourceHeight = static_cast<std::uint32_t>(height);
 
-            std::uint32_t targetWidth = static_cast<std::uint32_t>(width);
-            std::uint32_t targetHeight = static_cast<std::uint32_t>(height);
-            const std::uint32_t cap = std::max(maxWidth, maxHeight);
-            if (cap > 0)
-            {
-                const std::uint32_t longest = std::max(targetWidth, targetHeight);
-                if (longest > cap)
-                {
-                    const double ratio = static_cast<double>(cap) / longest;
-                    targetWidth = std::max<std::uint32_t>(1, static_cast<std::uint32_t>(std::floor(targetWidth * ratio)));
-                    targetHeight = std::max<std::uint32_t>(1, static_cast<std::uint32_t>(std::floor(targetHeight * ratio)));
-                }
-            }
+            std::uint32_t targetWidth = 0, targetHeight = 0;
+            FitWithin(sourceWidth, sourceHeight, maxEdge, targetWidth, targetHeight);
 
             WebPDecoderConfig config;
             if (!WebPInitDecoderConfig(&config)) return false;
-            config.output.colorspace = MODE_BGRA; // straight (non-premultiplied) BGRA, matching Image
-            if (targetWidth != static_cast<std::uint32_t>(width) ||
-                targetHeight != static_cast<std::uint32_t>(height))
+            config.output.colorspace = MODE_bgrA; // premultiplied BGRA
+            const bool shrinking = targetWidth != sourceWidth || targetHeight != sourceHeight;
+            if (shrinking)
             {
                 config.options.use_scaling = 1;
                 config.options.scaled_width = static_cast<int>(targetWidth);
                 config.options.scaled_height = static_cast<int>(targetHeight);
             }
+            const bool shrinkAtLeast2x = static_cast<std::uint64_t>(targetWidth) * 2 <= sourceWidth;
+            config.options.bypass_filtering = profile.webpBypassFiltering ? 1 : 0;
+            config.options.no_fancy_upsampling =
+                (profile.webpNoFancyUpsampling && (profile.quality == Quality::Fast || shrinkAtLeast2x)) ? 1 : 0;
 
             if (WebPDecode(data, size, &config) != VP8_STATUS_OK)
             {
@@ -1603,12 +2337,123 @@ namespace glide::thumb
                                     source + static_cast<std::size_t>(y) * config.output.u.RGBA.stride,
                                     rowBytes);
                     }
+                    out.premultiplied = true;
                     ok = true;
                 }
             }
             WebPFreeDecBuffer(&config.output);
             if (!ok) out = {};
             return ok;
+        }
+
+        bool LooksLikeSvg(const std::uint8_t* head, std::size_t size)
+        {
+            // Skip a UTF-8 BOM and leading whitespace before the signature check.
+            std::size_t offset = 0;
+            if (size >= 3 && head[0] == 0xEF && head[1] == 0xBB && head[2] == 0xBF) offset = 3;
+            while (offset < size && (head[offset] == ' ' || head[offset] == '\t' || head[offset] == '\r' || head[offset] == '\n')) ++offset;
+            return HasPrefix(head + offset, size - offset, "<?xml", 5) || HasPrefix(head + offset, size - offset, "<svg", 4);
+        }
+
+        DecodeResult Decode(Source& source, const wchar_t* extension, const DecodeOptions& options)
+        {
+            DecodeResult result;
+            if (source.Size() == 0 || source.Size() > MaxSourceBytes) return result;
+
+            const std::wstring extensionValue = NormalizeExtension(extension);
+            const QualityProfile profile = ProfileFor(options.quality);
+            const Edges edges = ResolveEdges(options, profile);
+            const std::uint64_t started = NowMicros();
+
+            std::size_t headSize = 0;
+            const std::uint8_t* head = source.Head(64, headSize);
+            if (!head) headSize = 0;
+
+            // 1. Vector documents render directly near the requested size.
+            if (IsVectorExtension(extensionValue.c_str()) || (head && LooksLikeSvg(head, headSize)))
+            {
+                std::size_t size = 0;
+                const std::uint8_t* data = source.All(size);
+                if (data && size > 0 && RenderSvg(data, size, std::min(edges.output, edges.decode), result.image))
+                {
+                    result.image.premultiplied = true;
+                    result.ok = true;
+                    result.decoder = "svg";
+                    result.vector = true;
+                    result.decodeMicros = NowMicros() - started;
+                    result.bytesRead = source.BytesRead();
+                    return result;
+                }
+            }
+
+            // 2. WebP through the vendored libwebp decoder. Windows ships no in-box WebP WIC codec
+            //    (it arrives only with the optional "Webp Image Extensions" Store package), so Glide
+            //    owns WebP itself. Tried ahead of WIC so a missing or stale platform codec can never
+            //    regress .webp thumbnails.
+            if (head && LooksLikeWebp(head, headSize, extensionValue))
+            {
+                std::size_t size = 0;
+                const std::uint8_t* data = source.All(size);
+                Image decoded;
+                std::uint32_t width = 0, height = 0;
+                if (data && DecodeWebp(data, size, edges.decode, profile, decoded, width, height) && decoded.Valid())
+                {
+                    result.image = std::move(decoded);
+                    result.ok = true;
+                    result.decoder = "webp";
+                    result.sourceWidth = width;
+                    result.sourceHeight = height;
+                    result.decodeMicros = NowMicros() - started;
+                    result.bytesRead = source.BytesRead();
+                    return result;
+                }
+            }
+
+            IWICImagingFactory* factory = CreateFactory();
+
+            // 3. Windows Imaging Component (covers JPEG/PNG/BMP/GIF/TIFF/ICO/DDS/JPEG-XR and any
+            //    installed HEIF/AVIF/JXL/RAW codec), decoded from the stream on demand.
+            if (factory)
+            {
+                IStream* stream = source.WicStream(factory);
+                DecodeResult attempt;
+                const bool ok = stream && DecodeWithWic(factory, stream, edges, profile, options.preferEmbedded, attempt);
+                if (stream) stream->Release();
+                if (ok)
+                {
+                    attempt.ok = true;
+                    attempt.decodeMicros = NowMicros() - started;
+                    attempt.bytesRead = source.BytesRead();
+                    factory->Release();
+                    return attempt;
+                }
+            }
+
+            // 4. Compact native decoders for the simple formats WIC does not cover.
+            if (IsCompactRasterExtension(extensionValue.c_str()) || extensionValue.empty())
+            {
+                std::size_t size = 0;
+                const std::uint8_t* data = source.All(size);
+                Image decoded;
+                if (data && DecodeCompact(data, size, extensionValue, decoded) && decoded.Valid())
+                {
+                    result.sourceWidth = decoded.width;
+                    result.sourceHeight = decoded.height;
+                    const std::uint64_t resizeStarted = NowMicros();
+                    std::uint32_t targetWidth = 0, targetHeight = 0;
+                    FitWithin(decoded.width, decoded.height, edges.decode, targetWidth, targetHeight);
+                    ResampleImage(factory, decoded, targetWidth, targetHeight, profile.interpolation);
+                    result.resizeMicros = NowMicros() - resizeStarted;
+                    result.image = std::move(decoded);
+                    result.ok = result.image.Valid();
+                    result.decoder = "compact";
+                    result.decodeMicros = NowMicros() - started;
+                }
+            }
+
+            if (factory) factory->Release();
+            result.bytesRead = source.BytesRead();
+            return result;
         }
     } // namespace
 
@@ -1631,104 +2476,53 @@ namespace glide::thumb
     DecodeResult DecodeForThumbnail(const std::uint8_t* data, std::size_t size, const wchar_t* extension,
                                     const DecodeOptions& options)
     {
-        DecodeResult result;
-        if (!data || size == 0 || size > MaxSourceBytes) return result;
-
-        const std::wstring extensionValue = NormalizeExtension(extension);
-        const std::uint32_t maxEdge = ClampEdge(std::max(options.maxWidth, options.maxHeight), HardCapLongestSide);
-        const std::uint32_t maxWidth = options.maxWidth ? std::min(options.maxWidth, maxEdge) : maxEdge;
-        const std::uint32_t maxHeight = options.maxHeight ? std::min(options.maxHeight, maxEdge) : maxEdge;
-
-        const std::uint64_t started = NowMicros();
-
-        // 1. Vector documents render directly near the requested size.
-        if (IsVectorExtension(extensionValue.c_str()) || HasPrefix(data, size, "<?xml", 5) || HasPrefix(data, size, "<svg", 4))
-        {
-            if (RenderSvg(data, size, maxEdge, result.image))
-            {
-                result.ok = true;
-                result.decoder = "svg";
-                result.vector = true;
-                result.decodeMicros = NowMicros() - started;
-                return result;
-            }
-        }
-
-        // 2. WebP through the vendored libwebp decoder. Windows ships no in-box WebP WIC codec
-        //    (it arrives only with the optional "Webp Image Extensions" Store package), so Glide
-        //    owns WebP itself. Tried ahead of WIC so a missing or stale platform codec can never
-        //    regress .webp thumbnails.
-        if (LooksLikeWebp(data, size, extensionValue))
-        {
-            const std::uint64_t webpStarted = NowMicros();
-            Image decoded;
-            if (DecodeWebp(data, size, maxWidth, maxHeight, decoded) && decoded.Valid())
-            {
-                result.image = std::move(decoded);
-                result.ok = true;
-                result.decoder = "webp";
-                result.decodeMicros = NowMicros() - webpStarted;
-                return result;
-            }
-        }
-
-        // 3. Windows Imaging Component (covers JPEG/PNG/BMP/GIF/TIFF/ICO/DDS/JPEG-XR and any
-        //    installed HEIF/AVIF/JXL codec), preferring an embedded thumbnail when present.
-        bool embeddedUsed = false;
-        {
-            const std::uint64_t wicStarted = NowMicros();
-            if (DecodeWithWic(data, size, maxWidth, maxHeight, options.preferEmbedded, result.image, embeddedUsed))
-            {
-                result.ok = true;
-                result.decoder = embeddedUsed ? "embedded" : "wic";
-                result.embedded = embeddedUsed;
-                result.decodeMicros = NowMicros() - wicStarted;
-                return result;
-            }
-        }
-
-        // 4. Compact native decoders for the simple formats WIC does not cover.
-        if (IsCompactRasterExtension(extensionValue.c_str()) || extensionValue.empty())
-        {
-            const std::uint64_t compactStarted = NowMicros();
-            Image decoded;
-            if (DecodeCompact(data, size, extensionValue, decoded) && decoded.Valid())
-            {
-                ShrinkToFit(decoded, maxWidth, maxHeight);
-                result.image = std::move(decoded);
-                result.ok = true;
-                result.decoder = "compact";
-                result.decodeMicros = NowMicros() - compactStarted;
-                return result;
-            }
-        }
-
-        return result;
+        if (!data || size == 0 || size > MaxSourceBytes) return {};
+        Source source(data, size);
+        return Decode(source, extension, options);
     }
 
-    Image ComposeThumbnail(const Image& source, std::uint32_t edge)
+    DecodeResult DecodeStreamForThumbnail(IStream* stream, const wchar_t* extension, const DecodeOptions& options)
+    {
+        if (!stream) return {};
+        Source source(stream);
+        return Decode(source, extension, options);
+    }
+
+    Image ComposeThumbnail(const Image& source, std::uint32_t edge, int quality)
     {
         Image composed;
         if (!source.Valid() || edge == 0) return composed;
-        const double ratio = std::min(static_cast<double>(edge) / source.width,
-                                      static_cast<double>(edge) / source.height);
-        const auto targetWidth = std::max<std::uint32_t>(1, static_cast<std::uint32_t>(std::floor(source.width * ratio)));
-        const auto targetHeight = std::max<std::uint32_t>(1, static_cast<std::uint32_t>(std::floor(source.height * ratio)));
-        Image scaled;
-        if (targetWidth == source.width && targetHeight == source.height) scaled = source;
-        else Downscale(source, targetWidth, targetHeight, scaled);
-        if (!scaled.Valid()) return composed;
+        // Defence in depth: the provider clamps the host's request too; never compose a canvas beyond
+        // MaxThumbnailEdge (an unclamped edge of e.g. 60000 asked for gigabytes inside Explorer's host).
+        edge = ClampRequestedEdge(edge);
+        std::uint32_t targetWidth = 0, targetHeight = 0;
+        FitExactly(source.width, source.height, edge, targetWidth, targetHeight);
+
+        composed = source;
+        if (targetWidth != source.width || targetHeight != source.height)
+        {
+            IWICImagingFactory* factory = CreateFactory();
+            const bool ok = ResampleImage(factory, composed, targetWidth, targetHeight, ProfileFor(quality).interpolation);
+            if (factory) factory->Release();
+            if (!ok) return {};
+        }
 
         // Composite onto opaque white so Explorer never shows a broken alpha thumbnail.
-        for (std::size_t i = 0; i < scaled.pixels.size(); i += 4)
+        const bool premultiplied = composed.premultiplied;
+        for (std::size_t i = 0; i < composed.pixels.size(); i += 4)
         {
-            const unsigned alpha = scaled.pixels[i + 3];
+            const unsigned alpha = composed.pixels[i + 3];
             if (alpha == 255) continue;
-            scaled.pixels[i + 0] = static_cast<std::uint8_t>((scaled.pixels[i + 0] * alpha + 255 * (255 - alpha)) / 255);
-            scaled.pixels[i + 1] = static_cast<std::uint8_t>((scaled.pixels[i + 1] * alpha + 255 * (255 - alpha)) / 255);
-            scaled.pixels[i + 2] = static_cast<std::uint8_t>((scaled.pixels[i + 2] * alpha + 255 * (255 - alpha)) / 255);
-            scaled.pixels[i + 3] = 255;
+            const unsigned background = 255 - alpha;
+            for (int c = 0; c < 3; ++c)
+            {
+                const unsigned value = composed.pixels[i + c];
+                const unsigned colour = premultiplied ? value : (value * alpha + 127) / 255;
+                composed.pixels[i + c] = static_cast<std::uint8_t>(std::min(255u, colour + background));
+            }
+            composed.pixels[i + 3] = 255;
         }
-        return scaled;
+        composed.premultiplied = true;
+        return composed;
     }
 }

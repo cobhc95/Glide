@@ -1,6 +1,5 @@
 using Avalonia;
 using Avalonia.Headless;
-using Xunit;
 
 [assembly: AvaloniaTestApplication(typeof(Glide.Core.Tests.AvaloniaHeadlessFixture.HeadlessTestApplication))]
 
@@ -59,7 +58,12 @@ public sealed class AvaloniaHeadlessFixture
         EnsureInitialized();
         if (_session is not null)
         {
-            await _session.Dispatch(action, CancellationToken.None);
+            // Dispatch(Func<Task>) binds to the generic Dispatch<TResult>(Func<TResult>) overload with
+            // TResult = Task, which only waits until the body reaches its FIRST await: everything after
+            // an `await Task.Delay(...)` used to run after the test had already finished, so later
+            // assertions were never observed (registry audit, 5.0.x). Route through the
+            // Func<Task<TResult>> overload so the whole async body runs inside the dispatch scope.
+            await _session.Dispatch(async () => { await action().ConfigureAwait(true); return true; }, CancellationToken.None);
         }
         else
         {

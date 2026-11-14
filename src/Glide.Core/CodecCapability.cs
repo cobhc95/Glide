@@ -53,11 +53,6 @@ public static class CodecCapabilityRegistry
         lock (ExternalGate) ExternalProviders.Clear();
     }
 
-    public static IReadOnlyDictionary<string, string> ExternalProviderSnapshot()
-    {
-        lock (ExternalGate) return new Dictionary<string, string>(ExternalProviders, StringComparer.OrdinalIgnoreCase);
-    }
-
     private static CodecCapability Create(string ext)
     {
         string? externalProvider;

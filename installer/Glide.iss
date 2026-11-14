@@ -50,7 +50,8 @@ Root: HKLM; Subkey: "Software\RegisteredApplications"; ValueType: none; ValueNam
 Root: HKLM; Subkey: "Software\Glide Image Viewer"; Flags: deletekey
 
 [Run]
-Filename: "{app}\Glide.exe"; Description: "Launch Glide"; Flags: nowait postinstall skipifsilent
+; runasoriginaluser: the "Launch Glide" checkbox must not start the viewer with Setup's elevated token.
+Filename: "{app}\Glide.exe"; Description: "Launch Glide"; Flags: nowait postinstall skipifsilent runasoriginaluser
 
 [Code]
 procedure StopAllGlideProcesses;
@@ -126,12 +127,9 @@ begin
     Exit;
   end;
 
-  FoundPath := ExistingAppPath(HKCU, 'Software\Microsoft\Windows\CurrentVersion\App Paths\Glide.exe');
-  if FoundPath <> '' then
-  begin
-    Result := FoundPath;
-    Exit;
-  end;
+  // Security: never take the install directory from HKCU. This setup runs elevated, then runs the
+  // installed Glide.exe elevated and registers it machine-wide; a per-user value (writable by any
+  // non-elevated process of this user) could point all of that at a user-writable folder.
 
   FoundPath := LegacyAppPath(HKLM, 'Software\Classes\Applications\Glide.exe\shell\open\command');
   if FoundPath <> '' then
@@ -148,6 +146,82 @@ begin
   end;
 
   Result := ExpandConstant('{autopf}\Glide');
+end;
+
+// ---------------------------------------------------------------- install folder permissions ---
+// Security (R2): Setup runs elevated, then runs Glide.exe from the install folder elevated
+// (--register-*) and registers that folder machine-wide (Open With, the Explorer thumbnail provider
+// that every user's Explorer loads). A custom folder such as C:\Glide inherits "Authenticated Users:
+// Modify" from the drive root, so any local program could plant or replace a DLL there and have it run
+// elevated or inside other users' Explorer. Such folders get the Program Files permission set:
+// inheritance removed, owner Administrators, SYSTEM and Administrators full control, Users and app
+// packages read and execute.
+// - Under Program Files the inherited permissions are already that, so nothing changes.
+// - A per-user folder inside this user's own profile (for example %LOCALAPPDATA%\Programs\Glide) is
+//   left as it is: the profile is already private to the user, and Glide may keep its settings and the
+//   optional FFmpeg download beside it (%LOCALAPPDATA%\Glide), which needs the user's write access.
+
+function IsUnderFolder(const Path, Root: String): Boolean;
+var
+  P, R: String;
+begin
+  Result := False;
+  if (Path = '') or (Root = '') then Exit;
+  P := AddBackslash(Lowercase(ExpandFileName(Path)));
+  R := AddBackslash(Lowercase(ExpandFileName(Root)));
+  Result := (Length(R) > 3) and (Copy(P, 1, Length(R)) = R);
+end;
+
+function IsProgramFilesFolder(const Dir: String): Boolean;
+begin
+  Result := IsUnderFolder(Dir, ExpandConstant('{commonpf64}')) or IsUnderFolder(Dir, ExpandConstant('{commonpf32}'));
+end;
+
+function IsUserProfileFolder(const Dir: String): Boolean;
+begin
+  Result := IsUnderFolder(Dir, GetEnv('USERPROFILE')) or IsUnderFolder(Dir, ExpandConstant('{localappdata}')) or
+            IsUnderFolder(Dir, ExpandConstant('{userappdata}'));
+end;
+
+function InstallFolderNeedsLockdown(const Dir: String): Boolean;
+begin
+  Result := not IsProgramFilesFolder(Dir) and not IsUserProfileFolder(Dir);
+end;
+
+procedure RunIcacls(const Params: String);
+var
+  ResultCode: Integer;
+begin
+  if not Exec(ExpandConstant('{sys}\icacls.exe'), Params, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) or (ResultCode <> 0) then
+    Log(Format('icacls %s failed (exit code %d)', [Params, ResultCode]));
+end;
+
+var
+  { True when the install folder is Glide's own: created by this Setup or holding a previous Glide. }
+  InstallFolderIsGlides: Boolean;
+
+procedure LockDownInstallFolder(const Dir: String; IncludeContents: Boolean);
+begin
+  { Well-known SIDs, so this works on every Windows display language:
+    S-1-5-18 SYSTEM, S-1-5-32-544 Administrators, S-1-5-32-545 Users,
+    S-1-15-2-1 ALL APPLICATION PACKAGES, S-1-15-2-2 ALL RESTRICTED APPLICATION PACKAGES. }
+  if not DirExists(Dir) then ForceDirectories(Dir);
+  { Owner first: the owner of a folder (or of a file someone replaced earlier) keeps the right to change
+    its permissions, so it could otherwise grant itself write access again. }
+  if IncludeContents then
+    RunIcacls('"' + Dir + '" /setowner *S-1-5-32-544 /T /C /Q')
+  else
+    RunIcacls('"' + Dir + '" /setowner *S-1-5-32-544 /C /Q');
+  { /reset drops every explicit entry, /inheritance:r then removes the inherited ones, and the grants
+    rebuild exactly the Program Files set. Windows propagates the new inheritable entries to the files. }
+  RunIcacls('"' + Dir + '" /reset /C /Q');
+  RunIcacls('"' + Dir + '" /inheritance:r /grant:r *S-1-5-18:(OI)(CI)F *S-1-5-32-544:(OI)(CI)F ' +
+            '*S-1-5-32-545:(OI)(CI)RX *S-1-15-2-1:(OI)(CI)RX *S-1-15-2-2:(OI)(CI)RX /C /Q');
+  { Glide's own folder: also drop explicit entries someone added to files inside it, so every file
+    inherits only from the folder. An existing unrelated folder chosen as the install folder keeps its
+    other files' explicit entries (they belong to other software). }
+  if IncludeContents and InstallFolderIsGlides then
+    RunIcacls('"' + AddBackslash(Dir) + '*" /reset /T /C /Q');
 end;
 
 procedure RegisterGlideAssociations;
@@ -196,9 +270,22 @@ begin
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
+var
+  AppDir: String;
 begin
+  AppDir := ExpandConstant('{app}');
+  { Before the files are copied, so they are never written into a folder others can modify. }
+  if CurStep = ssInstall then
+  begin
+    InstallFolderIsGlides := (not DirExists(AppDir)) or FileExists(AddBackslash(AppDir) + '{#MyAppExeName}');
+    if InstallFolderNeedsLockdown(AppDir) then
+      LockDownInstallFolder(AppDir, False);
+  end;
   if CurStep = ssPostInstall then
   begin
+    { Again with every file, before Glide.exe runs elevated from this folder. }
+    if InstallFolderNeedsLockdown(AppDir) then
+      LockDownInstallFolder(AppDir, True);
     RegisterGlideAssociations;
     RegisterGlideThumbnails;
   end;

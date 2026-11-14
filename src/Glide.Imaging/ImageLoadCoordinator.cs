@@ -1,5 +1,4 @@
 using System.Buffers;
-using System.IO.MemoryMappedFiles;
 using System.Runtime.InteropServices;
 using Avalonia.Media.Imaging;
 using Glide.Core;
@@ -103,7 +102,7 @@ public sealed class ImageLoadCoordinator : IDisposable
     private readonly LinkedList<string> _preparedLru = new();
     private readonly SemaphoreSlim _foregroundGate = new(ImagePerformanceGovernor.Current.ForegroundDecodeLanes, ImagePerformanceGovernor.Current.ForegroundDecodeLanes);
     private readonly SemaphoreSlim _refinementGate = new(1, 1);
-    private readonly SemaphoreSlim _speculativeGate = new(ImagePerformanceGovernor.Current.SpeculativeDecodeLanes, ImagePerformanceGovernor.Current.SpeculativeDecodeLanes);
+    private readonly SemaphoreSlim _speculativeGate = new(ImagePerformanceGovernor.SpeculativeDecodeLanes, ImagePerformanceGovernor.SpeculativeDecodeLanes);
     private readonly SemaphoreSlim _compressedWarmGate = new(ImagePerformanceGovernor.Current.CompressedWarmLanes, ImagePerformanceGovernor.Current.CompressedWarmLanes);
     private CancellationTokenSource _prefetchCts = new();
     private long _generation;
@@ -122,13 +121,102 @@ public sealed class ImageLoadCoordinator : IDisposable
     private sealed record PreparedEntry(Bitmap Bitmap, bool IsFull, ImageDimensions Source, FileIdentity Identity, long EstimatedBytes, LinkedListNode<string> Node);
     private readonly record struct FileIdentity(long Length, long LastWriteTicksUtc);
 
+    // Deterministic bitmap lifetime (replaces the old "skip disposal and leave it to the GC" path).
+    // Every cache-owned bitmap handed to a caller in an ImageLoadResult carries one presentation lease
+    // until the caller calls ReleaseBitmap. Cache eviction, purge or promotion never disposes a leased
+    // (or viewport-active) bitmap: it is moved to _retired instead and disposed by the final
+    // ReleaseBitmap, after the caller's presentation fence. Guarded by _cacheGate.
+    private readonly Dictionary<Bitmap, int> _leases = new(ReferenceEqualityComparer.Instance);
+    private readonly HashSet<Bitmap> _retired = new(ReferenceEqualityComparer.Instance);
+    // Neighbour preparations currently decoding, so a foreground request for the same file joins
+    // the in-flight decode instead of duplicating it. Guarded by _cacheGate.
+    private readonly Dictionary<string, Task> _inflightPrepares = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Concurrent neighbour decodes per prefetch run (hardware tier: 1 constrained, 2 mainstream, 3-6 high-end).</summary>
+    private static int PrefetchDecodeLanes => ImagePerformanceGovernor.SpeculativeDecodeLanes;
+
+    /// <summary>Test seam: observes every bitmap disposal performed by the coordinator.</summary>
+    internal Action<Bitmap>? BitmapDisposedForTests { get; set; }
+
     public ImageLoadCoordinator(IImageDecoderBackend? backend = null) => _backend = backend ?? new AvaloniaImageDecoderBackend();
 
     /// <summary>
-    /// Callback to determine if a bitmap is currently active in the viewport or mid-transition,
-    /// preventing premature disposal during LRU cache trimming, promotion, or purge.
+    /// Extra safety net consulted before the cache disposes a bitmap: true while the viewport still
+    /// shows it. Ownership itself is tracked with presentation leases (see <see cref="ReleaseBitmap"/>);
+    /// a bitmap that is in active use is retired, never leaked to the GC.
     /// </summary>
     public Func<Bitmap?, bool>? IsBitmapInActiveUse { get; set; }
+
+    /// <summary>
+    /// The caller no longer presents <paramref name="bitmap"/> (call it after the compositor fence for
+    /// a replaced frame, or immediately for a stale/rejected result). Releases one presentation lease;
+    /// when none remain the bitmap is disposed unless the cache still owns it. Bitmaps that were never
+    /// cached (rapid previews, cacheResult:false loads) are disposed here as well, so the caller has a
+    /// single release rule for every <see cref="ImageLoadResult"/> it received.
+    /// </summary>
+    /// <returns>True when the bitmap was disposed by this call.</returns>
+    public bool ReleaseBitmap(Bitmap? bitmap)
+    {
+        if (bitmap is null) return false;
+        lock (_cacheGate)
+        {
+            if (_leases.TryGetValue(bitmap, out var count))
+            {
+                if (count > 1) { _leases[bitmap] = count - 1; return false; }
+                _leases.Remove(bitmap);
+            }
+            if (IsCachedLocked(bitmap)) return false;
+            _retired.Remove(bitmap);
+        }
+        return DisposeBitmap(bitmap);
+    }
+
+    /// <summary>Number of presentation leases currently held on <paramref name="bitmap"/> (diagnostics/tests).</summary>
+    public int GetLeaseCount(Bitmap? bitmap)
+    {
+        if (bitmap is null) return 0;
+        lock (_cacheGate) return _leases.TryGetValue(bitmap, out var count) ? count : 0;
+    }
+
+    /// <summary>Bitmaps evicted from the cache while still presented, awaiting their final release.</summary>
+    public int RetiredBitmapCount { get { lock (_cacheGate) return _retired.Count; } }
+
+    private void LeaseLocked(Bitmap bitmap) => _leases[bitmap] = _leases.TryGetValue(bitmap, out var count) ? count + 1 : 1;
+
+    private bool IsCachedLocked(Bitmap bitmap)
+    {
+        foreach (var entry in _prepared.Values)
+            if (ReferenceEquals(entry.Bitmap, bitmap)) return true;
+        return false;
+    }
+
+    /// <summary>Cache gave up ownership of <paramref name="bitmap"/>: dispose now unless someone still presents it.</summary>
+    private void DisposeOrRetireLocked(Bitmap bitmap)
+    {
+        if (_leases.ContainsKey(bitmap) || IsBitmapInActiveUse?.Invoke(bitmap) == true)
+        {
+            _retired.Add(bitmap);
+            return;
+        }
+        DisposeBitmap(bitmap);
+    }
+
+    /// <summary>Disposes once; a repeated release of the same bitmap is a no-op. Returns true when disposed now.</summary>
+    private bool DisposeBitmap(Bitmap bitmap)
+    {
+        lock (_disposedGate)
+        {
+            if (_disposedByLoader.TryGetValue(bitmap, out _)) return false;
+            _disposedByLoader.Add(bitmap, DisposedMarker);
+        }
+        BitmapDisposedForTests?.Invoke(bitmap);
+        bitmap.Dispose();
+        return true;
+    }
+
+    private static readonly object DisposedMarker = new();
+    private readonly object _disposedGate = new();
+    private readonly System.Runtime.CompilerServices.ConditionalWeakTable<Bitmap, object> _disposedByLoader = new();
 
     public ImagePerformancePolicy Policy
     {
@@ -179,7 +267,6 @@ public sealed class ImageLoadCoordinator : IDisposable
             catch (OperationCanceledException) { }
         }, CancellationToken.None);
     }
-    public ImageNavigationActivity NavigationActivity => _navigationActivity;
 
     public async Task<ImageLoadResult?> LoadForegroundAsync(string path, CancellationToken cancellationToken = default)
         => await LoadForegroundAsync(path, Policy, cancellationToken).ConfigureAwait(false);
@@ -202,7 +289,7 @@ public sealed class ImageLoadCoordinator : IDisposable
         var started = System.Diagnostics.Stopwatch.GetTimestamp();
         if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("foreground_load_start", ImageFormatRegistry.GetLongestExtension(path));
 
-        if (!requireFull && TryGetPrepared(path, out var prepared))
+        if (!requireFull && TryGetPrepared(path, out var prepared, lease: true))
         {
             if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("foreground_prepared_cache_hit", path);
             return new ImageLoadResult(path, prepared.Bitmap, System.Diagnostics.Stopwatch.GetElapsedTime(started),
@@ -217,45 +304,73 @@ public sealed class ImageLoadCoordinator : IDisposable
         {
             using (preloadedResult)
             {
+                Bitmap? preloadedBitmap = null;
+                var route = "startup-preloaded";
                 if (preloadedResult.Bitmap is not null)
                 {
-                    var preloadedSource = NormalizeSourceOrientation(preloadedResult.Dimensions, preloadedResult.Bitmap);
-                    if (cacheResult) AddPrepared(path, preloadedResult.Bitmap, isFull: true, preloadedSource, epoch: -1);
+                    preloadedBitmap = preloadedResult.Bitmap;
                     preloadedResult.IsConsumed = true;
-                    if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("foreground_startup_preload_hit", path);
-                    return new ImageLoadResult(path, preloadedResult.Bitmap, System.Diagnostics.Stopwatch.GetElapsedTime(started),
-                        CacheHit: true, IsPreview: false, SourceWidth: preloadedSource.Width,
-                        SourceHeight: preloadedSource.Height, Generation: generation, PreparedFrameHit: true,
-                        DecodeRoute: "startup-preloaded");
                 }
-                if (preloadedResult.NativeImage.Data != IntPtr.Zero && preloadedResult.NativeStatus == 1)
+                else if (preloadedResult.NativeImage.Data != IntPtr.Zero && preloadedResult.NativeStatus == 1)
                 {
-                    if (NativeImageDecoder.TryCreateBitmapFromNative(preloadedResult.NativeImage, preloadedResult.NativeStatus, out var bitmap))
-                    {
-                        preloadedResult.IsConsumed = true;
-                        var preloadedSource = NormalizeSourceOrientation(preloadedResult.Dimensions, bitmap);
-                        if (cacheResult) AddPrepared(path, bitmap, isFull: true, preloadedSource, epoch: -1);
-                        if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("foreground_startup_preload_hit", path);
-                        return new ImageLoadResult(path, bitmap, System.Diagnostics.Stopwatch.GetElapsedTime(started),
-                            CacheHit: true, IsPreview: false, SourceWidth: preloadedSource.Width,
-                            SourceHeight: preloadedSource.Height, Generation: generation, PreparedFrameHit: true,
-                            DecodeRoute: "startup-native-preloaded");
-                    }
+                    // TryCreateBitmapFromNative always frees the native buffer (success or failure).
+                    // The copy into the bitmap (tens of MB for a full-resolution preload) must not run on
+                    // the UI thread, which is the caller here.
+                    preloadedResult.IsConsumed = true;
+                    var native = preloadedResult.NativeImage;
+                    var nativeStatus = preloadedResult.NativeStatus;
+                    preloadedBitmap = await Task.Run(() =>
+                        NativeImageDecoder.TryCreateBitmapFromNative(native, nativeStatus, out var nativeBitmap) ? nativeBitmap : null,
+                        CancellationToken.None).ConfigureAwait(false);
+                    if (preloadedBitmap is not null) route = "startup-native-preloaded";
                 }
-                if (preloadedResult.PreloadedBytes is not null && preloadedResult.PreloadedBytes.Length > 0)
+                else if (preloadedResult.PreloadedBytes is not null && preloadedResult.PreloadedBytes.Length > 0 &&
+                         preloadedResult.Dimensions.IsValid && DecodeMemoryGuard.AllowsFullDecode(preloadedResult.Dimensions))
                 {
+                    // Full decode without a scaled path: only for a frame of known size within the pixel
+                    // cap and the memory guard (the preloader enforces the same rule; this is the backstop).
                     using var ms = new MemoryStream(preloadedResult.PreloadedBytes, writable: false);
-                    var bitmap = _backend.DecodeFull(ms, path);
+                    preloadedBitmap = _backend.DecodeFull(ms, path);
                     preloadedResult.IsConsumed = true;
-                    var preloadedSource = NormalizeSourceOrientation(preloadedResult.Dimensions, bitmap);
-                    if (cacheResult) AddPrepared(path, bitmap, isFull: true, preloadedSource, epoch: -1);
-                    if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("foreground_startup_preload_hit", path);
-                    return new ImageLoadResult(path, bitmap, System.Diagnostics.Stopwatch.GetElapsedTime(started),
-                        CacheHit: false, IsPreview: false, SourceWidth: preloadedSource.Width,
-                        SourceHeight: preloadedSource.Height, Generation: generation, PreparedFrameHit: true,
-                        DecodeRoute: "startup-memory-preloaded");
+                    route = "startup-memory-preloaded";
+                }
+
+                if (preloadedBitmap is not null)
+                {
+                    var preloadedSource = preloadedResult.Dimensions.IsValid
+                        ? NormalizeSourceOrientation(preloadedResult.Dimensions, preloadedBitmap)
+                        : new ImageDimensions(preloadedBitmap.PixelSize.Width, preloadedBitmap.PixelSize.Height);
+                    // The preloader decodes large JPEGs at the screen-sized preview box (see
+                    // StartupImagePreloader), so report a reduced frame as a preview: refinement and the
+                    // quality-recovery path then fetch full resolution exactly as for any other preview.
+                    var preloadedIsPreview = preloadedBitmap.PixelSize.Width < preloadedSource.Width ||
+                                             preloadedBitmap.PixelSize.Height < preloadedSource.Height;
+                    if (cacheResult) TryAddPrepared(path, preloadedBitmap, isFull: !preloadedIsPreview, preloadedSource, epoch: -1, lease: true);
+                    if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("foreground_startup_preload_hit", $"{route};preview={preloadedIsPreview}");
+                    return new ImageLoadResult(path, preloadedBitmap, System.Diagnostics.Stopwatch.GetElapsedTime(started),
+                        CacheHit: true, IsPreview: preloadedIsPreview, SourceWidth: preloadedSource.Width,
+                        SourceHeight: preloadedSource.Height, Generation: generation, PreparedFrameHit: false,
+                        DecodeRoute: route);
                 }
             }
+        }
+
+        // Foreground miss. If a neighbour preparation is already decoding this exact file, join it
+        // instead of starting a second decode of the same pixels (the prepared re-check below then
+        // hits). Otherwise stop the stale prefetch run from starting more decodes: the current image
+        // beats speculation, and the neighbourhood is re-planned once this frame is presented.
+        if (!requireFull)
+        {
+            Task? inflight;
+            lock (_cacheGate) _inflightPrepares.TryGetValue(path, out inflight);
+            if (inflight is not null)
+            {
+                if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("foreground_join_inflight_prefetch", ImageFormatRegistry.GetLongestExtension(path));
+                try { await inflight.WaitAsync(cancellationToken).ConfigureAwait(false); }
+                catch (OperationCanceledException) { throw; }
+                catch { }
+            }
+            lock (_cacheGate) _prefetchCts.Cancel();
         }
 
         return await Task.Run(async () =>
@@ -266,7 +381,7 @@ public sealed class ImageLoadCoordinator : IDisposable
                 cancellationToken.ThrowIfCancellationRequested();
                 if (generation != Volatile.Read(ref _generation)) return null;
 
-                if (!requireFull && TryGetPrepared(path, out var preparedWhileWaiting))
+                if (!requireFull && TryGetPrepared(path, out var preparedWhileWaiting, lease: true))
                 {
                     if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("foreground_prepared_cache_hit", path);
                     return new ImageLoadResult(path, preparedWhileWaiting.Bitmap, System.Diagnostics.Stopwatch.GetElapsedTime(started),
@@ -282,7 +397,18 @@ public sealed class ImageLoadCoordinator : IDisposable
                     var source = await ProbeDimensionsAsync(path, stream, cancellationToken).ConfigureAwait(false);
                     if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("foreground_probe_ready", source.IsValid ? $"{source.Width}x{source.Height}" : "unknown");
 
-                    if (!requireFull && policy.DecoderScaledFirstFrame && _backend is IPathOptimizedImageDecoderBackend pathBackend &&
+                    // Formats whose codecs cannot decode at reduced size (PNG/WebP/TIFF/BMP/GIF/ICO) pay a
+                    // full decode for a "preview" anyway; the Fit refinement then decoded them twice more
+                    // (bounded + full). Decode once at source resolution when it fits the budget.
+                    // Memory guard (see DecodeMemoryGuard): a frame within the pixel cap that would not fit
+                    // the memory available right now is shown through its preview, never decoded full.
+                    var overMemory = source.IsValid && !IsDecompressionBomb(source) && !DecodeMemoryGuard.FitsAvailableMemory(source);
+                    var fullFirst = !requireFull && !overMemory && policy.DecoderScaledFirstFrame && source.IsValid &&
+                        RequiresPreview(source, policy) && PrefersFullFirstFrame(path, source, policy);
+                    if (fullFirst && GlidePerformanceTrace.Enabled)
+                        GlidePerformanceTrace.Mark("foreground_full_first", $"source={source.Width}x{source.Height}");
+
+                    if (!fullFirst && !requireFull && policy.DecoderScaledFirstFrame && _backend is IPathOptimizedImageDecoderBackend pathBackend &&
                         pathBackend.SupportsPathPreview(path) && source.IsValid && RequiresPreview(source, policy))
                     {
                         if (GlidePerformanceTrace.Enabled)
@@ -294,7 +420,7 @@ public sealed class ImageLoadCoordinator : IDisposable
                         {
                             if (generation != Volatile.Read(ref _generation))
                             {
-                                pathPreview.Bitmap.Dispose();
+                                DisposeBitmap(pathPreview.Bitmap);
                                 return null;
                             }
                             if (GlidePerformanceTrace.Enabled)
@@ -302,7 +428,7 @@ public sealed class ImageLoadCoordinator : IDisposable
                                     $"route={pathPreview.Route};output={pathPreview.Bitmap.PixelSize.Width}x{pathPreview.Bitmap.PixelSize.Height};elapsed={System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds:F3}ms");
                             source = NormalizeSourceOrientation(source, pathPreview.Bitmap);
                             if (cacheResult && (!pathPreview.IsPreview || cachePreview))
-                                AddPrepared(path, pathPreview.Bitmap, isFull: !pathPreview.IsPreview, source, epoch: -1);
+                                TryAddPrepared(path, pathPreview.Bitmap, isFull: !pathPreview.IsPreview, source, epoch: -1, lease: true);
                             return new ImageLoadResult(path, pathPreview.Bitmap, System.Diagnostics.Stopwatch.GetElapsedTime(started),
                                 CacheHit: pathPreview.Route == "shell-cache", IsPreview: pathPreview.IsPreview,
                                 SourceWidth: source.Width, SourceHeight: source.Height, Generation: generation, PreparedFrameHit: false,
@@ -316,11 +442,40 @@ public sealed class ImageLoadCoordinator : IDisposable
                     if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("foreground_decode_start", source.IsValid ? $"{source.Width}x{source.Height}" : "unknown");
                     if (source.IsValid && IsDecompressionBomb(source))
                     {
+                        // A source beyond the safe full-decode ceiling (e.g. 20000 x 20000) can still be
+                        // shown through its decoder-scaled frame. A full-resolution request (quality
+                        // recovery, rapid-browse settle) keeps that frame instead of failing the open.
+                        if (TryGetPrepared(path, out var bounded, lease: true))
+                        {
+                            if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("foreground_full_refused_kept_preview", $"{source.Width}x{source.Height}");
+                            return new ImageLoadResult(path, bounded.Bitmap, System.Diagnostics.Stopwatch.GetElapsedTime(started),
+                                CacheHit: true, IsPreview: !bounded.IsFull, SourceWidth: bounded.Source.Width,
+                                SourceHeight: bounded.Source.Height, Generation: generation, PreparedFrameHit: true,
+                                DecodeRoute: "prepared-cache");
+                        }
                         throw new InvalidDataException(
                             $"Image dimensions ({source.Width}x{source.Height}) exceed the safe decompression bomb limit of {ImageHeaderProbe.MaxTotalPixels:N0} pixels.");
                     }
 
-                    if (!requireFull && policy.DecoderScaledFirstFrame && source.IsValid && RequiresPreview(source, policy))
+                    var scaledFirstFrame = !fullFirst && !requireFull && policy.DecoderScaledFirstFrame && source.IsValid && RequiresPreview(source, policy);
+                    if (overMemory && !scaledFirstFrame)
+                    {
+                        // A full frame was requested (or the image has no scaled first frame) but it does
+                        // not fit the free memory: keep the cached preview, else decode a bounded one.
+                        if (cacheResult && TryGetPrepared(path, out var kept, lease: true))
+                        {
+                            if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("foreground_full_refused_memory_kept_preview", $"{source.Width}x{source.Height}");
+                            return new ImageLoadResult(path, kept.Bitmap, System.Diagnostics.Stopwatch.GetElapsedTime(started),
+                                CacheHit: true, IsPreview: !kept.IsFull, SourceWidth: kept.Source.Width,
+                                SourceHeight: kept.Source.Height, Generation: generation, PreparedFrameHit: true,
+                                DecodeRoute: "prepared-cache");
+                        }
+                        if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("foreground_full_refused_memory", $"{source.Width}x{source.Height}");
+                        (bitmap, isPreview) = await DecodeBoundedFallbackAsync(stream, path, source, policy, cancellationToken).ConfigureAwait(false)
+                            ?? throw new InvalidDataException(
+                                $"There is not enough free memory to open this {source.Width}x{source.Height} image at full size.");
+                    }
+                    else if (scaledFirstFrame)
                     {
                         var targetLongest = RequiredPreviewLongestSide(source, policy);
                         bitmap = await _backend.DecodePreviewAsync(stream, source, targetLongest, policy.PreviewInterpolation, path, cancellationToken).ConfigureAwait(false);
@@ -328,20 +483,38 @@ public sealed class ImageLoadCoordinator : IDisposable
                     }
                     else
                     {
-                        bitmap = await _backend.DecodeFullAsync(stream, path, cancellationToken).ConfigureAwait(false);
+                        try
+                        {
+                            bitmap = await _backend.DecodeFullAsync(stream, path, cancellationToken).ConfigureAwait(false);
+                        }
+                        catch (Exception ex) when (DecodeMemoryGuard.IsAllocationFailure(ex) && source.IsValid && RequiresPreview(source, policy))
+                        {
+                            // The full frame could not be allocated (memory changed since the check, or the
+                            // codec needed more than the estimate): fall back to the preview instead of failing.
+                            if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("foreground_full_allocation_failed", $"{source.Width}x{source.Height}");
+                            if (cacheResult && TryGetPrepared(path, out var kept, lease: true))
+                                return new ImageLoadResult(path, kept.Bitmap, System.Diagnostics.Stopwatch.GetElapsedTime(started),
+                                    CacheHit: true, IsPreview: !kept.IsFull, SourceWidth: kept.Source.Width,
+                                    SourceHeight: kept.Source.Height, Generation: generation, PreparedFrameHit: true,
+                                    DecodeRoute: "prepared-cache");
+                            (bitmap, isPreview) = await DecodeBoundedFallbackAsync(stream, path, source, policy, cancellationToken).ConfigureAwait(false)
+                                ?? throw new InvalidDataException(
+                                    $"There is not enough free memory to open this {source.Width}x{source.Height} image at full size.", ex);
+                        }
                         if (!source.IsValid) source = new ImageDimensions(bitmap.PixelSize.Width, bitmap.PixelSize.Height);
                     }
 
                     if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("foreground_decode_ready", $"{bitmap.PixelSize.Width}x{bitmap.PixelSize.Height};preview={isPreview}");
                     if (generation != Volatile.Read(ref _generation))
                     {
-                        bitmap.Dispose();
+                        DisposeBitmap(bitmap);
                         return null;
                     }
                     if (!source.IsValid) source = new ImageDimensions(bitmap.PixelSize.Width, bitmap.PixelSize.Height);
                     source = NormalizeSourceOrientation(source, bitmap);
+                    // A rejected admission leaves the bitmap caller-owned (never disposed under the caller).
                     if (cacheResult && (!isPreview || cachePreview))
-                        AddPrepared(path, bitmap, isFull: !isPreview, source, epoch: -1);
+                        TryAddPrepared(path, bitmap, isFull: !isPreview, source, epoch: -1, lease: true);
                     if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("foreground_load_end", $"elapsed={System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds:F3}ms");
                     return new ImageLoadResult(path, bitmap, System.Diagnostics.Stopwatch.GetElapsedTime(started),
                         compressedHit, isPreview, source.Width, source.Height, generation, false,
@@ -369,6 +542,16 @@ public sealed class ImageLoadCoordinator : IDisposable
         var source = new ImageDimensions(firstFrame.SourceWidth, firstFrame.SourceHeight);
         var plan = _refinementScheduler.Plan(source, demand, _navigationActivity, policy);
         if (!plan.Allowed) return null;
+        // Beyond the full-decode ceiling the caller can never get the full frame; a bounded refinement
+        // would be decoded only to be discarded by MainWindow (it then asks for the full frame).
+        if (IsDecompressionBomb(source)) return null;
+        // Same for a frame the memory guard refuses: the caller would follow a bounded refinement with a
+        // full-resolution request, which would only return the preview again.
+        if (!DecodeMemoryGuard.FitsAvailableMemory(source))
+        {
+            if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("refinement_skipped_memory_guard", $"{source.Width}x{source.Height}");
+            return null;
+        }
 
         if (TryGetPrepared(firstFrame.Path, out var prepared) && prepared.IsFull)
         {
@@ -381,6 +564,8 @@ public sealed class ImageLoadCoordinator : IDisposable
             var firstBytes = EstimatedDecodedBytes(firstFrame.Bitmap.PixelSize.Width, firstFrame.Bitmap.PixelSize.Height);
             if (preparedBytes > Math.Max(0, preparedBudget - firstBytes))
             { return null; }
+            // The caller will present this cached frame: lease it (only if it is still cached).
+            if (!TryLeaseCached(firstFrame.Path, prepared.Bitmap)) return null;
             return new ImageLoadResult(firstFrame.Path, prepared.Bitmap, TimeSpan.Zero, true, false,
                 prepared.Source.Width, prepared.Source.Height, firstFrame.Generation, true);
         }
@@ -404,22 +589,51 @@ public sealed class ImageLoadCoordinator : IDisposable
                     GlidePerformanceTrace.Mark("refinement_bounded_by_budget", $"source={sourceBytes};firstFrame={firstFrameBytes};budget={budgetBytes}");
                 var boundedTarget = Math.Min(plan.LongestSide, policy.PreviewLongestSide * 2);
                 boundedTarget = ImageRefinementScheduler.BoundLongestSide(source, boundedTarget, Math.Max(0, budgetBytes - firstFrameBytes));
+                if (!full)
+                {
+                    var firstLongest = Math.Max(firstFrame.Bitmap.PixelSize.Width, firstFrame.Bitmap.PixelSize.Height);
+                    // A plain Fit demand only needs the image's longest side at the fitted scale: a
+                    // portrait photo in a landscape window is limited by the window height, not width.
+                    if (demand.DisplayPixelWidth > 0 && demand.DisplayPixelHeight > 0 && !demand.SelectionZoom && !demand.ExactPixelDemand)
+                    {
+                        var zoom = double.IsFinite(demand.Zoom) && demand.Zoom > 0 ? demand.Zoom : 1;
+                        var fit = Math.Min(demand.DisplayPixelWidth * zoom / source.Width, demand.DisplayPixelHeight * zoom / source.Height);
+                        var fitLongest = (int)Math.Ceiling(source.LongestSide * Math.Min(1.0, fit));
+                        boundedTarget = Math.Min(boundedTarget, Math.Max(1, fitLongest));
+                    }
+                    if (firstLongest >= boundedTarget)
+                    {
+                        // The first frame already carries at least the pixels this demand asks for; a
+                        // bounded decode could only reproduce it (JPEG picks the same DCT scale again).
+                        // Measured: 24 MP JPEG wasted a whole ~38 ms decode here on every image.
+                        if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("refinement_skipped_first_frame_sufficient", $"first={firstLongest};target={boundedTarget}");
+                        return null;
+                    }
+                    if (budgetAllowsFull && sourceBytes <= MaxDirectFullRefinementBytes)
+                    {
+                        // MainWindow discards a bounded refinement and immediately decodes the full frame
+                        // (RefinePresentedAsync), and codecs without reduced-size decoding (PNG/WebP/TIFF/
+                        // BMP/GIF) pay a full decode for a bounded frame anyway. Decode full once.
+                        full = true;
+                        if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("refinement_direct_full", $"source={sourceBytes}");
+                    }
+                }
                 var isPreview = !full && boundedTarget < Math.Max(firstFrame.SourceWidth, firstFrame.SourceHeight);
                 var bitmap = isPreview
                     ? await _backend.DecodePreviewAsync(stream, new ImageDimensions(firstFrame.SourceWidth, firstFrame.SourceHeight), boundedTarget, policy.PreviewInterpolation, firstFrame.Path, cancellationToken).ConfigureAwait(false)
                     : await _backend.DecodeFullAsync(stream, firstFrame.Path, cancellationToken).ConfigureAwait(false);
-                if (firstFrame.Generation != Volatile.Read(ref _generation)) { bitmap.Dispose(); return null; }
+                if (firstFrame.Generation != Volatile.Read(ref _generation)) { DisposeBitmap(bitmap); return null; }
                 if ((long)bitmap.PixelSize.Width * bitmap.PixelSize.Height <=
                     (long)firstFrame.Bitmap.PixelSize.Width * firstFrame.Bitmap.PixelSize.Height)
                 {
-                    bitmap.Dispose();
+                    DisposeBitmap(bitmap);
                     return null;
                 }
                 var outputBytes = EstimatedDecodedBytes(bitmap.PixelSize.Width, bitmap.PixelSize.Height);
                 if (outputBytes > Math.Max(0, budgetBytes - firstFrameBytes))
                 {
                     if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("refinement_bounded_output_rejected", $"output={outputBytes};budget={budgetBytes};firstFrame={firstFrameBytes}");
-                    bitmap.Dispose(); return null;
+                    DisposeBitmap(bitmap); return null;
                 }
                 return new ImageLoadResult(firstFrame.Path, bitmap, System.Diagnostics.Stopwatch.GetElapsedTime(started), cacheHit, isPreview,
                     firstFrame.SourceWidth, firstFrame.SourceHeight, firstFrame.Generation, false);
@@ -460,13 +674,11 @@ public sealed class ImageLoadCoordinator : IDisposable
             _prepared[refined.Path] = new PreparedEntry(refined.Bitmap, !refined.IsPreview,
                 new ImageDimensions(refined.SourceWidth, refined.SourceHeight), identity, estimate, node);
             _preparedBytes = _preparedBytes - old.EstimatedBytes + estimate;
-            // The old frame is detached by the caller before this method is called.
-            // If the viewport is still rendering it (e.g. mid-transition), skip disposal;
-            // it will be disposed by PriorBitmapReleased when finished.
-            if (IsBitmapInActiveUse?.Invoke(old.Bitmap) != true)
-            {
-                old.Bitmap.Dispose();
-            }
+            // The caller now presents the promoted bitmap: it holds a lease like any cached result.
+            LeaseLocked(refined.Bitmap);
+            // The old frame is detached by the caller before this call; if it is still leased (e.g. kept
+            // as the interaction preview) it is retired and disposed by its final ReleaseBitmap.
+            DisposeOrRetireLocked(old.Bitmap);
             return true;
         }
     }
@@ -485,8 +697,31 @@ public sealed class ImageLoadCoordinator : IDisposable
         }
         if (!policy.PredictivePrefetch || policy.PrefetchDepth <= 0 || paths.Count < 2) return;
         var plan = BuildNeighbourPlan(paths, currentIndex, direction, policy.PrefetchDepth);
-        _ = Task.Run(() => RunPrefetchAsync(plan, policy, epoch, cts.Token), CancellationToken.None);
+
+        // A jump outside the previous neighbourhood (random access, Home/End, a far thumbnail click)
+        // makes most of the old speculation useless and the next move unpredictable: prepare the new
+        // neighbourhood one decode at a time as before. Sequential browsing gets every lane.
+        var lanes = PrefetchDecodeLanes;
+        lock (_cacheGate)
+        {
+            var sameList = ReferenceEquals(paths, _lastPrefetchList) || paths.Count == _lastPrefetchCount;
+            var jumped = sameList && _lastPrefetchIndex >= 0 && Math.Abs(currentIndex - _lastPrefetchIndex) > 2;
+            _lastPrefetchList = paths;
+            _lastPrefetchCount = paths.Count;
+            _lastPrefetchIndex = currentIndex;
+            if (jumped) lanes = 1;
+            // Keep the nearest neighbours resident: far speculation must never evict the image the
+            // user is most likely to open next (LRU order alone did, once every neighbour was touched).
+            _protectedNeighbours.Clear();
+            foreach (var path in plan.Take(Math.Max(2, PrefetchDecodeLanes))) _protectedNeighbours.Add(path);
+        }
+        _ = Task.Run(() => RunPrefetchAsync(plan, policy, epoch, lanes, cts.Token), CancellationToken.None);
     }
+
+    private IReadOnlyList<string>? _lastPrefetchList;
+    private int _lastPrefetchCount;
+    private int _lastPrefetchIndex = -1;
+    private readonly HashSet<string> _protectedNeighbours = new(StringComparer.OrdinalIgnoreCase);
 
     public static IReadOnlyList<string> BuildNeighbourPlan(IReadOnlyList<string> paths, int currentIndex, int direction, int depth)
     {
@@ -504,32 +739,45 @@ public sealed class ImageLoadCoordinator : IDisposable
         return result.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
     }
 
-    private async Task RunPrefetchAsync(IReadOnlyList<string> plan, ImagePerformancePolicy policy, long epoch, CancellationToken token)
+    private async Task RunPrefetchAsync(IReadOnlyList<string> plan, ImagePerformancePolicy policy, long epoch, int maxLanes, CancellationToken token)
     {
         try
         {
             if (plan.Count == 0) return;
 
-            // Glide 2.1 warmed every compressed neighbour before preparing even the nearest likely
-            // next image. Glide 2.2 reverses that priority: create the nearest presentation-ready
-            // frame first, then spend idle I/O on farther compressed neighbours.
+            // Glide 2.2 priority order is kept (nearest presentation-ready frames, then compressed
+            // warm-up of farther files, then their frames) but each phase now uses the machine's
+            // speculative lanes (1 on constrained, 2 mainstream, 3+ high-end) instead of one decode at
+            // a time. Frames already prepared are skipped (they used to be re-decoded on every step).
+            var lanes = Math.Clamp(maxLanes, 1, plan.Count);
             var fullRemaining = policy.FullNeighbourPredecodeCount;
-            if (await PrepareOneAsync(plan[0], policy, epoch, fullRemaining > 0, token).ConfigureAwait(false))
-                fullRemaining = Math.Max(0, fullRemaining - 1);
+            var nearest = new Task<bool>[lanes];
+            for (var i = 0; i < lanes; i++)
+                nearest[i] = PrepareOneAsync(plan[i], policy, epoch, allowFull: i < fullRemaining, token);
+            await Task.WhenAll(nearest).ConfigureAwait(false);
+            if (lanes >= plan.Count) return;
 
-            // Warm farther files only after the highest-value neighbour is presentation-ready.
-            for (var i = 1; i < plan.Count; i++)
-            {
-                token.ThrowIfCancellationRequested();
-                await WarmOneAsync(plan[i], epoch, token).ConfigureAwait(false);
-            }
+            token.ThrowIfCancellationRequested();
+            var warm = new List<Task>(plan.Count - lanes);
+            for (var i = lanes; i < plan.Count; i++) warm.Add(WarmOneAsync(plan[i], epoch, token));
+            await Task.WhenAll(warm).ConfigureAwait(false);
 
-            for (var i = 1; i < plan.Count; i++)
+            var next = lanes - 1;
+            var workers = new Task[lanes];
+            for (var w = 0; w < lanes; w++)
             {
-                token.ThrowIfCancellationRequested();
-                var usedFull = await PrepareOneAsync(plan[i], policy, epoch, fullRemaining > 0, token).ConfigureAwait(false);
-                if (usedFull) fullRemaining = Math.Max(0, fullRemaining - 1);
+                workers[w] = Task.Run(async () =>
+                {
+                    while (true)
+                    {
+                        token.ThrowIfCancellationRequested();
+                        var index = Interlocked.Increment(ref next);
+                        if (index >= plan.Count) return;
+                        await PrepareOneAsync(plan[index], policy, epoch, allowFull: false, token).ConfigureAwait(false);
+                    }
+                }, token);
             }
+            await Task.WhenAll(workers).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -541,9 +789,15 @@ public sealed class ImageLoadCoordinator : IDisposable
     private async Task<bool> PrepareOneAsync(string path, ImagePerformancePolicy policy, long epoch, bool allowFull, CancellationToken token)
     {
         if (epoch != Volatile.Read(ref _cacheEpoch)) return false;
+        // Already presentation-ready: every navigation step re-plans the same neighbourhood, and the
+        // old loop re-decoded all of it each time (up to 30 decodes per step at depth 15).
+        if (HasPrepared(path, out var preparedIsFull) && (preparedIsFull || !allowFull)) return preparedIsFull;
         await _speculativeGate.WaitAsync(token).ConfigureAwait(false);
+        var inflight = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        lock (_cacheGate) _inflightPrepares[path] = inflight.Task;
         try
         {
+            if (HasPrepared(path, out preparedIsFull) && (preparedIsFull || !allowFull)) return preparedIsFull;
             // Use one open stream for both the bounded header probe and decode, exactly as the
             // foreground path does. This removes a redundant open/read from the highest-value
             // neighbour-preparation path.
@@ -552,10 +806,11 @@ public sealed class ImageLoadCoordinator : IDisposable
             {
                 var source = await ProbeDimensionsAsync(path, stream, token).ConfigureAwait(false);
                 if (!source.IsValid || IsDecompressionBomb(source)) return false;
-                var wantFull = allowFull && EstimatedDecodedBytes(source.Width, source.Height) <= policy.DecodedCacheMegabytes * 1024L * 1024L / 2;
+                var wantFull = allowFull && EstimatedDecodedBytes(source.Width, source.Height) <= policy.DecodedCacheMegabytes * 1024L * 1024L / 2 &&
+                    DecodeMemoryGuard.FitsAvailableMemory(source);
                 Bitmap bitmap;
                 var isFull = false;
-                if (wantFull || !policy.DecoderScaledFirstFrame || !RequiresPreview(source, policy))
+                if (wantFull || ((!policy.DecoderScaledFirstFrame || !RequiresPreview(source, policy)) && DecodeMemoryGuard.FitsAvailableMemory(source)))
                 {
                     bitmap = await _backend.DecodeFullAsync(stream, path, token).ConfigureAwait(false);
                     isFull = true;
@@ -564,15 +819,27 @@ public sealed class ImageLoadCoordinator : IDisposable
                 {
                     bitmap = await _backend.DecodePreviewAsync(stream, source, RequiredPreviewLongestSide(source, policy), policy.PreviewInterpolation, path, token).ConfigureAwait(false);
                 }
-                if (epoch != Volatile.Read(ref _cacheEpoch)) { bitmap.Dispose(); return false; }
+                if (epoch != Volatile.Read(ref _cacheEpoch)) { DisposeBitmap(bitmap); return false; }
                 source = NormalizeSourceOrientation(source, bitmap);
+                // Some WIC codecs (PNG) answer a bounded request at source size; record what was
+                // actually produced so a source-resolution frame is never treated as a preview.
+                isFull |= bitmap.PixelSize.Width >= source.Width && bitmap.PixelSize.Height >= source.Height;
                 AddPrepared(path, bitmap, isFull, source, epoch);
                 return wantFull && isFull;
             }
         }
         catch (OperationCanceledException) { throw; }
         catch { return false; }
-        finally { _speculativeGate.Release(); }
+        finally
+        {
+            lock (_cacheGate)
+            {
+                if (_inflightPrepares.TryGetValue(path, out var current) && ReferenceEquals(current, inflight.Task))
+                    _inflightPrepares.Remove(path);
+            }
+            inflight.TrySetResult();
+            _speculativeGate.Release();
+        }
     }
 
     public async Task WarmAsync(IEnumerable<string> paths, CancellationToken cancellationToken = default)
@@ -679,23 +946,43 @@ public sealed class ImageLoadCoordinator : IDisposable
         return Task.FromResult(OpenDecodeStream(path, sequential));
     }
 
-    private ImageDimensions ProbeDimensionsAsyncDirect(string path)
-    {
-        // Dedicated built-in decoders know their own container. Probe them before the generic content
-        // sniffer, which is unreliable for header-less formats (an uncompressed true-colour TGA, for
-        // example, starts 00 00 02 00 and can otherwise resemble an ICO/CUR directory).
-        if (SvgDecoder.TryProbeDimensions(path, out var svg) && svg.IsValid) return svg;
-        if (BuiltInRasterDecoder.TryProbeDimensions(path, out var raster) && raster.IsValid) return raster;
-        if (ImageHeaderProbe.TryProbe(path, out var dimensions)) return dimensions;
-        if (NativeImageProbe.TryProbe(path, out var native) && native.Width > 0 && native.Height > 0)
-            return new ImageDimensions((int)Math.Min(native.Width, (uint)int.MaxValue), (int)Math.Min(native.Height, (uint)int.MaxValue));
-        var provider = _backend.Probe(path);
-        if (provider is { Supported: true, Dimensions.IsValid: true }) return provider.Value.Dimensions;
-        return default;
-    }
-
     private static bool RequiresPreview(ImageDimensions source, ImagePerformancePolicy policy) =>
         source.IsValid && (source.Width > policy.PreviewMaxWidth || source.Height > policy.PreviewMaxHeight);
+
+    /// <summary>Largest frame RefineForegroundAsync decodes directly at source resolution (the decompression-bomb ceiling).</summary>
+    private const long MaxDirectFullRefinementBytes = ImageHeaderProbe.MaxTotalPixels * 4L;
+
+    /// <summary>
+    /// True when the first frame should be decoded at source resolution: the codec has no reduced-size
+    /// decode (so a "preview" costs a full decode plus a resample, and the Fit refinement then decoded
+    /// the file twice more) and the frame fits half the decoded-cache budget - the same admission rule
+    /// neighbour preparation uses for full frames, and a frame the refinement would have decoded and
+    /// cached anyway. Output pixels are exactly the frame the refinement chain used to settle on.
+    /// Measured (Maximum quality, 16 threads): LZW TIFF 24 MP settles in 178 ms instead of 585 ms, 100 MP
+    /// in 0.76 s instead of 2.3 s, BMP 24 MP in 28 ms instead of 123 ms; first paint is no slower.
+    /// </summary>
+    internal static bool PrefersFullFirstFrame(string path, ImageDimensions source, ImagePerformancePolicy policy)
+    {
+        if (!source.IsValid || !NativeImageDecoder.IsFullDecodeOnlyFormat(path)) return false;
+        // WebP is the exception: its scaled first frame is cheaper than the full frame (measured 24 MP:
+        // 86 vs 90 ms, 50 MP: 156 vs 183 ms; on PCs without the WIC WebP extension both go through Skia),
+        // so its first paint stays on the scaled frame and the refinement then decodes full once.
+        if (NativeImageDecoder.IsWebpPath(path)) return false;
+        var bytes = EstimatedDecodedBytes(source.Width, source.Height);
+        var limit = Math.Min(policy.DecodedCacheMegabytes * 1024L * 1024L / 2, MaxDirectFullRefinementBytes);
+        return bytes > 0 && bytes <= limit;
+    }
+
+    /// <summary>Leases <paramref name="bitmap"/> if it is still the cached frame for <paramref name="path"/>.</summary>
+    private bool TryLeaseCached(string path, Bitmap bitmap)
+    {
+        lock (_cacheGate)
+        {
+            if (!_prepared.TryGetValue(path, out var entry) || !ReferenceEquals(entry.Bitmap, bitmap)) return false;
+            LeaseLocked(bitmap);
+            return true;
+        }
+    }
 
     /// <summary>
     /// Converts the 2-D viewport box to the one-dimensional DecodeToWidth/Height API used by generic
@@ -708,6 +995,20 @@ public sealed class ImageLoadCoordinator : IDisposable
         var scale = Math.Min(1.0, Math.Min(policy.PreviewMaxWidth / (double)source.Width,
                                           policy.PreviewMaxHeight / (double)source.Height));
         return Math.Max(1, (int)Math.Ceiling(source.LongestSide * scale));
+    }
+
+    /// <summary>
+    /// Decodes a preview-box frame when the full frame was refused by the memory guard or failed to
+    /// allocate. Null when the image is small enough that no reduced frame exists.
+    /// </summary>
+    private async Task<(Bitmap Bitmap, bool IsPreview)?> DecodeBoundedFallbackAsync(Stream stream, string path, ImageDimensions source,
+        ImagePerformancePolicy policy, CancellationToken cancellationToken)
+    {
+        if (!source.IsValid || !RequiresPreview(source, policy)) return null;
+        if (stream.CanSeek) stream.Position = 0;
+        var bitmap = await _backend.DecodePreviewAsync(stream, source, RequiredPreviewLongestSide(source, policy),
+            policy.PreviewInterpolation, path, cancellationToken).ConfigureAwait(false);
+        return (bitmap, bitmap.PixelSize.Width < source.Width || bitmap.PixelSize.Height < source.Height);
     }
 
     private async Task<ImageDimensions> ProbeDimensionsAsync(string path, Stream alreadyOpenStream, CancellationToken cancellationToken)
@@ -742,9 +1043,13 @@ public sealed class ImageLoadCoordinator : IDisposable
             _compressedBytes = 0;
             foreach (var entry in _prepared.Values)
             {
-                if (!string.Equals(entry.Node.Value, _currentActivePath, StringComparison.OrdinalIgnoreCase) &&
-                    IsBitmapInActiveUse?.Invoke(entry.Bitmap) != true)
-                    entry.Bitmap.Dispose();
+                // The active path's frame may be on screen without a lease (e.g. attached before
+                // leases existed for it); retire it rather than dispose. Retired frames are disposed
+                // when the window releases them (ReleaseBitmap) or when the coordinator is disposed.
+                if (string.Equals(entry.Node.Value, _currentActivePath, StringComparison.OrdinalIgnoreCase))
+                    _retired.Add(entry.Bitmap);
+                else
+                    DisposeOrRetireLocked(entry.Bitmap);
             }
             _prepared.Clear();
             _preparedLru.Clear();
@@ -797,7 +1102,7 @@ public sealed class ImageLoadCoordinator : IDisposable
         }
     }
 
-    private bool TryGetPrepared(string path, out PreparedFrame frame)
+    private bool TryGetPrepared(string path, out PreparedFrame frame, bool lease = false)
     {
         frame = default;
         if (!TryIdentity(path, out var identity)) { InvalidateCachedPath(path); return false; }
@@ -807,7 +1112,25 @@ public sealed class ImageLoadCoordinator : IDisposable
             if (entry.Identity != identity) { RemovePreparedLocked(path, entry, dispose: true); return false; }
             _preparedLru.Remove(entry.Node);
             _preparedLru.AddFirst(entry.Node);
+            // Lease inside the lock: a concurrent trim between this return and the caller attaching
+            // the bitmap to the viewport can no longer dispose it.
+            if (lease) LeaseLocked(entry.Bitmap);
             frame = new PreparedFrame(entry.Bitmap, entry.IsFull, entry.Source);
+            return true;
+        }
+    }
+
+    /// <summary>True when a prepared frame exists for <paramref name="path"/> (full or preview), without leasing it.</summary>
+    private bool HasPrepared(string path, out bool isFull)
+    {
+        isFull = false;
+        lock (_cacheGate)
+        {
+            if (!_prepared.TryGetValue(path, out var entry)) return false;
+            isFull = entry.IsFull;
+            // Keep a still-relevant neighbour warm in the LRU.
+            _preparedLru.Remove(entry.Node);
+            _preparedLru.AddFirst(entry.Node);
             return true;
         }
     }
@@ -831,25 +1154,49 @@ public sealed class ImageLoadCoordinator : IDisposable
         }
     }
 
-    internal void AddPrepared(string path, Bitmap bitmap, bool isFull, ImageDimensions source, long epoch = -1)
+    /// <summary>
+    /// Admits <paramref name="bitmap"/> to the prepared cache. Never disposes the bitmap: on rejection
+    /// (over budget, stale epoch, file changed, a full frame already cached) it stays owned by the
+    /// caller. The foreground path used to return a bitmap this method had just disposed whenever the
+    /// cache rejected it (e.g. a 100 MP full frame over a 256 MB budget), i.e. a use-after-dispose.
+    /// When <paramref name="lease"/> is true an admitted bitmap also receives one presentation lease.
+    /// </summary>
+    internal bool TryAddPrepared(string path, Bitmap bitmap, bool isFull, ImageDimensions source, long epoch = -1, bool lease = false)
     {
         var estimate = EstimatedDecodedBytes(bitmap.PixelSize.Width, bitmap.PixelSize.Height);
         var budget = Policy.DecodedCacheMegabytes * 1024L * 1024L;
-        if (estimate <= 0 || estimate > budget) { bitmap.Dispose(); return; }
-        if (!TryIdentity(path, out var identity)) { bitmap.Dispose(); return; }
+        if (estimate <= 0 || estimate > budget) return false;
+        if (!TryIdentity(path, out var identity)) return false;
         lock (_cacheGate)
         {
-            if (epoch >= 0 && epoch != _cacheEpoch) { bitmap.Dispose(); return; }
+            if (epoch >= 0 && epoch != _cacheEpoch) return false;
             if (_prepared.TryGetValue(path, out var old))
             {
-                if (old.IsFull && !isFull) { bitmap.Dispose(); return; }
+                if (ReferenceEquals(old.Bitmap, bitmap)) { if (lease) LeaseLocked(bitmap); return true; }
+                if (old.IsFull && !isFull) return false;
                 RemovePreparedLocked(path, old, dispose: true);
             }
             var node = _preparedLru.AddFirst(path);
             _prepared[path] = new PreparedEntry(bitmap, isFull, source, identity, estimate, node);
             _preparedBytes += estimate;
+            if (lease) LeaseLocked(bitmap);
             TrimPreparedLocked();
+            // Speculative frame that only fits by evicting the protected nearest neighbours: refuse it
+            // (the caller disposes it) so the decoded cache stays within budget.
+            if (epoch >= 0 && _preparedBytes > budget && !_protectedNeighbours.Contains(path) &&
+                _prepared.TryGetValue(path, out var added) && ReferenceEquals(added.Bitmap, bitmap))
+            {
+                RemovePreparedLocked(path, added, dispose: false);
+                return false;
+            }
+            return true;
         }
+    }
+
+    /// <summary>Compatibility wrapper for speculative callers: a rejected bitmap is disposed.</summary>
+    internal void AddPrepared(string path, Bitmap bitmap, bool isFull, ImageDimensions source, long epoch = -1)
+    {
+        if (!TryAddPrepared(path, bitmap, isFull, source, epoch)) DisposeBitmap(bitmap);
     }
 
     private string? _currentActivePath;
@@ -861,14 +1208,7 @@ public sealed class ImageLoadCoordinator : IDisposable
     public bool IsBitmapCached(Bitmap? bitmap)
     {
         if (bitmap is null) return false;
-        lock (_cacheGate)
-        {
-            foreach (var entry in _prepared.Values)
-            {
-                if (ReferenceEquals(entry.Bitmap, bitmap)) return true;
-            }
-            return false;
-        }
+        lock (_cacheGate) return IsCachedLocked(bitmap);
     }
 
     private void InvalidateCachedPath(string path)
@@ -893,18 +1233,8 @@ public sealed class ImageLoadCoordinator : IDisposable
         _preparedBytes -= entry.EstimatedBytes;
         _preparedLru.Remove(entry.Node);
         _prepared.Remove(path);
-        if (dispose)
-        {
-            if (IsBitmapInActiveUse?.Invoke(entry.Bitmap) == true)
-            {
-                // Active in viewport or mid-transition; skip disposal so we don't cause black flashes.
-                // The viewport will release and dispose via PriorBitmapReleased when done.
-            }
-            else
-            {
-                entry.Bitmap.Dispose();
-            }
-        }
+        // Leased / viewport-active bitmaps are retired and disposed by their final ReleaseBitmap.
+        if (dispose) DisposeOrRetireLocked(entry.Bitmap);
     }
 
     private void TrimCaches()
@@ -929,7 +1259,7 @@ public sealed class ImageLoadCoordinator : IDisposable
         {
             var prev = node.Previous;
             var path = node.Value;
-            if (string.Equals(path, _currentActivePath, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(path, _currentActivePath, StringComparison.OrdinalIgnoreCase) || _protectedNeighbours.Contains(path))
             {
                 node = prev;
                 continue;
@@ -965,7 +1295,7 @@ public sealed class ImageLoadCoordinator : IDisposable
 
     /// <summary>
     /// The lightweight header probe reports the raw stored pixel dimensions for JPEG/TIFF/WebP eXIf
-    /// files, while the codec may apply the EXIF orientation and return a 90°-rotated bitmap. The
+    /// files, while the codec may apply the EXIF orientation and return a 90Â°-rotated bitmap. The
     /// viewport sizes its destination rectangle from the reported source size and maps the bitmap
     /// onto it, so a transposed source stretches the picture. Align the source orientation with the
     /// bitmap the decoder actually produced by comparing the bitmap aspect ratio against both the
@@ -996,6 +1326,15 @@ public sealed class ImageLoadCoordinator : IDisposable
     public void Dispose()
     {
         PurgeCaches();
+        // End of life: nothing can present these any more (the owning window is closing).
+        Bitmap[] retired;
+        lock (_cacheGate)
+        {
+            retired = _retired.ToArray();
+            _retired.Clear();
+            _leases.Clear();
+        }
+        foreach (var bitmap in retired) DisposeBitmap(bitmap);
         _prefetchCts.Dispose();
         _activitySettleCts.Cancel(); _activitySettleCts.Dispose();
         _foregroundGate.Dispose(); _refinementGate.Dispose(); _speculativeGate.Dispose(); _compressedWarmGate.Dispose();

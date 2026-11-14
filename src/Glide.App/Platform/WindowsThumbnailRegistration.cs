@@ -75,15 +75,56 @@ internal static class WindowsThumbnailRegistration
         return existing is not null && !existing.Equals(ProviderClsid, StringComparison.OrdinalIgnoreCase);
     }
 
-    public static bool IsRegistered()
+    public static bool IsRegistered() => !string.IsNullOrWhiteSpace(RegisteredDllPath(perUser: true));
+
+    /// <summary>The DLL path Explorer would load for this hive's CLSID registration (read-only), or null.</summary>
+    public static string? RegisteredDllPath(bool perUser)
     {
-        if (!OperatingSystem.IsWindows()) return false;
+        if (!OperatingSystem.IsWindows()) return null;
         try
         {
-            using var key = Registry.CurrentUser.OpenSubKey($@"Software\Classes\CLSID\{ProviderClsid}\InprocServer32");
-            return key?.GetValue(string.Empty) is string value && !string.IsNullOrWhiteSpace(value);
+            var hive = perUser ? Registry.CurrentUser : Registry.LocalMachine;
+            using var key = hive.OpenSubKey($@"Software\Classes\CLSID\{ProviderClsid}\InprocServer32");
+            return key?.GetValue(string.Empty) is string value && !string.IsNullOrWhiteSpace(value) ? value : null;
         }
-        catch { return false; }
+        catch { return null; }
+    }
+
+    /// <summary>
+    /// Extensions whose effective thumbnail handler is Glide (per-user entry first, then machine-wide).
+    /// Read-only; used for the status line and to seed the Custom mode selection.
+    /// </summary>
+    public static IReadOnlyList<string> ExtensionsRoutedToGlide(bool perUserOnly = false)
+    {
+        if (!OperatingSystem.IsWindows()) return Array.Empty<string>();
+        var routed = new List<string>();
+        foreach (var extension in ImageFormatRegistry.Extensions)
+        {
+            var handler = perUserOnly ? ReadHandler(Registry.CurrentUser, extension) : ReadRegisteredHandler(extension);
+            if (handler is not null && handler.Equals(ProviderClsid, StringComparison.OrdinalIgnoreCase)) routed.Add(extension);
+        }
+        return routed;
+    }
+
+    /// <summary>Gathers the read-only facts behind the Settings status line.</summary>
+    public static ThumbnailProviderFacts ProbeFacts()
+    {
+        var userPath = RegisteredDllPath(perUser: true);
+        var machinePath = RegisteredDllPath(perUser: false);
+        var effective = !string.IsNullOrWhiteSpace(userPath) ? userPath : machinePath;
+        var glideVersion = typeof(WindowsThumbnailRegistration).Assembly.GetName().Version is { } v
+            ? $"{v.Major}.{v.Minor}.{v.Build}"
+            : "unknown";
+        return new ThumbnailProviderFacts(
+            LocalDllPath: ProviderDllPath,
+            LocalDllExists: ProviderDllPresent,
+            LocalDllVersion: ThumbnailProviderStatus.ReadDllVersion(ProviderDllPath),
+            UserRegisteredPath: userPath,
+            MachineRegisteredPath: machinePath,
+            EffectiveDllExists: ThumbnailProviderStatus.RegisteredFileExists(effective),
+            EffectiveDllVersion: ThumbnailProviderStatus.ReadDllVersion(effective),
+            RoutedFormats: ExtensionsRoutedToGlide().Count,
+            GlideVersion: glideVersion);
     }
 
     public static bool Register(bool perUser, IEnumerable<string> extensions, out string message)
@@ -153,16 +194,16 @@ internal static class WindowsThumbnailRegistration
     }
 
     private static string? ReadRegisteredHandler(string extension)
+        => ReadHandler(Registry.CurrentUser, extension) ?? ReadHandler(Registry.LocalMachine, extension);
+
+    private static string? ReadHandler(RegistryKey hive, string extension)
     {
-        foreach (var hive in new[] { Registry.CurrentUser, Registry.LocalMachine })
+        try
         {
-            try
-            {
-                using var key = hive.OpenSubKey($@"Software\Classes\{extension}\ShellEx\{ThumbnailHandlerGuid}");
-                if (key?.GetValue(string.Empty) is string value && !string.IsNullOrWhiteSpace(value)) return value;
-            }
-            catch { }
+            using var key = hive.OpenSubKey($@"Software\Classes\{extension}\ShellEx\{ThumbnailHandlerGuid}");
+            if (key?.GetValue(string.Empty) is string value && !string.IsNullOrWhiteSpace(value)) return value;
         }
+        catch { }
         return null;
     }
 }

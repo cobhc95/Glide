@@ -20,6 +20,9 @@ internal sealed class GifAnimationPlayer : IDisposable
     // still be rasterizing a bitmap that was handed to the compositor (see MainWindow.Navigation).
     private static readonly TimeSpan RetireDelay = TimeSpan.FromSeconds(2);
 
+    /// <summary>Upper bound for all decoded frames of one animation (single copy, see DecodeFrames).</summary>
+    internal const long PlayerMemoryBudgetBytes = 512L * 1024 * 1024;
+
     private readonly ImageViewport _viewport;
     private readonly Action<string, object> _diagnostics;
     private CancellationTokenSource? _cts;
@@ -27,6 +30,16 @@ internal sealed class GifAnimationPlayer : IDisposable
     private List<(WriteableBitmap Bitmap, int DelayMs)>? _frames;
     private int _generation;
     private int _index;
+    private bool _paused;
+
+    /// <summary>Raised on the UI thread when playback starts, stops, pauses, resumes or steps.</summary>
+    public event Action? StateChanged;
+
+    /// <summary>True while a multi-frame GIF is loaded for the frame the viewport presents now.</summary>
+    public bool HasAnimation => _frames is { Count: > 1 } && _viewport.PresentationGeneration == _generation;
+    public bool IsPaused => HasAnimation && _paused;
+    public int FrameIndex => HasAnimation ? _index : 0;
+    public int FrameCount => HasAnimation ? _frames!.Count : 0;
 
     public GifAnimationPlayer(ImageViewport viewport, Action<string, object> diagnostics)
     {
@@ -62,10 +75,12 @@ internal sealed class GifAnimationPlayer : IDisposable
                 _frames = frames;
                 _generation = generation;
                 _index = 0;
+                _paused = false;
                 _timer = new DispatcherTimer(DispatcherPriority.Render) { Interval = TimeSpan.FromMilliseconds(frames[0].DelayMs) };
                 _timer.Tick += Tick;
                 _timer.Start();
                 _diagnostics("gif_playback_started", new { path, frameCount = frames.Count });
+                StateChanged?.Invoke();
             });
         }, TaskScheduler.Default);
     }
@@ -81,24 +96,36 @@ internal sealed class GifAnimationPlayer : IDisposable
             stream.ReadExactly(bytes);
         }
         token.ThrowIfCancellationRequested();
-        var animation = GifAnimationDecoder.Decode(bytes, cancellationToken: token);
-        if (animation is null) return null;
 
-        var frames = new List<(WriteableBitmap Bitmap, int DelayMs)>(animation.Frames.Count);
+        // Stream each composited frame straight into its display bitmap. The player used to decode every
+        // frame into a managed byte[] first and then copy it, holding both copies at once (2x the frame
+        // memory, all on the large object heap). With one copy the same peak budget now admits larger
+        // animations: 512 MB of frames (e.g. 60 frames at 1920x1080) versus up to 768 MB peak before.
+        var frames = new List<(WriteableBitmap Bitmap, int DelayMs)>();
         try
         {
-            foreach (var frame in animation.Frames)
+            var size = GifAnimationDecoder.DecodeFrames(bytes, (canvas, width, height, delayMs) =>
             {
                 token.ThrowIfCancellationRequested();
-                var bitmap = new WriteableBitmap(new PixelSize(animation.Width, animation.Height), new Vector(96, 96),
+                var bitmap = new WriteableBitmap(new PixelSize(width, height), new Vector(96, 96),
                     PixelFormat.Bgra8888, AlphaFormat.Premul);
-                using (var locked = bitmap.Lock())
+                try
                 {
-                    var rowBytes = animation.Width * 4;
-                    for (var y = 0; y < animation.Height; y++)
-                        System.Runtime.InteropServices.Marshal.Copy(frame.Bgra, y * rowBytes, locked.Address + y * locked.RowBytes, rowBytes);
+                    using var locked = bitmap.Lock();
+                    GifAnimationDecoder.CopyCanvasToBgra(canvas, width, height, locked.Address, locked.RowBytes);
                 }
-                frames.Add((bitmap, frame.DelayMs));
+                catch
+                {
+                    bitmap.Dispose();
+                    throw;
+                }
+                frames.Add((bitmap, delayMs));
+                return true;
+            }, PlayerMemoryBudgetBytes, token);
+            if (size is null || frames.Count < 2)
+            {
+                foreach (var (bitmap, _) in frames) bitmap.Dispose();
+                return null;
             }
             return frames;
         }
@@ -111,6 +138,7 @@ internal sealed class GifAnimationPlayer : IDisposable
 
     private void Tick(object? sender, EventArgs e)
     {
+        if (_paused) return;
         if (_frames is not { Count: > 0 } frames || _viewport.PresentationGeneration != _generation)
         {
             Stop();
@@ -121,9 +149,58 @@ internal sealed class GifAnimationPlayer : IDisposable
         if (_timer is not null) _timer.Interval = TimeSpan.FromMilliseconds(frames[_index].DelayMs);
     }
 
+    /// <summary>Pauses on the current frame, or resumes from it (UI thread).</summary>
+    public bool TogglePause() => IsPaused ? Resume() : Pause();
+
+    public bool Pause()
+    {
+        if (!HasAnimation || _paused) return false;
+        _paused = true;
+        _timer?.Stop();
+        _diagnostics("gif_paused", new { frame = _index });
+        StateChanged?.Invoke();
+        return true;
+    }
+
+    public bool Resume()
+    {
+        if (!HasAnimation || !_paused) return false;
+        _paused = false;
+        if (_timer is not null)
+        {
+            _timer.Interval = TimeSpan.FromMilliseconds(_frames![_index].DelayMs);
+            _timer.Start();
+        }
+        _diagnostics("gif_resumed", new { frame = _index });
+        StateChanged?.Invoke();
+        return true;
+    }
+
+    /// <summary>
+    /// Shows the previous (-1) or next (+1) frame, wrapping at either end. Stepping pauses playback
+    /// first so the chosen frame stays on screen.
+    /// </summary>
+    public bool Step(int delta)
+    {
+        if (!HasAnimation || _frames is not { } frames) return false;
+        if (!_paused)
+        {
+            _paused = true;
+            _timer?.Stop();
+        }
+        var count = frames.Count;
+        _index = ((_index + delta) % count + count) % count;
+        _viewport.SetAnimationFrame(frames[_index].Bitmap);
+        _diagnostics("gif_step", new { frame = _index, delta });
+        StateChanged?.Invoke();
+        return true;
+    }
+
     /// <summary>Stops playback and restores the statically presented frame (UI thread).</summary>
     public void Stop()
     {
+        var hadState = _frames is not null || _paused;
+        _paused = false;
         _cts?.Cancel();
         _cts = null;
         if (_timer is not null)
@@ -138,6 +215,7 @@ internal sealed class GifAnimationPlayer : IDisposable
             if (_viewport.PresentationGeneration == _generation) _viewport.SetAnimationFrame(null);
             RetireLater(frames);
         }
+        if (hadState) StateChanged?.Invoke();
     }
 
     private static void RetireLater(List<(WriteableBitmap Bitmap, int DelayMs)> frames) =>

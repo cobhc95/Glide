@@ -18,6 +18,7 @@ public sealed class FullscreenCursorAutoHide
 
     private bool _active;
     private bool _suppressed;
+    private bool _popupOpen;
     private DateTime _lastActivity;
     private DateTime? _streakStart;
     private DateTime _lastStreakMove;
@@ -55,6 +56,26 @@ public sealed class FullscreenCursorAutoHide
         return false;
     }
 
+    /// <summary>
+    /// A popup (context menu, sub-menu, drop-down, flyout) is open. Popups are separate top-level windows, so
+    /// the main window receives no pointer events while the pointer is inside one and the idle timer would
+    /// otherwise hide the cursor over the menu. While open the cursor is shown and never hidden; closing
+    /// restarts the idle countdown. Unlike <see cref="SetSuppressed"/> this is not overwritten by pointer moves.
+    /// Returns true when visibility changed.
+    /// </summary>
+    public bool SetPopupOpen(bool open, DateTime now)
+    {
+        if (_popupOpen == open) return false;
+        _popupOpen = open;
+        _lastActivity = now;
+        _streakStart = null;
+        if (open && IsHidden) { IsHidden = false; return true; }
+        return false;
+    }
+
+    /// <summary>True while a popup holds the cursor visible.</summary>
+    public bool IsPopupOpen => _popupOpen;
+
     /// <summary>Returns true when visibility changed.</summary>
     public bool OnPointerMoved(DateTime now, double x, double y)
     {
@@ -84,7 +105,7 @@ public sealed class FullscreenCursorAutoHide
     /// <summary>Periodic check; returns true when visibility changed.</summary>
     public bool Tick(DateTime now)
     {
-        if (!_active || _suppressed) return false;
+        if (!_active || _suppressed || _popupOpen) return false;
         if (IsHidden)
         {
             if (_streakStart is not null && now - _lastStreakMove > MaxMovementGap) _streakStart = null;

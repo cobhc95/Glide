@@ -1,48 +1,44 @@
 ﻿using System.Diagnostics;
-using System.Collections.ObjectModel;
-using System.Runtime.InteropServices;
-using System.Text.Json;
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Controls.Primitives;
 using Avalonia.Controls.Templates;
 using Avalonia.Input;
 using Avalonia.Interactivity;
-using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
-using Avalonia.Platform.Storage;
-using Avalonia.Styling;
 using Avalonia.Threading;
-using Avalonia.VisualTree;
 using Glide.App.Controls;
+using Glide.App.Explorer;
 using Glide.App.Diagnostics;
 using Glide.App.Platform;
-using Glide.App.Printing;
 using Glide.App.Settings;
 using Glide.App.Services;
 using Glide.Core;
 using Glide.Core.Commands;
 using Glide.Core.Workspace;
 using Glide.Imaging;
-using Glide.Input;
-using Glide.Diagnostics.Runtime;
-using Microsoft.VisualBasic.FileIO;
 
 namespace Glide.App;
 
 /// <summary>Workspace loading, presentation, refinement, rate limiting and sibling-folder navigation. Split from MainWindow (4.5.2).</summary>
 public partial class MainWindow
 {
-    private async Task OpenAsImageTabAsync(string path, bool openInNewTab = false)
+    private async Task OpenAsImageTabAsync(string path, bool openInNewTab = false, bool startNewHistory = false)
     {
         if (!File.Exists(path) || !ImageNavigator.IsSupported(path))
         {
             Title = AppVersion.UnsupportedImageTitle;
             return;
         }
+        // Opening in the same tab (from the Explorer, Home / Recent, Open file...) is a history step: first remember what
+        // the tab shows now (Explorer selection and scroll), so Back returns exactly there. A new tab starts its own history.
+        if (!openInNewTab && !startNewHistory && _workspace.Active is { } previous) SyncCurrentHistoryEntry(previous);
         if (openInNewTab || !_workspace.ReplaceActiveWithImage(path)) _workspace.AddImage(path);
+        // The image is not on screen yet (the viewer still shows the previous one): record the path that is opening.
+        var opening = Glide.Core.Navigation.NavigationEntry.Image(Path.GetFullPath(path));
+        if (startNewHistory) ResetActiveTabHistory(opening);
+        else RecordActiveTabLocation(opening);
         RebuildTabStrip();
         await LoadPathAsync(path, updateActiveTab: true);
         if (_settings.RecentHistoryEnabled) RecentHistoryStore.RecordFile(path, _settings.HistorySize);
@@ -293,7 +289,7 @@ public partial class MainWindow
         }
     }
 
-    private async Task<PresentationOutcome> PresentCurrentAsync(bool rapidPreviewOnly = false, bool forceFull = false, bool? skipTransition = null)
+    private async Task<PresentationOutcome> PresentCurrentAsync(bool rapidPreviewOnly = false, bool forceFull = false)
     {
         var path = _navigator.Current;
         if (path is null)
@@ -326,9 +322,10 @@ public partial class MainWindow
                     cachePreview: !rapidPreviewOnly);
             if (result is null || !IsRequestCurrent(request))
             {
-                // Successful foreground results are retained by ImageLoadCoordinator's prepared
-                // cache. Purge/eviction owns disposal; a stale continuation must not dispose that
-                // bitmap a second time after standby has already purged it.
+                // A stale result hands back its presentation lease: a cached frame stays owned by the
+                // loader cache (disposed on eviction/purge, never twice), an uncached one (rapid
+                // preview) is disposed now instead of being left to the GC.
+                if (result is not null) _loader.ReleaseBitmap(result.Bitmap);
                 if (_warmPresentationGateActive)
                     await ReleaseWarmPresentationGateAsync(safeFrameReady: false);
                 return new PresentationOutcome(PresentationStatus.Cancelled, request);
@@ -369,7 +366,7 @@ public partial class MainWindow
             if (!isRefinementOnly)
             {
                 if (_settings.AnimateGifs && GifAnimationPlayer.IsGif(path))
-                    (_gifPlayer ??= new GifAnimationPlayer(Viewport, (name, data) => _diagnostics.Write("gif", name, data))).Start(path);
+                    EnsureGifPlayer().Start(path);
                 else _gifPlayer?.Stop();
             }
 
@@ -395,16 +392,22 @@ public partial class MainWindow
                         {
                             Dispatcher.UIThread.Post(() =>
                             {
-                                if (old is not null && !ReferenceEquals(old, Viewport.Bitmap) && !_loader.IsBitmapCached(old))
-                                    old.Dispose();
-                                if (retiredInteraction is not null && !ReferenceEquals(retiredInteraction, old) &&
-                                    !ReferenceEquals(retiredInteraction, Viewport.Bitmap) && !_loader.IsBitmapCached(retiredInteraction))
-                                    retiredInteraction.Dispose();
+                                // The new frame crossed the compositor fence: the replaced frames give
+                                // back their presentation leases (deterministic disposal once unowned).
+                                RetirePresentedBitmap(old);
+                                if (retiredInteraction is not null && !ReferenceEquals(retiredInteraction, old))
+                                    RetirePresentedBitmap(retiredInteraction);
                             }, DispatcherPriority.Background);
                         }
                     }
                     catch { }
                 });
+            }
+            else if (old is not null && _loader.GetLeaseCount(old) > 1)
+            {
+                // The same cached frame was presented again: its earlier presentation lease still
+                // covers it, so give back the one this load added.
+                _loader.ReleaseBitmap(old);
             }
 
             if (GlidePerformanceTrace.Enabled)
@@ -601,7 +604,7 @@ public partial class MainWindow
                 var full = await _loader.LoadFullForegroundAsync(firstFrame.Path, request.Token, cacheResult: false);
                 if (full is null || !IsRequestCurrent(request, requirePresented: true))
                 {
-                    if (full is not null && !_loader.IsBitmapCached(full.Bitmap)) full.Bitmap.Dispose();
+                    if (full is not null) _loader.ReleaseBitmap(full.Bitmap);
                     return;
                 }
 
@@ -613,7 +616,7 @@ public partial class MainWindow
                 {
                     if (!IsRequestCurrent(request, requirePresented: true))
                     {
-                        if (!_loader.IsBitmapCached(full.Bitmap)) full.Bitmap.Dispose();
+                        _loader.ReleaseBitmap(full.Bitmap);
                         return;
                     }
 
@@ -635,18 +638,32 @@ public partial class MainWindow
                         var rendered = await fence.ConfigureAwait(false);
                         _diagnostics.Write("render", "refinement_fence", new
                         { request = request.ImageRequestId, path = firstFrame.Path, rendered, mode = "full_after_bounded" });
-                        if (!rendered || !IsRequestCurrent(request, requirePresented: true)) return;
+                        if (!rendered || !IsRequestCurrent(request, requirePresented: true))
+                        {
+                            // Superseded: the next presentation retires the attached full frame, but the
+                            // detached first frame is referenced by nothing any more; release it too.
+                            ReleaseDetachedAfterSupersede(detachedPreview, retiredInteraction, full.Bitmap);
+                            return;
+                        }
 
                         Dispatcher.UIThread.Post(() =>
                         {
-                            if (!IsRequestCurrent(request, requirePresented: true)) return;
+                            if (!IsRequestCurrent(request, requirePresented: true))
+                            {
+                                ReleaseDetachedAfterSupersede(detachedPreview, retiredInteraction, full.Bitmap);
+                                return;
+                            }
                             var fullPromoted = _loader.PromoteRefinement(firstFrame, full);
                             if (retiredInteraction is not null && !ReferenceEquals(retiredInteraction, detachedPreview) &&
-                                !ReferenceEquals(retiredInteraction, full.Bitmap) && !_loader.IsBitmapCached(retiredInteraction))
-                                retiredInteraction.Dispose();
+                                !ReferenceEquals(retiredInteraction, full.Bitmap))
+                                RetirePresentedBitmap(retiredInteraction);
 
                             _interactionPreviewBitmap = fullPromoted ? null : detachedPreview;
                             Viewport.SetInteractionBitmap(_interactionPreviewBitmap);
+                            // Promotion replaced the preview in the cache (it was retired, not disposed,
+                            // while leased). Nothing presents it any more: release it deterministically.
+                            if (fullPromoted && detachedPreview is not null && !ReferenceEquals(detachedPreview, full.Bitmap))
+                                RetirePresentedBitmap(detachedPreview);
                             _currentFrameIsPreview = false;
                             CancelPreviewQualityRecovery();
                             UpdateStatusStats();
@@ -690,18 +707,28 @@ public partial class MainWindow
                     var rendered = await directFence.ConfigureAwait(false);
                     _diagnostics.Write("render", "refinement_fence", new
                     { request = request.ImageRequestId, path = firstFrame.Path, rendered, mode = "direct" });
-                    if (!rendered || !IsRequestCurrent(request, requirePresented: true)) return;
+                    if (!rendered || !IsRequestCurrent(request, requirePresented: true))
+                    {
+                        ReleaseDetachedAfterSupersede(oldBitmap, retiredInteractionDirect, refined.Bitmap);
+                        return;
+                    }
 
                     Dispatcher.UIThread.Post(() =>
                     {
-                        if (!IsRequestCurrent(request, requirePresented: true)) return;
+                        if (!IsRequestCurrent(request, requirePresented: true))
+                        {
+                            ReleaseDetachedAfterSupersede(oldBitmap, retiredInteractionDirect, refined.Bitmap);
+                            return;
+                        }
                         var promoted = _loader.PromoteRefinement(firstFrame, refined);
                         if (retiredInteractionDirect is not null && !ReferenceEquals(retiredInteractionDirect, oldBitmap) &&
-                            !ReferenceEquals(retiredInteractionDirect, refined.Bitmap) && !_loader.IsBitmapCached(retiredInteractionDirect))
-                            retiredInteractionDirect.Dispose();
+                            !ReferenceEquals(retiredInteractionDirect, refined.Bitmap))
+                            RetirePresentedBitmap(retiredInteractionDirect);
 
                         _interactionPreviewBitmap = promoted ? null : oldBitmap;
                         Viewport.SetInteractionBitmap(_interactionPreviewBitmap);
+                        if (promoted && oldBitmap is not null && !ReferenceEquals(oldBitmap, refined.Bitmap))
+                            RetirePresentedBitmap(oldBitmap);
                         _currentFrameIsPreview = refined.IsPreview;
                         if (!refined.IsPreview) CancelPreviewQualityRecovery();
                         _currentDecodeMs += refined.DecodeTime.TotalMilliseconds;
@@ -728,17 +755,82 @@ public partial class MainWindow
 
     private GifAnimationPlayer? _gifPlayer;
 
-    private void DisposeRejectedRefinement(ImageLoadResult? result)
+    private GifAnimationPlayer EnsureGifPlayer()
     {
-        // Refined cache hits remain loader-owned. A newly decoded refinement is MainWindow-owned
-        // until it is attached, so dispose only that uncached result when it is rejected.
-        if (result is null || result.PreparedFrameHit || _loader.IsBitmapCached(result.Bitmap)) return;
-        result.Bitmap.Dispose();
+        if (_gifPlayer is not null) return _gifPlayer;
+        _gifPlayer = new GifAnimationPlayer(Viewport, (name, data) => _diagnostics.Write("gif", name, data));
+        _gifPlayer.StateChanged += UpdateGifStatusUi;
+        return _gifPlayer;
     }
 
-    private void ShowNavigationBoundaryNotice(int direction)
+    /// <summary>
+    /// Shows the status-bar GIF group only while an animated GIF is the current image and keeps its
+    /// play/pause glyph and tooltips in sync. Navigating away stops the player, which hides it again.
+    /// </summary>
+    private void UpdateGifStatusUi()
     {
-        var message = direction >= 0 ? "End of folder — no next image" : "Start of folder — no previous image";
+        if (GifGroup is null) return;
+        var player = _gifPlayer;
+        var has = player?.HasAnimation == true;
+        var paused = player?.IsPaused == true;
+        var changed = GifGroup.IsVisible != has;
+        GifGroup.IsVisible = has;
+        if (GifPlayPauseIcon is not null) GifPlayPauseIcon.Kind = paused ? "Play" : "Pause";
+        void Tip(Control control, string text, GlideCommand command)
+        {
+            ToolTip.SetTip(control, $"[{text} ({ShortcutFor(command)})]");
+            ToolTip.SetShowDelay(control, 650);
+        }
+        Tip(GifPlayPauseButton, paused ? "Play GIF" : "Pause GIF", GlideCommand.GifPlayPause);
+        Tip(GifPreviousFrameButton, has ? $"Previous GIF frame ({player!.FrameIndex + 1}/{player.FrameCount})" : "Previous GIF frame", GlideCommand.GifPreviousFrame);
+        Tip(GifNextFrameButton, has ? $"Next GIF frame ({player!.FrameIndex + 1}/{player.FrameCount})" : "Next GIF frame", GlideCommand.GifNextFrame);
+        if (changed) ApplyStatusBarSize();
+    }
+
+    private void DisposeRejectedRefinement(ImageLoadResult? result)
+    {
+        // A cached refinement hit gives back its lease (the cache keeps it); a newly decoded,
+        // never-attached refinement is disposed.
+        if (result is null) return;
+        _loader.ReleaseBitmap(result.Bitmap);
+    }
+
+    /// <summary>
+    /// A refinement was superseded by a newer request after it detached the first frame. The newer
+    /// presentation retires whatever the viewport shows; the detached frames are released here (on the
+    /// UI thread, at background priority so the newer frame has been composed first).
+    /// </summary>
+    private void ReleaseDetachedAfterSupersede(Bitmap? detached, Bitmap? retiredInteraction, Bitmap attached)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (detached is not null && !ReferenceEquals(detached, attached)) RetirePresentedBitmap(detached);
+            if (retiredInteraction is not null && !ReferenceEquals(retiredInteraction, detached) && !ReferenceEquals(retiredInteraction, attached))
+                RetirePresentedBitmap(retiredInteraction);
+        }, DispatcherPriority.Background);
+    }
+
+    /// <summary>
+    /// A frame left the presentation (after its compositor fence): release its lease so the loader
+    /// disposes it deterministically once neither the cache nor another presentation owns it.
+    /// Defensive: a frame the viewport is drawing right now is only released when another lease
+    /// covers that presentation.
+    /// </summary>
+    private void RetirePresentedBitmap(Bitmap? bitmap)
+    {
+        if (bitmap is null) return;
+        if ((ReferenceEquals(bitmap, Viewport.Bitmap) || ReferenceEquals(bitmap, _interactionPreviewBitmap)) &&
+            _loader.GetLeaseCount(bitmap) <= 1)
+            return;
+        _loader.ReleaseBitmap(bitmap);
+    }
+
+    private void ShowNavigationBoundaryNotice(int direction) =>
+        ShowViewerNotice(direction >= 0 ? "End of folder — no next image" : "Start of folder — no previous image");
+
+    /// <summary>A short message over the image (and in the status bar) that fades after about a second and a half.</summary>
+    private void ShowViewerNotice(string message)
+    {
         NavigationBoundaryNoticeText.Text = message;
         NavigationBoundaryNotice.IsVisible = true;
         StatusStatsText.Text = message;
@@ -943,7 +1035,7 @@ public partial class MainWindow
                     {
                         _navigationSerializationGate.Release();
                     }
-                    await PresentCurrentAsync(rapidPreviewOnly: rapid, skipTransition: false);
+                    await PresentCurrentAsync(rapidPreviewOnly: rapid);
                     if (rapid) ScheduleRapidNavigationSettle();
                     return;
                 }
@@ -973,7 +1065,7 @@ public partial class MainWindow
             _navigationSerializationGate.Release();
         }
 
-        await PresentCurrentAsync(rapidPreviewOnly: rapid, skipTransition: false);
+        await PresentCurrentAsync(rapidPreviewOnly: rapid);
         if (rapid) ScheduleRapidNavigationSettle();
     }
 
@@ -1037,7 +1129,7 @@ public partial class MainWindow
                         {
                             if (token.IsCancellationRequested || _navigator.Current is null) return;
                             _loader.ReportNavigationActivity(ImageNavigationActivity.NormalBrowse);
-                            await PresentCurrentAsync(rapidPreviewOnly: false, forceFull: true, skipTransition: false);
+                            await PresentCurrentAsync(rapidPreviewOnly: false, forceFull: true);
                         });
                     }
                     catch (OperationCanceledException) { }
@@ -1074,7 +1166,7 @@ public partial class MainWindow
                             if (token.IsCancellationRequested || !_currentFrameIsPreview ||
                                 !string.Equals(_navigator.Current, path, StringComparison.OrdinalIgnoreCase)) return;
                             _loader.ReportNavigationActivity(ImageNavigationActivity.NormalBrowse);
-                            await PresentCurrentAsync(rapidPreviewOnly: false, forceFull: true, skipTransition: false);
+                            await PresentCurrentAsync(rapidPreviewOnly: false, forceFull: true);
                         });
                     }
                     catch (OperationCanceledException) { }
@@ -1247,8 +1339,19 @@ public partial class MainWindow
         _diagnostics.Write("navigation", "rapid_input_interrupted", new { reason, maxBuffered = MaxBufferedNavigationCommands });
     }
 
+    /// <summary>The Explorer surface is going away (another surface is shown): keep its tab view state for later.</summary>
+    private void RetireExplorerSurface()
+    {
+        if (_explorerDisplayedTabId == Guid.Empty) return;
+        CommitOrCancelExplorerRename(commit: false);
+        CaptureExplorerTabView();
+        _explorerDisplayedTabId = Guid.Empty;
+        _explorerLoadedFolder = null;
+    }
+
     private void ShowImageSurface()
     {
+        RetireExplorerSurface();
         CancelBrowserThumbnailWork();
         HomeHost.IsVisible = false;
         WarmOpenTransitionHost.IsVisible = false;
@@ -1259,6 +1362,7 @@ public partial class MainWindow
 
     private void ShowWarmOpenTransitionSurface()
     {
+        RetireExplorerSurface();
         CancelBrowserThumbnailWork();
         HomeHost.IsVisible = false;
         ImageView.IsVisible = false;
@@ -1336,6 +1440,7 @@ public partial class MainWindow
     {
         _gifPlayer?.Stop();
         AdvanceWorkspaceEpoch();
+        RetireExplorerSurface();
         CancelBrowserThumbnailWork();
         _presentedPath = null;
         StopSlideshow(restoreStartingMode: false);
@@ -1349,6 +1454,9 @@ public partial class MainWindow
         home.SubtitleText.Text = recentLanding
             ? "Jump straight back into recently opened images."
             : "Open an image with Ctrl+O or drop one here, or pick up where you left off below.";
+        // A custom startup/new-tab path that could not be opened says so here, without a dialog.
+        if (_workspace.Active is { } activeHome && _tabNotices.TryGetValue(activeHome.Id, out var homeNotice))
+            home.SubtitleText.Text = homeNotice + "  Opened the Welcome page instead.";
         ApplyWelcomeLayout();
         Title = recentLanding ? AppVersion.RecentTitle : AppVersion.HomeTitle;
         RefreshRecentHistoryHome();
@@ -1362,41 +1470,58 @@ public partial class MainWindow
         _browserSurface = browser;
         BrowserView.Content = browser;
         _browserUiReady = false;
-        _browserViewMode = Math.Max(0, browser.ViewModeCombo.SelectedIndex);
-        browser.Repeater.ItemTemplate = new FuncDataTemplate<BrowserEntry>((entry, _) => CreateBrowserItem(entry), supportsRecycling: false);
+        _browserViewMode = ExplorerViewModes.IndexOf(_settings.ExplorerDefaultView);
+        browser.ViewModeCombo.SelectedIndex = _browserViewMode;
+        browser.Repeater.ItemTemplate = new FuncDataTemplate<ExplorerEntry>((entry, _) => CreateExplorerTile(entry), supportsRecycling: false);
         browser.Repeater.ElementPrepared += BrowserRepeaterElementPrepared;
         browser.Repeater.ElementClearing += BrowserRepeaterElementClearing;
+        // Explorer wheel row: Default scrolls the file list (unchanged); another action replaces it.
+        browser.ScrollViewer.AddHandler(InputElement.PointerWheelChangedEvent, async (_, e) =>
+        {
+            var configured = ResolveGestureSlot("explorer.wheel", e.KeyModifiers);
+            if (string.Equals(configured, GestureCatalog.Default, StringComparison.OrdinalIgnoreCase))
+            {
+                // Ctrl + wheel steps through the icon sizes (Extra large ... Details) like Windows Explorer.
+                if (e.KeyModifiers == KeyModifiers.Control && e.Delta.Y != 0)
+                {
+                    e.Handled = true;
+                    SetExplorerViewMode(_browserViewMode + (e.Delta.Y > 0 ? -1 : 1));
+                }
+                return;
+            }
+            e.Handled = true;
+            await ExecuteGestureActionAsync(configured, ImageViewport.WheelNavigationStep(e.Delta.Y, _settings.InvertWheelDirection));
+        }, RoutingStrategies.Tunnel);
         browser.BackRequested += (_, _) => BrowserBackClicked(browser, new RoutedEventArgs());
         browser.ForwardRequested += (_, _) => BrowserForwardClicked(browser, new RoutedEventArgs());
+        browser.HistoryRequested += (_, _) => ShowExplorerHistoryMenu();
         browser.UpRequested += (_, _) => BrowserUpClicked(browser, new RoutedEventArgs());
         browser.RefreshRequested += (_, _) => BrowserRefreshClicked(browser, new RoutedEventArgs());
-        browser.AddressKeyPressed += (_, e) => BrowserAddressKeyDown(browser.AddressBox, e);
+        browser.AddressNavigateRequested += (_, text) => BrowserAddressNavigateRequested(text);
+        browser.ScrollViewer.ScrollChanged += (_, e) => { if (e.OffsetDelta.Y != 0) NoteExplorerSessionChanged(); };
         browser.ViewModeChanged += (_, e) => BrowserViewModeChanged(browser.ViewModeCombo, e);
         browser.WindowsExplorerRequested += (_, _) => BrowserWindowsExplorerClicked(browser, new RoutedEventArgs());
-        browser.BrowserKeyPressed += (_, e) => BrowserListKeyDown(browser.ScrollViewer, e);
+        browser.FilterTextChanged += (_, e) => BrowserFilterTextChanged(browser.FilterBox, e);
+        browser.FilterKeyPressed += (_, e) => BrowserFilterKeyDown(browser.FilterBox, e);
+        WireExplorerInput(browser);
         _browserUiReady = true;
         ConfigureBrowserRepeaterLayout();
+        BuildExplorerNavPane();
         RefreshDynamicTooltips();
         ApplyManagedExplorerTheme();
         return browser;
     }
 
-    private Button BrowserBackButton => EnsureBrowserSurface().BackButton;
-    private Button BrowserForwardButton => EnsureBrowserSurface().ForwardButton;
-    private Button BrowserUpButton => EnsureBrowserSurface().UpButton;
-    private Button BrowserRefreshButton => EnsureBrowserSurface().RefreshButton;
-    private TextBox BrowserAddressBox => EnsureBrowserSurface().AddressBox;
-    private ComboBox BrowserViewModeCombo => EnsureBrowserSurface().ViewModeCombo;
     private ScrollViewer BrowserScrollViewer => EnsureBrowserSurface().ScrollViewer;
     private ItemsRepeater BrowserRepeater => EnsureBrowserSurface().Repeater;
-    private UniformGridLayout BrowserRepeaterLayout => EnsureBrowserSurface().RepeaterLayout;
     private Grid NativeExplorerHostSurface => EnsureBrowserSurface().NativeHostSurface;
 
     private void ShowBrowserSurface()
     {
         AdvanceWorkspaceEpoch();
-        var browserSurface = EnsureBrowserSurface();
+        EnsureBrowserSurface();
         _presentedPath = null;
+        _gifPlayer?.Stop();
         StopSlideshow(restoreStartingMode: false);
         HomeHost.IsVisible = false;
         WarmOpenTransitionHost.IsVisible = false;
@@ -1408,6 +1533,16 @@ public partial class MainWindow
         BrowserScrollViewer.IsVisible = true;
         ApplyManagedExplorerTheme();
         ApplyStatusVisibility();
+    }
+
+    /// <summary>Keyboard focus goes to the folder list so arrows / Enter / Backspace act on it.</summary>
+    private void FocusBrowserList()
+    {
+        if (_browserSurface is not { } surface) return;
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (BrowserView.IsVisible && _workspace.Active is BrowserTabState && !surface.AddressBar.IsEditing) surface.ScrollViewer.Focus();
+        }, DispatcherPriority.Loaded);
     }
 
     /// <summary>
@@ -1508,18 +1643,32 @@ public partial class MainWindow
                     Viewport.RestoreViewState(new ViewerViewSnapshot(view.Mode, view.Zoom, new Vector(view.PanX, view.PanY)));
                 break;
             case BrowserTabState browser:
-                // Compatibility migration only: the built-in Explorer no longer exists.
-                _browserSessions.Remove(browser.Id);
-                _browserHighlightTargets.Remove(browser.Id);
-                _tabForwardFolderTargets.Remove(browser.Id);
-                _tabForwardImageTargets.Remove(browser.Id);
-                _workspace.ReplaceTab(new HomeTabState(browser.Id));
-                ShowHomeSurface();
-                _diagnostics.Write("browser", "legacy_browser_tab_migrated_to_home", new { browser.Id });
+                // Explorer tab (4.8.0): Glide's own managed folder browser. The native IExplorerBrowser
+                // COM host stays dormant (NativeAOT restricts COM interop); only BrowserSurface is used.
+                // A folder that no longer exists falls back to the fresh-Explorer location.
+                // The tab's history (restored from the session file / a moved tab the first time it is shown).
+                HistoryFor(browser);
+                // A folder that is gone (or unreadable) opens its nearest existing parent instead, and the
+                // remembered selection/scroll then no longer applies.
+                var firstShown = !_explorerTabViews.ContainsKey(browser.Id) && _explorerDisplayedTabId != browser.Id;
+                var folder = ResolveExplorerRestoreFolder(browser.Folder, checkReadable: firstShown);
+                var folderRestored = string.Equals(folder, browser.Folder, StringComparison.OrdinalIgnoreCase);
+                if (_explorerDisplayedTabId != Guid.Empty && _explorerDisplayedTabId != browser.Id) RetireExplorerSurface();
+                ShowBrowserSurface();
+                ApplyExplorerTabView(browser, applySavedView: folderRestored);
+                BuildExplorerNavPane();
+                NavigateBrowserTo(folder, addHistory: !folderRestored);
+                FocusBrowserList();
+                // A custom new-tab folder that could not be used says so in the Explorer message slot.
+                if (_tabNotices.Remove(browser.Id, out var explorerNotice)) ShowExplorerMessage(explorerNotice, isError: true);
+                _diagnostics.Write("browser", "explorer_tab_activated", new { browser.Id, folder });
                 break;
         }
         RebuildTabStrip();
         if (_workspace.Active is { } active) SelectBrowserHighlight(active.Id);
+        // Back / Forward: the first time a tab is shown its history starts here; a tab that changed what it shows
+        // (an image tab turned into an Explorer view...) gets a new step.
+        RecordActiveTabLocation();
         UpdateTabNavigationButtons();
     }
 
@@ -1547,31 +1696,16 @@ public partial class MainWindow
                 });
                 break;
             }
-            case BrowserTabState browser when _browserSessions.TryGetValue(id, out var session):
-                _workspace.ReplaceTab(browser with
-                {
-                    Navigation = new BrowserNavigationState(session.History.ToArray(), session.Index, session.Highlights.ToArray())
-                });
+            case BrowserTabState browser:
+            {
+                // The session file keeps the Explorer folders of the tab history (images and Home are not persisted).
+                if (_tabHistories.TryGetValue(id, out var history) && history.Current is { Kind: Glide.Core.Navigation.NavigationEntryKind.Explorer })
+                    CaptureExplorerHistoryEntry(history, browser);
+                var navigation = BrowserNavigationFor(id) ?? browser.Navigation;
+                _workspace.ReplaceTab(browser with { Navigation = navigation, View = CaptureExplorerViewFor(browser) ?? browser.View });
                 break;
+            }
         }
-    }
-
-    private void RestoreBrowserNavigationState(BrowserTabState browser)
-    {
-        if (browser.Navigation is not { } navigation || _browserSessions.ContainsKey(browser.Id)) return;
-        var session = new BrowserSession();
-        for (var i = 0; i < navigation.History.Count; i++)
-        {
-            var folder = navigation.History[i];
-            if (!Directory.Exists(folder)) continue;
-            session.History.Add(Path.GetFullPath(folder));
-            var highlight = navigation.Highlights is { } highlights && i < highlights.Count ? highlights[i] : null;
-            session.Highlights.Add(!string.IsNullOrWhiteSpace(highlight) ? highlight : null);
-        }
-        session.Index = session.History.Count == 0
-            ? -1
-            : Math.Clamp(navigation.Index, 0, session.History.Count - 1);
-        _browserSessions[browser.Id] = session;
     }
 
     private void ApplyCompactChromeLayout()

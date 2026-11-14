@@ -3,33 +3,41 @@ using Glide.Core.Commands;
 namespace Glide.Input;
 
 /// <summary>
-/// Converts canonical physical shortcut strings into semantic Glide commands. The UI adapter owns
-/// platform key naming; this type owns conflict-free lookup only. This keeps hotkey remapping testable.
+/// Converts canonical physical shortcut strings into registry actions / semantic Glide commands. The UI adapter
+/// owns platform key naming; this type owns conflict-free lookup only. Shortcuts are compared in canonical form
+/// (<see cref="ShortcutText"/>), so modifier order ("Alt+Shift+S" vs the pressed "Shift+Alt+S") and letter case
+/// never decide whether a binding fires.
 /// </summary>
 public sealed class InputRouter
 {
-    public GlideCommand ResolveShortcut(string shortcut, IReadOnlyDictionary<string, List<string>> bindings)
+    /// <summary>The registry action bound to <paramref name="shortcut"/>, or null. First hotkey row in list order wins.</summary>
+    public AppAction? ResolveShortcutAction(string shortcut, IReadOnlyDictionary<string, List<string>> bindings)
     {
-        if (string.IsNullOrWhiteSpace(shortcut)) return GlideCommand.None;
+        if (string.IsNullOrWhiteSpace(shortcut)) return null;
+        var canonical = ShortcutText.Canonicalize(shortcut);
         foreach (var definition in HotkeyCatalog.All)
         {
             if (!bindings.TryGetValue(definition.Id, out var assigned)) continue;
-            if (assigned.Any(x => string.Equals(x, shortcut, StringComparison.OrdinalIgnoreCase)))
-                return definition.Command;
+            if (assigned.Any(x => string.Equals(ShortcutText.Canonicalize(x), canonical, StringComparison.OrdinalIgnoreCase)))
+                return AppActionRegistry.FindByHotkeySlot(definition.Id);
         }
-        return GlideCommand.None;
+        return null;
     }
+
+    public GlideCommand ResolveShortcut(string shortcut, IReadOnlyDictionary<string, List<string>> bindings) =>
+        ResolveShortcutAction(shortcut, bindings)?.Command ?? GlideCommand.None;
 
     public GlideCommand ResolveShortcut(string shortcut)
     {
+        var canonical = ShortcutText.Canonicalize(shortcut);
         foreach (var definition in HotkeyCatalog.All)
-            if (definition.DefaultShortcuts.Any(x => string.Equals(x, shortcut, StringComparison.OrdinalIgnoreCase)))
+            if (definition.DefaultShortcuts.Any(x => string.Equals(ShortcutText.Canonicalize(x), canonical, StringComparison.OrdinalIgnoreCase)))
                 return definition.Command;
         return GlideCommand.None;
     }
 
 
-    /// <summary>Resolve one of Glide's 24 gesture slots to a stable action ID.</summary>
+    /// <summary>Resolve one of Glide's gesture slots (see GestureCatalog.Slots) to a stable action ID.</summary>
     public string ResolveGesture(string slotId, IReadOnlyDictionary<string, string>? bindings) =>
         GestureCatalog.ResolveAction(slotId, bindings);
 

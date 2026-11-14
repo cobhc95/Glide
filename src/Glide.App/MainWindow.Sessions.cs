@@ -1,34 +1,23 @@
 ﻿using System.Diagnostics;
-using System.Collections.ObjectModel;
-using System.Runtime.InteropServices;
 using System.Text.Json;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
-using Avalonia.Controls.Primitives;
-using Avalonia.Controls.Templates;
 using Avalonia.Input;
 using Avalonia.Interactivity;
-using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
-using Avalonia.Platform.Storage;
 using Avalonia.Styling;
 using Avalonia.Threading;
-using Avalonia.VisualTree;
-using Glide.App.Controls;
 using Glide.App.Diagnostics;
+using Glide.App.Explorer;
 using Glide.App.Platform;
-using Glide.App.Printing;
 using Glide.App.Settings;
 using Glide.App.Services;
 using Glide.Core;
 using Glide.Core.Commands;
 using Glide.Core.Workspace;
 using Glide.Imaging;
-using Glide.Input;
-using Glide.Diagnostics.Runtime;
-using Microsoft.VisualBasic.FileIO;
 
 namespace Glide.App;
 
@@ -72,10 +61,9 @@ public partial class MainWindow
 
     private void DisposeDetachedBitmap(Bitmap? bitmap)
     {
-        // Cached bitmaps are disposed by ImageLoadCoordinator.PurgeCaches. Only dispose an image
-        // that was not in the loader cache, avoiding double-disposal across both ownership domains.
-        if (bitmap is null || _loader.IsBitmapCached(bitmap)) return;
-        bitmap.Dispose();
+        // One ownership rule: give back the presentation lease. Cached bitmaps stay with the loader
+        // (PurgeCaches disposes them right after); uncached or retired ones are disposed here.
+        _loader.ReleaseBitmap(bitmap);
     }
 
     private void ReturnToSpeedBoostStandbyAfterDelegatedOpen()
@@ -96,7 +84,6 @@ public partial class MainWindow
         // Secondary windows are ordinary top-level windows: each owns its own taskbar button and a
         // distinct AppUserModelID, so Windows shows it as a separate taskbar entry instead of
         // combining it with the primary window.
-        child.IsSecondaryWindow = true;
         child.ShowInTaskbar = true;
         child.Show();
         child.ApplyDistinctTaskbarIdentity();
@@ -134,6 +121,7 @@ public partial class MainWindow
         {
             try
             {
+                CancelPendingExplorerSessionSave();
                 CaptureActiveTabRuntimeState();
                 WorkspaceSessionStore.Save(_workspace.Tabs, _workspace.ActiveIndex);
             }
@@ -221,6 +209,75 @@ public partial class MainWindow
         return new ExternalLaunchItemResult(requestId, ExternalLaunchItemStatus.Accepted, "Activated");
     }
 
+    /// <summary>
+    /// The multi-tab close rule shared by the window's Closing handler and "Exit Glide": the remembered choice, or the
+    /// "Close Glide tabs?" dialog while the choice is "Ask". Returns "Close current tab", "Close all" or "Cancel".
+    /// </summary>
+    private async Task<string> ResolveMultiTabCloseChoiceAsync()
+    {
+        var choice = _settings.RememberedMultiTabCloseChoice;
+        if (string.Equals(choice, "Ask", StringComparison.OrdinalIgnoreCase))
+            choice = await ShowMultiTabCloseDialogAsync();
+        return choice;
+    }
+
+    /// <summary>Test seam: replaces the real process exit of <see cref="ExitGlideAsync"/> (which would end the test host).</summary>
+    internal Action? ApplicationExitForTests { get; set; }
+
+    /// <summary>
+    /// "Exit Glide" (registry action app.exit; the viewer menu's "Exit program"): quits the whole program. It applies
+    /// the same confirmation as closing the window (several image tabs and "confirm close" on: close current tab / close
+    /// all / cancel), flushes the recent history, then ends the process through the tray icon's exit path:
+    /// the other windows save their placement and are closed without Speed Boost standby, then <see cref="ForceExit"/>
+    /// saves this window's session and placement and shuts the application down. Speed Boost and the tray icon cannot
+    /// keep the process alive.
+    /// </summary>
+    internal async Task ExitGlideAsync()
+    {
+        if (!_closeConfirmationInProgress && IsVisible && _settings.ConfirmCloseMultipleTabs && _workspace.Tabs.OfType<ImageTabState>().Count() > 1)
+        {
+            _closeConfirmationInProgress = true;
+            try
+            {
+                var choice = await ResolveMultiTabCloseChoiceAsync();
+                if (string.Equals(choice, "Close current tab", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (_workspace.Active is { } active) await CloseTabWithPolicyAsync(active.Id, "exit_dialog");
+                    return;
+                }
+                if (!string.Equals(choice, "Close all", StringComparison.OrdinalIgnoreCase)) return;
+            }
+            catch (Exception ex)
+            {
+                _diagnostics.Write("window", "exit_confirmation_failed", new { error = ex.GetType().Name, ex.Message });
+                return;
+            }
+            finally { _closeConfirmationInProgress = false; }
+        }
+        try { await RecentHistoryStore.FlushAsync(); }
+        catch (Exception ex) { _diagnostics.Write("window", "exit_history_flush_failed", new { error = ex.GetType().Name, ex.Message }); }
+        _diagnostics.Write("window", "exit_application_requested", new { windows = GlideWindowRegistry.Snapshot().Count, state = WindowState.ToString() });
+        if (ApplicationExitForTests is { } seam) { seam(); return; }
+        foreach (var other in GlideWindowRegistry.Snapshot())
+            if (!ReferenceEquals(other, this)) other.PrepareForApplicationExit();
+        ForceExit();
+    }
+
+    /// <summary>Another window is exiting the program: save this window's placement and let it close without
+    /// Speed Boost standby or confirmation (its session is not saved, so the exiting window's session is the one restored).</summary>
+    internal void PrepareForApplicationExit()
+    {
+        try
+        {
+            if (!_speedBoostStandbyActive && !_closeForSpeedBoostStandby && _workspace.Tabs.Count > 0) SaveWindowPlacement();
+        }
+        catch (Exception ex)
+        {
+            _diagnostics.Write("window", "exit_prepare_failed", new { error = ex.GetType().Name, ex.Message });
+        }
+        _forceProcessExit = true;
+    }
+
     internal void ForceExit()
     {
         _diagnostics.Write("window", "force_exit_requested", new { state = WindowState.ToString(), active = _workspace.Active?.Kind.ToString() });
@@ -233,6 +290,7 @@ public partial class MainWindow
             // entered standby); saving it here would replace the real last session with nothing.
             if (!_speedBoostStandbyActive && !_closeForSpeedBoostStandby && _workspace.Tabs.Count > 0)
             {
+                CancelPendingExplorerSessionSave();
                 CaptureActiveTabRuntimeState();
                 WorkspaceSessionStore.Save(_workspace.Tabs, _workspace.ActiveIndex);
                 SaveWindowPlacement();
@@ -404,7 +462,8 @@ public partial class MainWindow
         // even when the normal external policy is "Open in new tab"; otherwise Explorer launches
         // visibly retain an unrelated Home tab beside the requested picture.
         var replaceDefaultHome = IsDefaultHomeOnlyWorkspace();
-        await OpenAsImageTabAsync(path, openInNewTab: !overwriteExistingTab && !replaceDefaultHome);
+        // A placeholder Home replaced by a launched file is not a page to go Back to: that tab's history starts at the image.
+        await OpenAsImageTabAsync(path, openInNewTab: !overwriteExistingTab && !replaceDefaultHome, startNewHistory: replaceDefaultHome);
         if (wasSpeedBoostStandby)
         {
             ShowImageSurface();
@@ -440,37 +499,6 @@ public partial class MainWindow
         await ShowOwnedDialogAsync(dialog);
         if (remember.IsChecked == true && result != "Cancel") { _settings.RememberedMultiTabCloseChoice = result; _settings.ConfirmCloseMultipleTabs = false; SaveSettingsAndPublish(); }
         return result;
-    }
-
-    private void OpenContainingFolder()
-    {
-        // The embedded Explorer remains removed. This title-bar action opens the real Windows
-        // Explorer only, selecting the current image.
-        if (string.IsNullOrWhiteSpace(_currentPath)) return;
-        var path = _currentPath;
-        var opened = _fileOperations.TryOpenContainingFolder(path);
-        _diagnostics.Write("file", opened ? "open_containing_folder_external" : "open_containing_folder_failed", new { path });
-    }
-
-    private async Task OpenContainingFolderInCurrentTabAsync(Guid tabId, string imagePath, string folder)
-    {
-        _tabForwardImageTargets[tabId] = imagePath;
-        _tabForwardFolderTargets[tabId] = new Stack<string>();
-        _browserHighlightTargets[tabId] = imagePath;
-
-        var session = new BrowserSession();
-        session.History.Add(folder);
-        session.Highlights.Add(imagePath);
-        session.Index = 0;
-        _browserSessions[tabId] = session;
-
-        _workspace.ReplaceTab(new BrowserTabState(tabId, folder)
-        {
-            Navigation = new BrowserNavigationState(session.History.ToArray(), session.Index, session.Highlights.ToArray())
-        });
-        await ActivateWorkspaceAsync();
-        SelectBrowserHighlight(tabId);
-        _diagnostics.Write("file", "open_containing_folder_internal", new { path = imagePath, folder, sameTab = true });
     }
 
     private async Task RenameCurrentFileAsync()
@@ -580,12 +608,14 @@ public partial class MainWindow
         var items = new List<MenuItem>();
         var hasImage = Viewport.Bitmap is not null;
         var hasFile = _currentPath is not null;
+        // Every item is a master-registry action: the shortcut text comes from the live hotkey map and the click
+        // goes through the same ExecuteActionAsync entry point as the hotkey (see MenuActions / AppActionRegistry).
         MenuItem Item(string label, GlideCommand command, bool enabled = true, string? icon = null)
         {
-            var suffix = ShortcutFor(command);
-            var item = new MenuItem { Header = suffix == "Unassigned" ? label : $"{label}\t{suffix}", IsEnabled = enabled };
+            var action = AppActionRegistry.ForCommand(command) ?? throw new InvalidOperationException($"Viewer menu command {command} is not in the action registry");
+            var item = MenuActions.Tag(new MenuItem { Header = MenuActions.Header(label, ShortcutForAction(action.Id)), IsEnabled = enabled }, action.Id);
             if (icon is not null) item.Icon = MenuIcon(icon);
-            item.Click += async (_, _) => await ExecuteCommandAsync(command);
+            item.Click += async (_, _) => await ExecuteActionAsync(action, "menu");
             return item;
         }
         MenuItem Group(string header, string icon, params object[] children)
@@ -599,6 +629,15 @@ public partial class MainWindow
         // The most-used action stays at the top level; everything else is grouped by purpose.
         items.Add(Item(Viewport.HasSelection ? "Copy selected pixels" : "Copy image pixels", GlideCommand.CopyImage, hasImage, "Copy"));
         items.Add(Separator());
+
+        // Animated GIF playback controls appear only while an animated GIF is the current image.
+        if (_gifPlayer is { HasAnimation: true } gif)
+        {
+            items.Add(Item(gif.IsPaused ? "Play GIF" : "Pause GIF", GlideCommand.GifPlayPause, true, gif.IsPaused ? "Play" : "Pause"));
+            items.Add(Item("Previous frame", GlideCommand.GifPreviousFrame, true, "FramePrevious"));
+            items.Add(Item("Next frame", GlideCommand.GifNextFrame, true, "FrameNext"));
+            items.Add(Separator());
+        }
 
         items.Add(Group("Fit and zoom", "ZoomIn",
             Item("Fit image (shrink only)", GlideCommand.FitImage, hasImage, "Fit"),
@@ -650,7 +689,7 @@ public partial class MainWindow
             Item("Last image", GlideCommand.LastImage, _navigator.Count > 1, "Last")));
 
         var statusShown = _settings.ShowStatusSurface && !_statusCollapsed;
-        var showStatus = new MenuItem { Header = statusShown ? "Show status bar  ✓" : "Show status bar", Icon = MenuIcon("Status") };
+        var showStatus = MenuActions.Tag(new MenuItem { Header = statusShown ? "Show status bar  ✓" : "Show status bar", Icon = MenuIcon("Status") }, "setting.status.visible");
         showStatus.Click += (_, _) =>
         {
             // A collapsed bar is "not shown": this item brings it back rather than closing it.
@@ -695,17 +734,66 @@ public partial class MainWindow
 
         items.Add(Separator());
         items.Add(Item("Settings", GlideCommand.Settings, true, "Settings"));
-        items.Add(Item("Exit program", GlideCommand.CloseWindow, true, "Close"));
+        items.Add(Item("Exit Glide", GlideCommand.ExitApplication, true, "Close"));
         menu.ItemsSource = items;
         return PrepareOwnedContextMenu(menu);
     }
 
+    /// <summary>Test seam: replaces the process launch of "Open in external program 1-3" (program, image path) so tests can
+    /// record what would have been started without running anything.</summary>
+    internal Func<string?, string?, bool>? ExternalLauncherForTests { get; set; }
+
+    /// <summary>
+    /// "Open in external program 1-3". Every entry point (hotkey, gesture, title-bar button, context menu) reaches this one
+    /// handler through the command dispatcher. The image it opens depends on the active tab:
+    /// image tab = the current image; Explorer tab = the image selected in the Explorer list (see
+    /// <see cref="SelectedExplorerImageForAction"/>), and with none selected nothing is launched and the Explorer says so;
+    /// Home / Welcome tab = nothing. It never falls back to the picture of another tab or to an earlier selection.
+    /// </summary>
     private void LaunchExternal(int slot)
     {
-        if (string.IsNullOrWhiteSpace(_currentPath)) return;
+        string? path;
+        switch (_workspace.Active)
+        {
+            case BrowserTabState browser:
+                path = SelectedExplorerImageForAction(browser)?.Path;
+                if (path is null)
+                {
+                    ShowExplorerMessage("Select an image first");
+                    _diagnostics.Write("file", "external_no_selected_image", new { slot });
+                    return;
+                }
+                break;
+            case HomeTabState:
+                _diagnostics.Write("file", "external_no_image_in_home", new { slot });
+                return;
+            default:
+                path = _currentPath;
+                break;
+        }
+        if (string.IsNullOrWhiteSpace(path)) return;
         var program = slot switch { 1 => _settings.ExternalProgram1, 2 => _settings.ExternalProgram2, _ => _settings.ExternalProgram3 };
-        var launched = _fileOperations.TryLaunchExternal(program, _currentPath);
-        _diagnostics.Write("file", launched ? "external_launched" : "external_launch_failed", new { slot, program, path = _currentPath });
+        var launched = (ExternalLauncherForTests ?? _fileOperations.TryLaunchExternal)(program, path);
+        _diagnostics.Write("file", launched ? "external_launched" : "external_launch_failed", new { slot, program, path });
+    }
+
+    /// <summary>
+    /// The one image an image-only action (external programs) acts on in an Explorer tab: only entries currently selected in
+    /// the list that are supported images count (folders and other files are ignored). With several selected images the
+    /// focused item wins when it is one of them, otherwise the first selected image in list order. Null when there is none,
+    /// or when the list on screen is not this tab's.
+    /// </summary>
+    private ExplorerEntry? SelectedExplorerImageForAction(BrowserTabState browser)
+    {
+        if (_explorerDisplayedTabId != browser.Id) return null;
+        var images = SelectedExplorerEntries().Where(e => e.IsImage && !e.IsDirectory).ToList();
+        if (images.Count == 0) return null;
+        if (images.Count > 1 && _browserCurrentIndex >= 0 && _browserCurrentIndex < _browserEntries.Count)
+        {
+            var focused = _browserEntries[_browserCurrentIndex];
+            if (images.Contains(focused)) return focused;
+        }
+        return images[0];
     }
 
     internal async Task CaptureDiagnosticVisualScenariosAsync(string folder)
@@ -842,12 +930,5 @@ public partial class MainWindow
         {
             try { settingsWindow.Close(); } catch { }
         }
-    }
-
-    private sealed class BrowserSession
-    {
-        public List<string> History { get; } = new();
-        public List<string?> Highlights { get; } = new();
-        public int Index { get; set; } = -1;
     }
 }

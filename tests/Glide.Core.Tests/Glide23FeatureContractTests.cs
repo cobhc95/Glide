@@ -1,7 +1,6 @@
 using Glide.App.Settings;
 using Glide.Core.Commands;
 using Glide.Core.Settings;
-using Xunit;
 
 namespace Glide.Core.Tests;
 
@@ -60,8 +59,11 @@ public sealed class Glide23FeatureContractTests
         Assert.Equal(new[] { "Glide default", "Windows Photos", "IrfanView", "nomacs", "FastStone", "XnView MP" }, SettingsPresetCatalog.Names);
         var current = new GlideSettingsState { SelectionRightClickZoomOut = true };
         var photos = SettingsPresetCatalog.Apply("Windows Photos", current);
-        Assert.False(photos.SelectionRightClickZoomOut);
-        Assert.Equal("Pan image", photos.LeftDragMode);
+        // 4.8.0: presets still describe themselves through the folded toggles, which become explicit
+        // gesture rows (selection right-click "Ignore here" = zoom-out off; left-drag = pan).
+        Assert.Equal(GestureCatalog.PassThrough, photos.Gestures["selection.rightClick"]);
+        Assert.Equal(GestureCatalog.Pan, photos.Gestures["drag.leftImage"]);
+        Assert.Equal(GestureCatalog.ZoomWheel, photos.Gestures["wheel.windowed"]);
         Assert.Contains("profiles.import", SettingsCatalog.All.Select(x => x.Id));
         Assert.Contains("profiles.export", SettingsCatalog.All.Select(x => x.Id));
     }
@@ -170,14 +172,17 @@ public sealed class Glide23FeatureContractTests
     }
 
     [Fact]
-    public void TitleUpUsesPresentedImagePathAndSameTabExplorerState()
+    public void Title_navigation_uses_the_one_per_tab_history_and_keeps_the_same_tab()
     {
+        // 5.0.0: the dormant title "Up to containing folder / Forward to the image" state (NavigateTitleUpAsync,
+        // _tabForwardImageTargets) was replaced by one browser-style history per tab (MainWindow.History.cs).
         var source = Source("src/Glide.App/MainWindow.axaml.cs");
-        Assert.Contains("NavigateTitleUpAsync", source, StringComparison.Ordinal);
-        Assert.Contains("ImageView.IsVisible && !string.IsNullOrWhiteSpace(_presentedPath)", source, StringComparison.Ordinal);
-        Assert.Contains("new BrowserTabState(id, folder)", source, StringComparison.Ordinal);
-        Assert.Contains("_tabForwardImageTargets[id] = imagePath", source, StringComparison.Ordinal);
-        Assert.Contains("title_up_image_to_folder", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("NavigateTitleUpAsync", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("_tabForwardImageTargets", source, StringComparison.Ordinal);
+        Assert.Contains("await NavigateBackAsync();", source, StringComparison.Ordinal);
+        Assert.Contains("new BrowserTabState(active.Id, folder)", source, StringComparison.Ordinal);   // Back to the Explorer keeps the tab
+        Assert.Contains("new ImageTabState(active.Id, target.Path!)", source, StringComparison.Ordinal);
+        Assert.Contains("RecordActiveTabLocation();", source, StringComparison.Ordinal);
     }
 
     private static void AssertToggle(string id)

@@ -101,18 +101,6 @@ public sealed class CodecProviderRuntime : IDisposable
         return null;
     }
 
-    /// <summary>
-    /// Explicit exhaustive verification for diagnostics/developer workflows. Never call this from
-    /// MainWindow construction or ordinary image open.
-    /// </summary>
-    public IReadOnlyList<CodecProviderArtifact> VerifyAllProviders()
-    {
-        ThrowIfDisposed();
-        var artifacts = CodecProviderInventory.Discover(ProviderDirectory);
-        lock (_gate) _runtimeArtifacts.AddRange(artifacts);
-        return artifacts;
-    }
-
     public async Task<ImageMetadata?> ReadMetadataAsync(string path, CancellationToken cancellationToken = default)
     { ThrowIfDisposed(); return await _backend.ReadMetadataAsync(path, cancellationToken).ConfigureAwait(false); }
 

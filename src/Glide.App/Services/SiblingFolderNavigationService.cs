@@ -1,4 +1,3 @@
-using System.Runtime.InteropServices;
 
 namespace Glide.App.Services;
 
@@ -197,60 +196,6 @@ public static class SiblingFolderNavigationService
         return cursor;
     }
 
-    private static string? FindFirstImageFolderInBranch(
-        string root, SiblingFolderNavigationOptions options, Func<string, bool> isSupported, CancellationToken token)
-    {
-        var pending = new Stack<string>();
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        pending.Push(root);
-        var steps = 0;
-        while (pending.Count > 0 && steps++ < MaxTraversalSteps)
-        {
-            token.ThrowIfCancellationRequested();
-            var folder = pending.Pop();
-            var normalized = SafeFullPath(folder) ?? folder;
-            if (!seen.Add(normalized)) continue;
-
-            var images = EnumerateImages(folder, isSupported);
-            if (images is { Length: > 0 }) return folder;
-
-            // Include linked/reparse directories as sibling candidates, but do not recurse through
-            // them. This preserves legitimate linked folders without risking junction cycles.
-            if (IsReparseDirectory(folder)) continue;
-
-            var children = EnumerateChildDirectories(folder, options, includePath: null);
-            for (var i = children.Length - 1; i >= 0; i--)
-                pending.Push(children[i]);
-        }
-        return null;
-    }
-
-    private static string? FindLastImageFolderInBranch(
-        string root, SiblingFolderNavigationOptions options, Func<string, bool> isSupported, CancellationToken token)
-    {
-        string? last = null;
-        var steps = 0;
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        void Visit(string folder)
-        {
-            if (steps++ >= MaxTraversalSteps) return;
-            token.ThrowIfCancellationRequested();
-            var normalized = SafeFullPath(folder) ?? folder;
-            if (!seen.Add(normalized)) return;
-
-            var images = EnumerateImages(folder, isSupported);
-            if (images is { Length: > 0 }) last = folder;
-
-            if (IsReparseDirectory(folder)) return;
-            foreach (var child in EnumerateChildDirectories(folder, options, includePath: null))
-                Visit(child);
-        }
-
-        Visit(root);
-        return last;
-    }
-
     internal static string[] EnumerateChildDirectories(string parent, SiblingFolderNavigationOptions options, string? includePath)
     {
         try
@@ -325,12 +270,6 @@ public static class SiblingFolderNavigationService
             SafeFullPath(b)?.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), StringComparison.OrdinalIgnoreCase);
 
     private static string? SafeFullPath(string path) { try { return Path.GetFullPath(path); } catch { return null; } }
-
-    private static bool IsReparseDirectory(string path)
-    {
-        try { return (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0; }
-        catch { return true; }
-    }
 
     private static bool IsHiddenDirectory(string path)
     {

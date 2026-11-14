@@ -241,76 +241,18 @@ internal sealed class CompositorOverlayVisualHandler : CompositionCustomVisualHa
         // direction changes continuous and preserves sub-pixel motion on high-refresh displays.
         var margin = Math.Clamp(speed * 0.9 + 30, 48, 360);
         var steer = new Vector();
-        AddBoundarySteer(ref steer, item.X - item.LegalBounds.Left, velocity.X < 0, new Vector(speed, 0), margin);
-        AddBoundarySteer(ref steer, item.LegalBounds.Right - item.X, velocity.X > 0, new Vector(-speed, 0), margin);
-        AddBoundarySteer(ref steer, item.Y - item.LegalBounds.Top, velocity.Y < 0, new Vector(0, speed), margin);
-        AddBoundarySteer(ref steer, item.LegalBounds.Bottom - item.Y, velocity.Y > 0, new Vector(0, -speed), margin);
+        OverlayDriftMotion.AddBoundarySteer(ref steer, item.X - item.LegalBounds.Left, velocity.X < 0, new Vector(speed, 0), margin);
+        OverlayDriftMotion.AddBoundarySteer(ref steer, item.LegalBounds.Right - item.X, velocity.X > 0, new Vector(-speed, 0), margin);
+        OverlayDriftMotion.AddBoundarySteer(ref steer, item.Y - item.LegalBounds.Top, velocity.Y < 0, new Vector(0, speed), margin);
+        OverlayDriftMotion.AddBoundarySteer(ref steer, item.LegalBounds.Bottom - item.Y, velocity.Y > 0, new Vector(0, -speed), margin);
         var desired = velocity + steer;
         if (desired.Length > .001) desired *= speed / desired.Length;
-        velocity = RotateTowards(velocity, desired, Math.PI * 2.2 * Math.Clamp(seconds, 0, .05));
+        velocity = OverlayDriftMotion.RotateTowards(velocity, desired, Math.PI * 2.2 * Math.Clamp(seconds, 0, .05));
 
         item.X += velocity.X * seconds;
         item.Y += velocity.Y * seconds;
-        ClampWithoutBounce(item, ref velocity);
+        velocity = OverlayDriftMotion.ClampWithoutBounce(item.LegalBounds, ref item.X, ref item.Y, velocity);
         item.Velocity = velocity;
-    }
-
-    private static void AddBoundarySteer(ref Vector steer, double distance, bool headingOutward, Vector inward, double margin)
-    {
-        if (!headingOutward || distance >= margin) return;
-        var strength = 1 - Math.Clamp(distance / margin, 0, 1);
-        steer += inward * (0.65 + strength * strength * 2.35);
-    }
-
-    private static Vector RotateTowards(Vector current, Vector desired, double maxRadians)
-    {
-        var speed = Math.Max(1, current.Length);
-        if (desired.Length <= .001 || maxRadians <= 0) return current;
-        var from = Math.Atan2(current.Y, current.X);
-        var to = Math.Atan2(desired.Y, desired.X);
-        var delta = Math.Atan2(Math.Sin(to - from), Math.Cos(to - from));
-        var angle = from + Math.Clamp(delta, -maxRadians, maxRadians);
-        return new Vector(Math.Cos(angle) * speed, Math.Sin(angle) * speed);
-    }
-
-    private static void ClampWithoutBounce(Item item, ref Vector velocity)
-    {
-        var speed = Math.Max(1, velocity.Length);
-        var inward = Math.Max(1, speed * .18);
-        if (item.LegalBounds.Right <= item.LegalBounds.Left)
-        {
-            item.X = item.LegalBounds.Left;
-            velocity = new Vector(0, velocity.Y);
-        }
-        else if (item.X <= item.LegalBounds.Left)
-        {
-            item.X = item.LegalBounds.Left;
-            if (velocity.X < inward) velocity = new Vector(inward, velocity.Y);
-        }
-        else if (item.X >= item.LegalBounds.Right)
-        {
-            item.X = item.LegalBounds.Right;
-            if (velocity.X > -inward) velocity = new Vector(-inward, velocity.Y);
-        }
-
-        if (item.LegalBounds.Bottom <= item.LegalBounds.Top)
-        {
-            item.Y = item.LegalBounds.Top;
-            velocity = new Vector(velocity.X, 0);
-        }
-        else if (item.Y <= item.LegalBounds.Top)
-        {
-            item.Y = item.LegalBounds.Top;
-            if (velocity.Y < inward) velocity = new Vector(velocity.X, inward);
-        }
-        else if (item.Y >= item.LegalBounds.Bottom)
-        {
-            item.Y = item.LegalBounds.Bottom;
-            if (velocity.Y > -inward) velocity = new Vector(velocity.X, -inward);
-        }
-
-        if (velocity.Length > .001 && Math.Abs(velocity.Length - speed) > .001)
-            velocity *= speed / velocity.Length;
     }
 
     private void ResolveOverlaps(double delta)
@@ -364,7 +306,7 @@ internal sealed class CompositorOverlayVisualHandler : CompositionCustomVisualHa
             ? new Vector(direction * speed, velocity.Y)
             : new Vector(velocity.X, direction * speed);
         if (target.Length > .001) target *= speed / target.Length;
-        return RotateTowards(velocity, target, maxTurn);
+        return OverlayDriftMotion.RotateTowards(velocity, target, maxTurn);
     }
 
     private static void Clamp(Item item)

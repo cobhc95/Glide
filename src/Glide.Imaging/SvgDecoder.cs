@@ -108,14 +108,104 @@ public static class SvgDecoder
                 ArrayPool<byte>.Shared.Return(rented);
             }
             decompressed.Position = 0;
-            return svg.Load(decompressed);
+            return LoadWithoutExternalImages(svg, decompressed);
         }
 
         using var buffer = new MemoryStream(checked((int)info.Length));
         file.CopyTo(buffer);
         buffer.Position = 0;
-        return svg.Load(buffer);
+        return LoadWithoutExternalImages(svg, buffer);
     }
+
+    /// <summary>
+    /// Security: Svg.Model fetches every non-data: <c>&lt;image&gt;</c>/<c>&lt;feImage&gt;</c> href with
+    /// WebRequest, so merely viewing a hostile SVG made Glide contact remote hosts (http/https/ftp) or
+    /// UNC shares (\\host\share, which also sends the user's NTLM credentials). Same parser as
+    /// <c>SKSvg.Load(Stream)</c>; image references that are not embedded data: URIs, internal #fragments
+    /// or local drive paths are dropped before the picture is built (the rest of the document renders).
+    /// </summary>
+    private static SKPicture? LoadWithoutExternalImages(SKSvg svg, Stream stream)
+    {
+        var document = Svg.Model.SvgExtensions.Open(stream, null);
+        if (document is null) return null;
+        RemoveExternalImageReferences(document);
+        return svg.FromSvgDocument(document);
+    }
+
+    /// <summary>Removes image/feImage elements whose href could reach the network. Returns how many were removed.</summary>
+    internal static int RemoveExternalImageReferences(Svg.SvgElement root) => RemoveExternalImageReferences(root, 0, remove: true);
+
+    private static int RemoveExternalImageReferences(Svg.SvgElement root, int depth, bool remove)
+    {
+        var unsafeElements = new List<Svg.SvgElement>();
+        var pending = new Stack<Svg.SvgElement>();
+        pending.Push(root);
+        while (pending.Count > 0)
+        {
+            var element = pending.Pop();
+            var href = element switch
+            {
+                Svg.SvgImage image => image.Href,
+                Svg.FilterEffects.SvgImage filterImage => filterImage.Href,
+                _ => null,
+            };
+            if (href is not null && !IsSafeImageReference(href, depth)) unsafeElements.Add(element);
+            foreach (var child in element.Children) pending.Push(child);
+        }
+        if (remove)
+            foreach (var element in unsafeElements) element.Parent?.Children.Remove(element);
+        return unsafeElements.Count;
+    }
+
+    /// <summary>Nested SVG images (data:image/svg+xml) are checked this many levels deep; deeper nesting is refused.</summary>
+    private const int MaxNestedSvgDepth = 3;
+
+    /// <summary>
+    /// True for references that cannot leave the machine: embedded data: URIs, same-document #fragments
+    /// and fully qualified local drive paths (C:\x.png or file:///C:/x.png). Remote schemes, UNC/device
+    /// paths, host-qualified file URIs and relative references (resolved against xml:base) are refused.
+    /// An embedded SVG image (data:image/svg+xml) is itself rendered by Svg.Model, so it is safe only
+    /// when its own image references are.
+    /// </summary>
+    internal static bool IsSafeImageReference(string? href) => IsSafeImageReference(href, 0);
+
+    private static bool IsSafeImageReference(string? href, int depth)
+    {
+        if (string.IsNullOrWhiteSpace(href)) return true;
+        var value = href.Trim();
+        if (value.StartsWith("data:", StringComparison.OrdinalIgnoreCase)) return IsSafeDataUri(value, depth);
+        if (value.StartsWith('#')) return true;
+        if (IsLocalDrivePath(value)) return true;
+        return Uri.TryCreate(value, UriKind.Absolute, out var uri) && uri.IsFile && !uri.IsUnc &&
+               string.IsNullOrEmpty(uri.Host) && IsLocalDrivePath(uri.LocalPath);
+    }
+
+    private static bool IsSafeDataUri(string value, int depth)
+    {
+        var comma = value.IndexOf(',');
+        if (comma < 0) return true; // nothing decodable, so nothing is loaded
+        var header = value[5..comma];
+        if (header.IndexOf("svg", StringComparison.OrdinalIgnoreCase) < 0) return true; // raster: decoded in memory only
+        if (depth >= MaxNestedSvgDepth) return false;
+        try
+        {
+            var payload = value[(comma + 1)..];
+            var bytes = header.EndsWith(";base64", StringComparison.OrdinalIgnoreCase)
+                ? Convert.FromBase64String(payload)
+                : System.Text.Encoding.UTF8.GetBytes(Uri.UnescapeDataString(payload));
+            using var nestedStream = new MemoryStream(bytes, writable: false);
+            var nested = Svg.Model.SvgExtensions.Open(nestedStream, null);
+            return nested is null || RemoveExternalImageReferences(nested, depth + 1, remove: false) == 0;
+        }
+        catch
+        {
+            return false; // undecodable here: refuse rather than let the renderer try
+        }
+    }
+
+    private static bool IsLocalDrivePath(string value) =>
+        value.Length >= 3 && char.IsAsciiLetter(value[0]) && value[1] == ':' && (value[2] == '\\' || value[2] == '/') &&
+        value.IndexOf("\\\\", 2, StringComparison.Ordinal) < 0 && value.IndexOf("//", 2, StringComparison.Ordinal) < 0;
 
     private static unsafe Bitmap? Render(SKPicture picture, int width, int height)
     {

@@ -1,34 +1,20 @@
-﻿using System.Diagnostics;
-using System.Collections.ObjectModel;
 using System.Runtime.InteropServices;
-using System.Text.Json;
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Controls.ApplicationLifetimes;
-using Avalonia.Controls.Primitives;
-using Avalonia.Controls.Templates;
 using Avalonia.Input;
 using Avalonia.Interactivity;
-using Avalonia.Layout;
 using Avalonia.Media;
-using Avalonia.Media.Imaging;
-using Avalonia.Platform.Storage;
 using Avalonia.Styling;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Glide.App.Controls;
-using Glide.App.Diagnostics;
 using Glide.App.Platform;
-using Glide.App.Printing;
 using Glide.App.Settings;
 using Glide.App.Services;
 using Glide.Core;
 using Glide.Core.Commands;
 using Glide.Core.Workspace;
 using Glide.Imaging;
-using Glide.Input;
-using Glide.Diagnostics.Runtime;
-using Microsoft.VisualBasic.FileIO;
 
 namespace Glide.App;
 
@@ -109,6 +95,7 @@ public partial class MainWindow
             body.PointerPressed += TabDragPointerPressed;
             body.PointerMoved += TabDragPointerMoved;
             body.PointerReleased += TabDragPointerReleased;
+            body.AddHandler(InputElement.PointerReleasedEvent, TabRightReleasedTunnel, RoutingStrategies.Tunnel);
             body.PointerCaptureLost += TabDragPointerCaptureLost;
 
             var content = new StackPanel
@@ -172,7 +159,7 @@ public partial class MainWindow
             grid.Children.Add(close);
             container.Child = grid;
             container.ContextMenu = BuildTabContextMenu(tab);
-            ToolTip.SetTip(container, fullPath is null ? tabMouseHint : $"{fullPath}{Environment.NewLine}{tabMouseHint}");
+            ToolTip.SetTip(container, BuildTabToolTip(tab, fullPath, tabMouseHint));
             ToolTip.SetShowDelay(container, 650);
             ToolTip.SetTip(close, "Close tab");
             ToolTip.SetShowDelay(close, 650);
@@ -193,12 +180,39 @@ public partial class MainWindow
         _ => null
     };
 
+    /// <summary>Filename / path font sizes for the tab tooltip ("Tab tooltip text size").</summary>
+    internal static (double Name, double Detail) TabToolTipFontSizes(string? choice) => choice switch
+    {
+        "Small" => (12, 11),
+        "Large" => (18, 14),
+        _ => (15, 12.5)
+    };
+
+    /// <summary>
+    /// Tab tooltip: the file (or folder) name on its own line in larger semibold text, then the full
+    /// path when one is available, then the mouse hint, both a notch smaller.
+    /// </summary>
+    private Control BuildTabToolTip(TabState tab, string? fullPath, string mouseHint)
+    {
+        var (nameSize, detailSize) = TabToolTipFontSizes(_settings.TabToolTipTextSize);
+        var name = fullPath is not null ? System.IO.Path.GetFileName(fullPath.TrimEnd('\\', '/')) : null;
+        if (string.IsNullOrWhiteSpace(name)) name = string.IsNullOrWhiteSpace(tab.Title) ? fullPath : tab.Title;
+        var panel = new StackPanel { Spacing = 3, MaxWidth = 640 };
+        if (!string.IsNullOrWhiteSpace(name))
+            panel.Children.Add(new TextBlock { Text = name, FontSize = nameSize, FontWeight = FontWeight.SemiBold, TextWrapping = TextWrapping.Wrap });
+        if (fullPath is not null)
+            panel.Children.Add(new TextBlock { Text = fullPath, FontSize = detailSize, TextWrapping = TextWrapping.Wrap });
+        panel.Children.Add(new TextBlock { Text = mouseHint, FontSize = detailSize, Opacity = 0.78, TextWrapping = TextWrapping.Wrap });
+        return panel;
+    }
+
     /// <summary>Tab tooltip hint that reflects which mouse actions are actually enabled.</summary>
     private string TabMouseHint()
     {
         var closers = new List<string>();
-        if (_settings.MiddleClickTabCloses) closers.Add("middle-click");
-        if (_settings.DoubleClickTabCloses) closers.Add("double-click");
+        static bool Closes(string action) => action is GestureCatalog.Default or GestureCatalog.CloseTab;
+        if (Closes(_inputRouter.ResolveGesture("tabs.middleClick", _settings.Gestures))) closers.Add("middle-click");
+        if (Closes(_inputRouter.ResolveGesture("tabs.doubleClick", _settings.Gestures))) closers.Add("double-click");
         var parts = new List<string> { "Drag to reorder" };
         if (closers.Count > 0) parts.Add($"{string.Join(" or ", closers)} to close");
         parts.Add("right-click for tab actions");
@@ -287,15 +301,59 @@ public partial class MainWindow
         // higher-level DoubleTapped gesture is not guaranteed to fire for a tab body. Detect the
         // native click count at the press boundary instead so double-click-to-close remains reliable
         // without weakening drag/reorder behaviour.
-        if (_settings.DoubleClickTabCloses && e.GetCurrentPoint(body).Properties.IsLeftButtonPressed && e.ClickCount >= 2)
+        if (e.GetCurrentPoint(body).Properties.IsLeftButtonPressed && e.ClickCount >= 2)
         {
-            e.Handled = true;
-            _tabDrag.Clear();
-            await CloseTabWithPolicyAsync(id, "double_click");
-            return;
+            var configuredDouble = ResolveGestureSlot("tabs.doubleClick", e.KeyModifiers);
+            if (!string.Equals(configuredDouble, GestureCatalog.Nothing, StringComparison.OrdinalIgnoreCase))
+            {
+                e.Handled = true;
+                _tabDrag.Clear();
+                await ExecuteTabGestureAsync(id, configuredDouble, "double_click");
+                return;
+            }
         }
 
+        // Right press on a tab: Default leaves the tab context menu to Avalonia (opened on release).
+        if (e.GetCurrentPoint(body).Properties.IsRightButtonPressed)
+            _tabRightPressAction = ResolveGestureSlot("tabs.rightClick", e.KeyModifiers);
+        if (e.GetCurrentPoint(body).Properties.IsMiddleButtonPressed) _lastTabMiddleModifiers = e.KeyModifiers;
+
         await _tabDrag.PointerPressedAsync(id, body, e);
+    }
+
+    private string _tabRightPressAction = GestureCatalog.Default;
+    private KeyModifiers _lastTabMiddleModifiers;
+
+    /// <summary>
+    /// Runs a Tabs-area action for the clicked tab. Default closes the tab (the 4.7 double-click and
+    /// middle-click behaviour); "Close tab", "Duplicate tab" and "Move tab to a new window" act on the
+    /// clicked tab rather than the active one.
+    /// </summary>
+    private async Task ExecuteTabGestureAsync(Guid id, string actionId, string reason)
+    {
+        switch (GestureCatalog.NormalizeAction(actionId))
+        {
+            case GestureCatalog.Default:
+            case GestureCatalog.CloseTab:
+                await CloseTabWithPolicyAsync(id, reason);
+                return;
+            case GestureCatalog.Nothing:
+                return;
+            case GestureCatalog.DetachTab:
+                await DetachTabAsync(id, this.PointToScreen(new Point(Bounds.Width / 2, 48)));
+                return;
+            case GestureCatalog.DuplicateTab:
+                if (_workspace.Active?.Id != id) { CaptureActiveTabRuntimeState(); if (_workspace.Select(id)) await ActivateWorkspaceAsync(); }
+                await DuplicateActiveTabAsync();
+                return;
+            case GestureCatalog.ContextMenu:
+                if (_workspace.Tabs.FirstOrDefault(t => t.Id == id) is { } tab)
+                    BuildTabContextMenu(tab).Open(TabStripPanel.Children.OfType<Border>().FirstOrDefault(b => Equals(b.DataContext, id)) ?? (Control)TabStripPanel);
+                return;
+            default:
+                await ExecuteGestureActionAsync(actionId);
+                return;
+        }
     }
 
     private async void TabDragPointerMoved(object? sender, PointerEventArgs e)
@@ -363,6 +421,21 @@ public partial class MainWindow
             await _tabDrag.PointerReleasedAsync(id, e);
     }
 
+    /// <summary>
+    /// Tabs right-click row. Runs on the tunnel route so a non-default action marks the release
+    /// handled before Avalonia's bubble-phase ContextRequested could open the tab menu. Default
+    /// leaves the release alone, so the tab context menu opens exactly as before.
+    /// </summary>
+    private async void TabRightReleasedTunnel(object? sender, PointerReleasedEventArgs e)
+    {
+        if (sender is not Border { DataContext: Guid id } || e.InitialPressMouseButton != MouseButton.Right) return;
+        var configured = _tabRightPressAction;
+        _tabRightPressAction = GestureCatalog.Default;
+        if (string.Equals(configured, GestureCatalog.Default, StringComparison.OrdinalIgnoreCase)) return;
+        e.Handled = true;
+        await ExecuteTabGestureAsync(id, configured, "right_click");
+    }
+
     private void TabDragPointerCaptureLost(object? sender, PointerCaptureLostEventArgs e)
     {
         if (sender is Border { DataContext: Guid id }) _tabDrag.PointerCaptureLost(id);
@@ -398,7 +471,7 @@ public partial class MainWindow
                 if (Equals(border.DataContext, id)) border.Classes.Add("active");
             }
         },
-        CloseMiddleAsync = id => _settings.MiddleClickTabCloses ? CloseTabWithPolicyAsync(id, "middle_click") : Task.CompletedTask,
+        CloseMiddleAsync = id => ExecuteTabGestureAsync(id, ResolveGestureSlot("tabs.middleClick", _lastTabMiddleModifiers), "middle_click"),
         Capture = (body, pointer) => pointer.Capture(body),
         ReleaseCapture = pointer => pointer.Capture(null),
         IsLeftPressed = (body, e) => e.GetCurrentPoint(body).Properties.IsLeftButtonPressed,
@@ -409,36 +482,22 @@ public partial class MainWindow
         GetInsertIndex = GetTabInsertIndex,
         ApplyPreview = (id, offset, _) => ApplyTabDragPreview(id, offset),
         ClearVisuals = ClearTabVisuals,
-        BeginSoleNativeMoveAsync = async (id, cursor) =>
-        {
-            _suppressNextTabClick = id;
-            await BeginHeldSoleTabNativeMoveAsync(id, cursor);
-        },
-        BeginTearOffAsync = async (id, cursor) =>
-        {
-            _suppressNextTabClick = id;
-            await BeginHeldTabTearOffAsync(id, cursor);
-        },
+        BeginSoleNativeMoveAsync = BeginHeldSoleTabNativeMoveAsync,
+        BeginTearOffAsync = BeginHeldTabTearOffAsync,
         AttachAsync = async (id, target, index) =>
         {
             CaptureTabRuntimeState(id);
-            var transferred = _workspace.RemoveForTransfer(id);
+            var transferred = RemoveTabForTransfer(id);
             if (transferred is null) return false;
             await target.AcceptTransferredTabAsync(transferred, Math.Max(0, index));
-            _suppressNextTabClick = id;
             _diagnostics.Write("tabs", "attached", new { id, target = target.Title, targetIndex = index });
             HandleSourceAfterTransfer(successfulCrossWindowTransfer: true);
             return true;
         },
-        DetachAsync = async (id, cursor) =>
-        {
-            await DetachTabAsync(id, cursor);
-            _suppressNextTabClick = id;
-        },
+        DetachAsync = DetachTabAsync,
         ReorderAsync = (id, index) =>
         {
             _workspace.Move(id, index);
-            _suppressNextTabClick = id;
             _diagnostics.Write("tabs", "reordered", new { id, targetIndex = index });
             return Task.CompletedTask;
         },
@@ -450,7 +509,7 @@ public partial class MainWindow
     private async Task<bool> BeginHeldTabTearOffAsync(Guid id, PixelPoint cursor)
     {
         CaptureTabRuntimeState(id);
-        var transferred = _workspace.RemoveForTransfer(id);
+        var transferred = RemoveTabForTransfer(id);
         if (transferred is null) return false;
 
         var detached = new MainWindow(transferred, _settings.CloneState(), deferWorkspaceActivation: true);
@@ -500,7 +559,7 @@ public partial class MainWindow
             if (target is { IsVisible: true } && target.CanAcceptTabAttach && _settings.TabAttachEnabled)
             {
                 CaptureTabRuntimeState(id);
-                var transferred = _workspace.RemoveForTransfer(id);
+                var transferred = RemoveTabForTransfer(id);
                 if (transferred is not null)
                 {
                     await target.AcceptTransferredTabAsync(transferred, Math.Max(0, targetIndex));
@@ -587,7 +646,7 @@ public partial class MainWindow
         {
             if (attachTarget is { IsVisible: true } && attachTarget.CanAcceptTabAttach && _settings.TabAttachEnabled)
             {
-                var transferred = _workspace.RemoveForTransfer(tabId);
+                var transferred = RemoveTabForTransfer(tabId);
                 if (transferred is not null)
                 {
                     await attachTarget.AcceptTransferredTabAsync(transferred, Math.Max(0, attachIndex));
@@ -641,7 +700,6 @@ public partial class MainWindow
 
     private const int VkLButton = 0x01;
     private const int VkRButton = 0x02;
-    private const int VkMButton = 0x04;
     private const uint WmNcLButtonDown = 0x00A1;
     private const uint WmSysCommand = 0x0112;
     private const int ScMinimize = 0xF020;
@@ -790,7 +848,7 @@ public partial class MainWindow
     {
         if (!_settings.TabDetachEnabled) return;
         CaptureTabRuntimeState(id);
-        var transferred = _workspace.RemoveForTransfer(id);
+        var transferred = RemoveTabForTransfer(id);
         if (transferred is null) return;
         var detached = new MainWindow(transferred, _settings.CloneState());
         CopyWindowGeometryTo(detached);
@@ -823,20 +881,29 @@ public partial class MainWindow
     {
         var menu = new ContextMenu();
         var items = new List<MenuItem>();
-        MenuItem Item(string header, Action action, bool enabled = true, string? icon = null)
+        // Each item is the registry action applied to THIS tab (which may not be the active one); the header carries
+        // the action's live shortcut (5.0.x: every item shows its binding, not only three of them).
+        MenuItem Item(string label, string actionId, Action action, bool enabled = true, string? icon = null)
         {
-            var item = new MenuItem { Header = header, IsEnabled = enabled };
+            var item = MenuActions.Tag(new MenuItem { Header = MenuActions.Header(label, ShortcutForAction(actionId)), IsEnabled = enabled }, actionId);
             if (icon is not null) item.Icon = MenuIcon(icon);
             item.Click += (_, _) => action();
             return item;
         }
-        items.Add(Item($"Duplicate tab\t{ShortcutFor(GlideCommand.DuplicateTab)}", () => _ = DuplicateTabByIdAsync(tab.Id), true, "Copy"));
-        items.Add(Item("Move tab to new window", () => _ = DetachTabAsync(tab.Id, this.PointToScreen(new Point(Bounds.Width / 2, 42))), _settings.TabDetachEnabled, "OpenWith"));
+        items.Add(Item("Duplicate tab", "tab.duplicate", () => _ = DuplicateTabByIdAsync(tab.Id), true, "Copy"));
+        items.Add(Item("Move tab to new window", "tab.detach", () => _ = DetachTabAsync(tab.Id, this.PointToScreen(new Point(Bounds.Width / 2, 42))), _settings.TabDetachEnabled, "OpenWith"));
         if (tab is BrowserTabState browser)
-            items.Add(Item("Open first image in folder", () => _ = OpenFirstImageInFolderAsync(browser.Folder), true, "Image"));
+            items.Add(Item("Open first image in folder", "tab.openFirstImage", () => _ = OpenFirstImageInFolderAsync(browser.Folder), true, "Image"));
+        var tabFolder = tab switch
+        {
+            ImageTabState image => Path.GetDirectoryName(image.Path),
+            BrowserTabState explorerTab => explorerTab.Folder,
+            _ => null
+        };
+        items.Add(Item("New Explorer tab (browse folders)", "tab.newExplorer", () => _ = OpenExplorerTabAsync(tabFolder), true, "Browser"));
         items.Add(new MenuItem { Header = "-" });
-        items.Add(Item($"Reopen closed tab\t{ShortcutFor(GlideCommand.RestoreClosedTab)}", () => _ = RestoreClosedTabAsync(), _workspace.ClosedCount > 0, "History"));
-        items.Add(Item($"Close tab\t{ShortcutFor(GlideCommand.CloseTab)}", () => _ = CloseTabByIdAsync(tab.Id), true, "Close"));
+        items.Add(Item("Reopen closed tab", "tab.restore", () => _ = RestoreClosedTabAsync(), _workspace.ClosedCount > 0, "History"));
+        items.Add(Item("Close tab", "tab.close", () => _ = CloseTabByIdAsync(tab.Id), true, "Close"));
         items.Add(new MenuItem { Header = "-" });
         AppendWholeAppOverlayMenuItems(items);
         menu.ItemsSource = items;
@@ -879,11 +946,14 @@ public partial class MainWindow
         await ActivateWorkspaceAsync();
     }
 
+    private bool HomePageIsExplorer =>
+        string.Equals(_settings.HomePageMode, "Explorer page", StringComparison.OrdinalIgnoreCase);
+
     private TabState CreateConfiguredHomeDestination()
     {
-        // Built-in Explorer was removed from the product. Legacy "Browser page" settings
-        // are treated as Welcome/Home.
-        return _workspace.AddHome();
+        // "Explorer page" (4.8.0) lands on Glide's built-in folder browser. Legacy "Browser page"
+        // values from before 4.7.0 stay treated as Welcome/Home, as 4.7.0 migrated them.
+        return HomePageIsExplorer ? _workspace.AddBrowser(ResolveHomeBrowserFolder()) : _workspace.AddHome();
     }
 
     private void ApplyConfiguredStartupWorkspace()
@@ -894,31 +964,73 @@ public partial class MainWindow
             var restored = WorkspaceSessionStore.Load();
             if (restored is { } session)
             {
-                var sanitizedTabs = session.Tabs
-                    .Select<TabState, TabState>(tab => tab is BrowserTabState ? new HomeTabState(tab.Id) : tab)
-                    .ToArray();
-                _workspace.Reset(sanitizedTabs, Math.Clamp(session.ActiveIndex, 0, Math.Max(0, sanitizedTabs.Length - 1)));
-                _diagnostics.Write("workspace", "startup_session_restored", new { tabs = sanitizedTabs.Length, session.ActiveIndex, browserTabsRemoved = true });
+                // Explorer tabs round-trip again (4.8.0); a missing folder falls back at activation.
+                var restoredTabs = session.Tabs.ToArray();
+                _workspace.Reset(restoredTabs, Math.Clamp(session.ActiveIndex, 0, Math.Max(0, restoredTabs.Length - 1)));
+                _diagnostics.Write("workspace", "startup_session_restored", new { tabs = restoredTabs.Length, session.ActiveIndex, explorerTabs = restoredTabs.Count(t => t is BrowserTabState) });
                 return;
             }
             action = "Welcome tab";
         }
 
-        TabState initial = action switch
+        TabState initial = new HomeTabState(Guid.NewGuid());
+        string? notice = null;
+        if (string.Equals(action, "Custom", StringComparison.OrdinalIgnoreCase))
         {
-            "Custom" => CreateStandaloneCustomDestination(_settings.StartupCustomPath) ?? new HomeTabState(Guid.NewGuid()),
-            _ => new HomeTabState(Guid.NewGuid())
-        };
+            // 5.0.0 fix: a custom FOLDER opens as an Explorer tab and a custom image FILE opens as an
+            // image tab. Before, only files were honoured and a folder silently fell back to Welcome.
+            var target = CustomLaunchTarget.Resolve(_settings.StartupCustomPath, "Startup custom");
+            switch (target.Kind)
+            {
+                case CustomLaunchKind.Image: initial = new ImageTabState(Guid.NewGuid(), target.Path); break;
+                case CustomLaunchKind.Folder: initial = new BrowserTabState(Guid.NewGuid(), target.Path); break;
+                default: notice = target.Notice; break;
+            }
+            _diagnostics.Write("launch", "custom_startup_destination", new { kind = target.Kind.ToString(), target.Path, fellBack = !target.IsUsable });
+        }
         _workspace.Reset(new[] { initial }, 0);
+        if (notice is not null) _tabNotices[initial.Id] = notice;
     }
+
+    /// <summary>Why a Home tab opened instead of the configured custom destination (shown on the Welcome page).</summary>
+    private readonly Dictionary<Guid, string> _tabNotices = new();
 
     private TabState CreateConfiguredNewTabDestination()
     {
         var action = string.IsNullOrWhiteSpace(_settings.NewTabAction) ? "Welcome tab" : _settings.NewTabAction;
+        if (string.Equals(action, "Explorer tab", StringComparison.OrdinalIgnoreCase))
+        {
+            // Precedence for the folder of a new Explorer tab opened by "New tab opens: Explorer tab":
+            //   1. the New-tab custom path when one is set and usable (a folder, or the folder of an image file);
+            //   2. the "New Explorer tab default directory" setting;
+            //   3. the last Explorer-tab location (when "use last location" is on);
+            //   4. Pictures, then the user profile.
+            // A custom path that is set but missing/unreadable falls back to 2-4 with a short message.
+            if (string.IsNullOrWhiteSpace(_settings.NewTabCustomPath)) return _workspace.AddBrowser(ResolveFreshExplorerFolder());
+            var custom = CustomLaunchTarget.Resolve(_settings.NewTabCustomPath, "New-tab custom");
+            var customFolder = custom.Kind switch
+            {
+                CustomLaunchKind.Folder => custom.Path,
+                CustomLaunchKind.Image => Path.GetDirectoryName(custom.Path),
+                _ => null
+            };
+            if (!string.IsNullOrEmpty(customFolder) && Directory.Exists(customFolder)) return _workspace.AddBrowser(customFolder);
+            var fallback = _workspace.AddBrowser(ResolveFreshExplorerFolder());
+            if (custom.Notice is not null) _tabNotices[fallback.Id] = custom.Notice + "  Opened the usual start folder instead.";
+            return fallback;
+        }
         if (string.Equals(action, "Custom", StringComparison.OrdinalIgnoreCase))
         {
-            var path = _settings.NewTabCustomPath;
-            if (File.Exists(path) && ImageNavigator.IsSupported(path)) return _workspace.AddImage(path);
+            var target = CustomLaunchTarget.Resolve(_settings.NewTabCustomPath, "New-tab custom");
+            switch (target.Kind)
+            {
+                case CustomLaunchKind.Image: return _workspace.AddImage(target.Path);
+                case CustomLaunchKind.Folder: return _workspace.AddBrowser(target.Path);
+                default:
+                    var home = _workspace.AddHome();
+                    if (target.Notice is not null) _tabNotices[home.Id] = target.Notice;
+                    return home;
+            }
         }
         return _workspace.AddHome();
     }
@@ -935,13 +1047,6 @@ public partial class MainWindow
         return !string.IsNullOrWhiteSpace(profile) && Directory.Exists(profile) ? profile : AppContext.BaseDirectory;
     }
 
-    private static TabState? CreateStandaloneCustomDestination(string? path)
-    {
-        if (string.IsNullOrWhiteSpace(path)) return null;
-        if (File.Exists(path) && ImageNavigator.IsSupported(path)) return new ImageTabState(Guid.NewGuid(), Path.GetFullPath(path));
-        return null;
-    }
-
     private string ResolveHomeBrowserFolder()
     {
         if (_settings.RememberLastOpenLocation && Directory.Exists(_settings.LastOpenDirectory)) return _settings.LastOpenDirectory;
@@ -951,10 +1056,34 @@ public partial class MainWindow
         return !string.IsNullOrWhiteSpace(profile) && Directory.Exists(profile) ? profile : AppContext.BaseDirectory;
     }
 
-    private void OpenBrowserTab(string folder)
+    /// <summary>The "+" button's right-click menu: a configured new tab, Welcome, or an Explorer tab.</summary>
+    private ContextMenu BuildNewTabMenu()
     {
-        // Built-in Explorer removed. Kept as an inert compatibility shim for old call sites.
-        _diagnostics.Write("browser", "internal_explorer_removed", new { folder });
+        MenuItem Item(string label, string actionId, string icon)
+        {
+            var action = AppActionRegistry.Find(actionId)!;
+            var item = MenuActions.Tag(new MenuItem { Header = MenuActions.Header(label, ShortcutForAction(actionId)), Icon = MenuIcon(icon) }, actionId);
+            item.Click += async (_, _) => await ExecuteActionAsync(action, "menu");
+            return item;
+        }
+        return PrepareOwnedContextMenu(new ContextMenu
+        {
+            ItemsSource = new object[]
+            {
+                Item("New tab", "tab.new", "Plus"),
+                Item("New Welcome tab", "tab.newHome", "Home"),
+                Item("New Explorer tab (browse folders)", "tab.newExplorer", "Browser")
+            }
+        });
+    }
+
+    /// <summary>Opens a new Explorer tab (Glide's built-in folder browser) and activates it.</summary>
+    private async Task OpenExplorerTabAsync(string? folder = null)
+    {
+        folder = !string.IsNullOrWhiteSpace(folder) && Directory.Exists(folder) ? folder : ResolveFreshExplorerFolder();
+        _workspace.AddBrowser(folder);
+        RebuildTabStrip();
+        await ActivateWorkspaceAsync();
     }
 
     private async Task OpenFirstImageInFolderAsync(string folder)
@@ -971,103 +1100,19 @@ public partial class MainWindow
         await CloseTabWithPolicyAsync(id, "close_button");
     }
 
+    // The dormant right-side TabNav buttons of MainWindow.axaml (hidden since the built-in title navigation was removed)
+    // used to keep their own "Up to the containing folder / Forward to the image" state. 5.0.0 replaces that with the one
+    // per-tab history (MainWindow.History.cs); the buttons, if ever shown again, are plain Back / Forward.
     private async void TabNavBackClicked(object? sender, RoutedEventArgs e)
     {
         if (!_titleNavCanBack) return;
-        await NavigateTitleUpAsync();
-    }
-
-    /// <summary>
-    /// Title-bar Back is deliberately an Up/containing-folder operation, not classical history Back.
-    /// The currently presented image path is the source of truth. This makes the command independent
-    /// of how the file entered Glide (shell/file association, Ctrl+O, CLI, drag-drop, Recent, Explorer).
-    /// </summary>
-    private async Task NavigateTitleUpAsync()
-    {
-        var active = _workspace.Active;
-        if (ImageView.IsVisible && !string.IsNullOrWhiteSpace(_presentedPath) && File.Exists(_presentedPath))
-        {
-            var imagePath = Path.GetFullPath(_presentedPath);
-            var folder = Path.GetDirectoryName(imagePath);
-            if (string.IsNullOrWhiteSpace(folder) || !Directory.Exists(folder)) return;
-
-            // Preserve the stable active tab identity when possible. If a transient/state mismatch is
-            // ever observed, repair it here rather than making the UI button silently do nothing.
-            var id = active?.Id ?? Guid.NewGuid();
-            _tabForwardImageTargets[id] = imagePath;
-            _tabForwardFolderTargets[id] = new Stack<string>();
-            _browserHighlightTargets[id] = imagePath;
-
-            var browserSession = new BrowserSession();
-            browserSession.History.Add(folder);
-            browserSession.Highlights.Add(imagePath);
-            browserSession.Index = 0;
-            _browserSessions[id] = browserSession;
-            var browserState = new BrowserTabState(id, folder)
-            {
-                Navigation = new BrowserNavigationState(browserSession.History.ToArray(), browserSession.Index, browserSession.Highlights.ToArray())
-            };
-            if (!_workspace.ReplaceTab(browserState))
-            {
-                _workspace.AddBrowser(folder);
-                if (_workspace.Active is BrowserTabState replacement)
-                {
-                    id = replacement.Id;
-                    _tabForwardImageTargets[id] = imagePath;
-                    _tabForwardFolderTargets[id] = new Stack<string>();
-                    _browserHighlightTargets[id] = imagePath;
-                    _browserSessions[id] = browserSession;
-                }
-            }
-            await ActivateWorkspaceAsync();
-            SelectBrowserHighlight(id);
-            UpdateTabNavigationButtons();
-            _diagnostics.Write("navigation", "title_up_image_to_folder", new { imagePath, folder, tab = id });
-            return;
-        }
-
-        if (active is BrowserTabState browser)
-        {
-            var parent = Directory.GetParent(browser.Folder)?.FullName;
-            if (string.IsNullOrWhiteSpace(parent) || !Directory.Exists(parent)) return;
-
-            if (!_tabForwardFolderTargets.TryGetValue(browser.Id, out var forwardFolders))
-                _tabForwardFolderTargets[browser.Id] = forwardFolders = new Stack<string>();
-            forwardFolders.Push(browser.Folder);
-            NavigateBrowserTo(parent, addHistory: false, highlightPath: browser.Folder);
-            UpdateTabNavigationButtons();
-            _diagnostics.Write("navigation", "title_up_parent", new { from = browser.Folder, parent, tab = browser.Id });
-        }
+        await NavigateBackAsync();
     }
 
     private async void TabNavForwardClicked(object? sender, RoutedEventArgs e)
     {
         if (!_titleNavCanForward) return;
-        if (_workspace.Active is not BrowserTabState browser) return;
-
-        // Forward first retraces folders traversed by the Up button, then returns to the image state.
-        if (_tabForwardFolderTargets.TryGetValue(browser.Id, out var forwardFolders) && forwardFolders.Count > 0)
-        {
-            var folder = forwardFolders.Pop();
-            if (Directory.Exists(folder))
-            {
-                NavigateBrowserTo(folder, addHistory: false);
-                SelectBrowserHighlight(browser.Id);
-                UpdateTabNavigationButtons();
-                return;
-            }
-        }
-
-        if (_tabForwardImageTargets.TryGetValue(browser.Id, out var imagePath) &&
-            File.Exists(imagePath) && ImageNavigator.IsSupported(imagePath))
-        {
-            _workspace.ReplaceTab(new ImageTabState(browser.Id, imagePath));
-            _tabForwardImageTargets.Remove(browser.Id);
-            _tabForwardFolderTargets.Remove(browser.Id);
-            _browserHighlightTargets.Remove(browser.Id);
-            await ActivateWorkspaceAsync();
-            UpdateTabNavigationButtons();
-        }
+        await NavigateForwardAsync();
     }
 
     private void ApplyTabUtilityButtonVisibility()
@@ -1083,22 +1128,11 @@ public partial class MainWindow
 
     private void UpdateTabNavigationButtons()
     {
+        // Every Back / Forward control (title-bar buttons, Explorer toolbar) follows the active tab's history.
+        UpdateHistoryNavigationState();
         if (TabNavBackButton is null || TabNavForwardButton is null) return;
-        var canBack = false;
-        var canForward = false;
-        switch (_workspace.Active)
-        {
-            case ImageTabState image:
-                var sourcePath = ImageView.IsVisible && !string.IsNullOrWhiteSpace(_currentPath) ? _currentPath : image.Path;
-                canBack = File.Exists(sourcePath) && Directory.Exists(Path.GetDirectoryName(sourcePath));
-                canForward = false;
-                break;
-            case BrowserTabState browser:
-                canBack = Directory.GetParent(browser.Folder) is not null;
-                canForward = (_tabForwardFolderTargets.TryGetValue(browser.Id, out var forwardFolders) && forwardFolders.Count > 0)
-                    || (_tabForwardImageTargets.TryGetValue(browser.Id, out var target) && File.Exists(target));
-                break;
-        }
+        var canBack = ActiveHistory?.CanGoBack == true;
+        var canForward = ActiveHistory?.CanGoForward == true;
         _titleNavCanBack = canBack;
         _titleNavCanForward = canForward;
         TabNavBackButton.Classes.Set("inactive", !canBack);
@@ -1114,9 +1148,9 @@ public partial class MainWindow
 
     private void SelectBrowserHighlight(Guid tabId)
     {
-        string? target = null;
-        if (_browserSessions.TryGetValue(tabId, out var session))
-            target = CurrentBrowserHistoryHighlight(session);
+        // A selection carried over a refresh / tab switch wins over the remembered highlight.
+        if (_browserSelection.Count > 0) return;
+        var target = CurrentBrowserHistoryHighlight(tabId);
         if (string.IsNullOrWhiteSpace(target))
             _browserHighlightTargets.TryGetValue(tabId, out target);
         if (string.IsNullOrWhiteSpace(target)) return;
@@ -1127,33 +1161,7 @@ public partial class MainWindow
         _browserSelectionAnchor = index;
         _browserCurrentIndex = index;
         UpdateRealizedBrowserSelection();
-        try
-        {
-            var element = BrowserRepeater.GetOrCreateElement(index);
-            element.BringIntoView();
-        }
-        catch { }
-    }
-
-    private ContextMenu BuildTabUtilityContextMenu(string label, Action remove)
-    {
-        var menu = new ContextMenu();
-        var items = new List<MenuItem>();
-        MenuItem Item(string header, Action action, bool enabled = true)
-        {
-            var item = new MenuItem { Header = header, IsEnabled = enabled };
-            item.Click += (_, _) => action();
-            return item;
-        }
-
-        items.Add(Item($"Remove {label} button from title bar", remove));
-        items.Add(new MenuItem { Header = "-" });
-        items.Add(Item("Customize title-bar buttons…", () => _ = ShowTitleBarCustomizerAsync()));
-        items.Add(Item("Open Settings…", () => SettingsClicked(this, new RoutedEventArgs())));
-        items.Add(new MenuItem { Header = "-" });
-        AppendWholeAppOverlayMenuItems(items);
-        menu.ItemsSource = items;
-        return PrepareOwnedContextMenu(menu);
+        EnsureExplorerIndexVisible(index);
     }
 
     private async void ChromeMiddleClickReleased(object? sender, PointerReleasedEventArgs e)
@@ -1178,6 +1186,14 @@ public partial class MainWindow
             Math.Abs(releasePosition.Y - pressPosition.Y) > clickMovementTolerance)
             return;
 
+        // Title bar middle-click row: Default opens a new tab (unchanged); another action replaces it.
+        var configuredMiddle = ResolveGestureSlot("titleBar.middleClick", e.KeyModifiers);
+        if (!string.Equals(configuredMiddle, GestureCatalog.Default, StringComparison.OrdinalIgnoreCase))
+        {
+            e.Handled = true;
+            await ExecuteGestureActionAsync(configuredMiddle);
+            return;
+        }
         var tab = CreateConfiguredNewTabDestination();
         _diagnostics.Write("tabs", "middle_click_new_tab", new { tab.Id, tab.Kind });
         RebuildTabStrip();
@@ -1326,7 +1342,7 @@ public partial class MainWindow
     private static TabState CloneTabForIndependentWindow(TabState tab) => tab switch
     {
         ImageTabState image => new ImageTabState(Guid.NewGuid(), image.Path) { ViewState = image.ViewState },
-        BrowserTabState browser => new BrowserTabState(Guid.NewGuid(), browser.Folder) { Navigation = browser.Navigation },
+        BrowserTabState browser => new BrowserTabState(Guid.NewGuid(), browser.Folder) { Navigation = browser.Navigation, View = browser.View },
         _ => new HomeTabState(Guid.NewGuid())
     };
 
@@ -1463,6 +1479,7 @@ public partial class MainWindow
                     Children = { new TextBlock { Text = "Downloading the video decoder..." }, bar, stop }
                 }
             };
+            PopupPlacementStore.Track(progressWindow, "decoder-download-progress");
             progressWindow.Closing += (_, _) => cancel.Cancel();
             _overlays?.SetModalSuppressed(true);
             progressWindow.Show(this);

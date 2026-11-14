@@ -41,6 +41,54 @@ public sealed class GifAnimationDecoderTests
     }
 
     [Fact]
+    public void Streaming_frames_are_pixel_identical_to_buffered_frames()
+    {
+        // The player now copies each composited canvas straight into its bitmap (DecodeFrames +
+        // CopyCanvasToBgra) instead of holding a byte[] per frame. The pixels must not change.
+        var gif = BuildGif(2, 2,
+            new Frame(0, 0, 2, 2, new byte[] { 0, 1, 2, 3 }, DelayCs: 5, Disposal: 2, Transparent: -1),
+            new Frame(0, 0, 2, 2, new byte[] { 0, 1, 0, 1 }, DelayCs: 0, Disposal: 0, Transparent: 0),
+            new Frame(1, 1, 1, 1, new byte[] { 2 }, DelayCs: 7, Disposal: 1, Transparent: -1));
+        var buffered = GifAnimationDecoder.Decode(gif)!;
+
+        var streamed = new List<(byte[] Bgra, int Delay)>();
+        var size = GifAnimationDecoder.DecodeFrames(gif, (canvas, width, height, delayMs) =>
+        {
+            var stride = width * 4 + 8; // padded destination rows, like a locked bitmap
+            var surface = new byte[stride * height];
+            var pin = System.Runtime.InteropServices.GCHandle.Alloc(surface, System.Runtime.InteropServices.GCHandleType.Pinned);
+            try { GifAnimationDecoder.CopyCanvasToBgra(canvas, width, height, pin.AddrOfPinnedObject(), stride); }
+            finally { pin.Free(); }
+            var tight = new byte[width * height * 4];
+            for (var y = 0; y < height; y++) Array.Copy(surface, y * stride, tight, y * width * 4, width * 4);
+            streamed.Add((tight, delayMs));
+            return true;
+        });
+
+        Assert.Equal((2, 2), size);
+        Assert.Equal(buffered.Frames.Count, streamed.Count);
+        for (var i = 0; i < streamed.Count; i++)
+        {
+            Assert.Equal(buffered.Frames[i].Bgra, streamed[i].Bgra);
+            Assert.Equal(buffered.Frames[i].DelayMs, streamed[i].Delay);
+        }
+    }
+
+    [Fact]
+    public void Streaming_decode_can_stop_early_and_respects_the_budget()
+    {
+        var gif = BuildGif(2, 1,
+            new Frame(0, 0, 2, 1, new byte[] { 2, 2 }, DelayCs: 10, Disposal: 1, Transparent: -1),
+            new Frame(0, 0, 2, 1, new byte[] { 0, 3 }, DelayCs: 10, Disposal: 0, Transparent: -1),
+            new Frame(0, 0, 2, 1, new byte[] { 1, 3 }, DelayCs: 10, Disposal: 0, Transparent: -1));
+        var seen = 0;
+        GifAnimationDecoder.DecodeFrames(gif, (_, _, _, _) => ++seen < 2);
+        Assert.Equal(2, seen);
+        // 2 x 1 x 4 bytes per frame: a 16-byte budget admits two frames, not three.
+        Assert.Null(GifAnimationDecoder.DecodeFrames(gif, (_, _, _, _) => true, memoryBudgetBytes: 16));
+    }
+
+    [Fact]
     public void Transparent_pixels_keep_the_previous_frame_when_not_disposed()
     {
         var gif = BuildGif(2, 1,

@@ -1,15 +1,12 @@
 using Glide.App.Controls;
 using Avalonia.Media.Imaging;
-using Avalonia.Media;
 using Avalonia;
 using Avalonia.Platform;
 using Glide.App.Services;
-using Glide.Core;
 using Glide.Core.Commands;
 using Glide.Diagnostics;
 using Glide.Imaging;
 using System.Runtime.InteropServices;
-using Xunit;
 
 namespace Glide.Core.Tests;
 

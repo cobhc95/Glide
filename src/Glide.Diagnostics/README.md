@@ -3,9 +3,9 @@
 **Owns:** truthful, machine-readable structural evidence about Glide's runtime/build state and export format.  
 **Must not own:** UI feature behavior, image decoding, workspace state mutation, or hiding failures.
 
-## Current Glide 2.9 contract
+## Current contract
 
-`DiagnosticRunner` provides the headless `--diagnostics self-test` build gate and export files. It verifies assertions that can be proven without a live Avalonia visual tree, including settings-schema integrity, typed workspace transfer, the 68-action hotkey contract, the 24-slot/19-action gesture contract, overlay state/layout and the 196-suffix capability registry. Live-only checks remain `SKIP`/`WARN`; structural PASS is never visual certification.
+`DiagnosticRunner` provides the headless `--diagnostics self-test` build gate and export files. It verifies assertions that can be proven without a live Avalonia visual tree, including settings-schema integrity, typed workspace transfer, the hotkey and gesture contracts (the 75 persisted hotkey row ids and 56 persisted gesture action ids, which are projections of the master action registry in `Glide.Core/Commands/AppActionRegistry.cs`), overlay state/layout and the 196-suffix capability registry. Live-only checks remain `SKIP`/`WARN`; structural PASS is never visual certification.
 
 Exports include `codec_capabilities.json`, which reports recognised/routed breadth separately from guaranteed decode, and `codec_providers.json`, which reports only providers already verified in the current process. Exporting this evidence does not enumerate, hash or load optional providers.
 

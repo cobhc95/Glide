@@ -58,13 +58,6 @@ public static class ImageMetadataReader
         catch { return new ImageMetadata(); }
     }
 
-    private static ImageMetadata ParseJpeg(byte[] data)
-    {
-        if (data.Length < 4 || data[0] != 0xff || data[1] != 0xd8) return new ImageMetadata();
-        using var ms = new MemoryStream(data, writable: false);
-        return ParseJpegStream(ms, CancellationToken.None);
-    }
-
     private static ImageMetadata ParseJpegStream(Stream stream, CancellationToken token)
     {
         token.ThrowIfCancellationRequested();

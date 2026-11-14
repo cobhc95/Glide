@@ -1,4 +1,3 @@
-using Glide.Core;
 
 namespace Glide.Core.Tests;
 

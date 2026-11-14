@@ -1,7 +1,5 @@
 using System.Text.Json;
 using Glide.App.Settings;
-using Glide.Core.Commands;
-using Xunit;
 
 namespace Glide.Core.Tests;
 
@@ -67,7 +65,7 @@ public sealed class SettingsStoreRoundTripTests
 
             var loaded = SettingsStore.Load();
             Assert.Equal(new[] { "Ctrl+H", "1" }, loaded.Hotkeys["view.actual"]);
-            Assert.Equal(6, loaded.SettingsSchemaVersion);
+            Assert.Equal(SettingsStore.CurrentSettingsSchema, loaded.SettingsSchemaVersion);
         });
     }
 
@@ -225,7 +223,7 @@ public sealed class SettingsStoreRoundTripTests
             Assert.False(policy.ReuseSingleInstance);
             Assert.Equal("Open new window", policy.ExternalOpenBehavior);
             Assert.False(policy.AdaptiveFastPreview);
-            Assert.Equal(3000, policy.RapidPreviewLongestSide);
+            Assert.Equal(2400, policy.RapidPreviewLongestSide); // malformed value falls back to the Maximum quality default
         });
     }
 
@@ -309,7 +307,7 @@ public sealed class SettingsStoreRoundTripTests
             Assert.Equal(new[] { "F11", "Enter" }, loaded.Hotkeys["view.fullscreen"]);
             Assert.Equal(new[] { "F", "Shift+W" }, loaded.Hotkeys["view.fit"]);
             Assert.Equal(new[] { "Ctrl+H", "1" }, loaded.Hotkeys["view.actual"]);
-            Assert.Equal(6, loaded.SettingsSchemaVersion);
+            Assert.Equal(SettingsStore.CurrentSettingsSchema, loaded.SettingsSchemaVersion);
         });
     }
 
@@ -329,7 +327,7 @@ public sealed class SettingsStoreRoundTripTests
             File.WriteAllText(SettingsStore.GetSettingsPath(), JsonSerializer.Serialize(state));
             var loaded = SettingsStore.Load();
             Assert.Equal(80, loaded.NavigationRateLimitMs);
-            Assert.Equal(6, loaded.SettingsSchemaVersion);
+            Assert.Equal(SettingsStore.CurrentSettingsSchema, loaded.SettingsSchemaVersion);
         });
     }
 

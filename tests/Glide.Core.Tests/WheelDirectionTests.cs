@@ -1,5 +1,4 @@
 using Glide.App.Controls;
-using Xunit;
 
 namespace Glide.Core.Tests;
 

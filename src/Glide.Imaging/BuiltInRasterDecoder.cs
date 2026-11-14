@@ -1,7 +1,6 @@
 using System.Buffers;
 using System.Buffers.Binary;
 using System.Globalization;
-using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
 using Avalonia;
@@ -19,8 +18,8 @@ namespace Glide.Imaging;
 /// </summary>
 public static class BuiltInRasterDecoder
 {
-    private const int MaxDimension = 65_535;
-    private const long MaxTotalPixels = 256_000_000L; // ~1.0 GB uncompressed at 32bpp
+    private const int MaxDimension = DecodeMemoryGuard.MaxDimension;
+    private const long MaxTotalPixels = DecodeMemoryGuard.MaxTotalPixels; // 512 MP, ~2.05 GB uncompressed at 32bpp
     private const int MinBoundedSide = 1;
     private const int MaxBoundedSide = 32_768;
     private const long MaxSourceBytes = 1L << 30;      // 1 GiB on-disk safety cap
@@ -126,7 +125,7 @@ public static class BuiltInRasterDecoder
         {
             // Fix (TOCTOU + LOH): single FileStream open, Length checked once on the open handle,
             // then a capped ArrayPool loop read. Keeps FileShare.ReadWrite|Delete, MaxSourceBytes
-            // (1GiB), MaxDimension (65535) and MaxTotalPixels (256M) checks. Never throws.
+            // (1GiB), MaxDimension (65535) and MaxTotalPixels (512M) checks. Never throws.
             using var stream = new FileStream(path, FileMode.Open, FileAccess.Read,
                 FileShare.ReadWrite | FileShare.Delete, 4096, FileOptions.SequentialScan);
             var length = stream.Length;
@@ -145,6 +144,12 @@ public static class BuiltInRasterDecoder
                 if (read != count) return false;
                 var extension = ImageFormatRegistry.GetLongestExtension(path);
                 if (!IsSupportedExtension(extension)) return false;
+                // These decoders always build the full frame (a bounded request is a full decode plus a
+                // box downsample), and the output array plus the bitmap copy briefly hold it twice.
+                // Refuse a frame that would not fit the memory available now instead of risking OOM.
+                if (TryProbeBuffer(rented.AsSpan(0, count), extension, out var declared) && declared.IsValid &&
+                    !DecodeMemoryGuard.FitsAvailableMemory(DecodeMemoryGuard.EstimatedFrameBytes(declared) * 2, DecodeMemoryGuard.GetSnapshot()))
+                    return false;
                 return TryDecodeBuffer(rented.AsSpan(0, count), extension, out image);
             }
             finally
@@ -1732,14 +1737,17 @@ public static class BuiltInRasterDecoder
         int width = header.Width, height = header.Height, depth = header.Depth;
         var rowBytes = (int)(((long)width * depth + 7) / 8);
         var pixelCount = (long)width * height;
-        var planes = new byte[needed][];
-        for (var c = 0; c < needed; c++) planes[c] = new byte[pixelCount];
-        var row = new byte[rowBytes];
-
         var countSize = header.Large ? 4 : 2;
         var tableStart = position;
         long cursor = compression == 1 ? tableStart + (long)header.Channels * height * countSize : tableStart;
         if (cursor > data.Length) return false;
+        // Security: confirm the file really holds the pixel data before allocating the planes and the
+        // output (several GB at the 512 MP cap). A tiny file declaring a huge canvas used to allocate
+        // them first and only then discover that the data was missing.
+        if (!PsdHasPixelData(data, header, compression, needed, rowBytes, tableStart, cursor)) return false;
+        var planes = new byte[needed][];
+        for (var c = 0; c < needed; c++) planes[c] = new byte[pixelCount];
+        var row = new byte[rowBytes];
 
         for (var c = 0; c < needed; c++)
         {
@@ -1804,13 +1812,44 @@ public static class BuiltInRasterDecoder
         return true;
     }
 
+    /// <summary>
+    /// True when <paramref name="data"/> contains every byte the composite needs: raw rows for each used
+    /// channel, or a complete RLE byte-count table whose rows fit in the file and can each expand to a
+    /// full row (PackBits never expands more than 64:1). Runs before any pixel buffer is allocated.
+    /// </summary>
+    internal static bool PsdHasPixelData(ReadOnlySpan<byte> data, PsdHeader header, int compression, int needed,
+        int rowBytes, long tableStart, long dataStart)
+    {
+        var height = header.Height;
+        if (compression == 0)
+            return (long)needed * height * rowBytes <= data.Length - dataStart;
+
+        var countSize = header.Large ? 4 : 2;
+        if (dataStart > data.Length) return false;
+        var minimumRowBytes = 2L * ((rowBytes + 127) / 128);
+        long total = 0;
+        for (var c = 0; c < needed; c++)
+        {
+            for (var y = 0; y < height; y++)
+            {
+                var entry = tableStart + ((long)c * height + y) * countSize;
+                if (entry + countSize > data.Length) return false;
+                long length = header.Large ? ReadU32BigEndian(data, (int)entry) : ReadU16BigEndian(data, (int)entry);
+                if (length < minimumRowBytes) return false;
+                total += length;
+                if (total > data.Length - dataStart) return false;
+            }
+        }
+        return true;
+    }
+
     private static bool TryProbePsd(ReadOnlySpan<byte> data, out ImageDimensions dimensions)
     {
         dimensions = default;
         return TryParsePsdHeader(data, out var header) && SetDimensions(header.Width, header.Height, out dimensions);
     }
 
-    private readonly record struct PsdHeader(bool Large, int Channels, int Width, int Height, int Depth, int Mode);
+    internal readonly record struct PsdHeader(bool Large, int Channels, int Width, int Height, int Depth, int Mode);
 
     private static bool TryParsePsdHeader(ReadOnlySpan<byte> data, out PsdHeader header)
     {

@@ -1,9 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Text;
-using Avalonia.Headless;
 using Avalonia.Media.Imaging;
 using Glide.Imaging;
-using Xunit;
 
 namespace Glide.Core.Tests;
 

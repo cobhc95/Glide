@@ -19,11 +19,59 @@ public sealed class ExplorerRemovalAndOverlayChromeContractTests
     }
 
     [Fact]
-    public void Legacy_browser_tabs_are_migrated_to_home_at_activation()
+    public void Explorer_tabs_activate_the_managed_folder_browser_and_round_trip_sessions()
     {
+        // 4.8.0 restored the Explorer tab as Glide's own managed BrowserSurface. The native
+        // IExplorerBrowser COM host stays dormant (NativeAOT), and browser tabs are no longer
+        // migrated to Home at activation or at session restore.
         var main = ReadSource("src", "Glide.App", "MainWindow.axaml.cs");
-        Assert.Contains("legacy_browser_tab_migrated_to_home", main, StringComparison.Ordinal);
-        Assert.Contains("_workspace.ReplaceTab(new HomeTabState(browser.Id));", main, StringComparison.Ordinal);
+        Assert.DoesNotContain("legacy_browser_tab_migrated_to_home", main, StringComparison.Ordinal);
+        Assert.DoesNotContain("_workspace.ReplaceTab(new HomeTabState(browser.Id));", main, StringComparison.Ordinal);
+        Assert.Contains("explorer_tab_activated", main, StringComparison.Ordinal);
+        Assert.Contains("ShowBrowserSurface();", main, StringComparison.Ordinal);
+        Assert.DoesNotContain("tab is BrowserTabState ? new HomeTabState(tab.Id) : tab", main, StringComparison.Ordinal);
+        Assert.DoesNotContain("EnsureNativeExplorerHost(", Body(main, "private async Task ActivateWorkspaceAsync()"), StringComparison.Ordinal);
+
+        // New tab / Home page choices and the open-image setting.
+        Assert.Contains("\"Explorer tab\"", Body(main, "private TabState CreateConfiguredNewTabDestination()"), StringComparison.Ordinal);
+        Assert.Contains("_workspace.AddBrowser(", Body(main, "private TabState CreateConfiguredHomeDestination()"), StringComparison.Ordinal);
+        // 4.8.0: the open-image choice is the Explorer gesture rows (double-click / Enter and middle-click).
+        var open = Body(main, "private async Task OpenBrowserEntryAsync(string path, bool alternate, KeyModifiers modifiers = KeyModifiers.None, bool fromMenu = false)");
+        Assert.Contains("alternate ? \"explorer.middleClick\" : \"explorer.doubleClick\"", open, StringComparison.Ordinal);
+        Assert.Contains("var newTab = action == GestureCatalog.OpenInNewTab;", open, StringComparison.Ordinal);
+        Assert.Contains("IsMiddleButtonPressed", Body(main, "private async void BrowserItemPointerPressed("), StringComparison.Ordinal);
+
+        var settings = ReadSource("src", "Glide.Core", "Settings", "SettingsCatalog.cs");
+        Assert.DoesNotContain("\"explorer.openImagesWith\"", settings, StringComparison.Ordinal);
+        var gestures = ReadSource("src", "Glide.Core", "Commands", "GestureCatalog.cs");
+        Assert.Contains("S(\"explorer.doubleClick\"", gestures, StringComparison.Ordinal);
+        Assert.Contains("S(\"explorer.middleClick\"", gestures, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Explorer_host_is_never_declared_hit_test_invisible()
+    {
+        // 4.8.0 regression: BrowserView shipped with IsHitTestVisible="False" and nothing ever re-enabled it, so the
+        // Explorer tab drew correctly but could not be clicked, scrolled or typed into.
+        var xaml = ReadSource("src", "Glide.App", "MainWindow.axaml");
+        var line = xaml.Split((char)10).Single(l => l.Contains("x:Name=\"BrowserView\"", StringComparison.Ordinal));
+        Assert.DoesNotContain("IsHitTestVisible=\"False\"", line, StringComparison.OrdinalIgnoreCase);
+        foreach (var file in new[] { "MainWindow.Browser.cs", "MainWindow.Navigation.cs", "MainWindow.Tabs.cs" })
+            Assert.DoesNotContain("BrowserView.IsHitTestVisible = false", ReadSource("src", "Glide.App", file), StringComparison.Ordinal);
+    }
+
+    private static string Body(string source, string signature)
+    {
+        var start = source.IndexOf(signature, StringComparison.Ordinal);
+        Assert.True(start >= 0, $"Missing method: {signature}");
+        var brace = source.IndexOf('{', start);
+        var depth = 0;
+        for (var i = brace; i < source.Length; i++)
+        {
+            if (source[i] == '{') depth++;
+            else if (source[i] == '}' && --depth == 0) return source.Substring(brace, i - brace + 1);
+        }
+        throw new InvalidOperationException($"Unterminated body for: {signature}");
     }
 
     [Fact]

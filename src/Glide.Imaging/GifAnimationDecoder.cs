@@ -20,10 +20,43 @@ public static class GifAnimationDecoder
     private const int MaxDimension = 16384;
 
     /// <summary>
+    /// Frames decoded per animation. The byte budget alone admitted millions of 1x1 frames from a small
+    /// file, each becoming its own bitmap object; longer animations play their first MaxFrames frames.
+    /// </summary>
+    public const int MaxFrames = 10_000;
+
+    /// <summary>
+    /// A frame rectangle may exceed the logical screen (browsers clip it), but its index buffer is
+    /// allocated at the declared size: without a bound a ~100-byte GIF could declare a 65535x32767 frame
+    /// (a 2 GB allocation and a billion-iteration draw, per frame). Larger frames are skipped.
+    /// </summary>
+    internal const long MinFrameAreaAllowance = 1L << 20;
+
+    /// <summary>
     /// Decodes every frame. Returns null when the file is not a GIF, has fewer than two frames, is
     /// malformed before the second frame, or would exceed <paramref name="memoryBudgetBytes"/>.
     /// </summary>
     public static GifAnimation? Decode(ReadOnlySpan<byte> data, long memoryBudgetBytes = DefaultMemoryBudgetBytes, CancellationToken cancellationToken = default)
+    {
+        var frames = new List<GifAnimationFrame>();
+        var size = DecodeFrames(data, (canvas, _, _, delayMs) =>
+        {
+            frames.Add(new GifAnimationFrame(ToBytes(canvas), delayMs));
+            return true;
+        }, memoryBudgetBytes, cancellationToken);
+        return size is { } s && frames.Count >= 2 ? new GifAnimation(s.Width, s.Height, frames) : null;
+    }
+
+    /// <summary>
+    /// Streaming variant: hands every composited frame (ARGB canvas, opaque or fully transparent pixels)
+    /// to <paramref name="onFrame"/> as soon as it is drawn, so a caller can copy it straight into its
+    /// own surface instead of holding a managed byte[] per frame (the player used to keep both copies,
+    /// doubling peak memory). The canvas is reused for the next frame. Returns the logical screen size,
+    /// or null when the input is not a playable animation or exceeds the budget. Returning false from
+    /// <paramref name="onFrame"/> stops decoding.
+    /// </summary>
+    public static (int Width, int Height)? DecodeFrames(ReadOnlySpan<byte> data, Func<uint[], int, int, int, bool> onFrame,
+        long memoryBudgetBytes = DefaultMemoryBudgetBytes, CancellationToken cancellationToken = default)
     {
         if (data.Length < 13 || data[0] != 'G' || data[1] != 'I' || data[2] != 'F') return null;
         var width = data[6] | (data[7] << 8);
@@ -45,7 +78,7 @@ public static class GifAnimationDecoder
 
         var canvas = new uint[width * height];
         uint[]? restore = null;
-        var frames = new List<GifAnimationFrame>();
+        var frameCount = 0;
         long totalBytes = 0;
 
         // Graphic Control Extension state applies to the next image only.
@@ -115,7 +148,8 @@ public static class GifAnimationDecoder
                     p += len;
                 }
 
-                if (palette is null || fw <= 0 || fh <= 0) { ResetControl(); continue; }
+                if (palette is null || fw <= 0 || fh <= 0 ||
+                    (long)fw * fh > Math.Max((long)width * height, MinFrameAreaAllowance)) { ResetControl(); continue; }
                 var indices = new byte[fw * fh];
                 DecodeLzw(compressed, minCodeSize, indices);
 
@@ -124,7 +158,9 @@ public static class GifAnimationDecoder
 
                 totalBytes += frameBytes;
                 if (totalBytes > memoryBudgetBytes) return null;
-                frames.Add(new GifAnimationFrame(ToBytes(canvas), NormalizeDelay(delayCs)));
+                frameCount++;
+                if (!onFrame(canvas, width, height, NormalizeDelay(delayCs))) break;
+                if (frameCount >= MaxFrames) break;
 
                 // Apply this frame's disposal before the next frame is drawn.
                 if (disposal == 2) ClearRect(canvas, width, height, fx, fy, fw, fh);
@@ -133,7 +169,7 @@ public static class GifAnimationDecoder
             }
         }
         catch (OperationCanceledException) { throw; }
-        catch (Exception) when (frames.Count >= 2)
+        catch (Exception) when (frameCount >= 2)
         {
             // Truncated/corrupt tail: play the frames decoded so far, like browsers do.
         }
@@ -142,7 +178,7 @@ public static class GifAnimationDecoder
             return null;
         }
 
-        return frames.Count >= 2 ? new GifAnimation(width, height, frames) : null;
+        return frameCount >= 2 ? (width, height) : null;
 
         void ResetControl()
         {
@@ -260,6 +296,10 @@ public static class GifAnimationDecoder
     private static void DrawFrame(uint[] canvas, int width, int height, byte[] indices, uint[] palette,
         int fx, int fy, int fw, int fh, bool interlaced, int transparentIndex)
     {
+        // Only the part of the frame that lies on the canvas is drawn (same pixels as testing every column).
+        var firstCol = Math.Max(0, -fx);
+        var endCol = Math.Min(fw, width - fx);
+        if (endCol <= firstCol) return;
         for (var row = 0; row < fh; row++)
         {
             var destRow = interlaced ? InterlacedRow(row, fh) : row;
@@ -267,10 +307,9 @@ public static class GifAnimationDecoder
             if (y < 0 || y >= height) continue;
             var src = row * fw;
             var dst = y * width;
-            for (var col = 0; col < fw; col++)
+            for (var col = firstCol; col < endCol; col++)
             {
                 var x = fx + col;
-                if (x < 0 || x >= width) continue;
                 var index = indices[src + col];
                 if (index == transparentIndex) continue;
                 canvas[dst + x] = palette[index];
@@ -299,6 +338,30 @@ public static class GifAnimationDecoder
         var y0 = Math.Max(0, fy); var y1 = Math.Min(height, fy + fh);
         for (var y = y0; y < y1; y++)
             Array.Clear(canvas, y * width + x0, Math.Max(0, x1 - x0));
+    }
+
+    /// <summary>
+    /// Writes a <see cref="DecodeFrames"/> canvas as premultiplied BGRA8 straight into a pixel surface
+    /// (e.g. a locked WriteableBitmap). Pixel values are identical to <see cref="Decode"/>'s frames.
+    /// </summary>
+    public static unsafe void CopyCanvasToBgra(uint[] canvas, int width, int height, IntPtr destination, int destinationStride)
+    {
+        ArgumentNullException.ThrowIfNull(canvas);
+        if (canvas.Length < width * height || destinationStride < width * 4) throw new ArgumentOutOfRangeException(nameof(destinationStride));
+        fixed (uint* source = canvas)
+        {
+            for (var y = 0; y < height; y++)
+            {
+                var src = source + (long)y * width;
+                var dst = (uint*)((byte*)destination + (long)y * destinationStride);
+                for (var x = 0; x < width; x++)
+                {
+                    var argb = src[x];
+                    // Opaque ARGB as a little-endian uint is already B,G,R,A in memory; transparent -> 0.
+                    dst[x] = (argb >> 24) == 0 ? 0u : (argb | 0xFF000000u);
+                }
+            }
+        }
     }
 
     /// <summary>ARGB (opaque or fully transparent) to premultiplied BGRA8 bytes.</summary>

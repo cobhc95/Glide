@@ -2,7 +2,7 @@
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <!-- Glide 4.1 release: warm-engine Launch Speed Boost, background standby, and the current image-opening pipeline. -->
-    <Version>4.7.1</Version>
+    <Version>5.0.0</Version>
     <AssemblyVersion>$(Version).0</AssemblyVersion>
     <FileVersion>$(Version).0</FileVersion>
     <InformationalVersion>$(Version)</InformationalVersion>
@@ -43,6 +43,15 @@
        bridge so tests exercising the WIC encoder/decoder see the current Glide.Native.dll. -->
   <ItemGroup Condition="!Exists('$(MSBuildThisFileDirectory)dist\Glide.Native.dll') And Exists('$(MSBuildThisFileDirectory)native\Glide.Native\build\Release\Glide.Native.dll')">
     <None Include="$(MSBuildThisFileDirectory)native\Glide.Native\build\Release\Glide.Native.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Visible>false</Visible>
+    </None>
+  </ItemGroup>
+  <!-- Explorer thumbnail provider: copy the freshly built DLL next to dev/test outputs so a dev run
+       reports the provider correctly and the headless provider tests (ShellThumbnailProviderTests)
+       exercise the current native code in-process. Nothing is registered by copying it. -->
+  <ItemGroup Condition="Exists('$(MSBuildThisFileDirectory)native\Glide.ShellThumbnail\build\Release\Glide.ShellThumbnail.dll')">
+    <None Include="$(MSBuildThisFileDirectory)native\Glide.ShellThumbnail\build\Release\Glide.ShellThumbnail.dll">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <Visible>false</Visible>
     </None>
