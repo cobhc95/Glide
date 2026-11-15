@@ -817,6 +817,8 @@ public partial class MainWindow
         actions[GlideCommand.NavigateBack] = NavigateBackAsync;
         actions[GlideCommand.NavigateForward] = NavigateForwardAsync;
         actions[GlideCommand.BackOrPrevious] = BackOrPreviousAsync;
+        // 5.0.1 update checker: "Check for updates now" (MainWindow.Updates.cs).
+        actions[GlideCommand.CheckForUpdates] = CheckForUpdatesNowAsync;
         MainWindowCommandDispatcher.AssertComplete(actions.Keys);
         return new MainWindowCommandDispatcher(actions);
     }
@@ -952,6 +954,17 @@ public partial class MainWindow
             if (file is null) return;
             var destination = file.TryGetLocalPath();
             if (string.IsNullOrWhiteSpace(destination)) return;
+            // Exporting over the multi-frame original itself would keep only one cropped frame of it.
+            if (_currentPath is { } original && ImageSavePolicy.IsSameFile(original, destination))
+            {
+                var frames = await Task.Run(() => File.Exists(original) ? ImageFrameProbe.CountFrames(original) : 0);
+                if (ImageSavePolicy.BlocksInPlaceSave(frames))
+                {
+                    _diagnostics.Write("selection", "export_blocked_multiframe_original", new { path = original, frames });
+                    await ConfirmAsync("Export selected region", ImageSavePolicy.MultiFrameOverwriteMessage(original, frames), "OK", showCancel: false);
+                    return;
+                }
+            }
             await ImageSelectionExportService.ExportAsync(bitmap, selection, destination);
             _diagnostics.Write("selection", "exported", new { path = destination, selection.Width, selection.Height });
         }
@@ -979,15 +992,25 @@ public partial class MainWindow
         StatusSaveAsButton.IsEnabled = hasImage;
     }
 
-    private Task SaveCurrentImageAsync()
+    private async Task SaveCurrentImageAsync()
     {
         var path = _currentPath;
-        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return Task.CompletedTask;
+        if (string.IsNullOrWhiteSpace(path)) return;
         // Nothing edited: Save does nothing (unlike Save As, which always writes a copy).
-        if (!CanSaveCurrentImage()) return Task.CompletedTask;
+        if (!CanSaveCurrentImage()) return;
         // Formats the WIC bridge cannot write (WebP, GIF, HEIC, ...) fall through to Save As.
-        if (!ImageSavePolicy.CanSaveInPlace(path, NativeImageEncoder.CanEncode)) return SaveCurrentImageAsAsync();
-        return SaveCurrentImageToAsync(path, confirmOverwrite: true);
+        if (!ImageSavePolicy.CanSaveInPlace(path, NativeImageEncoder.CanEncode)) { await SaveCurrentImageAsAsync(); return; }
+        // Glide writes one frame: a multipage TIFF (or any multi-frame file) must never be overwritten in place.
+        var frames = await Task.Run(() => File.Exists(path) ? ImageFrameProbe.CountFrames(path) : 0);
+        if (frames == 0) return;
+        if (ImageSavePolicy.BlocksInPlaceSave(frames))
+        {
+            _diagnostics.Write("file", "save_in_place_blocked_multiframe", new { path, frames });
+            if (await ConfirmAsync("Save image", ImageSavePolicy.MultiFrameInPlaceMessage(path, frames), "Save as…"))
+                await SaveCurrentImageAsAsync();
+            return;
+        }
+        await SaveCurrentImageToAsync(path, confirmOverwrite: true, knownSourceFrames: frames);
     }
 
     private async Task SaveCurrentImageAsAsync()
@@ -1027,12 +1050,32 @@ public partial class MainWindow
         }
     }
 
-    private async Task SaveCurrentImageToAsync(string destination, bool confirmOverwrite)
+    private async Task SaveCurrentImageToAsync(string destination, bool confirmOverwrite, int? knownSourceFrames = null)
     {
         var source = _currentPath;
-        if (string.IsNullOrWhiteSpace(source) || !File.Exists(source)) return;
+        if (string.IsNullOrWhiteSpace(source)) return;
         var transform = Viewport.EditTransform;
-        if (confirmOverwrite && File.Exists(destination) &&
+        // File checks and the page/frame probe run off the UI thread (slow or network locations).
+        var (sourceExists, destinationExists, frames) = await Task.Run(() =>
+        {
+            var exists = File.Exists(source);
+            return (exists, File.Exists(destination), exists ? knownSourceFrames ?? ImageFrameProbe.CountFrames(source) : 0);
+        });
+        if (!sourceExists) return;
+        if (ImageSavePolicy.BlocksInPlaceSave(frames))
+        {
+            if (ImageSavePolicy.IsSameFile(source, destination))
+            {
+                // Save as picked the original itself: writing one frame over it would lose the others.
+                _diagnostics.Write("file", "save_in_place_blocked_multiframe", new { path = source, frames });
+                await ConfirmAsync("Save image", ImageSavePolicy.MultiFrameOverwriteMessage(source, frames), "OK", showCancel: false);
+                return;
+            }
+            if (!await ConfirmAsync("Save image as", ImageSavePolicy.MultiFrameCopyWarning(source, frames),
+                    "Save first " + ImageSavePolicy.FrameNoun(source, 1)))
+                return;
+        }
+        if (confirmOverwrite && destinationExists &&
             !await ConfirmAsync("Save image", $"Overwrite \"{Path.GetFileName(destination)}\"?" +
                 (transform.IsIdentity ? "" : " The current rotation/flip will be applied to the file.") +
                 " Embedded metadata (EXIF) is not preserved.", "Overwrite"))
@@ -1046,7 +1089,7 @@ public partial class MainWindow
                 await using var stream = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 64 * 1024, FileOptions.SequentialScan);
                 return await _decoderBackend.DecodeFullAsync(stream, source);
             });
-            await ImageSaveService.SaveAsync(full, transform, destination, SaveJpegQuality);
+            await ImageSaveService.SaveAsync(full, transform, destination, SaveJpegQuality, sourcePath: source);
             _diagnostics.Write("file", "saved", new { source, destination, transform.QuarterTurns, transform.FlipHorizontal, transform.FlipVertical });
             if (string.Equals(Path.GetFullPath(destination), Path.GetFullPath(source), StringComparison.OrdinalIgnoreCase))
             {

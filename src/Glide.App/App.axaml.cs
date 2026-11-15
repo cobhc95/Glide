@@ -166,6 +166,10 @@ public partial class App : Application
                 };
             }
 
+            // Update checker (5.0.1): a daily check of GitHub's latest release, started about 20 seconds after the window is shown.
+            // Never in benchmark / diagnostics-export modes, and never in tests (they do not run this method).
+            ScheduleUpdateChecker(window);
+
             // Automatically make Glide available in Windows' Open With list for every recognised
             // extension, without the user having to configure it. Deferred to background priority so
             // it can never delay first paint, and best-effort so a locked-down registry cannot fail
@@ -174,6 +178,17 @@ public partial class App : Application
         }
         base.OnFrameworkInitializationCompleted();
         GlidePerformanceTrace.Mark("framework_init_end");
+    }
+
+    private static void ScheduleUpdateChecker(MainWindow window)
+    {
+        if (CapturePrintDialogImage is not null ||
+            BenchmarkExitAfterFirstFrame ||
+            NotifyFirstFrameEventName is not null ||
+            AutoExportDiagnostics ||
+            !string.IsNullOrWhiteSpace(AutoExportDiagnosticsFolder))
+            return;
+        window.Opened += (_, _) => Updates.UpdateProduction.Start();
     }
 
     private static void ScheduleFileAssociationRegistration()

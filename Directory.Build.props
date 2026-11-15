@@ -1,15 +1,17 @@
 <Project>
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
-    <!-- Glide 4.1 release: warm-engine Launch Speed Boost, background standby, and the current image-opening pipeline. -->
-    <Version>5.0.0</Version>
+    <!-- 5.0.1: .NET 10 LTS (.NET 8 support ended 2026-11-10). One TFM for every project, including the
+         tests and tools\perf\Glide.PerfBench. See docs\NET10-MIGRATION-PLAN.md. -->
+    <TargetFramework>net10.0</TargetFramework>
+    <Version>5.0.1</Version>
     <AssemblyVersion>$(Version).0</AssemblyVersion>
     <FileVersion>$(Version).0</FileVersion>
     <InformationalVersion>$(Version)</InformationalVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>12</LangVersion>
-    <!-- Pinned to 12 (was `latest`): SDK upgrades must not silently change language semantics. -->
+    <!-- Pinned to 12 (was `latest`): SDK upgrades must not silently change language semantics.
+         Kept at 12 on the .NET 10 SDK; raising it (C# 14) is a separate change with its own test pass. -->
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
     <!-- Hygiene: warnings stay non-fatal (too noisy to enforce), but editor/IDE style rules are
          enforced at build time so formatting drift fails locally before review. -->
@@ -24,7 +26,11 @@
     <!-- Cold launch is Glide 3.0's overriding constraint. Composite R2R trades some publish size
          and build time for less cross-assembly JIT/runtime work before first useful pixels. -->
     <PublishReadyToRunComposite Condition="'$(Configuration)' == 'Release' And '$(PublishAot)' != 'true'">true</PublishReadyToRunComposite>
-    <!-- Release size. Exception messages and stack traces stay on so error text and crash reports remain useful. -->
+    <!-- Release size. Exception messages and stack traces stay on so error text and crash reports remain useful.
+         Known follow-up (docs\NET10-MIGRATION-PLAN.md, WP7): the ILCompiler targets do not read
+         IlcOptimizationPreference (the real property is OptimizationPreference), so this line is a no-op and
+         the exe uses the default blended optimization. Left unchanged on purpose: switching it changes speed
+         and size and needs its own measured release. -->
     <IlcOptimizationPreference Condition="'$(PublishAot)' == 'true'">Size</IlcOptimizationPreference>
     <EventSourceSupport Condition="'$(PublishAot)' == 'true'">false</EventSourceSupport>
     <MetricsSupport Condition="'$(PublishAot)' == 'true'">false</MetricsSupport>

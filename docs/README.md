@@ -4,7 +4,7 @@
 |---|---|
 | `ACTIONS-AND-HOTKEYS.md` | The master action registry: how hotkeys, gestures, menus, title-bar and status-bar buttons and Settings search come from one list; recipe for adding an action |
 | `NAVIGATION-HISTORY.md` | Browser-style Back / Forward per tab: rules, keys, mouse side buttons, migration and tests |
-| `NET10-MIGRATION-PLAN.md` | Plan for moving from .NET 8 to .NET 10 LTS (the next release) |
+| `NET10-MIGRATION-PLAN.md` | The .NET 8 to .NET 10 LTS migration (done in 5.0.1): findings, decisions (CET off), risks and the open follow-ups |
 | `CLEANUP-5.0.md` | Manifest of the 5.0.0 directory cleanup and the documentation sweep |
 | `code-signing.md` | How release builds are signed (certificate via environment variables) |
 | `explorer-thumbnails.md` | The native Windows Explorer thumbnail provider: design, quality presets, measurements |
@@ -13,7 +13,7 @@
 | `GLIDE_MANIFESTO_AND_HANDOFF.md` | Product principles, architecture notes and the handoff for contributors (read before changing the app) |
 | `GITHUB_ABOUT.txt` | The one-sentence GitHub About text and suggested topics |
 | `GITHUB_DESCRIPTION.txt` | A longer product description for stores and listings |
-| `releases/` | Release notes per version (`release-notes-<version>.md`), the 5.0.0 community feedback map, the 5.0.0 publish checklist and the ordered publish commands |
+| `releases/` | Release notes per version (`release-notes-<version>.md`), the 5.0.0 community feedback map, the 5.0.0 and 5.0.1 publish checklists and the ordered publish commands for each |
 | `screenshots/5.0/` | The 5.0.0 hero and Settings / Explorer captures used by the README and the release notes |
 | `screenshots/print-research/` | Print window captures used by `print-research.md` and the README |
 

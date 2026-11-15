@@ -14,7 +14,7 @@ namespace Glide.App.Services;
 public static class ImageSaveService
 {
     public static async Task SaveAsync(Bitmap source, ImageEditTransform transform, string destination,
-        float jpegQuality = 0.92f, CancellationToken token = default)
+        float jpegQuality = 0.92f, CancellationToken token = default, string? sourcePath = null)
     {
         var ext = Path.GetExtension(destination);
         if (!NativeImageEncoder.CanEncode(ext))
@@ -30,14 +30,24 @@ public static class ImageSaveService
         try { source.CopyPixels(new PixelRect(0, 0, width, height), handle.AddrOfPinnedObject(), raw.Length, stride); }
         finally { handle.Free(); }
 
-        await Task.Run(() => EncodeAndReplace(raw, width, height, transform, destination, jpegQuality, token), token).ConfigureAwait(false);
+        await Task.Run(() => EncodeAndReplace(raw, width, height, transform, destination, jpegQuality, token, sourcePath), token).ConfigureAwait(false);
     }
 
-    /// <summary>Pure-buffer path (premultiplied BGRA, tightly packed); used by Save and by tests.</summary>
+    /// <summary>
+    /// Pure-buffer path (premultiplied BGRA, tightly packed); used by Save and by tests. When
+    /// <paramref name="sourcePath"/> is the destination itself and it holds more than one page/frame, nothing is
+    /// written (the encoder writes one frame, so the others would be lost): last line of defence behind the UI checks.
+    /// </summary>
     public static void EncodeAndReplace(byte[] bgra, int width, int height, ImageEditTransform transform,
-        string destination, float jpegQuality, CancellationToken token = default)
+        string destination, float jpegQuality, CancellationToken token = default, string? sourcePath = null)
     {
         token.ThrowIfCancellationRequested();
+        if (sourcePath is not null && ImageSavePolicy.IsSameFile(sourcePath, destination) && File.Exists(destination))
+        {
+            var frames = ImageFrameProbe.CountFrames(destination);
+            if (ImageSavePolicy.BlocksInPlaceSave(frames))
+                throw new MultiFrameSaveRefusedException(ImageSavePolicy.MultiFrameInPlaceMessage(destination, frames), frames);
+        }
         var ext = Path.GetExtension(destination);
         var pixels = transform.Apply(bgra, width, height, out var w, out var h);
         var temp = ImageSavePolicy.TempPathFor(destination);
@@ -62,4 +72,10 @@ public static class ImageSaveService
             try { if (File.Exists(temp)) File.Delete(temp); } catch { }
         }
     }
+}
+
+/// <summary>Save refused because the destination is the multi-frame original (see <see cref="ImageSavePolicy.BlocksInPlaceSave"/>).</summary>
+public sealed class MultiFrameSaveRefusedException(string message, int frameCount) : InvalidOperationException(message)
+{
+    public int FrameCount { get; } = frameCount;
 }

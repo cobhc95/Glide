@@ -822,6 +822,7 @@ public sealed class HotkeyEndToEndTests
             ["Printing/PrintWindow.cs"] = "print dialog keys",
             ["Settings/TitleBarCustomizerWindow.cs"] = "customizer list keys",
             ["Settings/ResetDialogs.cs"] = "Reset Glide confirmation: Esc cancels (Cancel is focused; Enter never starts the destructive button)",
+            ["Updates/UpdatePromptWindow.cs"] = "update prompt dialog: Esc = Not now (Not now is focused; Enter never opens the browser unless View on GitHub is focused)",
         };
         var root = Path.Combine(SourceText.RepoRoot, "src", "Glide.App");
         var pattern = new Regex(@"\bKey\.(?!Modifiers)[A-Z][A-Za-z0-9]*\b(?!\s*\()|KeyGesture|KeyDownEvent|\.KeyDown\s*\+=|KeyBinding");

@@ -86,10 +86,11 @@ internal sealed class VideoOverlaySession : IDisposable
         if (!beyondHardware) (player, info, failure) = await TryOpenBackendAsync(path, VideoBackend.MediaFoundation, options, cancellationToken).ConfigureAwait(true);
         if (player is null)
         {
-            if (!VideoDecoderPack.TryActivate())
+            // The first activation in a process re-hashes the downloaded pack: keep it off the UI thread.
+            if (!await VideoDecoderPack.TryActivateAsync().ConfigureAwait(true))
             {
                 if (DecoderPackRequested is not { } request) return (null, failure);
-                if (!await request(cancellationToken).ConfigureAwait(true) || !VideoDecoderPack.TryActivate())
+                if (!await request(cancellationToken).ConfigureAwait(true) || !await VideoDecoderPack.TryActivateAsync().ConfigureAwait(true))
                     return (null, DecoderPackDeclined);
             }
             var fallback = await TryOpenBackendAsync(path, VideoBackend.Ffmpeg, options, cancellationToken).ConfigureAwait(true);

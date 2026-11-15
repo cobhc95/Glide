@@ -31,6 +31,7 @@ public sealed class WindowPlacementGuardTests
         [typeof(ResetConfirmWindow)] = () => new ResetConfirmWindow(ResetPlanner.Plan(
             new ResetEnvironment(Path.GetTempPath(), Path.GetTempPath(), Path.GetTempPath(), Path.GetTempPath(), [".jpg"]), [ResetItemId.Caches])),
         [typeof(ResetResultWindow)] = () => new ResetResultWindow("Reset Glide", "Done", ""),
+        [typeof(Glide.App.Updates.UpdatePromptWindow)] = () => new Glide.App.Updates.UpdatePromptWindow(new Glide.App.Updates.UpdatePromptModel("5.0.0", "5.0.1", "Released today on GitHub", "https://github.com/cobhc95/Glide/releases/tag/v5.0.1")),
     };
 
     [Fact]

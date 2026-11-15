@@ -11,6 +11,7 @@ using Glide.App.Controls;
 using Glide.App.Settings;
 using Glide.Core;
 using Glide.App.Services;
+using Glide.App.Updates;
 using Glide.Core.Commands;
 using Glide.Imaging;
 
@@ -261,15 +262,19 @@ public partial class MainWindow
                 // Modal children of an always-on-top viewer must share the same z-order contract.
                 // Otherwise Windows can bury Settings/confirmation dialogs behind the owner.
                 Topmost = Topmost,
-                PlacementChanged = SaveSettingsWindowPlacement
+                PlacementChanged = SaveSettingsWindowPlacement,
+                // The Updates card shows the live state of the update checker (null in tests, which never start one).
+                Updates = UpdateService.Current
             };
             _overlays?.SetModalSuppressed(true);
+            _openSettingsWindow = window;
             try
             {
                 await ShowOwnedDialogAsync(window);
             }
             finally
             {
+                _openSettingsWindow = null;
                 _overlays?.SetModalSuppressed(false);
             }
         }
@@ -312,6 +317,8 @@ public partial class MainWindow
         // Dialog placements are saved by WindowPlacementService as each window closes; include the live store so this
         // full save never writes back an older copy.
         WindowPlacementService.ApplyTo(_settings);
+        // Same for the update checker's memory (last check time...): its live copy is authoritative.
+        UpdateService.Current?.ApplyTo(_settings);
         SettingsStore.Save(_settings);
         App.PublishCurrentSettings(_settings);
         _startupSettingsBaseline = _settings.CloneState();
@@ -334,6 +341,9 @@ public partial class MainWindow
     private void ApplySettingsFromDialog(GlideSettingsState state, bool commit)
     {
         _settings = state.CloneState();
+        // The Settings window works on a snapshot taken when it opened; the update checker's memory is not part of it.
+        UpdateService.Current?.ApplyTo(_settings);
+        UpdateService.Current?.SettingsChanged(_settings);
         App.PublishCurrentSettings(_settings);
         ApplyNavigationSortOrder();
         ApplySettingsVisuals();

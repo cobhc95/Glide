@@ -17,6 +17,10 @@ DisableProgramGroupPage=yes
 PrivilegesRequired=admin
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
+; Glide is a self-contained .NET 10 NativeAOT exe (no runtime prerequisite). .NET 10 supports Windows 10 1607
+; (build 14393) and later, the same floor as .NET 8; older Windows gets a clear Setup message instead of a
+; silent startup failure.
+MinVersion=10.0.14393
 OutputDir=..\dist-installer
 OutputBaseFilename=Glide Setup
 SetupIconFile=..\src\Glide.App\Assets\Glide.ico

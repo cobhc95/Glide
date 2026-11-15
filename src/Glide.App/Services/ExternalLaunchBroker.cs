@@ -570,6 +570,8 @@ internal static class ExternalLaunchBroker
         }
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1859:Use concrete types when possible for improved performance",
+        Justification = "Cold path (one call per forwarded launch batch); the read-only shapes document that the batch is not mutated.")]
     private static IReadOnlyList<ExternalLaunchItemResult> AcceptOwnership(IReadOnlyList<ExternalLaunchRequest> requests)
     {
         var results = new List<ExternalLaunchItemResult>(requests.Count);

@@ -113,5 +113,7 @@ public enum GlideCommand
     /// <summary>Browser-style Forward in the active tab's history. Appended (5.0.0).</summary>
     NavigateForward,
     /// <summary>Backspace: Back through the tab history when there is a Back step, otherwise Previous image in an image tab, otherwise nothing. Appended (5.0.0).</summary>
-    BackOrPrevious
+    BackOrPrevious,
+    /// <summary>Checks GitHub for a newer Glide now and shows the result (Settings status line, the update prompt or a short message). Appended (5.0.1).</summary>
+    CheckForUpdates
 }

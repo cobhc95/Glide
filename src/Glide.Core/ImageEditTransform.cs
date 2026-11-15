@@ -59,4 +59,41 @@ public static class ImageSavePolicy
 
     public static string EnsureExtension(string destination, string fallbackExtension)
         => string.IsNullOrEmpty(Path.GetExtension(destination)) ? destination + fallbackExtension : destination;
+
+    /// <summary>
+    /// Glide writes a single frame, so writing over a source with more than one page/frame would discard the rest:
+    /// such saves are refused, and saving a copy warns first.
+    /// </summary>
+    public static bool BlocksInPlaceSave(int frameCount) => frameCount > 1;
+
+    /// <summary>True when both paths name the same file (Windows paths compare case-insensitively).</summary>
+    public static bool IsSameFile(string a, string b)
+    {
+        try
+        {
+            return string.Equals(Path.GetFullPath(a), Path.GetFullPath(b),
+                OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException) { return false; }
+    }
+
+    /// <summary>"pages" for TIFF, "frames" for everything else (singular for one).</summary>
+    public static string FrameNoun(string path, int count)
+    {
+        var ext = Path.GetExtension(path);
+        var pages = ext.Equals(".tif", StringComparison.OrdinalIgnoreCase) || ext.Equals(".tiff", StringComparison.OrdinalIgnoreCase);
+        return count == 1 ? (pages ? "page" : "frame") : (pages ? "pages" : "frames");
+    }
+
+    /// <summary>Shown when Save would overwrite a multi-frame original.</summary>
+    public static string MultiFrameInPlaceMessage(string path, int frameCount)
+        => $"This file has {frameCount} {FrameNoun(path, frameCount)}. Saving would keep only the first. Use Save as to write a copy instead.";
+
+    /// <summary>Shown when Save as picked the multi-frame original itself as the destination.</summary>
+    public static string MultiFrameOverwriteMessage(string path, int frameCount)
+        => $"This file has {frameCount} {FrameNoun(path, frameCount)}. Saving over it would keep only the first. Choose a different file name to write a copy instead.";
+
+    /// <summary>Confirmation before Save as writes a copy of a multi-frame original.</summary>
+    public static string MultiFrameCopyWarning(string path, int frameCount)
+        => $"This file has {frameCount} {FrameNoun(path, frameCount)}. Only the first {FrameNoun(path, 1)} will be written to the new file. The original file is not changed.";
 }

@@ -1,12 +1,12 @@
 # Glide Image Viewer
 
-> **Glide 5.0.0 is available:** download the [installer or portable archive](https://github.com/cobhc95/Glide/releases/tag/v5.0.0). The source in this repository matches 5.0.0.
+> **Glide 5.0.1 is available:** download the [installer or portable archive](https://github.com/cobhc95/Glide/releases/tag/v5.0.1). 5.0.1 is a polish release: Glide is now built with .NET 10 LTS (about 10 % smaller exe), file moves, saves and renames are safer, and a daily update check tells you when a newer version exists (it only opens the release page, and one switch turns it off). 5.0.0 was the major release; see [What changed since 4.7.1](#what-changed-since-471).
 
 ## Fast. Multi-tabbed. Multi-window. Highly customizable.
 
 ![Glide main window: an image with the stacked status bar, Back and Forward title-bar buttons and tab strip](docs/screenshots/5.0/hero.jpg)
 
-**Glide is a Windows image viewer built to feel instant: a compact installer, a window that opens before you notice, tabs and multiple windows, a built-in Explorer tab, live folder refresh, Save and Save As with format conversion, transparent Window-in-Window overlays, one panel for every mouse gesture, a hotkey for almost everything, animated GIF playback, complete printing, native SVG and Photoshop support, Windows Open With and Explorer thumbnails, and 196 recognised file extensions.** Everything is configurable, nothing phones home, and no .NET runtime is needed.
+**Glide is a Windows image viewer built to feel instant: a compact installer, a window that opens before you notice, tabs and multiple windows, a built-in Explorer tab, live folder refresh, Save and Save As with format conversion, transparent Window-in-Window overlays, one panel for every mouse gesture, a hotkey for almost everything, animated GIF playback, complete printing, native SVG and Photoshop support, Windows Open With and Explorer thumbnails, and 196 recognised file extensions.** Everything is configurable, there is no telemetry (the only thing Glide ever asks the internet is, once a day, whether a newer version exists; one switch turns that off), and no .NET runtime is needed.
 
 [Download](#download-and-install) | [What changed since 4.7.1](#what-changed-since-471) | [Feature tour](#feature-tour) | [Default shortcuts](#default-shortcuts) | [Formats](#recognized-and-routed-formats) | [Build](#building-from-source) | [Docs](#documentation)
 
@@ -15,14 +15,22 @@
 Windows x64 only. No .NET runtime is required. Get the files from the [latest release](https://github.com/cobhc95/Glide/releases/latest):
 
 * **`Glide.Setup.exe`**: the installer (requires administrator rights). Installs to Program Files by default, adds Glide to Windows' Open With menu and registers Explorer thumbnails.
-* **`Glide-5.0.0-Portable.zip`**: the portable build. Extract it anywhere and run `Glide.exe`; no installation or administrator rights are needed.
+* **`Glide-5.0.1-Portable.zip`**: the portable build. Extract it anywhere and run `Glide.exe`; no installation or administrator rights are needed.
 * **`Glide.Setup.sha256`**: the installer's checksum. To verify the download, run `certutil -hashfile Glide.Setup.exe SHA256` and compare the result with the value in this file.
 
-Upgrading from 4.x keeps your settings (older files are migrated once, and your own key bindings and customised title bar are kept). The installer closes Glide before upgrading.
+Upgrading from 5.0.0 or 4.x keeps your settings (older files are migrated once, and your own key bindings and customised title bar are kept). The installer closes Glide before upgrading.
 
 ---
 
 ## What changed since 4.7.1
+
+**5.0.1 (2026-11-15) is a polish release with three main points:**
+
+* 🧱 **.NET 10 LTS.** .NET 8 support ended on 2026-11-10, so Glide now builds on .NET 10 LTS. `Glide.exe` is about 10 % smaller (40.5 to 36.6 MB), image opening, navigation and memory are unchanged, a headless start-to-exit run is about 27 % faster, and the installer requires Windows 10 version 1607 or later. Still one self-contained exe, no runtime to install.
+* 🗂️ **Safer file operations** (from an external code audit): a folder move to another drive no longer deletes files that arrive or change during the move; a multipage TIFF or animated image can no longer be overwritten in place with only its first page (*Save* refuses, *Save as* warns); rename and Recycle in the viewer no longer freeze the window on a slow share (and the viewer's rename supports case-only renames like the Explorer tab); the optional video decoder is rehashed before it is loaded.
+* 🔔 **A daily update check:** one small request to GitHub once a day, a prompt that only opens the release page, *Don't remind me again*, a new *Updates* card in Settings > General & startup and a *Check for updates now* action. Off with one switch; Glide never downloads or installs anything.
+
+Details: [5.0.1 release notes](docs/releases/release-notes-5.0.1.md) and the [changelog](CHANGELOG.md).
 
 5.0.0 is the biggest Glide release so far. (4.8.0 was never published; everything built for it is part of 5.0.0.) Thanks to vertigo220, whose detailed bug reports and feature ideas shaped it: see [Thanks](#-thanks).
 
@@ -53,7 +61,7 @@ JPEG decoding itself is limited by the Windows codecs, so the very first frame o
 
 ### 📊 v4 vs v5 at a glance
 
-| | v4 (4.7.x) | v5.0.0 |
+| | v4 (4.7.x) | v5.0.1 |
 |---|---|---|
 | Explorer tab | ❌ (the option was hidden and removed in 4.7.0) | ✅ full file browser with thumbnails, file operations and session restore |
 | Back / Forward history in every tab | ❌ | ✅ up to 100 steps per tab, title-bar buttons, `Alt+Left` / `Alt+Right`, mouse side buttons |
@@ -61,8 +69,8 @@ JPEG decoding itself is limited by the Windows codecs, so the very first frame o
 | Mouse gestures | ➖ a matrix of fixed slots plus separate mouse toggles; no custom gestures, no tab / title-bar / Explorer areas | ✅ one panel, 9 areas, up to 6 custom gestures per area, every row searchable |
 | Hotkeys and actions | 75 hotkey rows, 56 gesture actions | ✅ more than 260 actions in one registry behind keys, gestures, buttons and menus |
 | Settings as hotkeys or gestures | ❌ | ✅ 132 on/off and choice settings can be bound |
-| Settings window | 8 pages, each one long scrolling list; opens at 1040 x 760 | ✅ 8 pages, 39 collapsible cards, results that *Open* and highlight the setting; opens at 930 x 630 and remembers its size |
-| Searchable settings entries | 202 documented at 4.6.0 | ✅ 269 |
+| Settings window | 8 pages, each one long scrolling list; opens at 1040 x 760 | ✅ 8 pages, 40 collapsible cards, results that *Open* and highlight the setting; opens at 930 x 630 and remembers its size |
+| Searchable settings entries | 202 documented at 4.6.0 | ✅ 271 |
 | Window memory | ➖ main window and Settings | ✅ every window, including Print and the dialogs |
 | Status bar | one line in a wide window | ✅ info line stacked on its own row by default, auto-hide, reveal area equal to the bar, reserve-space option |
 | Print preview, Portrait / Landscape click | 540-570 ms (seconds on a network printer) | ✅ instant |
@@ -83,6 +91,7 @@ JPEG decoding itself is limited by the Windows codecs, so the very first frame o
 * 🧩 **Settings in collapsible cards**, a compact 930 x 630 window, *Expand all* / *Collapse all*, *N changed* badges, search results that open the exact setting.
 * 📊 **Status bar**: stacked info line, auto-hide, hover reveal exactly where the bar appears, reserve space when fitting, tab tooltip text size.
 * 🧹 **Reset Glide** card; 🪟 every window remembers its place; 🖨️ instant print preview; 🎞️ GIF controls; 📁 folders as Custom startup / new-tab targets; 🖼️ 512 MP images.
+* 🔔 **Update check** (new in 5.0.1; the rest of this list is 5.0.0): once a day Glide asks GitHub whether a newer version exists and offers to open its release page. Nothing is ever downloaded or installed by Glide, *Don't remind me again* and *Check for updates once a day* are in Settings > General & startup > Updates, and *Check for updates now* is an action you can put on a key.
 
 ### 🐞 Fixes in short
 
@@ -98,7 +107,7 @@ SVG files can't fetch remote images · imported profiles can't change external p
 
 Thanks to vertigo220 for the many detailed bug reports and feature ideas that shaped this release: the 21-point report in issue #1 (the status bar and tab tooltip options, the Settings scroll memory, the hotkey conflict prompt, sortable shortcuts, *Search hotkey*, custom presets, the right-click menu timing and more), the Explorer tab request with session restore, and the GIF controls. See [the feedback map](docs/releases/5.0.0-community-feedback.md).
 
-Full details: [5.0.0 release notes](docs/releases/release-notes-5.0.0.md) and the [changelog](CHANGELOG.md). Next up: a migration to .NET 10 LTS ([plan](docs/NET10-MIGRATION-PLAN.md)).
+Full details: [5.0.1 release notes](docs/releases/release-notes-5.0.1.md), [5.0.0 release notes](docs/releases/release-notes-5.0.0.md) and the [changelog](CHANGELOG.md). The move from .NET 8 to .NET 10 LTS is described in the [migration notes](docs/NET10-MIGRATION-PLAN.md); next up is stabilisation (consolidating brittle tests, empty `catch` review, splitting `MainWindow`, moving the remaining file work off the UI thread).
 
 ---
 
@@ -173,7 +182,7 @@ Behind every key, gesture, button and menu there is one list of more than 260 ac
 
 ### Settings
 
-Settings is eight pages (General & startup, Appearance & viewing, Window & navigation, Mouse & keyboard, Performance, Slideshow & overlays, Tabs & status bar, Windows & developer) holding 39 collapsible cards. Cards start collapsed, open with a click or the keyboard, remember their state while the window is open and show an *N changed* badge when something differs from the default. Search covers titles, descriptions and aliases, says where each result lives (*Page > Card*) and *Open* switches to the page, opens the card, scrolls to the setting and highlights it; every setting is discoverable through search. The window opens at 930 x 630 (minimum 720 x 480), works at narrow widths, remembers its size, position and page scroll positions, and *Restore defaults* resets only what the window shows. At the end of Windows & developer, **Reset Glide** wipes exactly what you tick: settings, hotkeys and gestures, profiles, window positions, recent files, the last session, caches, the downloaded video pack and Glide's own per-user registry entries, after a confirmation that lists everything, with a settings backup to `Documents\Glide backups` ticked by default. It never touches the install folder, `HKEY_LOCAL_MACHINE`, your pictures or other programs. Settings can also be saved as named profiles and exported as JSON; imports keep this PC's external programs and drop network folders.
+Settings is eight pages (General & startup, Appearance & viewing, Window & navigation, Mouse & keyboard, Performance, Slideshow & overlays, Tabs & status bar, Windows & developer) holding 40 collapsible cards. Cards start collapsed, open with a click or the keyboard, remember their state while the window is open and show an *N changed* badge when something differs from the default. Search covers titles, descriptions and aliases, says where each result lives (*Page > Card*) and *Open* switches to the page, opens the card, scrolls to the setting and highlights it; every setting is discoverable through search. The window opens at 930 x 630 (minimum 720 x 480), works at narrow widths, remembers its size, position and page scroll positions, and *Restore defaults* resets only what the window shows. At the end of Windows & developer, **Reset Glide** wipes exactly what you tick: settings, hotkeys and gestures, profiles, window positions, recent files, the last session, caches, the downloaded video pack and Glide's own per-user registry entries, after a confirmation that lists everything, with a settings backup to `Documents\Glide backups` ticked by default. It never touches the install folder, `HKEY_LOCAL_MACHINE`, your pictures or other programs. Settings can also be saved as named profiles and exported as JSON; imports keep this PC's external programs and drop network folders.
 
 ![Windows and developer settings: collapsed cards](docs/screenshots/5.0/settings-windows.png)
 ![The Reset Glide card at the end of the page](docs/screenshots/5.0/settings-reset-glide.png)
@@ -223,11 +232,15 @@ Glide is built around a staged pipeline: a decoder-scaled first frame as soon as
 
 ### Security hardening
 
-A full security review shaped 5.0.0. SVG files can no longer make Glide contact other computers (linked web, network-share and relative images are dropped before rendering, so your IP address and Windows credentials are never sent); imported profiles keep your external programs and drop network folders and are refused above 16 MB; malformed GIFs, PSDs and very large images are bounded on every decode path; the single-instance hand-off is private to your Windows user; the installer no longer trusts a per-user registry value, starts Glide without administrator rights and locks down custom install folders; Glide no longer loads libraries from the folder of the image being opened; pasting into the Explorer tab ignores relative paths; and both native components are built with Control Flow Guard, CET and extra compiler checks. The audit found nothing in the native decoders' size checks, the IPC parser, file associations or metadata parsing.
+5.0.1 adds the fixes of an external code audit: a cross-drive folder move removes only the originals Glide copied and verified (anything that arrived or changed during the move stays and is reported), a multipage or animated image can't be overwritten in place with a single frame, and the optional FFmpeg decoder is rehashed against its pinned fingerprints before it is loaded instead of trusting a stamp file. A full security review shaped 5.0.0. SVG files can no longer make Glide contact other computers (linked web, network-share and relative images are dropped before rendering, so your IP address and Windows credentials are never sent); imported profiles keep your external programs and drop network folders and are refused above 16 MB; malformed GIFs, PSDs and very large images are bounded on every decode path; the single-instance hand-off is private to your Windows user; the installer no longer trusts a per-user registry value, starts Glide without administrator rights and locks down custom install folders; Glide no longer loads libraries from the folder of the image being opened; pasting into the Explorer tab ignores relative paths; and both native components are built with Control Flow Guard, CET and extra compiler checks. The audit found nothing in the native decoders' size checks, the IPC parser, file associations or metadata parsing.
+
+### Update check
+
+Once a day (about 20 seconds after Glide starts, and again every 24 hours while it keeps running in the background) Glide sends one small request to `api.github.com` asking for the latest release of the Glide repository. Only a plain HTTPS request is made: no personal data, no cookies, no account, no identifier beyond the generic name `Glide-UpdateCheck`; the answer is capped at 256 KB and a failed or offline check is silent and retried a few hours later. When a newer stable version exists Glide shows a small window, *A new version of Glide is available*, with *Not now* and *View on GitHub*. **View on GitHub only opens the release page in your browser: Glide never downloads, installs or runs anything by itself.** Tick *Don't remind me again* (or *Don't remind me about updates* in Settings) to turn the window off for good; the Updates card still shows that a new version exists. The prompt waits while you are in fullscreen, a slideshow, another dialog or a text box, and shows at most once a day per version. *Settings > General & startup > Updates* has *Check for updates once a day* (turn it off to stop all update requests), a status line and *Check now*, which also works with the daily check off; the hotkey action *Check for updates now* (no default key) does the same from anywhere.
 
 ### Accessibility and privacy
 
-Glide has no telemetry and makes no network requests except the optional, confirmed download of the FFmpeg video decoder. Diagnostic exports and traces happen only when you ask for them in Settings > Windows & developer (a normal install writes nothing to your Downloads folder; local crash logs are written only if Glide crashes). Everything works from the keyboard, with rebindable shortcuts, a *Tab key button navigation* option, and themes with your own accent, glow and background colours.
+Glide has no telemetry. Its only network requests are the once-a-day update check described above (one small request to GitHub for the latest release, off with one switch in Settings > General & startup > Updates; Glide never downloads or installs the update itself) and the optional, confirmed download of the FFmpeg video decoder. Diagnostic exports and traces happen only when you ask for them in Settings > Windows & developer (a normal install writes nothing to your Downloads folder; local crash logs are written only if Glide crashes). Everything works from the keyboard, with rebindable shortcuts, a *Tab key button navigation* option, and themes with your own accent, glow and background colours.
 
 ### Quality of life
 
@@ -294,11 +307,11 @@ Whether a recognised suffix actually opens depends on the route (built-in decode
 
 ## System requirements
 
-Windows x64. No .NET runtime is required (the app is self-contained and NativeAOT-compiled). The installer needs administrator rights; the portable build does not.
+Windows x64. No .NET runtime is required (the app is self-contained and NativeAOT-compiled with .NET 10 from 5.0.1; 5.0.0 and earlier were built with .NET 8). Windows 10 version 1607 or later. The installer needs administrator rights; the portable build does not.
 
 ## Building from source
 
-On Windows, run `build.cmd` (or `build.cmd fast --no-pause`). Release builds produce `Glide-<version>-Portable.zip`, `dist-installer\Glide Setup.exe`, `Glide-<version>.exe` for direct testing and the compact `Glide-Zero-Context-Handover.zip`; on GitHub the installer is published as `Glide.Setup.exe` together with `Glide.Setup.sha256` and the portable archive (for 5.0.0: `Glide-5.0.0-Portable.zip`). Building currently needs the .NET 8 SDK and the Visual Studio C++ tools (a move to .NET 10 LTS is planned; see [docs/NET10-MIGRATION-PLAN.md](docs/NET10-MIGRATION-PLAN.md)). Scripts live in `tools/`; the performance benchmark harness is `tools/perf`. Three test projects cover Core, Input and Explorer; settings and actions have static audits (`python tools/audit-settings-search.py`, `python tools/audit-action-registry.py`).
+On Windows, run `build.cmd` (or `build.cmd fast --no-pause`). Release builds produce `Glide-<version>-Portable.zip`, `dist-installer\Glide Setup.exe`, `Glide-<version>.exe` for direct testing and the compact `Glide-Zero-Context-Handover.zip`; on GitHub the installer is published as `Glide.Setup.exe` together with `Glide.Setup.sha256` and the portable archive (for 5.0.1: `Glide-5.0.1-Portable.zip`). Building needs the .NET 10 SDK (x64) and the Visual Studio 2022/2026 C++ tools (see [docs/NET10-MIGRATION-PLAN.md](docs/NET10-MIGRATION-PLAN.md)). Scripts live in `tools/`; the performance benchmark harness is `tools/perf`. Three test projects cover Core, Input and Explorer; settings and actions have static audits (`python tools/audit-settings-search.py`, `python tools/audit-action-registry.py`).
 
 ## Documentation
 

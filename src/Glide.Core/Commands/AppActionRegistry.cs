@@ -312,6 +312,15 @@ public static class AppActionRegistry
             Gesture = G("nav.forward", "Forward", GestureActionCategories.Navigation, 57, Everywhere)
         },
 
+        // 5.0.1 update checker: the same "Check now" as Settings > General & startup > Updates. It only asks GitHub and, when a newer
+        // version exists, shows the update prompt (which can only open the release page); nothing is ever downloaded or installed.
+        Cmd("app.checkUpdates", "Check for updates now", "Application", GlideCommand.CheckForUpdates, [],
+            ["update", "updates", "check for updates", "new version", "upgrade", "latest", "release", "github", "version", "check now"]) with
+        {
+            Inputs = AppActionInputs.Hotkey,
+            Description = "Asks GitHub whether a newer version of Glide exists (one small request, no personal data) and shows the answer: in Settings > Updates when Settings is open, otherwise as the update prompt or a short message. Nothing is downloaded or installed."
+        },
+
         // Same operation as folder.exploreParent (both run the title-bar Show in Explorer action). Kept as its own
         // entry for the legacy gesture id "showInExplorer", the title-bar button file.locate and menu wording.
         new("file.showInExplorer", "Show in Explorer (select current image)", "File", GlideCommand.OpenContainingFolder)

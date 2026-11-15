@@ -20,6 +20,8 @@ internal static class SettingAccessors
 
     public static IReadOnlyDictionary<string, Accessor> All { get; } = new Dictionary<string, Accessor>(StringComparer.OrdinalIgnoreCase)
     {
+        ["updates.checkDaily"] = Bool(s => s.UpdateCheckDaily, (s, v) => s.UpdateCheckDaily = v),
+        ["updates.dontRemind"] = Bool(s => s.UpdateDontRemind, (s, v) => s.UpdateDontRemind = v),
         ["general.recentHistory"] = Bool(s => s.RecentHistoryEnabled, (s, v) => s.RecentHistoryEnabled = v),
         ["search.showRelatedResults"] = Bool(s => s.SearchShowRelatedResults, (s, v) => s.SearchShowRelatedResults = v),
         ["windows.rememberPlacement"] = Bool(s => s.RememberWindowPlacement, (s, v) => s.RememberWindowPlacement = v),

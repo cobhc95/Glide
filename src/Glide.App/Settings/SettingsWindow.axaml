@@ -53,7 +53,7 @@
           <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,6">
             <StackPanel>
               <TextBlock x:Name="PageTitle" Text="General &amp; startup" FontSize="25" FontWeight="SemiBold" TextWrapping="Wrap"/>
-              <TextBlock x:Name="PageSubtitle" Text="What opens at launch and in new tabs, history, and saved profiles" Margin="0,2,0,0" Foreground="{DynamicResource BrushMuted}" FontSize="13" TextWrapping="Wrap"/>
+              <TextBlock x:Name="PageSubtitle" Text="What opens at launch and in new tabs, history, updates and saved profiles" Margin="0,2,0,0" Foreground="{DynamicResource BrushMuted}" FontSize="13" TextWrapping="Wrap"/>
             </StackPanel>
             <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Top" Margin="12,2,0,0">
               <Button x:Name="ExpandAllCardsButton" Classes="secondaryAction" Height="34" MinWidth="0" Padding="12,4" Content="Expand all" Click="ExpandAllCardsClicked" ToolTip.Tip="Open every card on this page"/>
@@ -90,6 +90,28 @@
                 <Grid ColumnDefinitions="205,*,Auto" ColumnSpacing="7" Margin="6,0,0,0"><TextBlock Text="Default Open File directory" VerticalAlignment="Center"/><TextBox x:Name="OpenFileDefaultDirectoryBox" Grid.Column="1"/><Button Grid.Column="2" Classes="secondaryAction" Content="Browse..." Click="BrowseOpenDefaultDirectoryClicked"/></Grid>
             </StackPanel>
           </controls:SettingsCard>
+            <controls:SettingsCard CardId="general-updates" Title="Updates" Subtitle="Check GitHub for new versions" Icon="Refresh" IsExpanded="False">
+              <StackPanel Classes="settingsCardBody" Spacing="10">
+                <CheckBox x:Name="UpdateCheckDailyCheck" Content="Check for updates once a day"/>
+                <CheckBox x:Name="UpdateDontRemindCheck">
+                  <StackPanel Orientation="Horizontal" Spacing="6">
+                    <TextBlock Text="Don't remind me about updates"/>
+                    <TextBlock Text="(turns the prompt off)" FontSize="12" VerticalAlignment="Center" Foreground="{DynamicResource BrushMuted}"/>
+                  </StackPanel>
+                </CheckBox>
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12" Margin="6,4,0,0">
+                  <StackPanel VerticalAlignment="Center" Spacing="2">
+                    <TextBlock x:Name="UpdateLastCheckedText" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite"/>
+                    <TextBlock x:Name="UpdateResultText" FontWeight="SemiBold" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite"/>
+                  </StackPanel>
+                  <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                    <Button x:Name="UpdateViewButton" Classes="secondaryAction" Content="View on GitHub" IsVisible="False" Click="UpdateViewClicked" ToolTip.Tip="Opens the release page of the new version in your browser. Nothing is downloaded or installed by Glide."/>
+                    <Button x:Name="UpdateCheckNowButton" Classes="secondaryAction" Content="Check now" Click="UpdateCheckNowClicked" ToolTip.Tip="Asks GitHub right now whether a newer version exists. Works even when the daily check is off."/>
+                  </StackPanel>
+                </Grid>
+                <TextBlock x:Name="UpdatePrivacyNote" Text="Only a plain request to github.com is sent: no personal data, no telemetry. Nothing is downloaded or installed automatically." Classes="phaseNote"/>
+              </StackPanel>
+            </controls:SettingsCard>
             <controls:SettingsCard CardId="general-settings-window" Title="Settings window" Subtitle="Search results and the discard-changes warning" Icon="Settings" IsExpanded="False">
               <StackPanel Classes="settingsCardBody" Spacing="10">
                 <CheckBox x:Name="SearchShowRelatedCheck" Content="Show related results in settings search (after the title matches)" ToolTip.Tip="Settings search always lists settings whose title matches first. When on, it also lists related settings that match only through a description, tooltip or search term, after the title matches. Turn off to see title matches only."/>

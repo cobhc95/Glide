@@ -33,6 +33,7 @@ public static class WindowPlacementCatalog
         new("decoder-download-progress", "Downloading video decoder (progress)", WindowPlacementMode.PositionOnly, "MainWindow.Tabs.cs"),
         new("overlay-video-unavailable", "Can't play this video", WindowPlacementMode.PositionOnly, "MainWindow.Tabs.cs"),
         new("escape-close-confirm", "Close Glide? (Escape)", WindowPlacementMode.PositionOnly, "MainWindow.Tabs.cs"),
+        new("update-prompt", "A new version of Glide is available (UpdatePromptWindow)", WindowPlacementMode.PositionOnly, "Updates/UpdatePromptWindow.cs"),
     ];
 
     /// <summary>

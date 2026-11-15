@@ -26,7 +26,7 @@ internal static class ExplorerFileOperations
 {
     private const string InvalidCharsMessage = "A file name can't contain any of the following characters: \\ / : * ? \" < > |";
 
-    private static readonly char[] InvalidNameChars = ['\\', '/', ':', '*', '?', '"', '<', '>', '|'];
+    private static readonly System.Buffers.SearchValues<char> InvalidNameChars = System.Buffers.SearchValues.Create("\\/:*?\"<>|");
 
     private static readonly StringComparison PathComparison =
         OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
@@ -72,7 +72,7 @@ internal static class ExplorerFileOperations
     public static string? ValidateName(string name, string parentFolder, string? currentPath)
     {
         if (string.IsNullOrWhiteSpace(name)) return "A file name can't be empty.";
-        if (name.IndexOfAny(InvalidNameChars) >= 0 || name.Any(char.IsControl)) return InvalidCharsMessage;
+        if (name.AsSpan().IndexOfAny(InvalidNameChars) >= 0 || name.Any(char.IsControl)) return InvalidCharsMessage;
         if (name is "." or "..") return "A file name can't be \".\" or \"..\".";
         if (name[^1] is '.' or ' ') return "A file name can't end with a period or a space.";
         if (name.Length > 255) return "The file name is too long (255 characters maximum).";
@@ -260,16 +260,19 @@ internal static class ExplorerFileOperations
         var target = Path.Combine(destination, UniqueCopyName(destination, name, isDirectory));
         if (!isDirectory)
         {
-            if (!move) File.Copy(full, target, overwrite: false);
-            else MoveFile(full, target);
-            created.Add(target);
+            if (!move)
+            {
+                File.Copy(full, target, overwrite: false);
+                created.Add(target);
+            }
+            else MoveFile(full, target, name, created, errors);
             return;
         }
 
         if (!move)
         {
             Directory.CreateDirectory(target);
-            CopyTree(full, target, errors, ct);
+            CopyTree(full, target, errors, null, ct);
             created.Add(target);
             return;
         }
@@ -281,35 +284,254 @@ internal static class ExplorerFileOperations
             return;
         }
 
-        // Cross-volume folder move: copy everything, remove the source only after a fully successful copy.
+        // Cross-volume folder move: copy everything while recording exactly what was copied, then remove from
+        // the source only those files that were copied, verified and are still unchanged, and only folders that
+        // are empty by then. Anything that arrived or changed during the move stays where it was. A folder that
+        // was not fully accounted for is never deleted recursively.
+        if ((File.GetAttributes(full) & FileAttributes.ReparsePoint) != 0)
+        {
+            // A linked folder (junction/symlink): moving it would empty the folder it points to. Never follow it.
+            errors.Add(new(full, $"'{name}' is a link and was skipped."));
+            return;
+        }
         Directory.CreateDirectory(target);
-        var copied = CopyTree(full, target, errors, ct);
+        var record = new MoveRecord();
+        var copied = CopyTree(full, target, errors, record, ct);
         created.Add(target);
         if (!copied)
         {
             errors.Add(new(full, $"'{name}' was copied, but the original was kept because some items couldn't be copied."));
             return;
         }
-        try { DeleteTree(full); }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            errors.Add(new(full, $"'{name}' was copied, but the original couldn't be removed. {DescribeError(ex, full)}"));
-        }
+        BeforeMoveSourceCleanupForTests?.Invoke(full);
+        RemoveMovedSources(full, name, record, errors);
     }
 
-    private static void MoveFile(string source, string target)
+    /// <summary>A file copied during a cross-volume move, with the source's size and write time when it was copied.</summary>
+    private sealed record CopiedFile(string Source, string Destination, long Length, DateTime LastWriteUtc);
+
+    /// <summary>What a cross-volume folder move copied: files with their snapshots, and folders in creation (pre-)order.</summary>
+    private sealed class MoveRecord
     {
-        if (!ForceCrossVolumeMoves)
+        public List<CopiedFile> Files { get; } = new();
+        public List<string> Directories { get; } = new();
+    }
+
+    /// <summary>Test seam: runs after every file copy of a copy or move (argument: the source file).</summary>
+    internal static Action<string>? AfterFileCopiedForTests { get; set; }
+
+    /// <summary>Test seam: runs after a cross-volume move copied an item and before any source is removed (argument: the top-level source).</summary>
+    internal static Action<string>? BeforeMoveSourceCleanupForTests { get; set; }
+
+    /// <summary>Copies one file without overwriting (source, destination). Tests replace it to simulate write failures or short copies.</summary>
+    internal static Action<string, string> FileCopier { get; set; } = (source, destination) => File.Copy(source, destination, overwrite: false);
+
+    private static void MoveFile(string source, string target, string name, List<string> created, List<ExplorerOperationError> errors)
+    {
+        if (!ForceCrossVolumeMoves && SameRoot(source, target))
         {
             File.Move(source, target, overwrite: false);
+            created.Add(target);
             return;
         }
-        File.Copy(source, target, overwrite: false);
-        DeleteFilePermanent(source);
+
+        // Cross-volume: copy, verify, and delete the original only when it is still exactly what was copied.
+        var copy = CopyVerified(source, target);
+        if (copy is null)
+        {
+            errors.Add(new(source, ChangedDuringMoveMessage(name)));
+            return;
+        }
+        created.Add(target);
+        BeforeMoveSourceCleanupForTests?.Invoke(source);
+        switch (TryDeleteUnchangedSource(copy, out var failure))
+        {
+            case SourceRemoval.Changed:
+                TryDeleteOwnCopy(target);
+                created.Remove(target);
+                errors.Add(new(source, ChangedDuringMoveMessage(name)));
+                break;
+            case SourceRemoval.Failed:
+                errors.Add(new(source, $"'{name}' was copied, but the original couldn't be removed. {DescribeError(failure!, source)}"));
+                break;
+        }
     }
 
-    /// <summary>Copies the contents of <paramref name="source"/> into the existing <paramref name="target"/>. Returns false when any item failed (recorded in <paramref name="errors"/>).</summary>
-    private static bool CopyTree(string source, string target, List<ExplorerOperationError> errors, CancellationToken ct)
+    private static string ChangedDuringMoveMessage(string name) =>
+        $"'{name}' changed while it was being moved, so it was left in place.";
+
+    /// <summary>
+    /// Copies <paramref name="source"/> to the new <paramref name="destination"/> and checks the result: the copy must
+    /// have the source's size, and the source must still have the size and write time it had before the copy.
+    /// Returns null (after removing its own copy) when the source changed during the copy; throws when the copy
+    /// itself failed or came out short.
+    /// </summary>
+    private static CopiedFile? CopyVerified(string source, string destination)
+    {
+        var before = new FileInfo(source);
+        var length = before.Length;
+        var written = before.LastWriteTimeUtc;
+        FileCopier(source, destination);
+        AfterFileCopiedForTests?.Invoke(source);
+
+        var after = new FileInfo(source);
+        if (!after.Exists || after.Length != length || after.LastWriteTimeUtc != written)
+        {
+            TryDeleteOwnCopy(destination);
+            return null;
+        }
+        var copied = new FileInfo(destination);
+        if (!copied.Exists || copied.Length != length)
+        {
+            TryDeleteOwnCopy(destination);
+            throw new ExplorerOperationException($"The copy of '{SafeName(source)}' is incomplete, so the original was kept.");
+        }
+        return new CopiedFile(source, destination, length, written);
+    }
+
+    /// <summary>Removes a file this operation itself just created (best effort).</summary>
+    private static void TryDeleteOwnCopy(string path)
+    {
+        try { if (File.Exists(path)) DeleteFilePermanent(path); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+    }
+
+    private enum SourceRemoval { Removed, Changed, Failed }
+
+    /// <summary>
+    /// Deletes a moved file's original only when it still has the size and write time it had when it was copied.
+    /// The original is held open (others may read it, nobody may write it) from the check until the delete, so it
+    /// can't change in between. A file that is gone already counts as removed.
+    /// </summary>
+    private static SourceRemoval TryDeleteUnchangedSource(CopiedFile file, out Exception? failure)
+    {
+        failure = null;
+        FileAttributes attributes;
+        try { attributes = File.GetAttributes(file.Source); }
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException) { return SourceRemoval.Removed; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { failure = ex; return SourceRemoval.Failed; }
+        if ((attributes & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != 0) return SourceRemoval.Changed;
+
+        FileStream held;
+        try { held = new FileStream(file.Source, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete, 1, FileOptions.None); }
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException) { return SourceRemoval.Removed; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { failure = ex; return SourceRemoval.Failed; }
+        using (held)
+        {
+            if (held.Length != file.Length || File.GetLastWriteTimeUtc(held.SafeFileHandle) != file.LastWriteUtc)
+                return SourceRemoval.Changed;
+            var readOnly = (attributes & FileAttributes.ReadOnly) != 0;
+            try
+            {
+                if (readOnly) File.SetAttributes(file.Source, attributes & ~FileAttributes.ReadOnly);
+                File.Delete(file.Source);
+                return SourceRemoval.Removed;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                if (readOnly)
+                {
+                    try { File.SetAttributes(file.Source, attributes); }
+                    catch (Exception restore) when (restore is IOException or UnauthorizedAccessException) { }
+                }
+                failure = ex;
+                return SourceRemoval.Failed;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Second half of a cross-volume folder move: deletes the verified, unchanged originals, then removes the
+    /// copied folders bottom-up only when they are empty. Reports what stayed behind.
+    /// </summary>
+    private static void RemoveMovedSources(string root, string name, MoveRecord record, List<ExplorerOperationError> errors)
+    {
+        var stayed = 0;
+        var accounted = new HashSet<string>(PathComparer);
+        foreach (var file in record.Files)
+        {
+            switch (TryDeleteUnchangedSource(file, out var failure))
+            {
+                case SourceRemoval.Changed:
+                    // The original is newer than the copy: keep the original, drop the outdated copy.
+                    TryDeleteOwnCopy(file.Destination);
+                    accounted.Add(file.Source);
+                    stayed++;
+                    break;
+                case SourceRemoval.Failed:
+                    accounted.Add(file.Source);
+                    errors.Add(new(file.Source, $"'{SafeName(file.Source)}' was copied, but the original couldn't be removed. {DescribeError(failure!, file.Source)}"));
+                    break;
+            }
+        }
+
+        // Folders were recorded parent-first, so the reverse order empties children before their parents.
+        // A non-recursive delete refuses a folder that isn't empty, so nothing that arrived meanwhile is lost.
+        var tracked = new HashSet<string>(record.Directories, PathComparer) { root };
+        for (var i = record.Directories.Count - 1; i >= -1; i--)
+        {
+            var directory = i >= 0 ? record.Directories[i] : root;
+            bool empty;
+            try { empty = Directory.Exists(directory) && !Directory.EnumerateFileSystemEntries(directory).Any(); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { empty = false; }
+            if (!empty) continue;
+            try { DeleteEmptyDirectory(directory); }
+            catch (IOException ex) when ((uint)ex.HResult == 0x80070091) { /* something arrived in it just now: it stays */ }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                errors.Add(new(directory, $"The folder '{SafeName(directory)}' was moved, but the original couldn't be removed. {DescribeError(ex, directory)}"));
+            }
+        }
+
+        stayed += CountArrivals(root, tracked, accounted);
+        if (stayed > 0)
+        {
+            errors.Add(new(root, stayed == 1
+                ? $"'{name}' was moved, but 1 item stayed because it changed or arrived during the move."
+                : $"'{name}' was moved, but {stayed} items stayed because they changed or arrived during the move."));
+        }
+    }
+
+    private static void DeleteEmptyDirectory(string directory)
+    {
+        try { Directory.Delete(directory, recursive: false); }
+        catch (UnauthorizedAccessException)
+        {
+            var attributes = File.GetAttributes(directory);
+            if ((attributes & FileAttributes.ReadOnly) == 0) throw;
+            File.SetAttributes(directory, attributes & ~FileAttributes.ReadOnly);
+            Directory.Delete(directory, recursive: false);
+        }
+    }
+
+    /// <summary>Counts items left in the copied folders that the move never saw (new files or folders), without following links.</summary>
+    private static int CountArrivals(string directory, HashSet<string> tracked, HashSet<string> accounted)
+    {
+        if (!Directory.Exists(directory)) return 0;
+        var count = 0;
+        IEnumerable<string> entries;
+        try { entries = Directory.EnumerateFileSystemEntries(directory).ToList(); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return 0; }
+        foreach (var entry in entries)
+        {
+            if (accounted.Contains(entry)) continue;
+            if (tracked.Contains(entry))
+            {
+                count += CountArrivals(entry, tracked, accounted);
+                continue;
+            }
+            count++;
+        }
+        return count;
+    }
+
+    /// <summary>
+    /// Copies the contents of <paramref name="source"/> into the existing <paramref name="target"/>. Returns false when
+    /// any item failed (recorded in <paramref name="errors"/>). With a <paramref name="record"/> (moves), every file
+    /// is verified after copying and recorded with its snapshot, links of any kind are skipped (never followed), and
+    /// a file that changed while it was copied is left out of the record so its original stays.
+    /// </summary>
+    private static bool CopyTree(string source, string target, List<ExplorerOperationError> errors, MoveRecord? record, CancellationToken ct)
     {
         List<string> entries;
         try { entries = Directory.EnumerateFileSystemEntries(source).ToList(); }
@@ -328,21 +550,35 @@ internal static class ExplorerFileOperations
             try
             {
                 var attributes = File.GetAttributes(entry);
+                var isLink = (attributes & FileAttributes.ReparsePoint) != 0;
                 if ((attributes & FileAttributes.Directory) != 0)
                 {
-                    if ((attributes & FileAttributes.ReparsePoint) != 0)
+                    if (isLink)
                     {
                         errors.Add(new(entry, $"'{name}' is a link and was skipped."));
                         ok = false;
                         continue;
                     }
                     Directory.CreateDirectory(destination);
-                    if (!CopyTree(entry, destination, errors, ct)) ok = false;
+                    record?.Directories.Add(entry);
+                    if (!CopyTree(entry, destination, errors, record, ct)) ok = false;
                 }
-                else
+                else if (record is null)
                 {
-                    File.Copy(entry, destination, overwrite: false);
+                    FileCopier(entry, destination);
+                    AfterFileCopiedForTests?.Invoke(entry);
                 }
+                else if (isLink)
+                {
+                    // Moving would copy the link's target and then delete the link: skip it instead.
+                    errors.Add(new(entry, $"'{name}' is a link and was skipped."));
+                    ok = false;
+                }
+                else if (CopyVerified(entry, destination) is { } copied)
+                {
+                    record.Files.Add(copied);
+                }
+                // else: the file changed while it was copied; it isn't recorded, so its original stays.
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception ex)

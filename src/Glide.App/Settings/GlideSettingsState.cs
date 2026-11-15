@@ -63,6 +63,66 @@ public sealed record GlideSettingsState
     public bool ShowRecentOnHome { get; set; } = true;
     public bool ConfirmDiscardSettingsChanges { get; set; } = true;
 
+    // Updates (5.0.1). Two real settings (Settings > General & startup > Updates) ...
+    /// <summary>Check GitHub once a day for a newer Glide and offer to open its release page. Nothing is ever downloaded or installed.</summary>
+    public bool UpdateCheckDaily { get; set; } = true;
+    /// <summary>"Don't remind me again": no update prompt (the Settings card still shows an available update).</summary>
+    public bool UpdateDontRemind { get; set; }
+    // ... and the update checker's own memory (UTC times). These are not settings: Settings never edits them, the Settings change
+    // list ignores them, and the live UpdateService overlays its copy whenever the main window saves (like WindowPlacements).
+    public DateTime? UpdateLastCheckedUtc { get; set; }
+    public DateTime? UpdateLastAttemptUtc { get; set; }
+    public bool UpdateLastAttemptFailed { get; set; }
+    public string UpdateLatestKnownVersion { get; set; } = string.Empty;
+    public string UpdateLatestKnownUrl { get; set; } = string.Empty;
+    public DateTime? UpdateLatestKnownPublishedUtc { get; set; }
+    public string UpdateLastPromptedVersion { get; set; } = string.Empty;
+    public DateTime? UpdateLastPromptedUtc { get; set; }
+
+    /// <summary>Names of the update checker's memory properties (not user settings).</summary>
+    internal static readonly string[] UpdateStateProperties =
+    [
+        nameof(UpdateLastCheckedUtc), nameof(UpdateLastAttemptUtc), nameof(UpdateLastAttemptFailed), nameof(UpdateLatestKnownVersion),
+        nameof(UpdateLatestKnownUrl), nameof(UpdateLatestKnownPublishedUtc), nameof(UpdateLastPromptedVersion), nameof(UpdateLastPromptedUtc)
+    ];
+
+    /// <summary>The update checker's memory as a standalone object.</summary>
+    public Glide.Core.Updates.UpdateCheckState ReadUpdateState() => new()
+    {
+        LastCheckedUtc = UpdateLastCheckedUtc, LastAttemptUtc = UpdateLastAttemptUtc, LastAttemptFailed = UpdateLastAttemptFailed,
+        LatestKnownVersion = UpdateLatestKnownVersion ?? string.Empty, LatestKnownUrl = UpdateLatestKnownUrl ?? string.Empty,
+        LatestKnownPublishedUtc = UpdateLatestKnownPublishedUtc,
+        LastPromptedVersion = UpdateLastPromptedVersion ?? string.Empty, LastPromptedUtc = UpdateLastPromptedUtc
+    };
+
+    public void WriteUpdateState(Glide.Core.Updates.UpdateCheckState state)
+    {
+        UpdateLastCheckedUtc = state.LastCheckedUtc; UpdateLastAttemptUtc = state.LastAttemptUtc; UpdateLastAttemptFailed = state.LastAttemptFailed;
+        UpdateLatestKnownVersion = state.LatestKnownVersion ?? string.Empty; UpdateLatestKnownUrl = state.LatestKnownUrl ?? string.Empty;
+        UpdateLatestKnownPublishedUtc = state.LatestKnownPublishedUtc;
+        UpdateLastPromptedVersion = state.LastPromptedVersion ?? string.Empty; UpdateLastPromptedUtc = state.LastPromptedUtc;
+    }
+
+    /// <summary>Makes a loaded settings file's update memory safe: junk versions and absurd URLs are dropped, times are UTC.</summary>
+    internal void NormalizeUpdateState()
+    {
+        static DateTime? Utc(DateTime? value) => value is { } v
+            ? (v.Kind == DateTimeKind.Utc ? v : v.Kind == DateTimeKind.Local ? v.ToUniversalTime() : DateTime.SpecifyKind(v, DateTimeKind.Utc))
+            : null;
+        UpdateLastCheckedUtc = Utc(UpdateLastCheckedUtc);
+        UpdateLastAttemptUtc = Utc(UpdateLastAttemptUtc);
+        UpdateLatestKnownPublishedUtc = Utc(UpdateLatestKnownPublishedUtc);
+        UpdateLastPromptedUtc = Utc(UpdateLastPromptedUtc);
+        if (!Glide.Core.Updates.UpdateVersion.TryParse(UpdateLatestKnownVersion, out _))
+        {
+            UpdateLatestKnownVersion = string.Empty;
+            UpdateLatestKnownUrl = string.Empty;
+        }
+        if ((UpdateLatestKnownUrl ?? string.Empty).Length > 2048) UpdateLatestKnownUrl = string.Empty;
+        UpdateLatestKnownUrl ??= string.Empty;
+        UpdateLastPromptedVersion = (UpdateLastPromptedVersion ?? string.Empty).Length > 64 ? string.Empty : UpdateLastPromptedVersion ?? string.Empty;
+    }
+
     // Launch/workspace destinations. These are intentionally independent of HomePageMode:
     // HomePageMode controls the Home command/last-tab fallback, while these control process startup/new tabs.
     public string StartupAction { get; set; } = "Welcome tab";
@@ -437,6 +497,9 @@ public sealed record GlideSettingsState
         var rightPlacements = right.WindowPlacements;
         var ignoredPlacements = new Dictionary<string, WindowPlacementState>(StringComparer.OrdinalIgnoreCase);
         left.WindowPlacements = ignoredPlacements; right.WindowPlacements = ignoredPlacements;
+        // The update checker's memory (last check time...) is bookkeeping, not a setting: it never makes two states "different".
+        var noUpdateMemory = new Glide.Core.Updates.UpdateCheckState();
+        left.WriteUpdateState(noUpdateMemory); right.WriteUpdateState(noUpdateMemory);
         if (!Equals(left, right)) return false;
         if (!WindowPlacementsEqual(leftPlacements, rightPlacements)) return false;
         if (!CustomGesturesEqual(leftCustom, rightCustom)) return false;

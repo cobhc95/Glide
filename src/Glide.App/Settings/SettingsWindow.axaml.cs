@@ -63,7 +63,7 @@ public partial class SettingsWindow : Window
 
     private static readonly CategoryGroup[] CategoryGroups =
     {
-        new("General", "General & startup", "What opens at launch and in new tabs, history, and saved profiles"),
+        new("General", "General & startup", "What opens at launch and in new tabs, history, updates and saved profiles"),
         new("Appearance", "Appearance & viewing", "Theme and colours, zoom and fit, image display and the text overlay"),
         new("Interface", "Window & navigation", "Window and fullscreen behaviour, title-bar buttons, and moving through images and folders"),
         new("Mouse", "Mouse & keyboard", "Mouse gestures, keyboard shortcuts, and the Escape and Tab keys"),
@@ -227,6 +227,7 @@ public partial class SettingsWindow : Window
         _committed = ReadControls().CloneState();
         Glide.Core.GlidePerformanceTrace.Mark("settings_controls_read");
         BuildProfileRows();
+        RefreshUpdateStatus();
         WireLivePreview();
         ApplySettingsTooltips();
         Glide.Core.GlidePerformanceTrace.Mark("settings_wired");
@@ -271,7 +272,7 @@ public partial class SettingsWindow : Window
                     e.Handled = true;
             });
         }
-        Closed += (_, _) => { _hotkeyCaptureFlashTimer.Stop(); _searchDebounceTimer.Stop(); _previewDisposed = true; _searchRenderVersion++; };
+        Closed += (_, _) => { _hotkeyCaptureFlashTimer.Stop(); _searchDebounceTimer.Stop(); _previewDisposed = true; _searchRenderVersion++; Updates = null; };
     }
 
     private void SettingsSurfacePointerPressed(object? sender, PointerPressedEventArgs e)
@@ -381,6 +382,8 @@ public partial class SettingsWindow : Window
             GlowIntensityBox.Value = Math.Clamp(s.GlowIntensityPercent, 0, 100);
             ShowRecentOnHomeCheck.IsChecked = s.ShowRecentOnHome;
             ConfirmDiscardSettingsCheck.IsChecked = s.ConfirmDiscardSettingsChanges;
+            UpdateCheckDailyCheck.IsChecked = s.UpdateCheckDaily;
+            UpdateDontRemindCheck.IsChecked = s.UpdateDontRemind;
             SelectByText(StartupActionCombo, string.Equals(s.StartupAction, "Explorer tab", StringComparison.OrdinalIgnoreCase) || string.IsNullOrWhiteSpace(s.StartupAction) ? "Welcome tab" : s.StartupAction);
             StartupCustomPathBox.Text = s.StartupCustomPath ?? string.Empty;
             SelectByText(NewTabActionCombo, string.IsNullOrWhiteSpace(s.NewTabAction) ? "Welcome tab" : s.NewTabAction);
@@ -612,6 +615,8 @@ public partial class SettingsWindow : Window
         state.GlowIntensityPercent = (int)(GlowIntensityBox.Value ?? 55);
         state.ShowRecentOnHome = ShowRecentOnHomeCheck.IsChecked == true;
         state.ConfirmDiscardSettingsChanges = ConfirmDiscardSettingsCheck.IsChecked == true;
+        state.UpdateCheckDaily = UpdateCheckDailyCheck.IsChecked == true;
+        state.UpdateDontRemind = UpdateDontRemindCheck.IsChecked == true;
         state.StartupAction = SelectedText(StartupActionCombo, "Welcome tab") is "Explorer tab" ? "Welcome tab" : SelectedText(StartupActionCombo, "Welcome tab");
         state.StartupCustomPath = StartupCustomPathBox.Text?.Trim() ?? string.Empty;
         state.NewTabAction = SelectedText(NewTabActionCombo, "Welcome tab");
@@ -1913,6 +1918,8 @@ public partial class SettingsWindow : Window
         return border;
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1859:Use concrete types when possible for improved performance",
+        Justification = "Builds a few controls per search result; the read-only shape documents that the companions are not mutated.")]
     private Control BuildSearchEditorGroup(Control editor, IReadOnlyList<Button> companions)
     {
         if (companions.Count == 0) return editor;
@@ -2041,6 +2048,7 @@ public partial class SettingsWindow : Window
         M("general.singleInstance", ReuseSingleInstanceCheck); M("navigation.siblingFolders", ContinueSiblingFoldersCheck); M("navigation.hierarchicalFolders", HierarchicalFolderTraversalCheck); M("navigation.confirmHierarchicalBoundary", ConfirmHierarchicalFolderTraversalCheck); M("navigation.hierarchicalPreviousEntry", HierarchicalPreviousFolderEntryCombo); M("navigation.rateLimitMs", NavigationRateLimitMsBox); M("navigation.rateLimitInput", NavigationRateLimitInputCombo); M("navigation.rateLimitIndicator", NavigationRateLimitIndicatorCheck); M("navigation.rateLimitIndicatorPosition", NavigationRateLimitIndicatorPositionCombo); M("navigation.rateLimitWindowed", NavigationRateLimitWindowedCheck); M("navigation.rateLimitFullscreen", NavigationRateLimitFullscreenCheck); M("navigation.rateLimitSlideshow", NavigationRateLimitSlideshowCheck); M("general.lastOpenLocation", RememberLastOpenCheck); M("general.newExplorerTabLastLocation", NewExplorerTabLastLocationCheck); M("general.newExplorerTabDefaultDirectory", NewExplorerTabDefaultDirectoryBox);
         M("appearance.theme", ThemeCombo); M("appearance.explorerTheme", ExplorerThemeCombo); M("appearance.accent", AccentCombo); M("appearance.glowColor", GlowCombo); M("appearance.background", MainBackgroundCombo); M("appearance.glowIntensity", GlowIntensityBox);
         M("general.showRecentOnHome", ShowRecentOnHomeCheck); M("general.confirmDiscardSettings", ConfirmDiscardSettingsCheck);
+        M("updates.checkDaily", UpdateCheckDailyCheck); M("updates.dontRemind", UpdateDontRemindCheck);
         M("general.startupAction", StartupActionCombo); M("general.startupCustomPath", StartupCustomPathBox); M("general.newTabAction", NewTabActionCombo); M("general.newTabCustomPath", NewTabCustomPathBox); M("titlebar.customize", CustomizeTitleBarButton); M("escape.resetRememberedClose", ResetEscChoiceButton);
         M("status.visible", StatusCheck); M("status.hoverWhenClosed", StatusHoverWhenClosedCheck); M("view.scrollbars", ShowScrollbarsCheck); M("window.fullPathTitle", FullPathTitleCheck); M("fullscreen.hideCursor", HideCursorFullscreenCheck); M("fullscreen.hideCursorDelay", FullscreenHideCursorDelayBox);
         M("fullscreen.autoHideChrome", AutoHideFullscreenChromeCheck); M("fullscreen.keepTabBarOpen", FullscreenKeepTabBarOpenCheck); M("tabs.enabled", TabsCheck); M("window.showInExplorerTarget", ShowInExplorerTargetCombo); M("explorer.defaultView", ExplorerDefaultViewCombo); M("explorer.showHidden", ExplorerShowHiddenFilesCheck); M("explorer.onlyImages", ExplorerShowOnlyImagesCheck); M("tabs.showBackButton", TabBarBackButtonCheck); M("tabs.showForwardButton", TabBarForwardButtonCheck); M("fullscreen.statusAlways", FullscreenStatusAlwaysCheck);

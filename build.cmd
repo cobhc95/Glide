@@ -111,7 +111,15 @@ call :progress 2 "Preflight"
 
 where dotnet >nul 2>nul
 if errorlevel 1 (
-  echo ERROR: .NET SDK not found. Install .NET 8 SDK x64, then rerun.
+  echo ERROR: .NET SDK not found. Install .NET 10 SDK x64, then rerun.
+  set "GLIDE_BUILD_RC=1"
+  goto :fail
+)
+rem global.json pins the .NET 10 SDK band (rollForward latestFeature). Fail with a clear message
+rem instead of the generic global.json resolver error when only older SDKs are installed.
+dotnet --list-sdks 2>nul | findstr /b /c:"10." >nul
+if errorlevel 1 (
+  echo ERROR: No .NET 10 SDK found ^(dotnet --list-sdks^). Install .NET 10 SDK x64, then rerun.
   set "GLIDE_BUILD_RC=1"
   goto :fail
 )

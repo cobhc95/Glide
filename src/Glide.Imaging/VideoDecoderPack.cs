@@ -34,8 +34,12 @@ public static partial class VideoDecoderPack
         new("avformat-63.dll", 23_003_136, "725FF43AD96F2A90413BE08CE88352A22795A355CEB5193515422A418839819D"),
     };
 
-    /// <summary>Records which (name, size, timestamps, pinned hash) were verified, so later starts skip re-hashing ~120 MB.</summary>
-    internal const string VerifiedStampFileName = ".glide-verified";
+    /// <summary>
+    /// Name of the "already verified" stamp that Glide 5.0.0 wrote beside the DLLs. It lived in the same
+    /// user-writable folder, so anyone able to swap a DLL could also forge it: it is never read any more,
+    /// and a leftover one is deleted.
+    /// </summary>
+    internal const string LegacyVerifiedStampFileName = ".glide-verified";
 
     private static readonly object VerifyGate = new();
     private static string? _verifiedDirectory;
@@ -43,12 +47,20 @@ public static partial class VideoDecoderPack
     // process, so the files the native bridge maps are exactly the ones that were checked.
     private static List<FileStream>? _heldLibraries;
 
-    /// <summary>Tests: number of files hashed by the last verification (0 when the stamp matched).</summary>
+    /// <summary>Tests and diagnostics: files hashed by the last verification, and how long it took.</summary>
     internal static int LastVerificationHashedFiles { get; private set; }
+    internal static TimeSpan LastVerificationDuration { get; private set; }
 
     // Program Files isn't writable without elevation, so downloads go to the per-user folder.
     private static string InstallDirectory => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Glide", "ffmpeg-" + PackVersion);
+
+    /// <summary>
+    /// <see cref="TryActivate"/> on a worker thread: the first activation in a process hashes the whole pack
+    /// (~120 MB), which must not run on the UI thread. Later calls return at once.
+    /// </summary>
+    public static Task<bool> TryActivateAsync(CancellationToken cancellationToken = default)
+        => Task.Run(TryActivate, cancellationToken);
 
     /// <summary>True when FFmpeg is usable now; also points the native bridge at a downloaded copy.</summary>
     public static bool TryActivate()
@@ -64,9 +76,11 @@ public static partial class VideoDecoderPack
     }
 
     /// <summary>
-    /// Checks every pinned library in <paramref name="directory"/> against its size and SHA-256, using the
-    /// verified stamp (keyed by size, write and creation time, and the pinned hash) to skip re-hashing an
-    /// unchanged file. On success the files stay open read-only-shared for the life of the process.
+    /// Checks every pinned library in <paramref name="directory"/> against its size and SHA-256. Nothing stored
+    /// beside the files is trusted: every library is hashed again the first time a process needs the pack (the
+    /// result is kept for that process only). Each file is opened without write/delete sharing before it is
+    /// hashed and stays open for the life of the process, so what the native bridge loads is exactly what was
+    /// checked.
     /// </summary>
     internal static bool TryVerifyLibraries(string directory, IReadOnlyList<PinnedLibrary> pins)
     {
@@ -76,34 +90,22 @@ public static partial class VideoDecoderPack
             if (_heldLibraries is not null && string.Equals(_verifiedDirectory, directory, StringComparison.OrdinalIgnoreCase))
                 return true;
 
+            RemoveLegacyStamp(directory);
+            var clock = System.Diagnostics.Stopwatch.StartNew();
             var handles = new List<FileStream>(pins.Count);
             var verified = false;
+            var hashed = 0;
             try
             {
-                var stampPath = Path.Combine(directory, VerifiedStampFileName);
-                var stamped = ReadStamp(stampPath);
-                var keys = new List<string>(pins.Count);
-                var hashed = 0;
                 foreach (var pin in pins)
                 {
                     var path = Path.Combine(directory, pin.Name);
                     var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 16, FileOptions.SequentialScan);
                     handles.Add(stream);
                     if (stream.Length != pin.Bytes) return false;
-                    var info = new FileInfo(path);
-                    var key = string.Join('|', pin.Name, stream.Length.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                        info.LastWriteTimeUtc.Ticks.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                        info.CreationTimeUtc.Ticks.ToString(System.Globalization.CultureInfo.InvariantCulture), pin.Sha256.ToUpperInvariant());
-                    keys.Add(key);
-                    if (stamped.Contains(key)) continue;
                     hashed++;
                     var hash = Convert.ToHexString(SHA256.HashData(stream));
                     if (!hash.Equals(pin.Sha256, StringComparison.OrdinalIgnoreCase)) return false;
-                }
-                LastVerificationHashedFiles = hashed;
-                if (hashed > 0)
-                {
-                    try { File.WriteAllLines(stampPath, keys); } catch { /* the stamp only saves time */ }
                 }
                 ReleaseHeldLibrariesLocked();
                 _heldLibraries = handles;
@@ -114,20 +116,22 @@ public static partial class VideoDecoderPack
             catch { return false; }
             finally
             {
+                LastVerificationHashedFiles = hashed;
+                LastVerificationDuration = clock.Elapsed;
                 if (!verified) foreach (var handle in handles) handle.Dispose();
             }
         }
     }
 
-    private static HashSet<string> ReadStamp(string stampPath)
+    /// <summary>Deletes the 5.0.0 "verified" stamp if one is left over; it is never read (best effort).</summary>
+    private static void RemoveLegacyStamp(string directory)
     {
         try
         {
-            var info = new FileInfo(stampPath);
-            if (!info.Exists || info.Length > 64 * 1024) return new HashSet<string>(StringComparer.Ordinal);
-            return new HashSet<string>(File.ReadAllLines(stampPath), StringComparer.Ordinal);
+            var stamp = Path.Combine(directory, LegacyVerifiedStampFileName);
+            if (File.Exists(stamp)) File.Delete(stamp);
         }
-        catch { return new HashSet<string>(StringComparer.Ordinal); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
     }
 
     private static void ReleaseHeldLibrariesLocked()

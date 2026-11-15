@@ -1454,7 +1454,7 @@ public partial class MainWindow
         await DecoderPackGate.WaitAsync(cancellationToken);
         try
         {
-            if (VideoDecoderPack.TryActivate()) return true;
+            if (await VideoDecoderPack.TryActivateAsync()) return true;
             if (_decoderPackDeclinedThisRun) return false;
             var sizeMb = VideoDecoderPack.PackBytes / 1_000_000;
             if (!await ConfirmAsync("Video decoder needed",

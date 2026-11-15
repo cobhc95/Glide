@@ -40,6 +40,8 @@ public static class SettingEffectRegistry
     private static SettingEffectBinding[] StaticRows() => new SettingEffectBinding[]
     {
         new("search.showRelatedResults", SettingEffectOwner.General, SettingEditorKind.FromCatalog, SettingApplySemantics.CommitOnly, "settings.effect.search.showRelatedResults", SettingEvidenceStatus.Unknown),
+        new("updates.checkDaily", SettingEffectOwner.General, SettingEditorKind.FromCatalog, SettingApplySemantics.LivePreview, "settings.effect.updates.checkDaily", SettingEvidenceStatus.Unknown),
+        new("updates.dontRemind", SettingEffectOwner.General, SettingEditorKind.FromCatalog, SettingApplySemantics.LivePreview, "settings.effect.updates.dontRemind", SettingEvidenceStatus.Unknown),
         new("general.recentHistory", SettingEffectOwner.General, SettingEditorKind.FromCatalog, SettingApplySemantics.CommitOnly, "settings.effect.general.recentHistory", SettingEvidenceStatus.Unknown),
         new("general.historySize", SettingEffectOwner.General, SettingEditorKind.FromCatalog, SettingApplySemantics.CommitOnly, "settings.effect.general.historySize", SettingEvidenceStatus.Unknown),
         new("windows.rememberPlacement", SettingEffectOwner.WindowIntegration, SettingEditorKind.FromCatalog, SettingApplySemantics.CommitOnly, "settings.effect.windows.rememberPlacement", SettingEvidenceStatus.Unknown),

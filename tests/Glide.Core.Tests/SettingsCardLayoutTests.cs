@@ -115,7 +115,7 @@ public sealed class SettingsCardLayoutTests
         await WithWindow(new GlideSettingsState(), window =>
         {
             var cards = Cards(window);
-            Assert.Equal(39, cards.Count); // 39 = the 38 earlier cards + Reset Glide
+            Assert.Equal(40, cards.Count); // 40 = the 38 earlier cards + Reset Glide + Updates (5.0.1)
             Assert.Equal(cards.Count, cards.Select(c => c.CardId).Distinct(StringComparer.Ordinal).Count());
             foreach (var card in cards)
             {

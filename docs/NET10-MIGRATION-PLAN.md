@@ -1,7 +1,19 @@
 # Glide: .NET 8 to .NET 10 LTS migration plan
 
-Status: plan only. No project file was changed to produce it. Every probe ran on a copy of the sources under the agent scratchpad (`...\scratchpad\net10-probe\`).
-Target: the first follow-up release after 5.0.0 (call it 5.1.0).
+Status: **executed for 5.0.1** (WP0-WP4 and WP6 done; WP5 skipped; WP7 open). The sections below are the original plan, kept for reference; "5.1" in them means this release, which shipped as 5.0.1.
+Original status: plan only. No project file was changed to produce it. Every probe ran on a copy of the sources under the agent scratchpad (`...\scratchpad\net10-probe\`).
+Target: the first follow-up release after 5.0.0 (released as 5.0.1).
+
+### Outcome in 5.0.1
+
+- `global.json`: SDK 10.0.100, `rollForward: latestFeature`, `allowPrerelease: false` (built with SDK 10.0.403, runtime/ILCompiler 10.0.14).
+- `Directory.Build.props`: `net10.0` for every project (src, the three test projects, `tools\perf\Glide.PerfBench`); `LangVersion` stays 12; `Version` 5.0.1.
+- `System.Drawing.Common` 8.0.11 -> 10.0.15. Avalonia 11.3.20, SkiaSharp 2.88.9, HarfBuzzSharp 8.3.1.1, Svg.Skia 2.0.0.8 and the test packages are unchanged.
+- **CET decision (final for 5.0.1): off.** `Glide.App.csproj` sets `<CETCompat>false</CETCompat>` (link flag `/CETCOMPAT:NO`), matching the .NET 8 exe. Glide loads third-party native code in-process (shell extensions, WIC codecs, FFmpeg, `codecs\`), and one non-CET-compatible DLL would terminate the process on CET-capable PCs. Turning it on later needs the WP4 manual interop pass on a CET-capable PC first. The native C++ DLLs (`Glide.Native.dll`, `Glide.ShellThumbnail.dll`) keep their own `/CETCOMPAT`.
+- `installer\Glide.iss`: `MinVersion=10.0.14393` (decision 4).
+- `build.cmd`: preflight asks for the .NET 10 SDK and fails fast when `dotnet --list-sdks` has no `10.` entry.
+- WP3: the 4 new warnings were fixed (CA1870 via a static `SearchValues<char>`, CS9191 `ref` -> `in`) or suppressed with a justification (2x CA1859 on private methods).
+- **Still open (WP7):** `IlcOptimizationPreference` in `Directory.Build.props` is not read by the ILCompiler targets (the real property is `OptimizationPreference`). Deliberately unchanged in 5.0.1 because fixing it changes speed and size; measure Size/Speed/default with tools\perf in a later release.
 Date of investigation: 2026-11-14. **.NET 8 support ended on 2026-11-10**, so Glide is already running on an unsupported runtime. The current NativeAOT publish also reports `NU1903: Package 'Microsoft.DotNet.ILCompiler' 8.0.31 has a known high severity vulnerability (GHSA-p3jp-9v83-76w9)`. That advisory is the strongest reason to ship this soon.
 
 ---
@@ -89,7 +101,7 @@ No source code changes are required to compile, test or AOT-publish on .NET 10. 
    - `Glide.Native.dll`
 
    A non-compliant DLL (setjmp/longjmp tricks, return-address patching, some older packers or DRM) terminates the process with `STATUS_STACK_BUFFER_OVERRUN` (0xC0000409) and leaves no managed stack.
-   *Recommendation:* ship with the default (CET on, a free hardening win). Run the interop smoke test in WP4 on a CET-capable machine. Keep `<CETCompat>false</CETCompat>` in Glide.App.csproj as the documented one-line fallback, and use it if any shell extension or codec crash shows up in beta.
+   *Decision taken for 5.0.1:* CET **off** (`<CETCompat>false</CETCompat>`), the same as .NET 8; see "Outcome in 5.0.1" above. *Original recommendation:* ship with the default (CET on, a free hardening win). Run the interop smoke test in WP4 on a CET-capable machine. Keep `<CETCompat>false</CETCompat>` in Glide.App.csproj as the documented one-line fallback, and use it if any shell extension or codec crash shows up in beta.
 2. **C# language version.** `LangVersion` is pinned to 12. Keep 12 for the migration release (zero semantic risk; already proven). Raising to 14 (`field` keyword, extension members, first-class span conversions, which change overload resolution for some `Span`/array calls) is a separate, later work package with its own test pass.
 3. **Avalonia 12 / SkiaSharp 3+ / Svg.Skia 5.** Explicitly out of scope. These are a major UI-stack migration.
 4. **Inno `MinVersion`.** .NET 10 supports Windows 10 1607+ / Windows 11 / Server 2012+ (x64). That is the same floor as .NET 8, so this is not a regression. Adding `MinVersion=10.0.14393` to `Glide.iss` turns a silent startup failure on Windows 7/8.1 into a clear installer message. This is optional.

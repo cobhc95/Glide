@@ -503,8 +503,11 @@ public partial class MainWindow
 
     private async Task RenameCurrentFileAsync()
     {
-        if (string.IsNullOrWhiteSpace(_currentPath) || !File.Exists(_currentPath)) return;
+        if (string.IsNullOrWhiteSpace(_currentPath)) return;
         var oldPath = _currentPath;
+        // The existence check can stall on an unreachable network share: keep it off the UI thread.
+        if (!await Task.Run(() => File.Exists(oldPath))) return;
+        if (!string.Equals(_currentPath, oldPath, StringComparison.Ordinal)) return;
         var box = new TextBox { Text = Path.GetFileName(oldPath), MinWidth = 330 };
         var dialog = CreateContentSizedDialog("Rename image", 430, 620);
         PopupPlacementStore.Track(dialog, "rename-image");
@@ -539,12 +542,22 @@ public partial class MainWindow
         };
         await ShowOwnedDialogAsync(dialog);
         if (!accepted || string.IsNullOrWhiteSpace(box.Text)) return;
-        var newPath = _fileOperations.ValidateRename(oldPath, box.Text.Trim());
-        if (newPath is null) { _diagnostics.Write("file", "rename_rejected", new { path = oldPath }); return; }
+        // Validation and the rename itself run off the UI thread (the shared Explorer rename, which also
+        // handles case-only renames); a slow or network location can't freeze the viewer.
+        FileRenameOutcome outcome;
+        try { outcome = await _fileOperations.TryRenameAsync(oldPath, box.Text.Trim()); }
+        catch (Exception ex)
+        {
+            _diagnostics.Write("file", "rename_failed", new { path = oldPath, error = ex.Message });
+            return;
+        }
+        if (outcome.NewPath is not { } newPath)
+        {
+            _diagnostics.Write("file", "rename_rejected", new { path = oldPath, reason = outcome.Error });
+            return;
+        }
         try
         {
-            newPath = await _fileOperations.RenameAsync(oldPath, box.Text.Trim());
-            if (newPath is null) return;
             _workspace.ReplaceActiveImage(newPath);
             await LoadPathAsync(newPath, updateActiveTab: true);
             RebuildTabStrip();
@@ -554,12 +567,13 @@ public partial class MainWindow
 
     private async Task DeleteCurrentFileAsync()
     {
-        if (string.IsNullOrWhiteSpace(_currentPath) || !File.Exists(_currentPath)) return;
+        if (string.IsNullOrWhiteSpace(_currentPath)) return;
         var oldPath = _currentPath;
         var oldIndex = Math.Max(0, _navigator.Index);
         var folder = Path.GetDirectoryName(oldPath);
         try
         {
+            // RecycleAsync checks the file and talks to the Recycle Bin on a worker thread.
             if (!await _fileOperations.RecycleAsync(oldPath)) return;
             _diagnostics.Write("file", "recycle_delete", new { path = oldPath });
         }
@@ -573,17 +587,18 @@ public partial class MainWindow
             return;
         }
 
-        string? replacement = null;
-        if (!string.IsNullOrWhiteSpace(folder) && Directory.Exists(folder))
+        // Listing the folder again can be slow on a network share: do it off the UI thread too.
+        var replacement = string.IsNullOrWhiteSpace(folder) ? null : await Task.Run<string?>(() =>
         {
             try
             {
+                if (!Directory.Exists(folder)) return null;
                 var remaining = Directory.EnumerateFiles(folder).Where(ImageNavigator.IsSupported)
                     .OrderBy(p => p, Glide.Core.ImageSortOrder.CreateComparer()).ToList();
-                if (remaining.Count > 0) replacement = remaining[Math.Min(oldIndex, remaining.Count - 1)];
+                return remaining.Count > 0 ? remaining[Math.Min(oldIndex, remaining.Count - 1)] : null;
             }
-            catch { }
-        }
+            catch { return null; }
+        });
 
         if (replacement is not null)
         {

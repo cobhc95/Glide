@@ -232,7 +232,7 @@ public sealed partial class WindowsExplorerHost : NativeControlHost, IExplorerBr
         var unknown = ComWrappers.GetOrCreateComInterfaceForObject(this, CreateComInterfaceFlags.None);
         try
         {
-            ThrowIfFailed(Marshal.QueryInterface(unknown, ref iid, out var pointer));
+            ThrowIfFailed(Marshal.QueryInterface(unknown, in iid, out var pointer));
             return pointer;
         }
         finally { Marshal.Release(unknown); }

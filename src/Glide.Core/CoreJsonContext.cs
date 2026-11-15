@@ -9,4 +9,5 @@ internal sealed record OverlayLayoutDocument(int version, OverlayState[] overlay
 [JsonSourceGenerationOptions(WriteIndented = true)]
 [JsonSerializable(typeof(OverlayLayoutDocument))]
 [JsonSerializable(typeof(OverlayState[]))]
+[JsonSerializable(typeof(Glide.Core.Updates.GitHubReleaseDto))]
 internal sealed partial class CoreJsonContext : JsonSerializerContext;

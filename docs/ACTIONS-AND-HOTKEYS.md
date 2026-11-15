@@ -116,6 +116,7 @@ opened image or an earlier selection. Tests: `ExternalProgramExplorerTests` (Gli
   add it. A file older than schema 10 gets the key only when the action has no key and no other action uses Ctrl+E; a
   user binding is kept and a removal made at schema 10 or later stays. The alias `file.showInExplorer` has no key of its own;
   the title-bar button tooltip reads the target's live keys (`ShortcutForTitleButton`).
+- `app.checkUpdates` ("Check for updates now", no default key, hotkey only: it asks GitHub once and shows the result in Settings > Updates when Settings is open, otherwise as the update prompt or a short message; it never downloads or installs anything) is the same "Check now" as the Updates card. The two update settings (`updates.checkDaily`, `updates.dontRemind`) are ordinary toggles with generated actions.
 - `app.exit` ("Exit Glide", no default key) quits the whole program (all windows, tray / Speed Boost cannot keep it
   alive; the multi-tab "confirm close" rule applies). `window.close` ("Close Glide window", Ctrl+Shift+W) still closes
   only the current window.

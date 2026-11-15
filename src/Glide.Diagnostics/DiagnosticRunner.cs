@@ -58,8 +58,8 @@ public static class DiagnosticRunner
             $"{snapshot.SettingsSchemaCount} declarative settings registered"));
         var currentSettings = SettingsCatalog.All.Count(x => x.FuturePhase is null);
         var futureSettings = SettingsCatalog.All.Count(x => x.FuturePhase is not null);
-        checks.Add(Check("settings_schema_glide30_contract", snapshot.SettingsSchemaCount == 269 && currentSettings == 269 && futureSettings == 0,
-            $"Glide catalogue contract: total={snapshot.SettingsSchemaCount}, current={currentSettings}, future={futureSettings}; expected 269/269/0."));
+        checks.Add(Check("settings_schema_glide30_contract", snapshot.SettingsSchemaCount == 271 && currentSettings == 271 && futureSettings == 0,
+            $"Glide catalogue contract: total={snapshot.SettingsSchemaCount}, current={currentSettings}, future={futureSettings}; expected 271/271/0."));
         var overlayAvoidOverlap = SettingsCatalog.All.FirstOrDefault(x => string.Equals(x.Id, "overlay.animationAvoidOverlap", StringComparison.OrdinalIgnoreCase));
         checks.Add(Check("overlay_animation_avoid_overlap_contract",
             overlayAvoidOverlap is not null && overlayAvoidOverlap.FuturePhase is null && overlayAvoidOverlap.DefaultValue is bool avoidOverlapEnabled && avoidOverlapEnabled,

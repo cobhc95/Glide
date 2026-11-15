@@ -480,6 +480,8 @@ public static class SettingsStore
             // Per-window placements (absent in older files). The Settings window's own older properties are folded into
             // the shared store once, so a placement saved before the store existed is kept.
             loaded.WindowPlacements = NormalizeWindowPlacements(loaded.WindowPlacements, loaded);
+            // Update checker memory (5.0.1; absent in older files): junk values dropped, times kept as UTC.
+            loaded.NormalizeUpdateState();
             loaded.TitleBarButtons = loaded.TitleBarButtons is null
                 ? TitleBarButtonCatalog.DefaultButtonIds.ToList()
                 : TitleBarButtonCatalog.Normalize(loaded.TitleBarButtons).ToList();
@@ -549,6 +551,46 @@ public static class SettingsStore
         catch
         {
             // Settings persistence must never crash the viewer. Diagnostics can surface a failed save later.
+        }
+    }
+
+    /// <summary>
+    /// Writes only the update checker's memory (last check, latest known version, last prompt...) into glide.settings.json and
+    /// leaves every other value exactly as it is on disk, so a check that finishes while Settings is previewing an unapplied
+    /// change can never persist that preview. Without a settings file a file with default settings plus this memory is
+    /// created (otherwise a fresh install would check again on every start).
+    /// </summary>
+    public static bool SaveUpdateState(Glide.Core.Updates.UpdateCheckState state)
+    {
+        try
+        {
+            var path = GetSettingsPath();
+            if (!File.Exists(path))
+            {
+                var fresh = new GlideSettingsState();
+                fresh.WriteUpdateState(state);
+                Save(fresh);
+                return true;
+            }
+            if (System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path)) is not System.Text.Json.Nodes.JsonObject root) return false;
+            var values = new GlideSettingsState();
+            values.WriteUpdateState(state);
+            values.NormalizeUpdateState();
+            // Serialised through the source-generated context (NativeAOT safe); only the update keys are copied over.
+            var node = JsonSerializer.SerializeToNode(values, AppJsonContext.Default.GlideSettingsState) as System.Text.Json.Nodes.JsonObject;
+            if (node is null) return false;
+            foreach (var name in GlideSettingsState.UpdateStateProperties)
+                root[name] = node[name]?.DeepClone();
+            using var buffer = new MemoryStream();
+            using (var writer = new Utf8JsonWriter(buffer, new JsonWriterOptions { Indented = true }))
+                root.WriteTo(writer);
+            AtomicWriteAllText(path, System.Text.Encoding.UTF8.GetString(buffer.ToArray()));
+            SaveLaunchPolicyCache();
+            return true;
+        }
+        catch
+        {
+            return false;
         }
     }
 

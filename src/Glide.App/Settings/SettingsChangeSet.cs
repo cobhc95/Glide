@@ -21,6 +21,8 @@ internal static class SettingsChangeSet
         foreach (var property in typeof(GlideSettingsState).GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance))
         {
             if (!property.CanRead || property.Name is nameof(GlideSettingsState.Hotkeys) or nameof(GlideSettingsState.Gestures) or nameof(GlideSettingsState.CustomHotkeyPresets)) continue;
+            // The update checker's memory (last check time...) is bookkeeping, never a pending Settings change.
+            if (Array.IndexOf(GlideSettingsState.UpdateStateProperties, property.Name) >= 0) continue;
             var before = property.GetValue(committed);
             var after = property.GetValue(current);
             if (SettingValuesEqual(before, after)) continue;

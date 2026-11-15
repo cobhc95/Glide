@@ -1,7 +1,8 @@
-# GLIDE 5.0.0 — ACTIVE HANDOFF
+# GLIDE 5.0.1 — ACTIVE HANDOFF
 
-**Current active release:** Glide 5.0.0 (single-sourced from `Directory.Build.props`). Release files
-and source metadata must stay aligned to 5.0.0 until a newer version is explicitly requested.
+**Current active release:** Glide 5.0.1 (single-sourced from `Directory.Build.props`; 5.0.0 is the previous
+published release, 5.0.1 adds the .NET 10 migration, the file-safety audit fixes and the daily update checker).
+Release files and source metadata must stay aligned to 5.0.1 until a newer version is explicitly requested.
 4.8.0 was developed but never published; everything built for it shipped in 5.0.0, so there is no
 4.8.0 release, tag or release-notes file. The "Current checkpoint — 5.0.0" section below summarises
 the release; `CHANGELOG.md` and `docs/releases/release-notes-5.0.0.md` hold the full lists, and
@@ -41,11 +42,15 @@ optional codec providers (copied to `dist\codecs` by the build), `docs/` design 
 `docs/releases/` (all release notes), `Archive/` retained backups (zips). Generated and git-ignored:
 `.artifacts/`, `artifacts/`, `dist/`, `dist-installer/`, `Glide-*.exe|zip`.
 
-Toolchain: .NET 8 SDK (x64), MSVC VS 2022+ (or BuildTools) with the C++ x64 workload, CMake 3.20+,
-Inno Setup 6 or 7. No administrator rights are required for the app itself. .NET 8 reached end of
-support on 2026-11-10; the migration to .NET 10 LTS is planned for the release after 5.0.0
-(`docs/NET10-MIGRATION-PLAN.md`: scratch-copy probe built, tested and AOT-published with only the
-target framework and `global.json` changed).
+Toolchain: .NET 10 SDK (x64; `global.json` pins 10.0.100 with `rollForward: latestFeature`), VS 2022/2026
+(or Build Tools) with the C++ x64 workload ("Desktop development with C++"), CMake 3.20+, Inno Setup 6 or 7.
+No administrator rights are required for the app itself. Since 5.0.1 every project targets `net10.0`
+(.NET 10 LTS; .NET 8 reached end of support on 2026-11-10); `LangVersion` stays pinned at 12. The NativeAOT
+publish needs `%ProgramFiles(x86)%\Microsoft Visual Studio\Installer` (vswhere) on PATH; `build.cmd` adds it,
+and any other script or agent job that publishes must do the same. The released exe is self-contained, so
+users need no .NET runtime. `Glide.App.csproj` sets `<CETCompat>false</CETCompat>` (the .NET 10 AOT default
+is on; Glide loads third-party shell extensions, codecs and FFmpeg in-process): enabling CET needs a manual
+interop test pass on a CET-capable PC first. See `docs/NET10-MIGRATION-PLAN.md`.
 
 ## Permanent invariants (do not regress)
 
@@ -171,8 +176,21 @@ Forward keys added to saved shortcut maps unless a key is taken; schema 10: *Exp
   `BuildSettingControlMap`, Load/Read, contract-pinned search-card code), `.Diagnostics.cs`, `.Hotkeys.cs`,
   `.Profiles.cs` and `.Thumbnails.cs`. `SettingsChangeSet` is the UI-free diff of two settings snapshots.
   Profile and settings import keeps this PC's external programs and drops network folders
-  (`KeepLocalLaunchTargets`, `KeepLocalFolderPaths`). Final settings audit: 207 editors, 213 settings in
-  39 cards on 8 pages, 54 generated gesture rows; the settings catalogue has 269 entries (the stacked-info option is one of them).
+  (`KeepLocalLaunchTargets`, `KeepLocalFolderPaths`). Final settings audit: 210 editors, 216 settings in
+  40 cards on 8 pages, 54 generated gesture rows; the settings catalogue has 271 entries (the stacked-info option and, since 5.0.1,
+  the two update options are among them).
+- **Update checker (5.0.1)**: the only network use besides the optional FFmpeg download. `Glide.Core/Updates` holds the pure,
+  tested logic (`UpdateVersion` comparison, `UpdateReleaseParser` over a source-generated DTO, `UpdateUrlPolicy` for the release
+  address and redirect hosts, `UpdateSchedule` for the 24 h / 6 h back-off / 20 h prompt rules with a clock seam, `UpdateChecker`
+  with one process-wide gate, `UpdateStatusText`). `Glide.App/Updates` holds `GitHubUpdateFeed` (the only HTTP code: HTTPS GET of
+  `api.github.com/repos/cobhc95/Glide/releases/latest`, no cookies / auth / personal data, 10 s timeout, 256 KB cap, redirects only to
+  https on api.github.com / github.com), `UpdateService` (schedule, prompt, manual check; seams `IUpdateHost` / `IUpdateTicker`),
+  `UpdatePromptWindow` and `UpdateProduction` (the single place that builds the real feed, called only from `App`). Tests and headless
+  windows never create a service (`UpdateService.Current` is null), and `UpdateStateAndGuardTests` fails if any test or any other
+  source file builds the real feed or an HTTP stack. The memory (`UpdateLastCheckedUtc`, `UpdateLatestKnownVersion`, ...) is part of
+  `GlideSettingsState` but is bookkeeping: it is ignored by `ContentEquals` / `SettingsChangeSet`, written on its own with
+  `SettingsStore.SaveUpdateState` (so an unapplied Settings preview is never persisted) and overlaid on every full save by
+  `UpdateService.ApplyTo`. Settings: `updates.checkDaily` (default on) and `updates.dontRemind`; action `app.checkUpdates`.
 - **Other extractions**: `CommandLineTools` (headless modes out of `Program.Main`; the GUI startup path and
   the diagnostic-trace opt-in lines stay in `Program.cs` for the privacy contract test),
   `ThemePaletteApplier`, `KeyboardShortcutText`, `OverlayDriftMotion` (the renderers must still call these
