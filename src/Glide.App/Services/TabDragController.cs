@@ -85,7 +85,9 @@ public sealed class TabDragController
 
         _ordinaryAttach.Update(_lastScreen, _host.TabAttachEnabled(), "merge_target_entered", "merge_target_left", "tabs");
         _targetIndex = _ordinaryAttach.Target?.GetTabInsertIndex(_lastScreen) ??
-            (_host.TabStripContains(_lastScreen) ? _host.GetInsertIndex(_lastScreen) : -1);
+            (_host.TabStripContains(_lastScreen) ? _host.GetInsertIndex(_lastScreen) : _targetIndex);
+        // once neighbours have swapped, a pointer that drifts just off the strip keeps the last
+        // in-strip slot, so release commits that order instead of snapping back.
         _host.ApplyPreview(id, now.X - _start.X, _ordinaryAttach.Target is not null);
         _host.Diagnostic("drag", new { id, screenX = _lastScreen.X, screenY = _lastScreen.Y, targetWindow = _ordinaryAttach.Target?.Title ?? "", targetIndex = _targetIndex });
         e.Handled = true;
@@ -106,7 +108,7 @@ public sealed class TabDragController
                 if (await _host.AttachAsync(id, target, Math.Max(0, targetIndex)).ConfigureAwait(true))
                     _host.Diagnostic("merge_completed", new { id, target = target.Title, targetIndex });
             }
-            else if (wasDrag && !_host.TabStripContains(_lastScreen) && _host.TabDetachEnabled())
+            else if (wasDrag && !_host.TabStripContains(_lastScreen) && _host.IsBeyondTearOff(_lastScreen) && _host.TabDetachEnabled())
             {
                 await _host.DetachAsync(id, _lastScreen).ConfigureAwait(true);
             }

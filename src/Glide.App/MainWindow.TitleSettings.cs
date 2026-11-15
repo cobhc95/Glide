@@ -164,7 +164,7 @@ public partial class MainWindow
             var label = id == "window.transparency"
                 ? $"Window transparency: {(int)Math.Round(_sessionOpacity * 100)}%"
                 : TitleActionLabel(id, definition);
-            ToolTip.SetTip(button, $"[{label} ({ShortcutForTitleButton(definition)})]");
+            ToolTip.SetTip(button, $"{label} ({ShortcutForTitleButton(definition)})");
             ToolTip.SetShowDelay(button, 650);
         }
     }
@@ -251,6 +251,16 @@ public partial class MainWindow
         _settings.TitleBarButtons = TitleBarButtonCatalog.Normalize(result).ToList();
         SaveSettingsAndPublish();
         RebuildTitleActionStrip();
+    }
+
+    private async Task ShowStatusBarCustomizerAsync()
+    {
+        var dialog = new StatusBarCustomizerWindow(_settings.StatusBarGroups) { Icon = Icon, Topmost = Topmost };
+        var result = await ShowOwnedDialogAsync<string?>(dialog);
+        if (result is null) return;
+        _settings.StatusBarGroups = result;
+        SaveSettingsAndPublish();
+        ApplyStatusBarSize();
     }
 
     private async void SettingsClicked(object? sender, RoutedEventArgs e)
@@ -340,6 +350,15 @@ public partial class MainWindow
 
     private void ApplySettingsFromDialog(GlideSettingsState state, bool commit)
     {
+        // a live preview that only changes the text overlay's look (font size spinner, opacity, colour...)
+        // restyles the overlay alone instead of re-applying every setting, so dragging a value never lags.
+        if (!commit && OnlyTextOverlayStyleDiffers(_settings, state))
+        {
+            _settings = state.CloneState();
+            ApplyPictureCounterVisuals();
+            return;
+        }
+        var previousTabToolTipSize = _settings.TabToolTipTextSize;
         _settings = state.CloneState();
         // The Settings window works on a snapshot taken when it opened; the update checker's memory is not part of it.
         UpdateService.Current?.ApplyTo(_settings);
@@ -347,6 +366,13 @@ public partial class MainWindow
         App.PublishCurrentSettings(_settings);
         ApplyNavigationSortOrder();
         ApplySettingsVisuals();
+        UpdateGifStatusUi();
+        // changing the tab tooltip size in Settings shows the current tab's tooltip at the new size.
+        if (!commit && !string.Equals(previousTabToolTipSize, _settings.TabToolTipTextSize, StringComparison.Ordinal))
+        {
+            RebuildTabStrip();
+            ShowActiveTabToolTipPreview();
+        }
         _diagnostics.Write("settings", commit ? "committed" : "previewed", new { theme = _settings.ThemeChoice, accent = _settings.AccentChoice, glow = _settings.GlowChoice, status = _settings.ShowStatusSurface, tabs = _settings.TabsEnabled });
         if (commit)
         {
@@ -362,6 +388,21 @@ public partial class MainWindow
                 catch { /* best-effort cleanup; a locked or missing file is harmless */ }
             }
         }
+    }
+
+    internal static bool OnlyTextOverlayStyleDiffers(GlideSettingsState current, GlideSettingsState next)
+    {
+        var a = current.CloneState();
+        var b = next.CloneState();
+        if (a.ContentEquals(b)) return false;
+        b.PictureCounterTemplate = a.PictureCounterTemplate;
+        b.PictureCounterFontSize = a.PictureCounterFontSize;
+        b.PictureCounterBold = a.PictureCounterBold;
+        b.PictureCounterOpacity = a.PictureCounterOpacity;
+        b.PictureCounterPosition = a.PictureCounterPosition;
+        b.PictureCounterColor = a.PictureCounterColor;
+        b.PictureCounterShadow = a.PictureCounterShadow;
+        return a.ContentEquals(b);
     }
 
     private ImagePerformancePolicy BuildPerformancePolicy()
@@ -688,7 +729,8 @@ public partial class MainWindow
         var baseIconSize = metrics.Icon * scale;
 
         // In the single-row layout the stats text may use up to this width before it is trimmed.
-        var statsCap = Math.Max(metrics.StatsWidth * scale, availableWidth * 0.32);
+        // The always-present GIF group costs width, so the file path gets a larger share.
+        var statsCap = Math.Max(metrics.StatsWidth * scale, availableWidth * 0.40);
         StatusStatsText.FontSize = metrics.Font * scale;
 
         var visibleButtonCount = 0;
@@ -808,6 +850,18 @@ public partial class MainWindow
             items.Add(pin);
             items.Add(new MenuItem { Header = "-" });
         }
+        var gifOnly = MenuActions.Tag(new MenuItem { Header = _settings.StatusGifControlsOnlyOnGifs ? "Show GIF controls only on GIFs  ✓" : "Show GIF controls only on GIFs", Icon = MenuIcon("Play") }, "setting.status.gifOnlyOnGifs");
+        gifOnly.Click += (_, _) =>
+        {
+            _settings.StatusGifControlsOnlyOnGifs = !_settings.StatusGifControlsOnlyOnGifs;
+            SaveSettingsAndPublish();
+            UpdateGifStatusUi();
+            ApplyStatusBarSize();
+        };
+        items.Add(gifOnly);
+        var customize = MenuActions.Tag(new MenuItem { Header = MenuActions.Header("Customize status-bar buttons…", ShortcutForAction("statusbar.customize")), Icon = MenuIcon("Settings") }, "statusbar.customize");
+        customize.Click += async (_, _) => await ShowStatusBarCustomizerAsync();
+        items.Add(customize);
         var autoHideItem = MenuActions.Tag(new MenuItem { Header = _settings.StatusAutoHide ? "Auto-hide status bar  ✓" : "Auto-hide status bar", Icon = MenuIcon("Eye") }, "setting.status.autoHide");
         autoHideItem.Click += (_, _) => SetStatusAutoHide(!_settings.StatusAutoHide);
         items.Add(autoHideItem);

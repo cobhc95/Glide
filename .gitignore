@@ -37,3 +37,7 @@ native/third_party/ffmpeg/
 TestResults/
 coverage/
 .vscode/
+
+# Local-only working notes (feedback-round queues, design mockups): never committed or packaged
+docs/QUEUE-*.md
+docs/mockups/

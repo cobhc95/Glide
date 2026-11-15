@@ -103,7 +103,7 @@ public sealed class ExplorerTabOperationsTests
                 "Show in Windows File Explorer", "Properties"
             }, Headers(menu));
             var view = Item(menu, "View").Items.OfType<MenuItem>().Select(i => i.Header!.ToString()).ToArray();
-            Assert.Equal(new[] { "Extra large icons", "Large icons  ✓", "Medium icons", "Small icons", "List", "Details" }, view);
+            Assert.Equal(new[] { "Extra large thumbnails", "Large thumbnails  ✓", "Medium thumbnails", "Small thumbnails", "List", "Details" }, view);
             return Task.CompletedTask;
         });
     }

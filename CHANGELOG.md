@@ -4,6 +4,45 @@ All notable changes to Glide Image Viewer are documented here. The format is bas
 [Keep a Changelog](https://keepachangelog.com/), and the project uses dotted feature releases with
 hyphenated follow-up corrections (for example `4.2.0-1`).
 
+## [5.0.3] - 2026-11-15
+
+Feedback from issue #1 (thanks to [vertigo220](https://github.com/vertigo220)): vertical tabs, a much more customizable status bar, Esc for every dialog, tab and Settings improvements and bug fixes. Settings from 5.0.x load unchanged.
+
+### Added
+
+- **Vertical tabs:** tabs can sit in a side pane, switched with **Place tabs vertically / Place tabs on top** in the tab and title-bar right-click menus (also a Settings option and a bindable action), and auto-hide like the status bar. The pane is resizable by dragging its right edge (remembered; double-click the edge for the default width), and its **New tab** button spans the pane like a tab row.
+- **Esc cancels every dialog** (prompts, confirmations, customizers, slideshow options, rename...), exactly like Cancel / the close button; an open dropdown or an active shortcut capture takes the Esc first.
+- Status bar: right-click the minimise button to toggle auto-hide (the button stays, with its own icon, while auto-hide is on); optional single-click on the file name to rename and double-click to open its location.
+- Status bar: **Customize status-bar buttons** (status-bar right-click menu, Settings, or a bindable action) shows, hides and reorders the built-in groups, and lists dozens more Glide actions, grouped by purpose, to add as status-bar buttons (Add / Remove / Move up / Move down, like the title-bar customizer; click anywhere on a row to select it, double-click to move it). None are added by default.
+- Bindable actions to make the tab tooltip font larger or smaller; `<br>` line breaks in the custom text overlay.
+- Settings: an **Always expand** switch next to Restore defaults (off by default) opens every section expanded.
+- Settings: **Ctrl+F** jumps to the search box so you can start typing straight away.
+
+### Changed
+
+- GIF controls are always shown and greyed out on non-GIFs, so the status-bar buttons no longer jump; a setting and context-menu option restore "only on GIFs".
+- Tab tooltip shows `Name:` and `Path:` on separate lines; changing its font size in Settings previews the current tab's tooltip.
+- Brackets removed from tooltips; Explorer view option says "Thumbnails" instead of "Icons".
+
+### Fixed
+
+- Mouse wheel over the status bar moves to the previous/next image.
+- Tab drag: a reorder sticks once tabs have swapped, and tabs no longer tear off by accident. A torn-off tab's new window no longer runs "Open last session", which copied every tab into it.
+- Text overlay font size changes no longer lag behind clicks.
+- Hotkey conflict dialog shows proper quotes; the hotkey search keeps its filter after assigning and Enter re-runs it.
+- Explorer scrolls a page in about 1.5 wheel notches.
+- The unsaved-changes list no longer always lists Custom Gestures and Window Placements, and shows readable summaries.
+- Collapsing a Settings section keeps its header in place instead of jumping.
+- Switching vertical tabs back to the top no longer leaves the tabs squashed until the window is resized.
+
+### Internal
+
+- Version advanced to 5.0.3 in `Directory.Build.props`.
+- Esc handling for dialogs is one class handler (`DialogEscape`); a test lists every window type and checks it is covered or excluded with a reason.
+- New settings are in `SettingsCatalog` (searchable) and new actions in `AppActionRegistry`; both audits pass.
+- Local working notes (`docs/QUEUE-*.md`, `docs/mockups/`) are excluded from the source package and `.gitignore`.
+- Tests: Core 1580, Input 21, Explorer 125.
+
 ## [5.0.2] - 2026-11-15
 
 A polish release on top of 5.0.1: window size and position are remembered correctly through maximise and full screen, full screen switches without the "reload" flash, a launch log explains new window vs tab decisions, and about 150 silent `catch` blocks were reviewed. `MainWindow` decomposition and the remaining UI-thread file work are planned for a later release.

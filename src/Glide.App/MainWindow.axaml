@@ -24,8 +24,12 @@
           <ScrollViewer x:Name="TabStripScroll" Grid.Column="1" HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Disabled">
             <StackPanel x:Name="TabStripHost" Orientation="Horizontal" Spacing="3" VerticalAlignment="Stretch">
               <StackPanel x:Name="TabStripPanel" Orientation="Horizontal" Spacing="3"/>
-              <Button x:Name="NewTabButton" Classes="tabPlus" Width="36" Height="36" Click="NewTabClicked" ToolTip.Tip="[New tab (Ctrl+T)]">
-                <controls:GlideIconView Kind="Plus" Width="14" Height="14" IconBrush="{DynamicResource BrushText}" StrokeWidth="1.8"/>
+              <Button x:Name="NewTabButton" Classes="tabPlus" Width="36" Height="36" Click="NewTabClicked" ToolTip.Tip="New tab (Ctrl+T)">
+                <StackPanel Orientation="Horizontal" Spacing="7" VerticalAlignment="Center">
+                  <controls:GlideIconView Kind="Plus" Width="14" Height="14" IconBrush="{DynamicResource BrushText}" StrokeWidth="1.8"/>
+                  <!-- Shown only in the vertical tab pane, where the button spans the pane like a tab row. -->
+                  <TextBlock x:Name="NewTabLabel" Text="New tab" FontSize="12.5" VerticalAlignment="Center" IsVisible="False"/>
+                </StackPanel>
               </Button>
             </StackPanel>
           </ScrollViewer>
@@ -229,5 +233,11 @@
         </Grid>
       </Border>
     </Grid>
+    <!-- 3.7 Vertical (side) tabs: TabOverflowHost moves in here when Tab position = Side. -->
+    <Border x:Name="SideTabHost" Grid.Row="1" Width="220" HorizontalAlignment="Left" IsVisible="False" ZIndex="900"
+            Classes="sideTabs" Background="{DynamicResource BrushChrome}" BorderBrush="{DynamicResource BrushBorder}" BorderThickness="0,0,1,0" Padding="6,6,6,6"/>
+    <!-- Drag to resize the vertical tab pane; double-click restores the default width. -->
+    <Border x:Name="SideTabResizeHandle" Grid.Row="1" Width="6" HorizontalAlignment="Left" IsVisible="False" ZIndex="901"
+            Background="Transparent" Cursor="SizeWestEast" ToolTip.Tip="Drag to resize the tab pane. Double-click: default width."/>
   </Grid>
 </Window>

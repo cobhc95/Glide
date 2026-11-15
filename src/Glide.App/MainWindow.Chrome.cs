@@ -49,10 +49,15 @@ public partial class MainWindow
         };
         var text = template;
         foreach (var (token, value) in replacements) text = text.Replace(token, value, StringComparison.OrdinalIgnoreCase);
+        text = ApplyTextOverlayLineBreaks(text);
         CornerCounterText.Text = text;
         CornerCounterShadowText.Text = text;
         UpdateFolderCounter(folderPath);
     }
+
+    /// <summary><c>&lt;br&gt;</c> (also <c>&lt;br/&gt;</c>, <c>&lt;br /&gt;</c>, any case) in the text overlay template starts a new line.</summary>
+    internal static string ApplyTextOverlayLineBreaks(string text) =>
+        System.Text.RegularExpressions.Regex.Replace(text, @"<br\s*/?>", "\n", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
     private async void UpdateFolderCounter(string folderPath)
     {

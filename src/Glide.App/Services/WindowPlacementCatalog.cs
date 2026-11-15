@@ -18,6 +18,7 @@ public static class WindowPlacementCatalog
         new("print", "Print window (PrintWindow)", WindowPlacementMode.SizeAndPosition, "Printing/PrintWindow.cs"),
         new("settings", "Settings window (SettingsWindow; own Cancel-aware code, same store and resolver)", WindowPlacementMode.SizeAndPosition, "Settings/SettingsWindow.Placement.cs"),
         new("titlebar-customizer", "Customize title-bar buttons (TitleBarCustomizerWindow)", WindowPlacementMode.SizeAndPosition, "Settings/TitleBarCustomizerWindow.cs"),
+        new("statusbar-customizer", "Customize status-bar buttons (StatusBarCustomizerWindow)", WindowPlacementMode.SizeAndPosition, "Settings/StatusBarCustomizerWindow.cs"),
         new("diagnostics-results", "Glide Diagnostics results", WindowPlacementMode.SizeAndPosition, "Settings/SettingsWindow.Diagnostics.cs"),
         new("settings-discard-confirm", "Discard Settings changes? (content-sized height)", WindowPlacementMode.PositionOnly, "Settings/SettingsWindow.axaml.cs"),
         new("reset-confirm", "Reset Glide confirmation (ResetConfirmWindow)", WindowPlacementMode.PositionOnly, "Settings/ResetDialogs.cs"),

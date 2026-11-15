@@ -109,12 +109,12 @@ public sealed class NavigationHistoryWindowTests
             Assert.True(forward.Classes.Contains("inactive"));
             Assert.True(back.Opacity < 0.5);
             Assert.True(back.IsEnabled, "never IsEnabled = false: a click must not fall through to the caption");
-            Assert.Equal("[Back (Alt+Left)]", ToolTip.GetTip(back)?.ToString());
-            Assert.Equal("[Forward (Shift+Backspace / Alt+Right)]", ToolTip.GetTip(forward)?.ToString());
+            Assert.Equal("Back (Alt+Left)", ToolTip.GetTip(back)?.ToString());
+            Assert.Equal("Forward (Shift+Backspace / Alt+Right)", ToolTip.GetTip(forward)?.ToString());
 
             Settings(window).Hotkeys["nav.back"] = new List<string> { "F7" };
             Invoke(window, "RefreshDynamicTooltips");
-            Assert.Equal("[Back (F7)]", ToolTip.GetTip(TitleButton(window, "nav.back"))?.ToString());
+            Assert.Equal("Back (F7)", ToolTip.GetTip(TitleButton(window, "nav.back"))?.ToString());
             Settings(window).Hotkeys["nav.back"] = new List<string>();
             Invoke(window, "RefreshDynamicTooltips");
             Assert.Contains("Unassigned", ToolTip.GetTip(TitleButton(window, "nav.back"))?.ToString());

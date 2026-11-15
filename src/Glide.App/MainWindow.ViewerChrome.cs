@@ -148,6 +148,7 @@ public partial class MainWindow
         else if (ReferenceEquals(button, OverlayLoadButton)) { _diagnostics.Write("overlay", "status_command", new { command = "load" }); OverlayLoadClicked(button, new RoutedEventArgs()); }
         else if (ReferenceEquals(button, OverlaySaveButton)) { if (_overlays?.HasOverlays == true) { _diagnostics.Write("overlay", "status_command", new { command = "save" }); OverlaySaveClicked(button, new RoutedEventArgs()); } }
         else if (ReferenceEquals(button, OverlayClearButton)) { if (_overlays?.HasOverlays == true) { _diagnostics.Write("overlay", "status_command", new { command = "clear" }); OverlayClearClicked(button, new RoutedEventArgs()); } }
+        else if (_extraStatusButtons.TryGetValue(button, out var extraActionId) && AppActionRegistry.Find(extraActionId) is { } extraAction) await ExecuteActionAsync(extraAction, "status_bar");
         else if (ReferenceEquals(button, CaptionMinimizeButton)) CaptionMinimizeClicked(button, new RoutedEventArgs());
         else if (ReferenceEquals(button, CaptionMaximizeButton)) CaptionMaximizeClicked(button, new RoutedEventArgs());
         else if (ReferenceEquals(button, CaptionCloseButton)) CaptionCloseClicked(button, new RoutedEventArgs());
@@ -203,6 +204,13 @@ public partial class MainWindow
 
     private void CollapseStatusClicked(object? sender, RoutedEventArgs e)
     {
+        // on an auto-hide bar the button is the auto-hide toggle: a click keeps the bar shown.
+        if (_settings.StatusAutoHide && !_statusCollapsed)
+        {
+            SetStatusAutoHide(false);
+            UpdateCollapseButtonGlyphs();
+            return;
+        }
         // The same button collapses an expanded bar and, on the hover-revealed collapsed bar,
         // expands it again.
         if (_statusCollapsed)
@@ -214,6 +222,45 @@ public partial class MainWindow
         ApplyStatusVisibility();
         _diagnostics.Write("status", "collapsed", new { surface = HomeHost.IsVisible ? "home" : "viewer" });
     }
+
+    private DispatcherTimer? _statusFileNameClickTimer;
+
+    /// <summary>
+    /// Option "Click the file name to rename / open its location"): a single click on the status-bar file
+    /// information starts Rename; a double-click opens the folder in Windows Explorer with the file selected. The
+    /// single click waits for the double-click time so a double-click never also starts Rename.
+    /// </summary>
+    private void StatusFileNamePointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (!_settings.StatusFileNameClickActions || string.IsNullOrWhiteSpace(_currentPath)) return;
+        if (!e.GetCurrentPoint(StatusStatsText).Properties.IsLeftButtonPressed) return;
+        e.Handled = true;
+        _statusFileNameClickTimer?.Stop();
+        if (e.ClickCount >= 2)
+        {
+            _ = ExecuteCommandAsync(GlideCommand.OpenContainingFolder);
+            return;
+        }
+        _statusFileNameClickTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(320) };
+        _statusFileNameClickTimer.Tick += (_, _) =>
+        {
+            _statusFileNameClickTimer?.Stop();
+            _ = ExecuteCommandAsync(GlideCommand.RenameFile);
+        };
+        _statusFileNameClickTimer.Start();
+    }
+
+    /// <summary>right-click on the status bar's minimise button toggles auto-hide (no context menu).</summary>
+    private void StatusCollapseButtonRightReleased(object? sender, PointerReleasedEventArgs e)
+    {
+        if (e.InitialPressMouseButton != MouseButton.Right) return;
+        e.Handled = true;
+        SetStatusAutoHide(!_settings.StatusAutoHide);
+        UpdateCollapseButtonGlyphs();
+        ShowViewerNotice(_settings.StatusAutoHide ? "Status bar auto-hide on" : "Status bar auto-hide off");
+    }
+
+    private void StatusCollapseButtonContextRequested(object? sender, ContextRequestedEventArgs e) => e.Handled = true;
 
     private void RestoreStatusClicked(object? sender, RoutedEventArgs e)
     {

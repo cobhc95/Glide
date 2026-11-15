@@ -8,6 +8,19 @@
   <Window.Styles>
     <!-- Settings-only rhythm: the category buttons are tighter than the shared theme default (50) so all eight fit a small window. -->
     <Style Selector="Button.settingsNav"><Setter Property="Height" Value="44"/></Style>
+    <!-- Footer "Always expand" switch (approved mockup: 32x18 pill, 12 px knob, 3 px inset). -->
+    <Style Selector="ToggleButton.footerSwitch">
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Template">
+        <ControlTemplate>
+          <Border x:Name="PART_Track" Width="32" Height="18" CornerRadius="9" Background="#444444">
+            <Border x:Name="PART_Knob" Width="12" Height="12" CornerRadius="6" Background="#EEEEEE" HorizontalAlignment="Left" Margin="3,0,0,0" VerticalAlignment="Center"/>
+          </Border>
+        </ControlTemplate>
+      </Setter>
+    </Style>
+    <Style Selector="ToggleButton.footerSwitch:checked /template/ Border#PART_Track"><Setter Property="Background" Value="{DynamicResource BrushAccent}"/></Style>
+    <Style Selector="ToggleButton.footerSwitch:checked /template/ Border#PART_Knob"><Setter Property="HorizontalAlignment" Value="Right"/><Setter Property="Margin" Value="0,0,3,0"/></Style>
   </Window.Styles>
   <!-- Responsive Glide Settings shell. Avalonia already works in device-independent pixels;
        a fixed 1080x810 Viewbox caused the empty top/bottom bands reported during live resize.
@@ -24,7 +37,7 @@
       </Border>
       <Border Grid.Row="0" Grid.Column="1" Background="{DynamicResource BrushWindow}">
         <Grid ColumnDefinitions="*,200" ColumnSpacing="10" Margin="20,0,20,0" VerticalAlignment="Center">
-          <TextBox x:Name="SearchBox" Classes="settingsSearch" Watermark="Search settings..." TextChanged="SearchChanged"/>
+          <TextBox x:Name="SearchBox" Classes="settingsSearch" Watermark="Search settings... (Ctrl+F)" TextChanged="SearchChanged"/>
           <ComboBox x:Name="SearchCategoryCombo" Grid.Column="1" Width="200" SelectedIndex="0" SelectionChanged="SearchCategoryChanged" ToolTip.Tip="Limit Settings search to one category. All categories is the default.">
             <ComboBoxItem Content="All categories"/><ComboBoxItem Content="General &amp; startup"/><ComboBoxItem Content="Appearance &amp; viewing"/><ComboBoxItem Content="Window &amp; navigation"/><ComboBoxItem Content="Tabs &amp; status bar"/><ComboBoxItem Content="Mouse &amp; keyboard"/><ComboBoxItem Content="Slideshow &amp; overlays"/><ComboBoxItem Content="Performance"/><ComboBoxItem Content="Windows &amp; developer"/>
           </ComboBox>
@@ -325,6 +338,15 @@
                     <ComboBoxItem Content="Large"/>
                   </ComboBox>
                 </Grid>
+                <Grid ColumnDefinitions="260,230,*" Margin="6,0,0,0">
+                  <TextBlock Text="Tab position" VerticalAlignment="Center"/>
+                  <ComboBox x:Name="TabPositionCombo" Grid.Column="1" Width="220" ToolTip.Tip="Top: tabs along the title bar. Side: a vertical tab panel on the left.">
+                    <ComboBoxItem Content="Top"/>
+                    <ComboBoxItem Content="Side"/>
+                  </ComboBox>
+                </Grid>
+                <CheckBox x:Name="TabSideAutoHideCheck" Content="Auto-hide the side tab panel (it slides in at the left edge of the window)"/>
+                <CheckBox x:Name="TabTopAutoHideCheck" Content="Auto-hide the top tab strip (it appears at the top edge)"/>
             </StackPanel>
           </controls:SettingsCard>
             <controls:SettingsCard CardId="tabs-explorer" Title="Explorer tab" Subtitle="The view and which files Glide's own Explorer tab lists" Icon="Browser" IsExpanded="False">
@@ -332,10 +354,10 @@
                 <Grid ColumnDefinitions="260,230,*" Margin="6,0,0,0">
                   <TextBlock Text="Explorer default view" VerticalAlignment="Center"/>
                   <ComboBox x:Name="ExplorerDefaultViewCombo" Grid.Column="1" Width="220">
-                    <ComboBoxItem Content="Extra large icons"/>
-                    <ComboBoxItem Content="Large icons"/>
-                    <ComboBoxItem Content="Medium icons"/>
-                    <ComboBoxItem Content="Small icons"/>
+                    <ComboBoxItem Content="Extra large thumbnails"/>
+                    <ComboBoxItem Content="Large thumbnails"/>
+                    <ComboBoxItem Content="Medium thumbnails"/>
+                    <ComboBoxItem Content="Small thumbnails"/>
                     <ComboBoxItem Content="List"/>
                     <ComboBoxItem Content="Details"/>
                   </ComboBox>
@@ -362,6 +384,9 @@
                 <CheckBox x:Name="FullscreenStatusAlwaysCheck" Content="Keep status bar visible in fullscreen"/>
                 <CheckBox x:Name="StatusReserveFitSpaceCheck" Content="Reserve status bar space when fitting (image fits above the bar instead of under it)"/>
                 <CheckBox x:Name="StatusStackInfoLineCheck" Content="Always stack the information on a separate line (file info above the buttons, even in a wide window)" ToolTip.Tip="On by default: the file name, position, size and zoom always sit on their own line at the top of the status bar, with the minimise and close buttons at its right and the button groups on the row below. Off: in a wide window everything shares a single line and the bar only wraps when the window is narrow."/>
+                <CheckBox x:Name="StatusGifOnlyOnGifsCheck" Content="Show GIF controls only on GIFs" ToolTip.Tip="Off (default): the GIF play / pause and frame buttons always sit in the status bar and are greyed out on images that are not animated GIFs. On: they appear only while an animated GIF is open."/>
+                <CheckBox x:Name="StatusFileNameClickActionsCheck" Content="Click the file name to rename it, double-click to open its location" ToolTip.Tip="Off by default. On: a single click on the file name in the status bar starts Rename; a double-click opens the folder in Windows Explorer with the file selected."/>
+                <Button x:Name="CustomizeStatusBarButton" Classes="secondaryAction" Content="Customize status-bar buttons..." Click="CustomizeStatusBarClicked" HorizontalAlignment="Left" MinWidth="230"/>
             </StackPanel>
           </controls:SettingsCard>
             <controls:SettingsCard CardId="tabs-status-buttons" Title="Status bar buttons" Subtitle="Which controls the status bar offers" Icon="More" IsExpanded="False">
@@ -652,11 +677,19 @@
 
       <!-- footer -->
       <Border Grid.Row="2" Grid.ColumnSpan="2" Background="{DynamicResource BrushFooter}" BorderBrush="{DynamicResource BrushBorder}" BorderThickness="0,1,0,0">
-        <Grid ColumnDefinitions="*,Auto" Margin="20,8,20,8">
-          <StackPanel Spacing="4" VerticalAlignment="Center">
-            <TextBlock x:Name="AboutVersionText" Text="Glide" Foreground="{DynamicResource BrushMuted}" FontSize="13"/>
-            <Button Classes="secondaryAction" Height="34" Content="Restore defaults" Click="RestoreDefaultsClicked" HorizontalAlignment="Left" MinWidth="150"/>
-          </StackPanel>
+        <Grid ColumnDefinitions="*,Auto" Margin="14,6,20,6">
+          <!-- Footer (approved design): sidebar-wide, two rows.
+               Row 1: version left, "Always expand" + switch right. Row 2: full-width Restore defaults with reset icon. -->
+          <Grid x:Name="SettingsFooterLeft" Width="196" HorizontalAlignment="Left" VerticalAlignment="Center" RowDefinitions="Auto,Auto" ColumnDefinitions="*,Auto" RowSpacing="6">
+            <TextBlock x:Name="AboutVersionText" Text="Glide" Foreground="{DynamicResource BrushMuted}" FontSize="13" VerticalAlignment="Center"/>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center" ToolTip.Tip="Open every Settings section expanded">
+              <TextBlock Text="Always expand" FontSize="13" VerticalAlignment="Center"/>
+              <ToggleButton x:Name="SettingsAlwaysExpandSwitch" Classes="footerSwitch" VerticalAlignment="Center" ToolTip.Tip="Open every Settings section expanded"/>
+            </StackPanel>
+            <Button x:Name="RestoreDefaultsButton" Grid.Row="1" Grid.ColumnSpan="2" Classes="secondaryAction" Height="32" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Click="RestoreDefaultsClicked">
+              <StackPanel Orientation="Horizontal" Spacing="6"><TextBlock Text="&#x21BA;" VerticalAlignment="Center"/><TextBlock Text="Restore defaults" VerticalAlignment="Center"/></StackPanel>
+            </Button>
+          </Grid>
           <StackPanel Grid.Column="1" VerticalAlignment="Center" Orientation="Horizontal" Spacing="10">
             <StackPanel x:Name="DirtySummaryHost" VerticalAlignment="Center" Margin="0,0,8,0" Spacing="1">
               <TextBlock x:Name="DirtyText" HorizontalAlignment="Right" Foreground="{DynamicResource BrushMuted}"/>

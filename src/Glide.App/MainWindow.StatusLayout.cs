@@ -6,6 +6,7 @@ using Avalonia.Threading;
 using Glide.App.Controls;
 
 using Glide.App.Services;
+using Glide.Core.Commands;
 
 namespace Glide.App;
 
@@ -13,6 +14,7 @@ namespace Glide.App;
 public partial class MainWindow
 {
     private sealed record StatusSlot(
+        string Id,
         Border Border,
         Control Inner,
         int HideOrder,
@@ -26,12 +28,12 @@ public partial class MainWindow
     // Display order. HideOrder is the overflow priority: 1 moves into the "..." menu first, 0 never does.
     private IReadOnlyList<StatusSlot> StatusSlots => _statusSlots ??= new StatusSlot[]
     {
-        new(ZoomGroupBorder, ZoomGroup, 7, () => new[] { ("ZoomOut", "Zoom out", StatusZoomOutButton), ("ZoomIn", "Zoom in", StatusZoomInButton) }),
-        new(FitGroupBorder, FitGroup, 5, () => new[] { ("Fit", "Fit image", StatusFitImageButton), ("FitWindow", "Fit to window", StatusFitWindowButton), ("FitWidth", "Fit width", StatusFitWidthButton), ("FitHeight", "Fit height", StatusFitHeightButton) }),
-        new(InfoGroupBorder, InfoGroup, 4, () => new[] { ("Info", "Image information", StatusInfoButton) }),
-        new(OptionsGroupBorder, OptionsGroup, 2, () => new[] { ("Settings", "Settings", StatusOptionsButton) }),
-        new(SaveGroupBorder, SaveGroup, 3, () => new[] { ("SaveFile", "Save", StatusSaveButton), ("SaveAs", "Save as…", StatusSaveAsButton) }),
-        new(OverlayGroupBorder, OverlayGroup, 1, () => new[]
+        new("zoom", ZoomGroupBorder, ZoomGroup, 7, () => new[] { ("ZoomOut", "Zoom out", StatusZoomOutButton), ("ZoomIn", "Zoom in", StatusZoomInButton) }),
+        new("fit", FitGroupBorder, FitGroup, 5, () => new[] { ("Fit", "Fit image", StatusFitImageButton), ("FitWindow", "Fit to window", StatusFitWindowButton), ("FitWidth", "Fit width", StatusFitWidthButton), ("FitHeight", "Fit height", StatusFitHeightButton) }),
+        new("info", InfoGroupBorder, InfoGroup, 4, () => new[] { ("Info", "Image information", StatusInfoButton) }),
+        new("options", OptionsGroupBorder, OptionsGroup, 2, () => new[] { ("Settings", "Settings", StatusOptionsButton) }),
+        new("save", SaveGroupBorder, SaveGroup, 3, () => new[] { ("SaveFile", "Save", StatusSaveButton), ("SaveAs", "Save as…", StatusSaveAsButton) }),
+        new("overlay", OverlayGroupBorder, OverlayGroup, 1, () => new[]
         {
             ("OverlayAdd", "Add Window-in-Window overlay", OverlayAddButton),
             ("OverlayLoad", "Load overlay layout", OverlayLoadButton),
@@ -39,10 +41,38 @@ public partial class MainWindow
             ("Close", "Clear all overlays", OverlayClearButton)
         }),
         // Shown only while an animated GIF is open (GifGroup.IsVisible, see UpdateGifStatusUi).
-        new(GifGroupBorder, GifGroup, 4, () => new[] { ("FramePrevious", "Previous GIF frame", GifPreviousFrameButton), (_gifPlayer?.IsPaused == true ? "Play" : "Pause", _gifPlayer?.IsPaused == true ? "Play GIF" : "Pause GIF", GifPlayPauseButton), ("FrameNext", "Next GIF frame", GifNextFrameButton) }),
-        new(SlideshowGroupBorder, SlideshowGroup, 6, () => new[] { ("Play", "Slideshow play / pause", SlideshowButton), ("Stop", "Stop slideshow", SlideshowStopButton) }),
-        new(NavGroupBorder, NavigationGroup, 0, () => Array.Empty<(string, string, Button)>())
+        new("gif", GifGroupBorder, GifGroup, 4, () => new[] { ("FramePrevious", "Previous GIF frame", GifPreviousFrameButton), (_gifPlayer?.IsPaused == true ? "Play" : "Pause", _gifPlayer?.IsPaused == true ? "Play GIF" : "Pause GIF", GifPlayPauseButton), ("FrameNext", "Next GIF frame", GifNextFrameButton) }),
+        new("slideshow", SlideshowGroupBorder, SlideshowGroup, 6, () => new[] { ("Play", "Slideshow play / pause", SlideshowButton), ("Stop", "Stop slideshow", SlideshowStopButton) }),
+        new("nav", NavGroupBorder, NavigationGroup, 0, () => Array.Empty<(string, string, Button)>())
     };
+
+    // extra single-action buttons the user added (Customize status-bar buttons). Built on first use, then reused.
+    private readonly Dictionary<string, StatusSlot> _extraStatusSlots = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<Button, string> _extraStatusButtons = new();
+
+    /// <summary>An added action button, styled exactly like the built-in status icons (classes statusIcon / legacyStatusIcon / statusGlyph).</summary>
+    private StatusSlot? ExtraStatusSlot(string id)
+    {
+        if (_extraStatusSlots.TryGetValue(id, out var existing)) return existing;
+        if (Glide.Core.StatusBarGroupCatalog.FindAction(id) is not { } definition || AppActionRegistry.Find(definition.ActionId) is not { } action) return null;
+        var button = new Button { Content = new GlideIconView { Kind = definition.Icon } };
+        button.Classes.Add("statusIcon");
+        button.Classes.Add("legacyStatusIcon");
+        ((GlideIconView)button.Content).Classes.Add("statusGlyph");
+        var shortcut = ShortcutForAction(action.Id);
+        ToolTip.SetTip(button, string.IsNullOrWhiteSpace(shortcut) ? definition.Label : $"{definition.Label} ({shortcut})");
+        ToolTip.SetShowDelay(button, 650);
+        button.Click += async (_, _) => await ExecuteActionAsync(action, "status_bar");
+        var inner = new StackPanel { Orientation = Avalonia.Layout.Orientation.Horizontal, Spacing = 2 };
+        inner.Children.Add(button);
+        var border = new Border { Child = inner };
+        border.Classes.Add("statusGroup");
+        border.Classes.Add("extraGroup");
+        var slot = new StatusSlot(id, border, inner, 1, () => new[] { (definition.Icon, definition.Label, button) });
+        _extraStatusSlots[id] = slot;
+        _extraStatusButtons[button] = action.Id;
+        return slot;
+    }
 
     /// <summary>Re-runs the layout when the stats text length changed enough to matter.</summary>
     private void ScheduleStatusRearrangeForStats(int statsLength)
@@ -62,7 +92,10 @@ public partial class MainWindow
         if (StatusRow1 is null || StatusRow2 is null || StatusLayoutGrid is null) return;
         const double Gap = 4d, ColGap = 8d;
         var inner = Math.Max(80d, availableWidth - 14d - 10d);
-        var slots = StatusSlots;
+        // the user's order and choice of groups (Customize status-bar buttons).
+        var shownIds = Glide.Core.StatusBarGroupCatalog.Parse(_settings.StatusBarGroups);
+        foreach (var hiddenSlot in StatusSlots.Where(x => !shownIds.Contains(x.Id))) hiddenSlot.Border.IsVisible = false;
+        var slots = shownIds.Select(id => StatusSlots.FirstOrDefault(x => x.Id == id) ?? ExtraStatusSlot(id)).OfType<StatusSlot>().ToList();
 
         // Put every group back on row 1 so each can be measured at its natural size.
         StatusRow1.Children.Clear();
@@ -118,8 +151,8 @@ public partial class MainWindow
             statsWidth = StatusStatsText.DesiredSize.Width;
         }
         StatusStatsHost.IsVisible = showStats;
-        // A revealed Auto-hide bar has no collapse button (ApplyCollapsedStatusChrome), so the wrap decision must not reserve its slot.
-        StatusCollapseButton.IsVisible = !_settings.StatusAutoHide;
+        // the minimise button is always there (auto-hide shows it with its own glyph).
+        StatusCollapseButton.IsVisible = true;
         StatusWindowControls.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
         var windowControlsWidth = StatusWindowControls.DesiredSize.Width;
 
@@ -192,7 +225,7 @@ public partial class MainWindow
                         row1.Remove(victim.Value);
                         _statusHiddenSlots.Add(enabled[victim.Value]);
                     }
-                    _statusHiddenSlots.Sort((a, b) => slots.ToList().IndexOf(a).CompareTo(slots.ToList().IndexOf(b)));
+                    _statusHiddenSlots.Sort((a, b) => slots.IndexOf(a).CompareTo(slots.IndexOf(b)));
                 }
             }
         }
@@ -253,7 +286,7 @@ public partial class MainWindow
         [StatusCollapseButton] = "status.toggle", [StatusCloseButton] = "status.close", [StatusActualButton] = "view.actual",
         [StatusRestoreButton] = "status.toggle",
         [StatusMoreButton] = MenuActions.ContextPrefix + "status.overflowMenu (lists the buttons that do not fit)",
-    };
+    }.Concat(_extraStatusButtons).ToDictionary(kv => kv.Key, kv => kv.Value);
 
     /// <summary>A small vector icon in the toolbar's own style, tinted with the theme text colour.</summary>
     private Control MenuIcon(string kind) => MenuIcons.Create(this, kind);

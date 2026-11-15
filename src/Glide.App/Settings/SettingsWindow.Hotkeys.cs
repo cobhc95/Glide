@@ -479,6 +479,15 @@ public partial class SettingsWindow
 
     private void SettingsKeyDown(object? sender, KeyEventArgs e)
     {
+        // Ctrl+F focuses Settings search (not while a shortcut is being captured, so Ctrl+F stays assignable).
+        if (e.Key == Key.F && e.KeyModifiers == KeyModifiers.Control
+            && _hotkeyCaptureActionId is null && !_hotkeyLookupCapturing)
+        {
+            e.Handled = true;
+            SearchBox.Focus();
+            SearchBox.SelectAll();
+            return;
+        }
         if (e.Key == Key.Escape)
         {
             e.Handled = true;
@@ -567,8 +576,8 @@ public partial class SettingsWindow
             RefreshHotkeySearchDisplay(actionId);
         }
         else EndHotkeyCapture(message);
-        ClearHotkeyLookup(rebuild: false);
-        BuildHotkeyRows();
+        // the list keeps the user's filter (and a Search hotkey result) after an assignment.
+        BuildHotkeyRows(HotkeyFilterBox?.Text);
         PreviewHotkeyChange();
     }
 

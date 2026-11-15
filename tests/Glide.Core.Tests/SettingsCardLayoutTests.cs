@@ -87,6 +87,13 @@ public sealed class SettingsCardLayoutTests
                     continue;
                 }
 
+                // Documented exception (tools/audit-settings-search.py outside_cards): the "Always expand" switch
+                // lives in the Settings footer, per the approved mockup.
+                if (setting.Id == "settings.alwaysExpand")
+                {
+                    if (!controls.ContainsKey(setting.Id)) failures.Add("settings.alwaysExpand: footer switch is not mapped");
+                    continue;
+                }
                 var hosts = new HashSet<SettingsCard>();
                 if (controls.TryGetValue(setting.Id, out var control))
                 {

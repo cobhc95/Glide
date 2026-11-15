@@ -84,8 +84,8 @@ public partial class MainWindow
         else ApplyStatusSurfaceAlignment(ViewerStatusSurface);
         SetStatusSurfaceChromeless(ViewerStatusSurface, collapsedOnly);
         ApplyCollapsedButtonLook(collapsedOnly);
-        // Auto-hide replaces collapsing, so a revealed auto-hide bar has no collapse button.
-        if (StatusCollapseButton is not null) StatusCollapseButton.IsVisible = !_settings.StatusAutoHide;
+        // the minimise button stays on a revealed auto-hide bar, with its own auto-hide glyph; right-click toggles auto-hide.
+        if (StatusCollapseButton is not null) StatusCollapseButton.IsVisible = true;
         if (_homeSurface is not null)
         {
             _homeSurface.StatusText.IsVisible = !compact;
@@ -102,7 +102,7 @@ public partial class MainWindow
                 button.IsVisible = !compact || isCollapse;
                 SetGhosted(button, ghost && !isCollapse);
             }
-            _homeSurface.StatusCollapseButton.IsVisible = !_settings.StatusAutoHide;
+            _homeSurface.StatusCollapseButton.IsVisible = true;
             if (compact) PinCollapsedSurfaceToCorner(_homeSurface.StatusSurface);
             else ApplyStatusSurfaceAlignment(_homeSurface.StatusSurface);
             SetStatusSurfaceChromeless(_homeSurface.StatusSurface, collapsedOnly);
@@ -194,10 +194,17 @@ public partial class MainWindow
         void Apply(Button? button)
         {
             if (button?.Content is not GlideIconView glyph) return;
+            if (_settings.StatusAutoHide && !StatusCollapsedNow)
+            {
+                // distinct glyph while auto-hide is on.
+                glyph.Kind = "Eye";
+                ToolTip.SetTip(button, "Auto-hide is on: the status bar hides until the pointer reaches it. Click or right-click to keep it shown.");
+                return;
+            }
             glyph.Kind = StatusCollapsedNow ? "Expand" : "Collapse";
             ToolTip.SetTip(button, StatusCollapsedNow
-                ? $"[Expand status bar ({ShortcutFor(GlideCommand.ToggleStatusSurface)})]"
-                : $"[Collapse status bar ({ShortcutFor(GlideCommand.ToggleStatusSurface)})]");
+                ? $"Expand status bar ({ShortcutFor(GlideCommand.ToggleStatusSurface)})"
+                : $"Collapse status bar ({ShortcutFor(GlideCommand.ToggleStatusSurface)}). Right-click: auto-hide the status bar");
         }
         Apply(StatusCollapseButton);
         Apply(_homeSurface?.StatusCollapseButton);
@@ -210,6 +217,7 @@ public partial class MainWindow
     private void ApplyChromeLayoutForWindowState(WindowState? state = null)
     {
         if (MainRoot.RowDefinitions.Count < 2) return;
+        ApplyTabPosition();
 
         if (_wholeAppOverlayMode)
         {
@@ -239,6 +247,16 @@ public partial class MainWindow
             ChromeBorder.ZIndex = 1000;
             ChromeBorder.IsVisible = !_settings.AutoHideFullscreenChrome;
             FullscreenCornerCloseHit.IsVisible = true;
+        }
+        else if (TopTabsAutoHideActive)
+        {
+            // windowed "Auto-hide the top tab strip": the title/tab row overlays the top of the content and
+            // appears when the pointer reaches the top edge (same reveal as fullscreen chrome).
+            MainRoot.RowDefinitions[0].Height = new GridLength(0);
+            Grid.SetRow(ChromeBorder, 1);
+            ChromeBorder.ZIndex = 1000;
+            ChromeBorder.IsVisible = false;
+            FullscreenCornerCloseHit.IsVisible = false;
         }
         else
         {
@@ -417,6 +435,13 @@ public partial class MainWindow
             if (_wholeAppOverlayMode)
             {
                 BuildWholeAppOverlayOnlyContextMenu().Open(ChromeBorder);
+                e.Handled = true;
+                return;
+            }
+            if (_settings.TabsEnabled)
+            {
+                // Empty title bar: "Place tabs vertically" / "Place tabs on top".
+                ShowTabAreaContextMenu(ChromeBorder);
                 e.Handled = true;
                 return;
             }
@@ -682,6 +707,7 @@ public partial class MainWindow
         _lastWindowPointer = windowPointer;
         HandleFullscreenCursorMove(e, windowPointer);
         UpdateFullscreenChromeHover(windowPointer);
+        UpdateSideTabsAutoHide(windowPointer);
         UpdateWholeAppOverlayChromeHover(windowPointer);
         var pointerProperties = e.GetCurrentPoint(this).Properties;
         _statusPointerButtonsDown = pointerProperties.IsLeftButtonPressed || pointerProperties.IsRightButtonPressed || pointerProperties.IsMiddleButtonPressed;
@@ -722,7 +748,9 @@ public partial class MainWindow
     private void UpdateFullscreenChromeHover(Point pointer)
     {
         if (_wholeAppOverlayMode) return;
-        if (WindowState != WindowState.FullScreen || !_settings.AutoHideFullscreenChrome || _settings.FullscreenKeepTabBarOpen) return;
+        var windowedTopAutoHide = WindowState != WindowState.FullScreen && TopTabsAutoHideActive;
+        if (!windowedTopAutoHide && (WindowState != WindowState.FullScreen || !_settings.AutoHideFullscreenChrome || _settings.FullscreenKeepTabBarOpen)) return;
+        if (windowedTopAutoHide && _tabDrag.IsActive) return;
 
         // Hidden fullscreen chrome has no hit-test surface, so use a narrow hot edge to reveal it.
         // Once revealed, keep it visible while the pointer is inside its actual height, then hide it

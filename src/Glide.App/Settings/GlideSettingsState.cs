@@ -170,7 +170,7 @@ public sealed record GlideSettingsState
     // (default) or ShowInExplorerTargets.WindowsExplorer. Also switchable from the button's right-click menu.
     public string ShowInExplorerTarget { get; set; } = ShowInExplorerTargets.GlideTab;
     // Explorer tab (4.8.0) view and filter preferences.
-    public string ExplorerDefaultView { get; set; } = "Large icons";
+    public string ExplorerDefaultView { get; set; } = "Large thumbnails";
     public bool ExplorerShowHiddenFiles { get; set; }
     public bool ExplorerShowOnlyImages { get; set; } = true;
     public bool FullscreenStatusAlwaysOn { get; set; } = true;
@@ -325,6 +325,12 @@ public sealed record GlideSettingsState
     /// <summary>Fit modes size the image to the area above the visible status bar instead of under it.</summary>
     public bool StatusReserveFitSpace { get; set; }
     public int StatusBarMaximizedBoostPercent { get; set; } = 15;
+    /// <summary>Off (default) = the GIF controls always show, greyed out on non-GIF images; on = only while an animated GIF is open (pre-5.0.3).</summary>
+    public bool StatusGifControlsOnlyOnGifs { get; set; }
+    /// <summary>single-click the status-bar file name renames the file, double-click opens its location.</summary>
+    public bool StatusFileNameClickActions { get; set; }
+    /// <summary>ordered, comma-separated status-bar group ids that are shown (see StatusBarGroupCatalog). Empty = default.</summary>
+    public string StatusBarGroups { get; set; } = string.Empty;
 
     // Slideshow
     public int SlideshowIntervalMs { get; set; } = 3000;
@@ -352,6 +358,14 @@ public sealed record GlideSettingsState
     public bool MiddleClickTabCloses { get; set; } = true;
     // Filename size in the tab tooltip: "Small", "Medium" (default) or "Large".
     public string TabToolTipTextSize { get; set; } = "Medium";
+    /// <summary>where the tab strip sits: "Top" (default) or "Side" (vertical tab panel on the left).</summary>
+    public string TabStripPosition { get; set; } = "Top";
+    /// <summary>the side tab panel hides until the pointer reaches the window's left edge.</summary>
+    public bool TabSideAutoHide { get; set; }
+    /// <summary>width (DIP) of the vertical tab pane, set by dragging its right edge (150-480, default 220).</summary>
+    public int TabSidePanelWidth { get; set; } = 220;
+    /// <summary>the top tab strip hides until the pointer reaches the top edge.</summary>
+    public bool TabTopAutoHide { get; set; }
     // "Tab order" cycles left-to-right; "Most recently used" cycles like Alt+Tab while Ctrl is held.
     public string TabCycleOrder { get; set; } = "Tab order";
     // "Open home page", "Keep last tab open", or "Close program". Applies when the user closes the final ordinary tab.
@@ -439,6 +453,8 @@ public sealed record GlideSettingsState
     public double SettingsWindowWidth { get; set; }
     public double SettingsWindowHeight { get; set; }
     public bool SettingsWindowWasMaximized { get; set; }
+    /// <summary>Every Settings page opens with all its sections expanded (off by default).</summary>
+    public bool SettingsAlwaysExpand { get; set; }
 
     // Every other window's remembered placement (Print, Settings, dialogs ...), keyed by a stable window id
     // (see Glide.App.Services.WindowPlacementCatalog). Older files simply have none; Settings also falls back to the
@@ -665,9 +681,14 @@ public static class ShowInExplorerTargets
 /// <summary>Explorer tab view choices (Settings combo item texts, in menu order).</summary>
 public static class ExplorerDefaultViews
 {
-    public static readonly string[] All = ["Extra large icons", "Large icons", "Medium icons", "Small icons", "List", "Details"];
-    public const string Default = "Large icons";
+    public static readonly string[] All = ["Extra large thumbnails", "Large thumbnails", "Medium thumbnails", "Small thumbnails", "List", "Details"];
+    public const string Default = "Large thumbnails";
 
-    public static string Normalize(string? value) =>
-        All.FirstOrDefault(x => string.Equals(x, value?.Trim(), StringComparison.OrdinalIgnoreCase)) ?? Default;
+    /// <summary>Maps a saved value to a current choice; 5.0.3 renamed "... icons" to "... thumbnails".</summary>
+    public static string Normalize(string? value)
+    {
+        var trimmed = value?.Trim() ?? string.Empty;
+        if (trimmed.EndsWith(" icons", StringComparison.OrdinalIgnoreCase)) trimmed = trimmed[..^" icons".Length] + " thumbnails";
+        return All.FirstOrDefault(x => string.Equals(x, trimmed, StringComparison.OrdinalIgnoreCase)) ?? Default;
+    }
 }

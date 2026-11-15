@@ -136,7 +136,7 @@ public partial class MainWindow : Window
     private int _browserSelectionAnchor = -1;
     private int _browserCurrentIndex = -1;
     private long _browserGeneration;
-    private int _browserViewMode = 1; // index into ExplorerViewModes.Names (1 = Large icons)
+    private int _browserViewMode = 1; // index into ExplorerViewModes.Names (1 = Large thumbnails)
     private bool _browserUiReady;
     private string? _queuedOpen;
     private bool _statusCollapsed;
@@ -375,6 +375,16 @@ public partial class MainWindow : Window
             if (string.Equals(configured, GestureCatalog.Default, StringComparison.OrdinalIgnoreCase)) return;
             e.Handled = true;
             await ExecuteGestureActionAsync(configured, ImageViewport.WheelNavigationStep(e.Delta.Y, _settings.InvertWheelDirection));
+        }, RoutingStrategies.Bubble);
+        StatusCollapseButton.AddHandler(InputElement.PointerReleasedEvent, StatusCollapseButtonRightReleased, RoutingStrategies.Tunnel, true);
+        StatusCollapseButton.AddHandler(Control.ContextRequestedEvent, StatusCollapseButtonContextRequested, RoutingStrategies.Tunnel | RoutingStrategies.Bubble, true);
+        StatusStatsText.AddHandler(InputElement.PointerPressedEvent, StatusFileNamePointerPressed, RoutingStrategies.Tunnel, true);
+        // Wheel over the status bar browses images (previous/next), like the image itself in browse mode.
+        ViewerStatusSurface.AddHandler(InputElement.PointerWheelChangedEvent, async (_, e) =>
+        {
+            if (e.Handled || Math.Abs(e.Delta.Y) < double.Epsilon) return;
+            e.Handled = true;
+            await NavigateFromViewportAsync(ImageViewport.WheelNavigationStep(e.Delta.Y, _settings.InvertWheelDirection));
         }, RoutingStrategies.Bubble);
         TabStripScroll.AddHandler(InputElement.PointerWheelChangedEvent, async (_, e) =>
         {
@@ -830,7 +840,7 @@ public partial class MainWindow : Window
 
             if (!isColdImageOpen)
             {
-                if (!_deferWorkspaceActivation && explicitStartupPaths.Length == 0 && !_hasExplicitStartupOpen)
+                if (!_deferWorkspaceActivation && !_isTransferredTabWindow && explicitStartupPaths.Length == 0 && !_hasExplicitStartupOpen)
                 {
                     // No-file startup actions depend on the full graph. Await hydration only on this
                     // non-image path so the decision is deterministic without taxing explicit cold opens.

@@ -262,6 +262,9 @@ public partial class MainWindow
         }
     }
 
+    /// <summary>Explorer wheel step per notch: about 1.5 notches per visible page (at least one 48 px line).</summary>
+    internal static double ExplorerWheelScrollStep(double viewportHeight) => Math.Max(48, viewportHeight / 1.5);
+
     private async Task NavigateFromViewportAsync(int delta)
     {
         try
@@ -773,15 +776,21 @@ public partial class MainWindow
         var player = _gifPlayer;
         var has = player?.HasAnimation == true;
         var paused = player?.IsPaused == true;
-        var changed = GifGroup.IsVisible != has;
-        GifGroup.IsVisible = has;
+        // By default the group is always there and greyed out without an animated GIF, so the bar
+        // keeps its size while browsing; "Show GIF controls only on GIFs" restores the old show/hide.
+        var visible = has || !_settings.StatusGifControlsOnlyOnGifs;
+        var changed = GifGroup.IsVisible != visible;
+        GifGroup.IsVisible = visible;
+        GifPreviousFrameButton.IsEnabled = has;
+        GifPlayPauseButton.IsEnabled = has;
+        GifNextFrameButton.IsEnabled = has;
         if (GifPlayPauseIcon is not null) GifPlayPauseIcon.Kind = paused ? "Play" : "Pause";
         void Tip(Control control, string text, GlideCommand command)
         {
-            ToolTip.SetTip(control, $"[{text} ({ShortcutFor(command)})]");
+            ToolTip.SetTip(control, $"{text} ({ShortcutFor(command)})");
             ToolTip.SetShowDelay(control, 650);
         }
-        Tip(GifPlayPauseButton, paused ? "Play GIF" : "Pause GIF", GlideCommand.GifPlayPause);
+        Tip(GifPlayPauseButton, !has ? "GIF playback (only for animated GIFs)" : paused ? "Play GIF" : "Pause GIF", GlideCommand.GifPlayPause);
         Tip(GifPreviousFrameButton, has ? $"Previous GIF frame ({player!.FrameIndex + 1}/{player.FrameCount})" : "Previous GIF frame", GlideCommand.GifPreviousFrame);
         Tip(GifNextFrameButton, has ? $"Next GIF frame ({player!.FrameIndex + 1}/{player.FrameCount})" : "Next GIF frame", GlideCommand.GifNextFrame);
         if (changed) ApplyStatusBarSize();
@@ -1431,6 +1440,8 @@ public partial class MainWindow
         home.CloseStatusRequested += (_, _) => CloseStatusClicked(home, new RoutedEventArgs());
         home.OptionsButton.AddHandler(InputElement.PointerPressedEvent, ReliableCommandButtonPressed, RoutingStrategies.Tunnel, true);
         home.StatusCollapseButton.AddHandler(InputElement.PointerPressedEvent, ReliableCommandButtonPressed, RoutingStrategies.Tunnel, true);
+        home.StatusCollapseButton.AddHandler(InputElement.PointerReleasedEvent, StatusCollapseButtonRightReleased, RoutingStrategies.Tunnel, true);
+        home.StatusCollapseButton.AddHandler(Control.ContextRequestedEvent, StatusCollapseButtonContextRequested, RoutingStrategies.Tunnel | RoutingStrategies.Bubble, true);
         ApplyWelcomeLayout();
         ApplyStatusBarSize();
         return home;
@@ -1486,6 +1497,16 @@ public partial class MainWindow
                 {
                     e.Handled = true;
                     SetExplorerViewMode(_browserViewMode + (e.Delta.Y > 0 ? -1 : 1));
+                    return;
+                }
+                // a plain wheel notch scrolls 2/3 of the visible list, so about 1.5 notches turn a page.
+                if (e.KeyModifiers == KeyModifiers.None && e.Delta.Y != 0)
+                {
+                    var viewer = browser.ScrollViewer;
+                    var step = ExplorerWheelScrollStep(viewer.Viewport.Height);
+                    var max = Math.Max(0, viewer.Extent.Height - viewer.Viewport.Height);
+                    viewer.Offset = new Vector(viewer.Offset.X, Math.Clamp(viewer.Offset.Y - e.Delta.Y * step, 0, max));
+                    e.Handled = true;
                 }
                 return;
             }

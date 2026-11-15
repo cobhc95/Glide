@@ -20,7 +20,8 @@ internal static class SettingsChangeSet
         var changes = new List<SettingChange>();
         foreach (var property in typeof(GlideSettingsState).GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance))
         {
-            if (!property.CanRead || property.Name is nameof(GlideSettingsState.Hotkeys) or nameof(GlideSettingsState.Gestures) or nameof(GlideSettingsState.CustomHotkeyPresets)) continue;
+            if (!property.CanRead || property.Name is nameof(GlideSettingsState.Hotkeys) or nameof(GlideSettingsState.Gestures) or nameof(GlideSettingsState.CustomHotkeyPresets)
+                or nameof(GlideSettingsState.CustomGestures) or nameof(GlideSettingsState.WindowPlacements) or nameof(GlideSettingsState.GestureRecentActions)) continue;
             // The update checker's memory (last check time...) is bookkeeping, never a pending Settings change.
             if (Array.IndexOf(GlideSettingsState.UpdateStateProperties, property.Name) >= 0) continue;
             var before = property.GetValue(committed);
@@ -35,8 +36,22 @@ internal static class SettingsChangeSet
             changes.Add(new SettingChange("Custom keyboard shortcut presets", "Previous presets", "Modified presets"));
         if (!DictionaryEqual(committed.Gestures, current.Gestures))
             changes.Add(new SettingChange("Mouse gesture matrix", "Previous assignments", "Modified assignments"));
+        // collections are compared by value and described in words, never as a .NET type name.
+        var beforeCustom = committed.CustomGestures ?? new();
+        var afterCustom = current.CustomGestures ?? new();
+        if (!GlideSettingsState.CustomGesturesEqual(beforeCustom, afterCustom))
+            changes.Add(new SettingChange("Custom gestures", CountText(beforeCustom.Count, "custom gesture"), CountText(afterCustom.Count, "custom gesture")));
+        if (!GlideSettingsState.WindowPlacementsEqual(committed.WindowPlacements, current.WindowPlacements))
+            changes.Add(new SettingChange("Window placements", CountText(committed.WindowPlacements?.Count ?? 0, "remembered window"), CountText(current.WindowPlacements?.Count ?? 0, "remembered window")));
         return changes;
     }
+
+    internal static string CountText(int count, string noun) => count switch
+    {
+        0 => "none",
+        1 => "1 " + noun,
+        _ => $"{count} {noun}s"
+    };
 
     private static bool DictionaryOfListsEqual(Dictionary<string, List<string>> a, Dictionary<string, List<string>> b)
     {
@@ -85,6 +100,7 @@ internal static class SettingsChangeSet
         bool flag => flag ? "On" : "Off",
         string text when string.IsNullOrWhiteSpace(text) => "(empty)",
         IEnumerable<string> values => FormatStringSequence(values),
+        System.Collections.ICollection collection => CountText(collection.Count, "item"),
         _ => value.ToString() ?? "(none)"
     };
 

@@ -182,12 +182,17 @@ public partial class MainWindow
         return slideshow;
     }
 
+    private readonly bool _isTransferredTabWindow;
+
     internal MainWindow(TabState transferredTab, GlideSettingsState inheritedSettings, bool deferWorkspaceActivation = false) : this()
     {
         _settings = inheritedSettings.CloneState();
         _startupSettingsBaseline = _settings.CloneState();
         _deferredStartupSettingsAdopted = true;
         _deferWorkspaceActivation = deferWorkspaceActivation;
+        // A torn-off/detached window holds exactly the transferred tab: it must never run the
+        // startup action ("Open last session" used to copy every tab into it).
+        _isTransferredTabWindow = true;
         _workspace.ResetForDetached(transferredTab, _settings.DetachedWindowHomeTab);
     }
 

@@ -44,10 +44,16 @@ public partial class MainWindow
         var preferred = natural >= configuredMin
             ? Math.Clamp(natural, configuredMin, max)
             : Math.Clamp(natural, floor, configuredMin);
+        var sideTabs = SideTabsActive;
+        if (sideTabs)
+        {
+            // vertical tabs use the full panel width; the panel scrolls instead of compressing tabs.
+            preferred = SideTabPaneWidth - 14;
+        }
         var tabMouseHint = TabMouseHint();
         if (_tabMruCycleSnapshot is null) TouchTabMru();
 
-        var edgeHitTabs = WindowState is WindowState.Maximized or WindowState.FullScreen;
+        var edgeHitTabs = !sideTabs && WindowState is WindowState.Maximized or WindowState.FullScreen;
         if (NewTabButton is not null)
         {
             NewTabButton.Height = edgeHitTabs ? 44 : 36;
@@ -189,21 +195,72 @@ public partial class MainWindow
     };
 
     /// <summary>
-    /// Tab tooltip: the file (or folder) name on its own line in larger semibold text, then the full
-    /// path when one is available, then the mouse hint, both a notch smaller.
+    /// Tab tooltip: "Name: file" in larger semibold text, then "Path: folder" (the folder
+    /// that contains it) when one is available, then the mouse hint, both a notch smaller.
     /// </summary>
     private Control BuildTabToolTip(TabState tab, string? fullPath, string mouseHint)
     {
         var (nameSize, detailSize) = TabToolTipFontSizes(_settings.TabToolTipTextSize);
-        var name = fullPath is not null ? System.IO.Path.GetFileName(fullPath.TrimEnd('\\', '/')) : null;
-        if (string.IsNullOrWhiteSpace(name)) name = string.IsNullOrWhiteSpace(tab.Title) ? fullPath : tab.Title;
+        var (name, folder) = TabToolTipLines(tab.Title, fullPath);
         var panel = new StackPanel { Spacing = 3, MaxWidth = 640 };
         if (!string.IsNullOrWhiteSpace(name))
-            panel.Children.Add(new TextBlock { Text = name, FontSize = nameSize, FontWeight = FontWeight.SemiBold, TextWrapping = TextWrapping.Wrap });
-        if (fullPath is not null)
-            panel.Children.Add(new TextBlock { Text = fullPath, FontSize = detailSize, TextWrapping = TextWrapping.Wrap });
+            panel.Children.Add(new TextBlock { Text = "Name: " + name, FontSize = nameSize, FontWeight = FontWeight.SemiBold, TextWrapping = TextWrapping.Wrap });
+        if (!string.IsNullOrWhiteSpace(folder))
+            panel.Children.Add(new TextBlock { Text = "Path: " + folder, FontSize = detailSize, TextWrapping = TextWrapping.Wrap });
         panel.Children.Add(new TextBlock { Text = mouseHint, FontSize = detailSize, Opacity = 0.78, TextWrapping = TextWrapping.Wrap });
         return panel;
+    }
+
+    /// <summary>The tooltip's Name and Path values: the item's own name and the folder that contains it.</summary>
+    internal static (string? Name, string? Folder) TabToolTipLines(string? title, string? fullPath)
+    {
+        if (fullPath is null) return (string.IsNullOrWhiteSpace(title) ? null : title, null);
+        var trimmed = fullPath.TrimEnd('\\', '/');
+        var name = System.IO.Path.GetFileName(trimmed);
+        if (string.IsNullOrWhiteSpace(name)) name = string.IsNullOrWhiteSpace(title) ? fullPath : title;
+        string? folder;
+        try { folder = System.IO.Path.GetDirectoryName(trimmed); } catch (ArgumentException) { folder = null; }
+        return (name, string.IsNullOrWhiteSpace(folder) ? null : folder);
+    }
+
+    private static readonly string[] TabToolTipSizeSteps = ["Small", "Medium", "Large"];
+
+    /// <summary>Steps the tab tooltip text size (actions tabs.tooltipLarger / tabs.tooltipSmaller) and previews it.</summary>
+    private void StepTabToolTipTextSize(int direction)
+    {
+        var index = Array.IndexOf(TabToolTipSizeSteps, _settings.TabToolTipTextSize);
+        if (index < 0) index = 1;
+        var next = TabToolTipSizeSteps[Math.Clamp(index + direction, 0, TabToolTipSizeSteps.Length - 1)];
+        if (!string.Equals(next, _settings.TabToolTipTextSize, StringComparison.Ordinal))
+        {
+            _settings.TabToolTipTextSize = next;
+            SaveSettingsAndPublish();
+            RebuildTabStrip();
+        }
+        ShowActiveTabToolTipPreview();
+        ShowViewerNotice($"Tab tooltip text: {next}");
+    }
+
+    private DispatcherTimer? _tabToolTipPreviewTimer;
+
+    /// <summary>Opens the active tab's tooltip for a few seconds so a size change can be judged live.</summary>
+    private void ShowActiveTabToolTipPreview()
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            var activeId = _workspace.Active?.Id;
+            var border = TabStripPanel.Children.OfType<Border>().FirstOrDefault(b => b.DataContext is Guid id && id == activeId);
+            if (border is null || !border.IsVisible) return;
+            ToolTip.SetIsOpen(border, true);
+            _tabToolTipPreviewTimer?.Stop();
+            _tabToolTipPreviewTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
+            _tabToolTipPreviewTimer.Tick += (_, _) =>
+            {
+                _tabToolTipPreviewTimer?.Stop();
+                ToolTip.SetIsOpen(border, false);
+            };
+            _tabToolTipPreviewTimer.Start();
+        }, DispatcherPriority.Loaded);
     }
 
     /// <summary>Tab tooltip hint that reflects which mouse actions are actually enabled.</summary>
@@ -274,6 +331,12 @@ public partial class MainWindow
     private void UpdateTabOverflowButtons()
     {
         if (TabOverflowLeftButton is null || TabOverflowRightButton is null || TabStripScroll is null) return;
+        if (SideTabsActive)
+        {
+            TabOverflowLeftButton.IsVisible = false;
+            TabOverflowRightButton.IsVisible = false;
+            return;
+        }
         // At very small widths the three caption buttons and actual tab bodies outrank overflow
         // arrows. Hide the arrows and let the tabs compress/scroll rather than spending 56 DIP on
         // navigation chrome while the user is deliberately squeezing the window.
@@ -369,7 +432,9 @@ public partial class MainWindow
         var moving = borders.FirstOrDefault(b => Equals(b.DataContext, draggedId));
         if (moving is null || originalIndex < 0) return;
 
-        moving.RenderTransform = new TranslateTransform(draggedOffsetX, 0);
+        var vertical = SideTabsActive;
+        TranslateTransform Along(double offset) => vertical ? new TranslateTransform(0, offset) : new TranslateTransform(offset, 0);
+        moving.RenderTransform = Along(draggedOffsetX);
         moving.ZIndex = 50;
         foreach (var border in borders)
         {
@@ -384,8 +449,12 @@ public partial class MainWindow
         // three-quarters; later neighbours follow the same rolling window. This tracks Chromium's
         // physical feel much more closely while keeping the dragged tab exactly under the pointer.
         if (_tabAttach.Target is not null) return;
-        var slot = Math.Max(1, moving.Bounds.Width + 3);
+        var slot = Math.Max(1, (vertical ? moving.Bounds.Height : moving.Bounds.Width) + 3);
         var slotsTravelled = draggedOffsetX / slot;
+        // the slot the preview shows (a neighbour counts as swapped once it is half way across)
+        // is exactly what release commits, so a drop never snaps back after tabs visibly swapped.
+        var previewPosition = Math.Clamp(originalIndex + (int)Math.Round(slotsTravelled, MidpointRounding.AwayFromZero), 0, borders.Count - 1);
+        _tabDragPreviewInsertIndex = previewPosition > originalIndex ? previewPosition + 1 : previewPosition;
         static double Smooth(double t)
         {
             t = Math.Clamp(t, 0, 1);
@@ -399,7 +468,7 @@ public partial class MainWindow
                 var relative = i - originalIndex;
                 var progress = Smooth((slotsTravelled - (relative - 0.75)) / 0.5);
                 if (progress <= 0) continue;
-                borders[i].RenderTransform = new TranslateTransform(-slot * progress, 0);
+                borders[i].RenderTransform = Along(-slot * progress);
             }
         }
         else if (slotsTravelled < 0)
@@ -410,7 +479,7 @@ public partial class MainWindow
                 var relative = originalIndex - i;
                 var progress = Smooth((travelled - (relative - 0.75)) / 0.5);
                 if (progress <= 0) continue;
-                borders[i].RenderTransform = new TranslateTransform(slot * progress, 0);
+                borders[i].RenderTransform = Along(slot * progress);
             }
         }
     }
@@ -443,8 +512,11 @@ public partial class MainWindow
 
     private void ClearTabDragState() => _tabDrag.Clear();
 
+    private int _tabDragPreviewInsertIndex = -1;
+
     private void ClearTabVisuals()
     {
+        _tabDragPreviewInsertIndex = -1;
         foreach (var border in TabStripPanel.Children.OfType<Border>())
         {
             border.RenderTransform = null;
@@ -475,7 +547,8 @@ public partial class MainWindow
         Capture = (body, pointer) => pointer.Capture(body),
         ReleaseCapture = pointer => pointer.Capture(null),
         IsLeftPressed = (body, e) => e.GetCurrentPoint(body).Properties.IsLeftButtonPressed,
-        StripPoint = e => e.GetPosition(TabStripPanel),
+        // Vertical tabs: the drag axis is Y, so the controller's "X" is the strip's own axis.
+        StripPoint = e => SideTabsActive ? new Point(e.GetPosition(TabStripPanel).Y, e.GetPosition(TabStripPanel).X) : e.GetPosition(TabStripPanel),
         ScreenPoint = e => this.PointToScreen(e.GetPosition(this)),
         IsBeyondTearOff = IsBeyondTabTearOffThreshold,
         TabStripContains = point => GetTabStripScreenRect().Contains(point),
@@ -497,6 +570,7 @@ public partial class MainWindow
         DetachAsync = DetachTabAsync,
         ReorderAsync = (id, index) =>
         {
+            if (_tabDragPreviewInsertIndex >= 0) index = _tabDragPreviewInsertIndex;
             _workspace.Move(id, index);
             _diagnostics.Write("tabs", "reordered", new { id, targetIndex = index });
             return Task.CompletedTask;
@@ -683,7 +757,10 @@ public partial class MainWindow
         var strip = GetTabStripScreenRect();
         var scale = TopLevel.GetTopLevel(this)?.RenderScaling ?? 1.0;
         if (scale <= 0) scale = 1.0;
-        var verticalTolerance = Math.Max(18, (int)Math.Round(22 * scale));
+        // generous vertical slack so a slightly sloppy horizontal reorder never tears the tab off.
+        var verticalTolerance = Math.Max(48, (int)Math.Round(64 * scale));
+        // Vertical tabs tear off sideways: well to the right of (or left of) the side panel.
+        if (SideTabsActive) return point.X < strip.X - verticalTolerance || point.X > (strip.X + strip.Width) + verticalTolerance;
         return point.Y < strip.Y - verticalTolerance || point.Y > (strip.Y + strip.Height) + verticalTolerance;
     }
 
@@ -799,11 +876,12 @@ public partial class MainWindow
         if (_workspace.Tabs.Count == 0) return 0;
         var pointInWindow = this.PointToClient(screenPoint);
         var panelOrigin = TabStripPanel.TranslatePoint(new Point(0, 0), this) ?? new Point(0, 0);
-        var clientX = pointInWindow.X - panelOrigin.X;
+        var vertical = SideTabsActive;
+        var clientX = vertical ? pointInWindow.Y - panelOrigin.Y : pointInWindow.X - panelOrigin.X;
         var borders = TabStripPanel.Children.OfType<Border>().Where(x => x.Classes.Contains("glideTab")).ToList();
         for (var i = 0; i < borders.Count; i++)
         {
-            var midpoint = borders[i].Bounds.X + borders[i].Bounds.Width / 2;
+            var midpoint = vertical ? borders[i].Bounds.Y + borders[i].Bounds.Height / 2 : borders[i].Bounds.X + borders[i].Bounds.Width / 2;
             if (clientX < midpoint) return i;
         }
         return borders.Count;
@@ -891,6 +969,7 @@ public partial class MainWindow
             return item;
         }
         items.Add(Item("Duplicate tab", "tab.duplicate", () => _ = DuplicateTabByIdAsync(tab.Id), true, "Copy"));
+        items.Add(BuildTabPlacementMenuItem());
         items.Add(Item("Move tab to new window", "tab.detach", () => _ = DetachTabAsync(tab.Id, this.PointToScreen(new Point(Bounds.Width / 2, 42))), _settings.TabDetachEnabled, "OpenWith"));
         if (tab is BrowserTabState browser)
             items.Add(Item("Open first image in folder", "tab.openFirstImage", () => _ = OpenFirstImageInFolderAsync(browser.Folder), true, "Image"));

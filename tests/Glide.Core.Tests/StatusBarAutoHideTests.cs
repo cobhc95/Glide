@@ -950,7 +950,10 @@ public sealed class StatusBarAutoHideTests
             Assert.True(Surface(window).IsVisible);
             Assert.False(Settings(window).StatusCollapsedToCorner && Collapse(window).Classes.Contains("collapsedArrow"));
             Assert.False(Collapse(window).Classes.Contains("collapsedArrow"));
-            Assert.False(Collapse(window).IsVisible, "a revealed auto-hide bar has no collapse button (auto-hide replaces collapsing)");
+            // 5.0.3: the minimise button stays on a revealed auto-hide bar with its own glyph;
+            // clicking or right-clicking it toggles auto-hide instead of collapsing.
+            Assert.True(Collapse(window).IsVisible, "a revealed auto-hide bar keeps the minimise button (auto-hide toggle)");
+            Assert.Equal("Eye", Assert.IsType<Glide.App.Controls.GlideIconView>(Collapse(window).Content).Kind);
             return Task.CompletedTask;
         });
     }

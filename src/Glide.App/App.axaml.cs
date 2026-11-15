@@ -119,6 +119,7 @@ public partial class App : Application
         AvaloniaXamlLoader.Load(this);
         GlidePerformanceTrace.Mark("avalonia_xaml_end");
         ToolTipGuard.Register();
+        DialogEscape.Register();
         PopupCursorGuard.Register();
     }
 

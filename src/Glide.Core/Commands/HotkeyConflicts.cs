@@ -45,13 +45,13 @@ public sealed record HotkeyConflict(
     public string PromptText()
     {
         var owners = OwnerNames;
-        var text = $"{Shortcut} is already assigned to â€œ{owners}â€.\n\nReplace it? {Shortcut} will then run â€œ{TargetLabel}â€, and â€œ{owners}â€ will have that shortcut removed.";
+        var text = $"{Shortcut} is already assigned to “{owners}”.\n\nReplace it? {Shortcut} will then run “{TargetLabel}”, and “{owners}” will have that shortcut removed.";
         if (CrossesScopes)
         {
             var global = Owners.Any(o => o.Scope == HotkeyScope.Global);
             text += global
-                ? $"\n\nâ€œ{owners}â€ works in every tab, so replacing it takes this shortcut away everywhere."
-                : $"\n\nâ€œ{owners}â€ only works while viewing an image; â€œ{TargetLabel}â€ works in every tab, so after replacing it {Shortcut} will also act in Explorer and Home tabs.";
+                ? $"\n\n“{owners}” works in every tab, so replacing it takes this shortcut away everywhere."
+                : $"\n\n“{owners}” only works while viewing an image; “{TargetLabel}” works in every tab, so after replacing it {Shortcut} will also act in Explorer and Home tabs.";
         }
         return text;
     }

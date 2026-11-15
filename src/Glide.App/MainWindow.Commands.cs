@@ -808,6 +808,9 @@ public partial class MainWindow
         actions[GlideCommand.OpenFirstImageInFolder] = () => _workspace.Active is BrowserTabState browserTab ? OpenFirstImageInFolderAsync(browserTab.Folder) : Task.CompletedTask;
         actions[GlideCommand.ToggleOverlayMode] = () => { if (_wholeAppOverlayMode) ExitWholeAppOverlayMode(); else EnterWholeAppOverlayMode(); return Task.CompletedTask; };
         actions[GlideCommand.CustomizeTitleBar] = ShowTitleBarCustomizerAsync;
+        actions[GlideCommand.CustomizeStatusBar] = ShowStatusBarCustomizerAsync;
+        actions[GlideCommand.TabToolTipLarger] = () => { StepTabToolTipTextSize(1); return Task.CompletedTask; };
+        actions[GlideCommand.TabToolTipSmaller] = () => { StepTabToolTipTextSize(-1); return Task.CompletedTask; };
         actions[GlideCommand.ShowFolderInWindowsExplorer] = () => { ShowFolderInWindowsExplorer(); return Task.CompletedTask; };
         actions[GlideCommand.ResetTransparency] = () => Event(TransparencyResetClicked);
         actions[GlideCommand.ClearRecentHistory] = () => Event(ClearRecentHistoryClicked);
@@ -871,7 +874,7 @@ public partial class MainWindow
     {
         void Tip(Control c, string text, GlideCommand? command = null)
         {
-            ToolTip.SetTip(c, command is null ? text : $"[{text} ({ShortcutFor(command.Value)})]");
+            ToolTip.SetTip(c, command is null ? text : $"{text} ({ShortcutFor(command.Value)})");
             ToolTip.SetShowDelay(c, 650);
         }
         Tip(NewTabButton, "New tab", GlideCommand.NewTab);
@@ -881,7 +884,7 @@ public partial class MainWindow
             var label = id == "window.transparency"
                 ? $"Window transparency: {(int)Math.Round(_sessionOpacity * 100)}%"
                 : TitleActionLabel(id, definition);
-            ToolTip.SetTip(button, $"[{label} ({ShortcutForTitleButton(definition)})]");
+            ToolTip.SetTip(button, $"{label} ({ShortcutForTitleButton(definition)})");
             ToolTip.SetShowDelay(button, 650);
         }
         if (_homeSurface is not null) Tip(_homeSurface.OptionsButton, "Settings", GlideCommand.Settings);

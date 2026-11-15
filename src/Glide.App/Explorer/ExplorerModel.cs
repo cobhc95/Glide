@@ -11,11 +11,13 @@ internal static class ExplorerViewModes
 
     public static readonly string[] Names =
     {
-        "Extra large icons", "Large icons", "Medium icons", "Small icons", "List", "Details"
+        "Extra large thumbnails", "Large thumbnails", "Medium thumbnails", "Small thumbnails", "List", "Details"
     };
 
     public static int IndexOf(string? name)
     {
+        // Saved before 5.0.3 as "... icons".
+        if (name is not null && name.EndsWith(" icons", StringComparison.OrdinalIgnoreCase)) name = name[..^" icons".Length] + " thumbnails";
         for (var i = 0; i < Names.Length; i++)
             if (string.Equals(Names[i], name, StringComparison.OrdinalIgnoreCase)) return i;
         return Large;

@@ -19,6 +19,11 @@ gesture_catalog = (root / "src/Glide.Core/Commands/GestureCatalog.cs").read_text
 #  - the card header ToggleButtons (class settingsCardHeader), the page's "Expand all" /
 #    "Collapse all" buttons and the "Open" buttons on search results are navigation, not settings
 #    (they are Buttons/ToggleButtons, so the editor scan below never sees them).
+# Settings that live outside every card, by design (documented exclusion from the card-placement rule):
+#  - settings.alwaysExpand: the "Always expand" switch sits in the Settings footer's bottom-left corner
+#    (the approved footer design). Search still finds it; "Open"
+#    focuses the footer switch.
+outside_cards = {"settings.alwaysExpand"}
 excluded = {"SearchBox", "SearchCategoryCombo", "HotkeyFilterBox", "FullscreenXCloseCheck"}
 editors = set(re.findall(r'<(?:CheckBox|ComboBox|NumericUpDown|TextBox)\b[^>]*x:Name="([^"]+)"', xaml))
 mappings = re.findall(r'M\("([^"]+)",\s*(\w+)\)', code)
@@ -133,6 +138,8 @@ def hosting_cards(element):
 # Every mapped editor sits inside exactly one card.
 placements = {}
 for setting_id, control_name in mappings:
+    if setting_id in outside_cards:
+        continue
     element = by_name.get(control_name)
     if element is None:
         card_problems.append(f"mapped control {control_name} ({setting_id}) not found in the AXAML")
@@ -156,7 +163,7 @@ for element in tree.iter():
             continue
         placements.setdefault(setting_id, []).append(hosts[0])
 
-static_ids = sorted(i for i in ids if not i.startswith("gesture."))
+static_ids = sorted(i for i in ids if not i.startswith("gesture.") and i not in outside_cards)
 for setting_id in static_ids:
     hosts = placements.get(setting_id, [])
     if len(hosts) != 1:

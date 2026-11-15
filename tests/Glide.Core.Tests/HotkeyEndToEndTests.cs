@@ -810,6 +810,7 @@ public sealed class HotkeyEndToEndTests
             ["MainWindow.Browser.cs"] = "Explorer filter text box: Esc / Down / Enter move between the box and the list",
             ["MainWindow.Navigation.cs"] = "folder-boundary prompt: remembers a held arrow until it is released",
             ["Services/KeyboardShortcutText.cs"] = "the canonical key-to-text adapter",
+            ["Services/DialogEscape.cs"] = "Esc cancels every dialog / secondary window (one class handler; never the main viewer window)",
             ["Controls/ExplorerAddressBar.cs"] = "address bar text editing",
             ["Controls/BrowserSurface.axaml.cs"] = "forwards the filter box keys",
             ["Controls/WindowInWindowOverlayManager.cs"] = "Esc cancels drawing an overlay area (fixed.overlay.areaCancel)",

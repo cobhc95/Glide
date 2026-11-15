@@ -29,6 +29,11 @@ if ((Test-Path $codecDir) -and (Test-Path $indexTool)) {
 # Superseded history lives under Archive/ and stays out of handover ZIPs. docs\ is kept (it carries the
 # handoff document and release notes) but its screenshots\ gallery is dropped.
 Get-ChildItem $stagedProject -Directory -Recurse | Where-Object { $_.Name -in @('bin','obj','build','dist','artifacts','.artifacts','dist-installer','.git','screenshots','diagnostic_corpus','Archive') } | Remove-Item -Recurse -Force
+# Local-only working notes never ship: feedback-round queues (docs\QUEUE-*.md) and design mockups (docs\mockups\).
+$stagedDocs = Join-Path $stagedProject 'docs'
+if (Test-Path (Join-Path $stagedDocs 'mockups')) { Remove-Item (Join-Path $stagedDocs 'mockups') -Recurse -Force }
+Get-ChildItem $stagedDocs -File -Filter 'QUEUE-*.md' -ErrorAction SilentlyContinue | Remove-Item -Force
+
 Get-ChildItem $stagedProject -File -Recurse | Where-Object {
     $_.Name -match '\.(bak|tmp|orig|prehelddrag|log|pdb|exe|dll|ilk|exp|lib|obj|pch|idb)$' -or $_.Name -like '*.zip' -or $_.Name -like 'build-output.txt' -or $_.Name -like 'installer-output.txt'
 } | Remove-Item -Force

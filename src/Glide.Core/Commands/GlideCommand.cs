@@ -115,5 +115,11 @@ public enum GlideCommand
     /// <summary>Backspace: Back through the tab history when there is a Back step, otherwise Previous image in an image tab, otherwise nothing. Appended (5.0.0).</summary>
     BackOrPrevious,
     /// <summary>Checks GitHub for a newer Glide now and shows the result (Settings status line, the update prompt or a short message). Appended (5.0.1).</summary>
-    CheckForUpdates
+    CheckForUpdates,
+    /// <summary>Tab tooltip text one size larger (Small, Medium, Large) and shows the active tab's tooltip. Appended (5.0.3).</summary>
+    TabToolTipLarger,
+    /// <summary>Tab tooltip text one size smaller. Appended (5.0.3).</summary>
+    TabToolTipSmaller,
+    /// <summary>Opens the status-bar button customizer (show / hide / reorder groups). Appended (5.0.3).</summary>
+    CustomizeStatusBar
 }

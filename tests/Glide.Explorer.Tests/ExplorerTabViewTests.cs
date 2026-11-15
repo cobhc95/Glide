@@ -40,7 +40,7 @@ public sealed class ExplorerTabViewTests
         await ExplorerHarness.Run(async h =>
         {
             Assert.Equal(6, h.Surface.ViewModeCombo.ItemCount);
-            Assert.Equal(ExplorerViewModes.Large, h.Surface.ViewModeCombo.SelectedIndex); // default "Large icons"
+            Assert.Equal(ExplorerViewModes.Large, h.Surface.ViewModeCombo.SelectedIndex); // default "Large thumbnails"
             for (var mode = 0; mode < ExplorerViewModes.Names.Length; mode++)
             {
                 h.Surface.ViewModeCombo.SelectedIndex = mode;

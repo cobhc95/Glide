@@ -32,7 +32,7 @@ public sealed class TitleBarLocateButtonTests
         var state = new GlideSettingsState();
         Assert.Equal("Glide's Explorer tab", state.ShowInExplorerTarget);
         Assert.False(ShowInExplorerTargets.IsWindowsExplorer(state.ShowInExplorerTarget));
-        Assert.Equal("Large icons", state.ExplorerDefaultView);
+        Assert.Equal("Large thumbnails", state.ExplorerDefaultView);
         Assert.False(state.ExplorerShowHiddenFiles);
         Assert.True(state.ExplorerShowOnlyImages);
     }
@@ -71,7 +71,7 @@ public sealed class TitleBarLocateButtonTests
             File.WriteAllText(Path.Combine(root, "glide.settings.json"), "{\"ShowInExplorerTarget\":\"x\",\"ExplorerDefaultView\":\"nope\"}");
             var loaded = SettingsStore.Load();
             Assert.Equal(ShowInExplorerTargets.GlideTab, loaded.ShowInExplorerTarget);
-            Assert.Equal("Large icons", loaded.ExplorerDefaultView);
+            Assert.Equal("Large thumbnails", loaded.ExplorerDefaultView);
         });
     }
 

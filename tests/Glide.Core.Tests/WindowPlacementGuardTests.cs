@@ -28,6 +28,7 @@ public sealed class WindowPlacementGuardTests
                 new PrintQueryCache(FakePrintQueries.Standard()));
         },
         [typeof(TitleBarCustomizerWindow)] = () => new TitleBarCustomizerWindow(TitleBarButtonCatalog.DefaultButtonIds),
+        [typeof(StatusBarCustomizerWindow)] = () => new StatusBarCustomizerWindow(string.Empty),
         [typeof(ResetConfirmWindow)] = () => new ResetConfirmWindow(ResetPlanner.Plan(
             new ResetEnvironment(Path.GetTempPath(), Path.GetTempPath(), Path.GetTempPath(), Path.GetTempPath(), [".jpg"]), [ResetItemId.Caches])),
         [typeof(ResetResultWindow)] = () => new ResetResultWindow("Reset Glide", "Done", ""),

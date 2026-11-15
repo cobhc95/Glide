@@ -176,12 +176,12 @@ public partial class MainWindow
             else if (active) SlideshowButton.Classes.Add("slideshowPaused");
 
             var verb = !active ? "Start slideshow" : running ? "Pause slideshow" : "Resume slideshow";
-            ToolTip.SetTip(SlideshowButton, $"[{verb} ({ShortcutFor(GlideCommand.StartPauseSlideshow)})]");
+            ToolTip.SetTip(SlideshowButton, $"{verb} ({ShortcutFor(GlideCommand.StartPauseSlideshow)})");
             ToolTip.SetShowDelay(SlideshowButton, 650);
         }
         if (SlideshowStopButton is not null)
         {
-            ToolTip.SetTip(SlideshowStopButton, $"[Stop slideshow session ({ShortcutFor(GlideCommand.StopSlideshow)})]");
+            ToolTip.SetTip(SlideshowStopButton, $"Stop slideshow session ({ShortcutFor(GlideCommand.StopSlideshow)})");
             ToolTip.SetShowDelay(SlideshowStopButton, 650);
         }
     }

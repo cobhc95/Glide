@@ -33,10 +33,10 @@
         <controls:ExplorerAddressBar x:Name="BrowserAddressBar" Grid.Column="5" NavigateRequested="BrowserAddressNavigateRequested"/>
         <TextBox x:Name="BrowserFilterBox" Grid.Column="6" Width="190" Height="31" Padding="9,3" VerticalContentAlignment="Center" Watermark="Filter this folder (Ctrl+F)" TextChanged="BrowserFilterTextChanged" KeyDown="BrowserFilterKeyDown" ToolTip.Tip="Type to filter the items in this folder"/>
         <ComboBox x:Name="BrowserViewModeCombo" Grid.Column="7" Width="148" Height="31" SelectedIndex="1" SelectionChanged="BrowserViewModeChanged" ToolTip.Tip="View">
-          <ComboBoxItem Content="Extra large icons"/>
-          <ComboBoxItem Content="Large icons"/>
-          <ComboBoxItem Content="Medium icons"/>
-          <ComboBoxItem Content="Small icons"/>
+          <ComboBoxItem Content="Extra large thumbnails"/>
+          <ComboBoxItem Content="Large thumbnails"/>
+          <ComboBoxItem Content="Medium thumbnails"/>
+          <ComboBoxItem Content="Small thumbnails"/>
           <ComboBoxItem Content="List"/>
           <ComboBoxItem Content="Details"/>
         </ComboBox>

@@ -265,7 +265,9 @@ public sealed class SettingsWindowLayoutTests : IDisposable
                 var scrollBounds = BoundsIn(scroll, window);
                 foreach (var text in new[] { "Restore defaults", "Cancel", "Apply", "OK" })
                 {
-                    var button = window.GetVisualDescendants().OfType<Button>().First(b => Equals(b.Content, text));
+                    var button = text == "Restore defaults"
+                        ? Named<Button>(window, "RestoreDefaultsButton")
+                        : window.GetVisualDescendants().OfType<Button>().First(b => Equals(b.Content, text));
                     var rect = BoundsIn(button, window);
                     Assert.True(button.IsEffectivelyVisible, $"'{text}' is not visible");
                     Assert.True(area.Contains(rect.TopLeft) && area.Contains(rect.BottomRight - new Vector(0.5, 0.5)), $"'{text}' {rect} is outside the window {area}");

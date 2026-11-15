@@ -113,6 +113,7 @@ public partial class SettingsWindow : Window
     private readonly Dictionary<string, GestureActionPicker> _gestureEditors = new(StringComparer.OrdinalIgnoreCase);
     private Dictionary<string, string> _workingGestures = GestureCatalog.CreateDefaultMap();
     private List<string> _workingTitleBarButtons = TitleBarButtonCatalog.DefaultButtonIds.ToList();
+    private string _workingStatusBarGroups = string.Empty;
     private string _workingCustomAccentHex = Glide.App.ThemePalette.GlideBlue;
     private string _workingCustomGlowHex = Glide.App.ThemePalette.GlideBlue;
     private string _workingCustomMainBackgroundHex = Glide.App.ThemePalette.FallbackBackground;
@@ -229,6 +230,25 @@ public partial class SettingsWindow : Window
         BuildProfileRows();
         RefreshUpdateStatus();
         WireLivePreview();
+        // Enter in a search box runs the search again (for example after an assignment changed the rows).
+        SearchBox.KeyDown += (_, e) =>
+        {
+            if (e.Key != Key.Enter || string.IsNullOrWhiteSpace(SearchBox.Text)) return;
+            SearchChanged(SearchBox, null!);
+            e.Handled = true;
+        };
+        HotkeyFilterBox.KeyDown += (_, e) =>
+        {
+            if (e.Key != Key.Enter) return;
+            BuildHotkeyRows(HotkeyFilterBox.Text);
+            e.Handled = true;
+        };
+        SettingsAlwaysExpandSwitch.IsCheckedChanged += (_, _) =>
+        {
+            if (_loadingControls) return;
+            // Off restores the collapsed view instead of leaving every section open.
+            SetActivePageCardsExpanded(SettingsAlwaysExpandSwitch.IsChecked == true);
+        };
         ApplySettingsTooltips();
         Glide.Core.GlidePerformanceTrace.Mark("settings_wired");
         KeyDown += SettingsKeyDown;
@@ -406,6 +426,7 @@ public partial class SettingsWindow : Window
             SelectByText(SameImageBehaviorCombo, string.IsNullOrWhiteSpace(s.SameImageAlreadyOpenBehavior) ? "Open new instance" : s.SameImageAlreadyOpenBehavior);
             FullscreenXCloseCheck.IsChecked = s.FullscreenXClosesApp;
             _workingTitleBarButtons = TitleBarButtonCatalog.Normalize(s.TitleBarButtons).ToList();
+            _workingStatusBarGroups = s.StatusBarGroups ?? string.Empty;
             SelectByText(CaptionWindowedMinimizeCombo, s.CaptionWindowedMinimizeAction);
             SelectByText(CaptionWindowedMaximizeCombo, s.CaptionWindowedMaximizeAction);
             SelectByText(CaptionWindowedCloseCombo, s.CaptionWindowedCloseAction);
@@ -489,6 +510,9 @@ public partial class SettingsWindow : Window
             StatusRevealZoneExpandBox.Value = Glide.Core.StatusBarAutoHide.NormalizeRevealZoneExpand(s.StatusRevealZoneExpand);
             StatusReserveFitSpaceCheck.IsChecked = s.StatusReserveFitSpace;
             StatusStackInfoLineCheck.IsChecked = s.StatusStackInfoLine;
+            StatusGifOnlyOnGifsCheck.IsChecked = s.StatusGifControlsOnlyOnGifs;
+            StatusFileNameClickActionsCheck.IsChecked = s.StatusFileNameClickActions;
+            SettingsAlwaysExpandSwitch.IsChecked = s.SettingsAlwaysExpand;
             StatIndexCheck.IsChecked = s.StatusStatIndex;
             StatResolutionCheck.IsChecked = s.StatusStatResolution;
             StatZoomCheck.IsChecked = s.StatusStatZoom;
@@ -517,6 +541,9 @@ public partial class SettingsWindow : Window
             DetachedHomeTabCheck.IsChecked = s.DetachedWindowHomeTab;
             SelectByText(TabCycleOrderCombo, string.Equals(s.TabCycleOrder, "Most recently used", StringComparison.OrdinalIgnoreCase) ? "Most recently used" : "Tab order");
             SelectByText(TabToolTipTextSizeCombo, s.TabToolTipTextSize is "Small" or "Large" ? s.TabToolTipTextSize : "Medium");
+            SelectByText(TabPositionCombo, s.TabStripPosition == "Side" ? "Side" : "Top");
+            TabSideAutoHideCheck.IsChecked = s.TabSideAutoHide;
+            TabTopAutoHideCheck.IsChecked = s.TabTopAutoHide;
             SelectByText(ExplorerDefaultViewCombo, ExplorerDefaultViews.Normalize(s.ExplorerDefaultView));
             ExplorerShowHiddenFilesCheck.IsChecked = s.ExplorerShowHiddenFiles;
             ExplorerShowOnlyImagesCheck.IsChecked = s.ExplorerShowOnlyImages;
@@ -635,6 +662,7 @@ public partial class SettingsWindow : Window
         state.ExternalOpenBehavior = SelectedText(ExternalOpenBehaviorCombo, "Open in new tab");
         state.SameImageAlreadyOpenBehavior = SelectedText(SameImageBehaviorCombo, "Open new instance");
         state.TitleBarButtons = TitleBarButtonCatalog.Normalize(_workingTitleBarButtons).ToList();
+        state.StatusBarGroups = _workingStatusBarGroups;
         state.CaptionWindowedMinimizeAction = SelectedText(CaptionWindowedMinimizeCombo, "Minimize");
         state.CaptionWindowedMaximizeAction = SelectedText(CaptionWindowedMaximizeCombo, "Maximize / restore");
         state.CaptionWindowedCloseAction = SelectedText(CaptionWindowedCloseCombo, "Close Glide");
@@ -720,6 +748,9 @@ public partial class SettingsWindow : Window
         state.StatusRevealZoneExpand = Glide.Core.StatusBarAutoHide.NormalizeRevealZoneExpand((int)(StatusRevealZoneExpandBox.Value ?? Glide.Core.StatusBarAutoHide.DefaultRevealZoneExpand));
         state.StatusReserveFitSpace = StatusReserveFitSpaceCheck.IsChecked == true;
         state.StatusStackInfoLine = StatusStackInfoLineCheck.IsChecked == true;
+        state.StatusGifControlsOnlyOnGifs = StatusGifOnlyOnGifsCheck.IsChecked == true;
+        state.StatusFileNameClickActions = StatusFileNameClickActionsCheck.IsChecked == true;
+        state.SettingsAlwaysExpand = SettingsAlwaysExpandSwitch.IsChecked == true;
         state.StatusStatIndex = StatIndexCheck.IsChecked == true;
         state.StatusStatResolution = StatResolutionCheck.IsChecked == true;
         state.StatusStatZoom = StatZoomCheck.IsChecked == true;
@@ -748,6 +779,9 @@ public partial class SettingsWindow : Window
         state.DetachedWindowHomeTab = DetachedHomeTabCheck.IsChecked == true;
         state.TabCycleOrder = SelectedText(TabCycleOrderCombo, "Tab order");
         state.TabToolTipTextSize = SelectedText(TabToolTipTextSizeCombo, "Medium");
+        state.TabStripPosition = SelectedText(TabPositionCombo, "Top");
+        state.TabSideAutoHide = TabSideAutoHideCheck.IsChecked == true;
+        state.TabTopAutoHide = TabTopAutoHideCheck.IsChecked == true;
         state.ExplorerDefaultView = ExplorerDefaultViews.Normalize(SelectedText(ExplorerDefaultViewCombo, ExplorerDefaultViews.Default));
         state.ExplorerShowHiddenFiles = ExplorerShowHiddenFilesCheck.IsChecked == true;
         state.ExplorerShowOnlyImages = ExplorerShowOnlyImagesCheck.IsChecked == true;
@@ -931,6 +965,17 @@ public partial class SettingsWindow : Window
         PageSubtitle.Text = $"Title bar: {_workingTitleBarButtons.Count} custom button(s) selected.";
     }
 
+    private async void CustomizeStatusBarClicked(object? sender, RoutedEventArgs e)
+    {
+        var dialog = new StatusBarCustomizerWindow(_workingStatusBarGroups) { Topmost = Topmost };
+        var result = await dialog.ShowDialog<string?>(this);
+        if (result is null) return;
+        _workingStatusBarGroups = result;
+        var preview = ReadControls();
+        _apply(preview, false);
+        UpdateDirtyState(preview);
+    }
+
     private void PerformanceProfileChanged(object? sender, SelectionChangedEventArgs e)
     {
         if (_loadingControls) return;
@@ -1038,7 +1083,7 @@ public partial class SettingsWindow : Window
             {
                 if (!string.IsNullOrWhiteSpace(card.CardId)) _cardById[card.CardId!] = card;
                 _pageOfCard[card] = pair.Key;
-                card.ExpandedChanged += (_, _) => UpdateExpandCollapseButtons();
+                card.ExpandedChanged += (_, _) => { AnchorCollapsedCardHeader(card); UpdateExpandCollapseButtons(); };
                 foreach (var anchor in card.Body.GetLogicalDescendants().OfType<Control>().Prepend(card.Body))
                     foreach (var id in SettingsCard.GetSettingIdList(anchor))
                     {
@@ -1136,6 +1181,8 @@ public partial class SettingsWindow : Window
         // Title-bar utility buttons (edited in their own dialog).
         if (!TitleBarButtonCatalog.Normalize(_workingTitleBarButtons).SequenceEqual(TitleBarButtonCatalog.DefaultButtonIds, StringComparer.OrdinalIgnoreCase))
             Add("window-title-bar", "Title-bar utility buttons");
+        if (!string.IsNullOrEmpty(_workingStatusBarGroups) && CustomizeStatusBarButton.FindLogicalAncestorOfType<SettingsCard>()?.CardId is { } statusCardId)
+            Add(statusCardId, "Status-bar buttons");
 
         foreach (var card in _cardById.Values)
         {
@@ -1154,6 +1201,26 @@ public partial class SettingsWindow : Window
     private void ExpandAllCardsClicked(object? sender, RoutedEventArgs e) => SetActivePageCardsExpanded(true);
 
     private void CollapseAllCardsClicked(object? sender, RoutedEventArgs e) => SetActivePageCardsExpanded(false);
+
+    /// <summary>
+    /// collapsing a section keeps its header where it was on screen (or pins it to the top when the
+    /// header had scrolled out above), so the page does not jump to a different section.
+    /// </summary>
+    private void AnchorCollapsedCardHeader(SettingsCard card)
+    {
+        if (card.IsExpanded || _loadingControls || SearchPanel.IsVisible || !card.IsEffectivelyVisible) return;
+        // Layout has not run yet: this is still the header's position before the body disappears.
+        if (card.TranslatePoint(new Point(0, 0), ContentScroll) is not { } before) return;
+        var anchorY = Math.Max(0, before.Y);
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (!card.IsEffectivelyVisible || card.TranslatePoint(new Point(0, 0), ContentScroll) is not { } after) return;
+            var shift = after.Y - anchorY;
+            if (Math.Abs(shift) < 0.5) return;
+            ContentScroll.Offset = new Vector(ContentScroll.Offset.X,
+                Math.Clamp(ContentScroll.Offset.Y + shift, 0, Math.Max(0, ContentScroll.ScrollBarMaximum.Y)));
+        }, DispatcherPriority.Loaded);
+    }
 
     private void SetActivePageCardsExpanded(bool expanded)
     {
@@ -1237,6 +1304,9 @@ public partial class SettingsWindow : Window
             BuildHotkeyRows(HotkeyFilterBox?.Text);
             if (!_gestureMatrixBuilt) { BuildGestureMatrix(); LoadGestureEditorsFromWorkingMap(); }
         }
+        // "Always expand" (footer switch) opens every section of the page.
+        if (SettingsAlwaysExpandSwitch.IsChecked == true)
+            foreach (var card in ActivePageCards()) card.IsExpanded = true;
         if (aliasCard is not null)
         {
             aliasCard.IsExpanded = true;
@@ -1973,6 +2043,7 @@ public partial class SettingsWindow : Window
                 break;
             case "performance.initialQuality": yield return B("Save custom", b => SaveUserPerformancePresetClicked(b, new RoutedEventArgs())); break;
             case "titlebar.customize": yield return B("Configure...", b => CustomizeTitleBarClicked(b, new RoutedEventArgs())); break;
+            case "status.customizeButtons": yield return B("Configure...", b => CustomizeStatusBarClicked(b, new RoutedEventArgs())); break;
             case "escape.resetRememberedClose": yield return B("Reset", b => ResetEscChoiceClicked(b, new RoutedEventArgs())); break;
             case "profiles.import": yield return B("Import...", b => ImportSettingsClicked(b, new RoutedEventArgs())); break;
             case "profiles.export": yield return B("Export...", b => ExportSettingsClicked(b, new RoutedEventArgs())); break;
@@ -2049,7 +2120,7 @@ public partial class SettingsWindow : Window
         M("appearance.theme", ThemeCombo); M("appearance.explorerTheme", ExplorerThemeCombo); M("appearance.accent", AccentCombo); M("appearance.glowColor", GlowCombo); M("appearance.background", MainBackgroundCombo); M("appearance.glowIntensity", GlowIntensityBox);
         M("general.showRecentOnHome", ShowRecentOnHomeCheck); M("general.confirmDiscardSettings", ConfirmDiscardSettingsCheck);
         M("updates.checkDaily", UpdateCheckDailyCheck); M("updates.dontRemind", UpdateDontRemindCheck);
-        M("general.startupAction", StartupActionCombo); M("general.startupCustomPath", StartupCustomPathBox); M("general.newTabAction", NewTabActionCombo); M("general.newTabCustomPath", NewTabCustomPathBox); M("titlebar.customize", CustomizeTitleBarButton); M("escape.resetRememberedClose", ResetEscChoiceButton);
+        M("general.startupAction", StartupActionCombo); M("general.startupCustomPath", StartupCustomPathBox); M("general.newTabAction", NewTabActionCombo); M("general.newTabCustomPath", NewTabCustomPathBox); M("titlebar.customize", CustomizeTitleBarButton); M("settings.alwaysExpand", SettingsAlwaysExpandSwitch); M("escape.resetRememberedClose", ResetEscChoiceButton);
         M("status.visible", StatusCheck); M("status.hoverWhenClosed", StatusHoverWhenClosedCheck); M("view.scrollbars", ShowScrollbarsCheck); M("window.fullPathTitle", FullPathTitleCheck); M("fullscreen.hideCursor", HideCursorFullscreenCheck); M("fullscreen.hideCursorDelay", FullscreenHideCursorDelayBox);
         M("fullscreen.autoHideChrome", AutoHideFullscreenChromeCheck); M("fullscreen.keepTabBarOpen", FullscreenKeepTabBarOpenCheck); M("tabs.enabled", TabsCheck); M("window.showInExplorerTarget", ShowInExplorerTargetCombo); M("explorer.defaultView", ExplorerDefaultViewCombo); M("explorer.showHidden", ExplorerShowHiddenFilesCheck); M("explorer.onlyImages", ExplorerShowOnlyImagesCheck); M("tabs.showBackButton", TabBarBackButtonCheck); M("tabs.showForwardButton", TabBarForwardButtonCheck); M("fullscreen.statusAlways", FullscreenStatusAlwaysCheck);
         M("caption.windowedMinimize", CaptionWindowedMinimizeCombo); M("caption.windowedMaximize", CaptionWindowedMaximizeCombo); M("caption.windowedClose", CaptionWindowedCloseCombo);
@@ -2073,12 +2144,12 @@ public partial class SettingsWindow : Window
         M("status.size", StatusBarSizeCombo); M("status.alignment", StatusBarAlignmentCombo); M("status.navigation", StatusNavigationCheck); M("status.zoom", StatusZoomCheck); M("status.slideshow", StatusSlideshowCheck); M("status.fit", StatusFitCheck);
         M("status.fitScope", StatusFitScopeCombo);
         M("status.autoResize", StatusAutoFitCheck);
-        M("status.info", StatusInfoCheck); M("status.options", StatusOptionsCheck); M("status.close", StatusCloseCheck); M("status.collapsedCorner", StatusCollapsedCornerCheck); M("status.autoHide", StatusAutoHideCheck); M("status.revealZoneExpand", StatusRevealZoneExpandBox); M("status.reserveFitSpace", StatusReserveFitSpaceCheck); M("status.stackInfoLine", StatusStackInfoLineCheck); M("status.statIndex", StatIndexCheck);
+        M("status.info", StatusInfoCheck); M("status.options", StatusOptionsCheck); M("status.close", StatusCloseCheck); M("status.collapsedCorner", StatusCollapsedCornerCheck); M("status.autoHide", StatusAutoHideCheck); M("status.revealZoneExpand", StatusRevealZoneExpandBox); M("status.reserveFitSpace", StatusReserveFitSpaceCheck); M("status.stackInfoLine", StatusStackInfoLineCheck); M("status.gifOnlyOnGifs", StatusGifOnlyOnGifsCheck); M("status.fileNameClickActions", StatusFileNameClickActionsCheck); M("status.customizeButtons", CustomizeStatusBarButton); M("status.statIndex", StatIndexCheck);
         M("status.statResolution", StatResolutionCheck); M("status.statZoom", StatZoomCheck); M("status.statFileSize", StatFileSizeCheck); M("status.statFormat", StatFormatCheck); M("status.statFileName", StatFileNameCheck);
         M("slideshow.interval", SlideshowIntervalBox); M("slideshow.loop", SlideshowLoopCheck); M("navigation.sortOrder", NavigationSortOrderCombo); M("navigation.sortDescending", NavigationSortDescendingCheck); M("slideshow.showQualityIndicator", SlideshowQualityIndicatorCheck); M("slideshow.crossFolders", SlideshowCrossFoldersCheck); M("slideshow.shuffle", SlideshowShuffleCheck);
         M("slideshow.direction", SlideshowDirectionCombo); M("slideshow.startFullscreen", SlideshowStartFullscreenCheck); M("slideshow.pauseInactive", SlideshowPauseInactiveCheck);
         M("tabs.minWidth", TabMinWidthBox); M("tabs.maxWidth", TabMaxWidthBox); M("tabs.overflowArrows", TabOverflowArrowsCheck); M("tabs.detach", TabDetachCheck); M("tabs.attach", TabAttachCheck); M("tabs.closedHistory", ClosedHistoryBox);
-        M("tabs.closeEmptyAfterDetach", CloseEmptyAfterDetachCheck); M("tabs.detachedHome", DetachedHomeTabCheck); M("tabs.cycleOrder", TabCycleOrderCombo); M("tabs.tooltipTextSize", TabToolTipTextSizeCombo);
+        M("tabs.closeEmptyAfterDetach", CloseEmptyAfterDetachCheck); M("tabs.detachedHome", DetachedHomeTabCheck); M("tabs.cycleOrder", TabCycleOrderCombo); M("tabs.tooltipTextSize", TabToolTipTextSizeCombo); M("tabs.position", TabPositionCombo); M("tabs.sideAutoHide", TabSideAutoHideCheck); M("tabs.topAutoHide", TabTopAutoHideCheck);
         M("tabs.lastTabBehavior", LastTabBehaviorCombo); M("tabs.confirmCloseMultiple", ConfirmCloseMultipleTabsCheck); M("tabs.homePage", HomePageCombo); M("folderNav.group", FolderNavGroupCheck); M("folderNav.previous", FolderNavPreviousCheck);
         M("folderNav.showCounter", ShowFolderCounterCheck); M("folderNav.counterGrandparent", FolderCounterGrandparentCheck);
         M("folderNav.next", FolderNavNextCheck); M("folderNav.explore", FolderNavExploreCheck); M("folderNav.skipEmpty", FolderNavSkipEmptyCheck); M("folderNav.includeHidden", FolderNavIncludeHiddenCheck); M("folderNav.wrap", FolderNavWrapCheck); M("folderNav.openFirst", FolderNavFirstImageCheck); M("folderNav.order", FolderNavOrderCombo);
