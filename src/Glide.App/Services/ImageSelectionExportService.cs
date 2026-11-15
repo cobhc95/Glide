@@ -42,7 +42,7 @@ public static class ImageSelectionExportService
                     if (ext != ".png") throw new PlatformNotSupportedException("PNG/JPEG/BMP encoding requires the Windows WIC bridge.");
                     // WIC may have created or partially written the temp path before
                     // reporting failure. Remove it so Avalonia can create a clean PNG.
-                    try { if (File.Exists(temp)) File.Delete(temp); } catch (IOException) { }
+                    try { if (File.Exists(temp)) File.Delete(temp); } catch (IOException) { /* best-effort cleanup; a locked or missing file is harmless */ }
                     using var output = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None);
                     cropped.Save(output);
                     output.Flush(true);
@@ -51,7 +51,7 @@ public static class ImageSelectionExportService
                 if (File.Exists(destination)) File.Replace(temp, destination, destination + ".bak", true);
                 else File.Move(temp, destination);
             }
-            finally { cropped.Dispose(); try { if (File.Exists(temp)) File.Delete(temp); } catch { } }
+            finally { cropped.Dispose(); try { if (File.Exists(temp)) File.Delete(temp); } catch { /* best-effort cleanup; a locked or missing file is harmless */ } }
         }, token).ConfigureAwait(false);
     }
 

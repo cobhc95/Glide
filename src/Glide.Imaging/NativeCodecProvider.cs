@@ -228,7 +228,7 @@ internal sealed class NativeCodecProvider : ICodecSurfaceProvider, IDisposable
     public void Dispose()
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
-        try { _destroy(_instance); } catch { }
+        try { _destroy(_instance); } catch { /* native destroy during teardown; nothing left to recover */ }
         // _module intentionally remains loaded until process teardown. See class summary.
     }
 

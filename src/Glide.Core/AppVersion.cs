@@ -29,7 +29,7 @@ public static class AppVersion
                 if (!string.IsNullOrWhiteSpace(shortVersion))
                     return shortVersion;
             }
-            catch { }
+            catch { /* version text is cosmetic; fall through to the default below */ }
             return Fallback;
         }
     }

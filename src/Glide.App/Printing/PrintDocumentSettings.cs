@@ -114,7 +114,7 @@ public static class PrintSettingsStore
             var dir = Settings.SettingsStore.GetSettingsDirectory();
             if (!string.IsNullOrWhiteSpace(dir)) return Path.Combine(dir, FileName);
         }
-        catch { }
+        catch { /* no settings directory available: fall back to the local default path below */ }
         return Path.Combine(AppContext.BaseDirectory, FileName);
     }
 }

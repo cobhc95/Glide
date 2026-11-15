@@ -160,7 +160,7 @@ public sealed class NaturalStringComparer : IComparer<string>
                 var result = StrCmpLogicalW(x, y);
                 if (result != 0) return result;
             }
-            catch { }
+            catch { /* shell comparer unavailable: fall back to the managed comparison below */ }
         }
 
         return NaturalCompare(x, y);

@@ -20,6 +20,7 @@ namespace Glide.Core.Tests;
 /// The Keyboard shortcuts page of the real Settings window (headless): sortable headers, the Replace / Cancel
 /// prompt, "Search hotkey" capture, custom presets, and that tooltips cannot swallow the mouse wheel.
 /// </summary>
+// Source-text contract kept: this asserts on production source (UI code-behind, native/installer files or a repo-wide scan) that cannot be run headlessly; behavioural coverage lives in the other test files.
 [Collection(AvaloniaHeadlessCollection.Name)]
 public sealed class HotkeySettingsUiTests
 {

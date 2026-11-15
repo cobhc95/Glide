@@ -109,7 +109,7 @@ public partial class SettingsWindow
             ZipFile.CreateFromDirectory(reportFolder, zipPath, CompressionLevel.Fastest, includeBaseDirectory: false);
             if (!keepFolder)
             {
-                try { Directory.Delete(reportFolder, true); } catch { }
+                try { Directory.Delete(reportFolder, true); } catch { /* best-effort cleanup; a locked or missing file is harmless */ }
             }
             DirtyText.Text = $"Diagnostics → {Path.GetFileName(zipPath)}";
             return reportFolder;
@@ -123,7 +123,7 @@ public partial class SettingsWindow
                 Directory.CreateDirectory(targetErrDir);
                 File.WriteAllText(Path.Combine(targetErrDir, "Glide Diagnostics Export Error.txt"), ex.ToString());
             }
-            catch { }
+            catch { /* writing the error note failed too; nothing further can be reported */ }
             throw;
         }
         finally
@@ -138,7 +138,7 @@ public partial class SettingsWindow
         {
             await ExportDiagnosticsAsync();
         }
-        catch { }
+        catch (Exception loggedEx) { Glide.Diagnostics.Runtime.LiveDiagnosticTrace.WriteException("diagnostics", "export_failed", loggedEx); }
     }
 
     private static void WriteOverallDiagnosticSummary(string reportFolder)
@@ -389,7 +389,7 @@ public partial class SettingsWindow
             static string Csv(string value) => "\"" + value.Replace("\"", "\"\"") + "\"";
             long fixtureBytes = 0;
             try { fixtureBytes = File.Exists(path) ? new FileInfo(path).Length : 0; }
-            catch { }
+            catch { /* fixture size is only a report column; 0 is acceptable */ }
             rows.Add(string.Join(",", Csv(extension), Csv(Path.GetFileName(path)), fixtureBytes, width, height,
                 coldMs.ToString("F3", System.Globalization.CultureInfo.InvariantCulture), warmMs.ToString("F3", System.Globalization.CultureInfo.InvariantCulture),
                 cacheHit ? "true" : "false", nativeProbeOk ? "true" : "false", nativeWidth, nativeHeight, nativeFrames, status, Csv(error)));

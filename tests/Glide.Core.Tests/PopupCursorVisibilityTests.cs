@@ -22,6 +22,7 @@ namespace Glide.Core.Tests;
 /// <c>Cursor = None</c> on itself (fullscreen idle hiding) - so every popup inherited "no cursor". The idle timer also
 /// kept running while the pointer was inside an open menu (the main window gets no pointer events there).
 /// </summary>
+// Source-text contract kept: this asserts on production source (UI code-behind, native/installer files or a repo-wide scan) that cannot be run headlessly; behavioural coverage lives in the other test files.
 [Collection(AvaloniaHeadlessCollection.Name)]
 public sealed class PopupCursorVisibilityTests
 {

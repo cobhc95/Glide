@@ -17,7 +17,7 @@ internal static partial class Program
         // planted DLL there can never be loaded. Glide's own and Avalonia's natives load from the app folder.
         if (OperatingSystem.IsWindows())
         {
-            try { SetDllDirectoryW(string.Empty); } catch { }
+            try { SetDllDirectoryW(string.Empty); } catch { /* DLL search hardening is best effort */ }
         }
 
         // Pre-warm thread pool to eliminate cold-launch worker thread dispatch delays
@@ -220,7 +220,7 @@ internal static partial class Program
             Directory.CreateDirectory(root);
             File.AppendAllText(Path.Combine(root, "crash.log"), $"[{DateTime.UtcNow:O}] {kind} v{AppVersion.DiagnosticTag}{Environment.NewLine}{detail}{Environment.NewLine}{Environment.NewLine}");
         }
-        catch { }
+        catch { /* the crash logger cannot log its own failure */ }
     }
 
     private static void WriteStartupCrashLog(Exception ex)
@@ -232,7 +232,7 @@ internal static partial class Program
             var path = Path.Combine(root, "startup-crash.log");
             File.WriteAllText(path, $"Glide fatal startup failure\nUTC: {DateTime.UtcNow:O}\n\n{ex}");
         }
-        catch { }
+        catch { /* the crash logger cannot log its own failure */ }
     }
 
     // Glide routinely displays images whose decoded BGRA textures are far larger than Avalonia's

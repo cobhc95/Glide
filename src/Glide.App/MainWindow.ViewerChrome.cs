@@ -180,7 +180,7 @@ public partial class MainWindow
             created = $"\nCreated: {info.CreationTime:g}";
             modified = $"\nModified: {info.LastWriteTime:g}";
         }
-        catch { }
+        catch { /* timestamps are optional in the info text */ }
         var metadata = (_currentMetadata.HasExif || _currentMetadata.FrameCount is not null) ? "\n" + _currentMetadata.ToDisplayText() : "";
         var format = CodecCapabilityRegistry.GetLongestExtension(path).TrimStart('.').ToUpperInvariant();
         ImageInfoText.Text = $"{Path.GetFileName(path)}\n{path}\nFormat: {format}   Dimensions: {_currentPixelWidth} × {_currentPixelHeight}\nFile size: {FormatFileSize(_currentFileSize)}   Index: {Math.Max(0, _navigator.Index + 1)} / {_navigator.Count}\nZoom: {Viewport.ZoomPercent}%   Last decode: {_currentDecodeMs:F1} ms{created}{modified}{metadata}";
@@ -395,7 +395,7 @@ public partial class MainWindow
             SetWindowPos(hwnd, new IntPtr(-1), 0, 0, 0, 0,
                 SwpNoMove | SwpNoSize | SwpNoActivate | SwpNoOwnerZOrder | SwpNoSendChanging);
         }
-        catch { }
+        catch { /* z-order change failed; the window keeps its current order */ }
     }
 
 
@@ -437,7 +437,7 @@ public partial class MainWindow
                 return true;
             }, IntPtr.Zero);
         }
-        catch { }
+        catch { /* window enumeration failed; treated as not found */ }
         return found;
     }
 
@@ -486,7 +486,7 @@ public partial class MainWindow
     {
         var menu = _activeOwnedMenu;
         if (menu is null || (only is not null && !ReferenceEquals(menu, only))) return;
-        try { if (menu.IsOpen) menu.Close(); } catch { }
+        try { if (menu.IsOpen) menu.Close(); } catch { /* best-effort teardown; the resource may already be closed */ }
         _activeOwnedMenu = null;
     }
 
@@ -516,7 +516,7 @@ public partial class MainWindow
                 dialog.MaxHeight = Math.Max(220, screen.WorkingArea.Height / scaling - 80);
             }
         }
-        catch { }
+        catch { /* screen lookup only caps the dialog height; the default height is fine */ }
         return dialog;
     }
 
@@ -526,7 +526,7 @@ public partial class MainWindow
         // than letting the InvalidOperationException escape an async void caller.
         if (!IsVisible)
         {
-            try { dialog.Close(); } catch { }
+            try { dialog.Close(); } catch { /* best-effort teardown; the resource may already be closed */ }
             return;
         }
         using var scope = EnterTopmostTransient();
@@ -538,7 +538,7 @@ public partial class MainWindow
     {
         if (!IsVisible)
         {
-            try { dialog.Close(); } catch { }
+            try { dialog.Close(); } catch { /* best-effort teardown; the resource may already be closed */ }
             return default!;
         }
         using var scope = EnterTopmostTransient();

@@ -10,6 +10,7 @@ namespace Glide.Core.Tests;
 /// that the declared owner and wiring remain present, but cannot prove pointer hit-testing
 /// or Explorer HWND behaviour on this non-Windows test host.
 /// </summary>
+// Source-text contract kept: this asserts on production source (UI code-behind, native/installer files or a repo-wide scan) that cannot be run headlessly; behavioural coverage lives in the other test files.
 public sealed class Glide23FeatureContractTests
 {
     [Fact]

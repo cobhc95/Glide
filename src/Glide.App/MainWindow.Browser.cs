@@ -251,7 +251,7 @@ public partial class MainWindow
             }
             _diagnostics.Write("browser", "managed_population_complete", new { folder, count = entries.Count, virtualized = true, generation });
         }
-        catch (OperationCanceledException) { }
+        catch (OperationCanceledException) { /* cancellation is the expected way to stop this work */ }
         catch (UnauthorizedAccessException ex) { ShowExplorerMessage($"Can't open this folder: {ex.Message}", isError: true); }
         catch (IOException ex) { ShowExplorerMessage($"Can't read this folder: {ex.Message}", isError: true); }
     }
@@ -653,8 +653,8 @@ public partial class MainWindow
                 if (fallback is not null) fallback.IsVisible = false;
             }, DispatcherPriority.Background);
         }
-        catch (OperationCanceledException) { }
-        catch { }
+        catch (OperationCanceledException) { /* cancellation is the expected way to stop this work */ }
+        catch { /* cancellation is the expected way to stop this work */ }
         finally { if (entered) _browserThumbnailGate.Release(); }
     }
 

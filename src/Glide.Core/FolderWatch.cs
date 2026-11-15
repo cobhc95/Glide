@@ -193,7 +193,7 @@ public sealed class FolderWatchService : IDisposable
         catch { return; }
         if (set.RescanRequired || set.Added.Count > 0 || set.Removed.Count > 0)
         {
-            try { _onChanges(folder, set); } catch { }
+            try { _onChanges(folder, set); } catch { /* a subscriber threw; it must not stop the watcher */ }
         }
         if (batcher.HasPending) Kick(batcher); // locked / in-progress files: retry later
     }

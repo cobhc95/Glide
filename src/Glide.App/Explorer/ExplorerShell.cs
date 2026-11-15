@@ -22,7 +22,7 @@ internal static class ExplorerShell
     {
         if (ExplorerHost.OpenWithShell is { } seam) { seam(path); return; }
         if (!OperatingSystem.IsWindows() || (!File.Exists(path) && !Directory.Exists(path)) || !IsSafeShellPath(path)) return;
-        try { Process.Start(new ProcessStartInfo(path) { UseShellExecute = true }); } catch { }
+        try { Process.Start(new ProcessStartInfo(path) { UseShellExecute = true }); } catch (Exception loggedEx) { Glide.Diagnostics.Runtime.LiveDiagnosticTrace.WriteException("explorer", "open_with_shell_failed", loggedEx); }
     }
 
     /// <summary>Shows a folder (<paramref name="directory"/>) or selects a file in Windows File Explorer.</summary>
@@ -36,7 +36,7 @@ internal static class ExplorerShell
             psi.Arguments = RevealArguments(path, directory);
             Process.Start(psi);
         }
-        catch { }
+        catch (Exception loggedEx) { Glide.Diagnostics.Runtime.LiveDiagnosticTrace.WriteException("explorer", "reveal_in_explorer_failed", loggedEx); }
     }
 
     /// <summary>

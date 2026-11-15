@@ -4,6 +4,30 @@ All notable changes to Glide Image Viewer are documented here. The format is bas
 [Keep a Changelog](https://keepachangelog.com/), and the project uses dotted feature releases with
 hyphenated follow-up corrections (for example `4.2.0-1`).
 
+## [5.0.2] - 2026-11-15
+
+A polish release on top of 5.0.1: window size and position are remembered correctly through maximise and full screen, full screen switches without the "reload" flash, a launch log explains new window vs tab decisions, and about 150 silent `catch` blocks were reviewed. `MainWindow` decomposition and the remaining UI-thread file work are planned for a later release.
+
+### Added
+
+- Launch log: every launch forwarded to a running Glide now writes a `launch/open_decision` diagnostics entry saying why it opened a new window, a new tab, replaced the Home tab, overwrote a tab or refreshed an already-open image (open-behavior settings in effect, duplicate policy, warm/standby state, file extension such as `.gif`; never the path).
+
+### Changed
+
+- **Entering and leaving fullscreen is a single, quicker mode switch.** A maximized window now goes from fullscreen straight back to maximized: one window-state change instead of three resizes (fullscreen, maximized, normal size, maximized again), and the window is no longer hidden for it. A normal window lands on its remembered size and position in one step, and the size and position are only set again when they really differ. The title-bar layout, the status-bar sizing and the tab strip are now updated once for the final size instead of on every intermediate resize, the status bar no longer re-applies its styles on every resize, and the title bar is laid out for the new mode before the window changes size, so there is one layout pass instead of two. The diagnostics trace now records each switch (`fullscreen/entered` and `fullscreen/exited` with path, hiding, number of resizes and time taken; `fullscreen/revealed` with how long the window was hidden).
+
+### Fixed
+
+- **Window size and position are remembered through maximise and full screen.** Windows can mark a window maximised before Glide's own state catches up, so the maximised rectangle could be saved as the "normal" size. Glide now ignores natively maximised windows when tracking normal bounds and pins the normal bounds when leaving Normal. Small window → maximise → un-maximise, and small window → full screen → exit, both return the same size and position; maximised → full screen → exit returns maximised.
+- **Leaving fullscreen no longer looks like Glide reloading.** Since 5.0.0 the whole window was made fully transparent while it left fullscreen (the desktop showed through for several frames) and was only shown again a few frames later, or after a quarter of a second. Now only a switch between fullscreen and a normal-sized window is hidden, and only from the moment the window changes size until the first frame at the new size has been drawn (usually one or two frames). This uses a Windows DWM cloak, so your window-transparency setting is never touched. Switches between fullscreen and maximized are not hidden at all. Entering fullscreen from a normal-sized window gets the same treatment, so the old picture no longer jumps to the top-left corner for a moment. Remembered window placement is unchanged: a normal window returns to the same size and position, and a maximized window returns maximized and still un-maximizes to its normal size.
+
+### Security
+
+### Internal
+
+- Version advanced to 5.0.2 in `Directory.Build.props` (single source for the assembly, installer, window title, About page and diagnostics).
+- Stabilisation: source-text tests converted to behavioural ones where the code can run (Reset catalogue file names now checked against what the real stores write, SVG decode checked for released file handles) and the remaining ones are labelled; about 150 empty `catch` blocks now either log to the diagnostics trace (launch-policy cache, legacy placement cleanup, diagnostics export, thumbnail cache clear, Explorer open/reveal) or carry a one-line reason for swallowing. No behaviour change.
+
 ## [5.0.1] - 2026-11-15
 
 A polish release with three main points: Glide moves to **.NET 10 LTS** (.NET 8 support ended on 2026-11-10) and the exe gets about 10 % smaller; the safety and integrity findings of an external code audit are fixed (a folder move to another drive can no longer delete files that arrive or change during the move, a multipage TIFF can no longer be overwritten with only its first page, the optional video decoder is rehashed before it is loaded, and rename and Recycle no longer freeze the window); and Glide gets a **daily update check** that only ever offers to open the release page. Features, settings and file formats are otherwise unchanged, and settings files from 5.0.0 load as they are.

@@ -160,7 +160,7 @@ public static class RecentHistoryStore
             _debounce?.Cancel();
             _debounce = cts = new CancellationTokenSource();
         }
-        _ = Task.Run(async () => { try { await Task.Delay(350, cts.Token).ConfigureAwait(false); await PersistAsync().ConfigureAwait(false); } catch (OperationCanceledException) { } });
+        _ = Task.Run(async () => { try { await Task.Delay(350, cts.Token).ConfigureAwait(false); await PersistAsync().ConfigureAwait(false); } catch (OperationCanceledException) { /* cancellation is the expected way to stop this work */ } });
     }
 
     private static async Task PersistAsync()
@@ -192,7 +192,7 @@ public static class RecentHistoryStore
     private static void ReportFailure(Exception ex)
     {
         lock (Gate) _lastPersistenceError = ex;
-        try { PersistenceFailed?.Invoke(ex); } catch { }
+        try { PersistenceFailed?.Invoke(ex); } catch { /* a subscriber threw; it must not break persistence */ }
     }
 
     private static bool SameKey(Entry x, string kind, string path) => string.Equals(x.Kind, kind, StringComparison.OrdinalIgnoreCase) && string.Equals(x.Path, path, StringComparison.OrdinalIgnoreCase);

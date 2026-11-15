@@ -5,6 +5,7 @@ namespace Glide.Core.Tests;
 /// ordinary windowed viewer menu and the fullscreen chrome menu, and its tick must reflect the
 /// active topmost state for the current mode.
 /// </summary>
+// Source-text contract kept: this asserts on production source (UI code-behind, native/installer files or a repo-wide scan) that cannot be run headlessly; behavioural coverage lives in the other test files.
 public sealed class AlwaysOnTopContextMenuContractTests
 {
     [Fact]

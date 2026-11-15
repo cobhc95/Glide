@@ -6,6 +6,7 @@ namespace Glide.Core.Tests;
 /// Print-layout preferences persist across sessions without touching printer-specific
 /// capabilities (paper/source names are never stored).
 /// </summary>
+[Collection("PrintSettingsStoreStatics")]
 public sealed class PrintSettingsStoreTests
 {
     [Fact]

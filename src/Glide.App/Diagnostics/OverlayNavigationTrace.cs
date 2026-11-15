@@ -98,6 +98,6 @@ internal static class OverlayNavigationTrace
                 writer.WriteLine((e.Detail ?? "").Replace('\t', ' ').Replace('\r', ' ').Replace('\n', ' '));
             }
         }
-        catch { }
+        catch { /* diagnostic trace output only; it must never throw into the UI */ }
     }
 }

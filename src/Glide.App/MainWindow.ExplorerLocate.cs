@@ -64,7 +64,7 @@ public partial class MainWindow
                 if (File.Exists(full)) { file = full; folder = Path.GetDirectoryName(full); }
                 else if (Directory.Exists(full)) folder = full;
             }
-            catch { }
+            catch { /* unusable path: file and folder stay null and the caller reports it */ }
         }
         if (string.IsNullOrWhiteSpace(folder) || !Directory.Exists(folder))
         {

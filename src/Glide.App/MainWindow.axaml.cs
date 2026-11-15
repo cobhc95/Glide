@@ -461,6 +461,14 @@ public partial class MainWindow : Window
 
             TrackNormalWindowPlacement();
             SaveCurrentWholeAppOverlayPlacement();
+            if (_fullscreenTransitionActive)
+            {
+                // Fullscreen enter/exit runs the chrome sizing and the tab-strip rebuild once for the final
+                // geometry (ApplyChromeSizingAfterFullscreenTransition / RefreshTabStripAfterFullscreenTransition)
+                // instead of on every intermediate WM_SIZE of the native state change.
+                _fullscreenTransitionResizeEvents++;
+                return;
+            }
             ApplyCompactChromeLayout();
             ApplyStatusBarSize();
             if (_wholeAppOverlayMode) Dispatcher.UIThread.Post(AlignWholeAppOverlayChromeToPixels, DispatcherPriority.Render);
@@ -485,6 +493,15 @@ public partial class MainWindow : Window
             var oldState = _lastKnownWindowState;
             var newState = WindowState;
             _lastKnownWindowState = newState;
+            if (newState is WindowState.Maximized or WindowState.FullScreen && _normalPlacementKnown && !_wholeAppOverlayMode)
+            {
+                // Leaving Normal: pin the remembered ordinary bounds so transient maximized/fullscreen
+                // geometry can never replace them (restore and fullscreen-exit return to these).
+                _settings.WindowX = _lastNormalWindowPosition.X;
+                _settings.WindowY = _lastNormalWindowPosition.Y;
+                _settings.WindowWidth = _lastNormalWindowSize.Width;
+                _settings.WindowHeight = _lastNormalWindowSize.Height;
+            }
             if (oldState != WindowState.Minimized)
                 _stateBeforeMinimize = oldState;
 
@@ -493,8 +510,12 @@ public partial class MainWindow : Window
             ApplySelectionBuffer();
             Viewport.RightDragWindowMoveAllowed = WindowState == WindowState.Normal;
             Viewport.BackgroundWindowDragEnabled = IsLeftWindowMoveAllowedForCurrentState();
-            ApplyStatusBarSize();
-            ApplyStatusVisibility();
+            if (!_fullscreenTransitionActive)
+            {
+                // Fullscreen enter/exit applies these once after the native change has settled.
+                ApplyStatusBarSize();
+                ApplyStatusVisibility();
+            }
             UpdateIntegratedTitleBarInset();
             UpdateCaptionButtonState();
             if (newState == WindowState.Minimized)

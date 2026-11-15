@@ -213,7 +213,7 @@ public static partial class VideoDecoderPack
         }
         finally
         {
-            try { Directory.Delete(work, recursive: true); } catch { }
+            try { Directory.Delete(work, recursive: true); } catch { /* best-effort cleanup; a locked or missing file is harmless */ }
         }
     }
 

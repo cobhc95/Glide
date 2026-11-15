@@ -112,7 +112,7 @@ public static class SettingsStore
                     return cached.Policy;
             }
         }
-        catch { }
+        catch { /* unreadable or stale launch-policy cache: fall through and recompute from the settings file */ }
 
         // Cache misses are deliberately scalar-only and side-effect free. In particular, this path
         // never constructs GlideSettingsState and never writes the sidecar before Avalonia starts.
@@ -222,7 +222,7 @@ public static class SettingsStore
         }
         finally
         {
-            try { if (File.Exists(temp)) File.Delete(temp); } catch { }
+            try { if (File.Exists(temp)) File.Delete(temp); } catch { /* best-effort temp cleanup; the write outcome is already decided */ }
         }
     }
 
@@ -236,7 +236,7 @@ public static class SettingsStore
             if (File.Exists(path) && string.Equals(File.ReadAllText(path), json, StringComparison.Ordinal)) return;
             AtomicWriteAllText(path, json);
         }
-        catch { }
+        catch (Exception loggedEx) { Glide.Diagnostics.Runtime.LiveDiagnosticTrace.WriteException("settings", "launch_policy_cache_write_failed", loggedEx); }
     }
 
     private static void SaveLaunchPolicyCache()
@@ -254,7 +254,7 @@ public static class SettingsStore
             if (before != after) return;
             SaveLaunchPolicyCache(after, policy);
         }
-        catch { }
+        catch (Exception loggedEx) { Glide.Diagnostics.Runtime.LiveDiagnosticTrace.WriteException("settings", "launch_policy_cache_refresh_failed", loggedEx); }
     }
 
     public static string GetSettingsPath()

@@ -180,7 +180,7 @@ internal static class WindowsThumbnailRegistration
                 }
             }
 
-            try { SHChangeNotify(ShcneAssocChanged, ShcnfIdList, IntPtr.Zero, IntPtr.Zero); } catch { }
+            try { SHChangeNotify(ShcneAssocChanged, ShcnfIdList, IntPtr.Zero, IntPtr.Zero); } catch (Exception loggedEx) { Glide.Diagnostics.Runtime.LiveDiagnosticTrace.WriteException("thumbnails", "assoc_notify_failed", loggedEx); }
             message = register
                 ? $"Glide Explorer thumbnails enabled for {list.Length} formats."
                 : $"Glide Explorer thumbnails disabled for {list.Length} formats.";
@@ -203,7 +203,7 @@ internal static class WindowsThumbnailRegistration
             using var key = hive.OpenSubKey($@"Software\Classes\{extension}\ShellEx\{ThumbnailHandlerGuid}");
             if (key?.GetValue(string.Empty) is string value && !string.IsNullOrWhiteSpace(value)) return value;
         }
-        catch { }
+        catch { /* key missing or unreadable means no existing handler to preserve */ }
         return null;
     }
 }

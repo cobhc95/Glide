@@ -203,7 +203,11 @@ public partial class MainWindow
         Apply(_homeSurface?.StatusCollapseButton);
     }
 
-    private void ApplyChromeLayoutForWindowState()
+    /// <param name="state">
+    /// The state to lay the chrome out for; defaults to the current one. Fullscreen enter/exit pass the target
+    /// state before the native change, so the synchronous WM_SIZE layout pass already uses the final chrome.
+    /// </param>
+    private void ApplyChromeLayoutForWindowState(WindowState? state = null)
     {
         if (MainRoot.RowDefinitions.Count < 2) return;
 
@@ -217,7 +221,7 @@ public partial class MainWindow
             return;
         }
 
-        var fullscreen = WindowState == WindowState.FullScreen;
+        var fullscreen = (state ?? WindowState) == WindowState.FullScreen;
         if (fullscreen && _settings.FullscreenKeepTabBarOpen)
         {
             // Pinned fullscreen chrome participates in layout: the image resizes below the 44-DIP row.
@@ -607,7 +611,7 @@ public partial class MainWindow
         Viewport.CancelInteraction();
         if (OperatingSystem.IsWindows())
         {
-            try { ReleaseNativeCapture(); } catch { }
+            try { ReleaseNativeCapture(); } catch { /* pointer capture already released; nothing to undo */ }
         }
     }
 
@@ -627,7 +631,7 @@ public partial class MainWindow
         if (_wholeAppOverlayControlsHost is { } overlayControls) overlayControls.IsVisible = false;
         if (OperatingSystem.IsWindows())
         {
-            try { ReleaseNativeCapture(); } catch { }
+            try { ReleaseNativeCapture(); } catch { /* pointer capture already released; nothing to undo */ }
         }
         _diagnostics.Write("input", "native_resize_begin", new { Position, Width, Height });
     }
@@ -638,7 +642,7 @@ public partial class MainWindow
         // authoritative boundary where Windows has finished its modal non-client sizing loop.
         _nativeSizeMoveActive = false;
         LeaveNativeMoveLoopGuard();
-        try { TrackNormalWindowPlacement(); SaveCurrentWholeAppOverlayPlacement(); } catch { }
+        try { TrackNormalWindowPlacement(); SaveCurrentWholeAppOverlayPlacement(); } catch { /* placement bookkeeping during close is best effort */ }
         EndManualWindowDrag();
         Viewport.CancelInteraction();
         _chromeMiddlePressPointer = null;
@@ -646,7 +650,7 @@ public partial class MainWindow
         _windowsBrowserFrame?.SetSelectionZoomOutPressed(false);
         if (OperatingSystem.IsWindows())
         {
-            try { ReleaseNativeCapture(); } catch { }
+            try { ReleaseNativeCapture(); } catch { /* pointer capture already released; nothing to undo */ }
         }
         Dispatcher.UIThread.Post(() =>
         {
@@ -667,7 +671,7 @@ public partial class MainWindow
         var dx = screenCurrent.X - screenStart.X;
         var dy = screenCurrent.Y - screenStart.Y;
         _manualWindowDragMoved = true;
-        try { pointer.Capture(this); } catch { }
+        try { pointer.Capture(this); } catch { /* pointer capture already released; nothing to undo */ }
         Position = new PixelPoint(_manualWindowDragWindowStart.X + dx, _manualWindowDragWindowStart.Y + dy);
         _diagnostics.Write("input", "deferred_right_window_drag_begin", new { dx, dy });
     }
@@ -972,7 +976,7 @@ public partial class MainWindow
     {
         if (_manualWindowDragPointer is { } pointer)
         {
-            try { pointer.Capture(null); } catch { }
+            try { pointer.Capture(null); } catch { /* pointer capture already released; nothing to undo */ }
         }
         _manualWindowDragPointer = null;
         _manualWindowDragMoved = false;

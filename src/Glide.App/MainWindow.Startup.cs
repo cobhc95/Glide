@@ -396,6 +396,10 @@ public partial class MainWindow
         // Overlay mode is intentionally transient presentation geometry. Never let moving/resizing
         // the frameless overlay overwrite Glide's remembered ordinary-window placement.
         if (_wholeAppOverlayMode || !_startupPlacementApplied || WindowState != WindowState.Normal || Bounds.Width < 100 || Bounds.Height < 100) return;
+        // Windows flips the native maximized/minimized state before Avalonia's cached WindowState catches
+        // up, so a resize fired mid-maximize still reads "Normal" but carries the maximized geometry.
+        // Trust the native state too, or the maximized rectangle overwrites the real normal bounds.
+        if (TryGetNativeZoomed(out var nativeZoomed) && nativeZoomed) return;
         _lastNormalWindowPosition = Position;
         _lastNormalWindowSize = Bounds.Size;
         _normalPlacementKnown = true;

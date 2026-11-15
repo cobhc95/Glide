@@ -2399,7 +2399,7 @@ public partial class SettingsWindow : Window
                     imported = document.Settings;
                 }
             }
-            catch (JsonException) { }
+            catch (JsonException) { /* not valid settings JSON: treated as not importable by the check that follows */ }
 
             // Backward-compatible import for the earlier raw-state JSON format.
             imported ??= JsonSerializer.Deserialize(json, AppJsonContext.Default.GlideSettingsState);

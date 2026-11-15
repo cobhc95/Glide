@@ -1,6 +1,6 @@
 # Glide Image Viewer
 
-> **Glide 5.0.1 is available:** download the [installer or portable archive](https://github.com/cobhc95/Glide/releases/tag/v5.0.1). 5.0.1 is a polish release: Glide is now built with .NET 10 LTS (about 10 % smaller exe), file moves, saves and renames are safer, and a daily update check tells you when a newer version exists (it only opens the release page, and one switch turns it off). 5.0.0 was the major release; see [What changed since 4.7.1](#what-changed-since-471).
+> **Glide 5.0.2 is available:** download the [installer or portable archive](https://github.com/cobhc95/Glide/releases/tag/v5.0.2). 5.0.2 is a polish release on top of 5.0.1: the window now remembers its size and position correctly through maximise and full screen, and full screen switches without the reload flash. 5.0.1 was also a polish release: Glide is now built with .NET 10 LTS (about 10 % smaller exe), file moves, saves and renames are safer, and a daily update check tells you when a newer version exists (it only opens the release page, and one switch turns it off). 5.0.0 was the major release; see [What changed since 4.7.1](#what-changed-since-471).
 
 ## Fast. Multi-tabbed. Multi-window. Highly customizable.
 
@@ -15,7 +15,7 @@
 Windows x64 only. No .NET runtime is required. Get the files from the [latest release](https://github.com/cobhc95/Glide/releases/latest):
 
 * **`Glide.Setup.exe`**: the installer (requires administrator rights). Installs to Program Files by default, adds Glide to Windows' Open With menu and registers Explorer thumbnails.
-* **`Glide-5.0.1-Portable.zip`**: the portable build. Extract it anywhere and run `Glide.exe`; no installation or administrator rights are needed.
+* **`Glide-5.0.2-Portable.zip`**: the portable build. Extract it anywhere and run `Glide.exe`; no installation or administrator rights are needed.
 * **`Glide.Setup.sha256`**: the installer's checksum. To verify the download, run `certutil -hashfile Glide.Setup.exe SHA256` and compare the result with the value in this file.
 
 Upgrading from 5.0.0 or 4.x keeps your settings (older files are migrated once, and your own key bindings and customised title bar are kept). The installer closes Glide before upgrading.
@@ -30,7 +30,7 @@ Upgrading from 5.0.0 or 4.x keeps your settings (older files are migrated once, 
 * 🗂️ **Safer file operations** (from an external code audit): a folder move to another drive no longer deletes files that arrive or change during the move; a multipage TIFF or animated image can no longer be overwritten in place with only its first page (*Save* refuses, *Save as* warns); rename and Recycle in the viewer no longer freeze the window on a slow share (and the viewer's rename supports case-only renames like the Explorer tab); the optional video decoder is rehashed before it is loaded.
 * 🔔 **A daily update check:** one small request to GitHub once a day, a prompt that only opens the release page, *Don't remind me again*, a new *Updates* card in Settings > General & startup and a *Check for updates now* action. Off with one switch; Glide never downloads or installs anything.
 
-Details: [5.0.1 release notes](docs/releases/release-notes-5.0.1.md) and the [changelog](CHANGELOG.md).
+Details: [5.0.2 release notes](docs/releases/release-notes-5.0.2.md), [5.0.1 release notes](docs/releases/release-notes-5.0.1.md) and the [changelog](CHANGELOG.md).
 
 5.0.0 is the biggest Glide release so far. (4.8.0 was never published; everything built for it is part of 5.0.0.) Thanks to vertigo220, whose detailed bug reports and feature ideas shaped it: see [Thanks](#-thanks).
 
@@ -311,7 +311,7 @@ Windows x64. No .NET runtime is required (the app is self-contained and NativeAO
 
 ## Building from source
 
-On Windows, run `build.cmd` (or `build.cmd fast --no-pause`). Release builds produce `Glide-<version>-Portable.zip`, `dist-installer\Glide Setup.exe`, `Glide-<version>.exe` for direct testing and the compact `Glide-Zero-Context-Handover.zip`; on GitHub the installer is published as `Glide.Setup.exe` together with `Glide.Setup.sha256` and the portable archive (for 5.0.1: `Glide-5.0.1-Portable.zip`). Building needs the .NET 10 SDK (x64) and the Visual Studio 2022/2026 C++ tools (see [docs/NET10-MIGRATION-PLAN.md](docs/NET10-MIGRATION-PLAN.md)). Scripts live in `tools/`; the performance benchmark harness is `tools/perf`. Three test projects cover Core, Input and Explorer; settings and actions have static audits (`python tools/audit-settings-search.py`, `python tools/audit-action-registry.py`).
+On Windows, run `build.cmd` (or `build.cmd fast --no-pause`). Release builds produce `Glide-<version>-Portable.zip`, `dist-installer\Glide Setup.exe`, `Glide-<version>.exe` for direct testing and the compact `Glide-Zero-Context-Handover.zip`; on GitHub the installer is published as `Glide.Setup.exe` together with `Glide.Setup.sha256` and the portable archive (for 5.0.1: `Glide-5.0.2-Portable.zip`). Building needs the .NET 10 SDK (x64) and the Visual Studio 2022/2026 C++ tools (see [docs/NET10-MIGRATION-PLAN.md](docs/NET10-MIGRATION-PLAN.md)). Scripts live in `tools/`; the performance benchmark harness is `tools/perf`. Three test projects cover Core, Input and Explorer; settings and actions have static audits (`python tools/audit-settings-search.py`, `python tools/audit-action-registry.py`).
 
 ## Documentation
 

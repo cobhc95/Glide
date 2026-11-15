@@ -5,6 +5,7 @@ namespace Glide.Core.Tests;
 /// status bar wraps by real content width (no premature partial third line) and buttons only shrink
 /// while an opt-in Auto-resize toggle is enabled.
 /// </summary>
+// Source-text contract kept: this asserts on production source (UI code-behind, native/installer files or a repo-wide scan) that cannot be run headlessly; behavioural coverage lives in the other test files.
 public sealed class StatusChromeLayoutContractTests
 {
     [Fact]

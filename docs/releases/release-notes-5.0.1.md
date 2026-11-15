@@ -1,7 +1,5 @@
 # Glide Image Viewer: .NET 10, safer file operations and update alerts
 
-![Glide](https://raw.githubusercontent.com/cobhc95/Glide/main/docs/screenshots/5.0/hero.jpg)
-
 🚀 **A polish release on top of 5.0.0:** Glide now runs on **.NET 10 LTS**, file operations are safer, and a **daily update check** tells you when a new version is out (it never installs anything).
 
 ## 🆕 What's new in 5.0.1
@@ -34,9 +32,6 @@ Large images open and settle **up to 89 % faster** with **half the memory**, plu
 |---|---|
 | `Glide.Setup.exe` | Installer (administrator rights; installs to Program Files, adds Open With and Explorer thumbnails) |
 | `Glide-5.0.1-Portable.zip` | Portable: extract anywhere, run `Glide.exe` |
-| `Glide.Setup.sha256` | Installer checksum |
-
-🔑 **SHA256 of `Glide.Setup.exe`:** `C46EF01C5E0CE3BC05CD8D7AACF2EB0630B33605E557160576542DF9DB441735` (`certutil -hashfile Glide.Setup.exe SHA256`)
 
 - 🔼 Install over 5.0.0 or any 4.x: settings carry over, your own key bindings and title bar are kept · 💻 Windows 10 1607+ (x64) · 🔐 no telemetry; the only network use is the daily update check (off in Settings) and the optional video-decoder download
 

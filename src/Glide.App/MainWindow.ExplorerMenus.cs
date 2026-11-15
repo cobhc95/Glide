@@ -23,7 +23,7 @@ public partial class MainWindow
         var shortcut = ExplorerMenuShortcut(tag);
         if (shortcut is not null)
         {
-            try { item.InputGesture = KeyGesture.Parse(shortcut); } catch { }
+            try { item.InputGesture = KeyGesture.Parse(shortcut); } catch { /* an unparsable shortcut text just shows no gesture */ }
         }
         item.Click += (_, _) => action();
         return tag.StartsWith(MenuActions.ContextPrefix, StringComparison.Ordinal)

@@ -12,6 +12,7 @@ namespace Glide.Core.Tests;
 /// The update checker's memory in the settings file (additive keys, JSON round trip, old files, equality, merge, targeted writes)
 /// and the guard rails: no test and no code path outside production start-up can make a real network request.
 /// </summary>
+// Source-text contract kept (tests reading src/): update-feed hardening and the "only HttpClient users" scan are security tripwires over source that no runtime test can enumerate.
 [Collection("UpdateService process-wide state")]
 public sealed class UpdateStateAndGuardTests
 {

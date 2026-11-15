@@ -5,6 +5,7 @@ namespace Glide.Core.Tests;
 /// Downloads folder. The crash breadcrumb trace is opt-in only, enabled by tools and crash
 /// investigations with --diagnostic-trace or GLIDE_DIAGNOSTIC_TRACE=1.
 /// </summary>
+// Source-text contract kept: this asserts on production source (UI code-behind, native/installer files or a repo-wide scan) that cannot be run headlessly; behavioural coverage lives in the other test files.
 public sealed class DiagnosticPrivacyContractTests
 {
     [Fact]

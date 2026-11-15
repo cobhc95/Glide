@@ -72,7 +72,7 @@ internal sealed class MainWindowUpdateHost : IUpdateHost
 
     public void Log(string name, object? data = null)
     {
-        try { LiveDiagnosticTrace.Write("updates", name, data); } catch { }
+        try { LiveDiagnosticTrace.Write("updates", name, data); } catch { /* trace write must never affect the update check */ }
     }
 }
 

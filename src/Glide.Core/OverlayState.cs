@@ -93,7 +93,7 @@ public static class OverlayLayoutStore
         // Validate the exact bytes before replacing the last known-good layout.
         _ = Parse(File.ReadAllText(temp));
         try { if (File.Exists(path)) File.Replace(temp, path, path + ".bak", true); else File.Move(temp, path); }
-        finally { try { if (File.Exists(temp)) File.Delete(temp); } catch { } }
+        finally { try { if (File.Exists(temp)) File.Delete(temp); } catch { /* best-effort cleanup; a locked or missing file is harmless */ } }
     }
 
     public static IReadOnlyList<OverlayState> Load(string path)

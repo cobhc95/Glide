@@ -239,7 +239,7 @@ internal sealed class WindowsBrowserFrameController : IDisposable
             SetWindowPos(_hwnd, IntPtr.Zero, 0, 0, 0, 0,
                 SwpNoSize | SwpNoMove | SwpNoZOrder | SwpNoActivate | SwpFrameChanged);
         }
-        catch { }
+        catch { /* frame style restore is cosmetic; the window keeps working */ }
         ApplyTaskbarIcons();
     }
 
@@ -263,12 +263,12 @@ internal sealed class WindowsBrowserFrameController : IDisposable
     {
         if (_privacyCurtain != IntPtr.Zero)
         {
-            try { DestroyWindow(_privacyCurtain); } catch { }
+            try { DestroyWindow(_privacyCurtain); } catch { /* best-effort teardown; the resource may already be closed */ }
             _privacyCurtain = IntPtr.Zero;
         }
         if (_privacyBrush != IntPtr.Zero)
         {
-            try { DeleteObject(_privacyBrush); } catch { }
+            try { DeleteObject(_privacyBrush); } catch { /* best-effort teardown; the resource may already be closed */ }
             _privacyBrush = IntPtr.Zero;
         }
     }
@@ -377,7 +377,7 @@ internal sealed class WindowsBrowserFrameController : IDisposable
                 // post may not run until that loop has already ended. MainWindow needs the guard set
                 // before the first WM_SIZING/mouse movement so routed image/overlay gestures cannot
                 // race the native resize operation.
-                try { _nativeResizeStarted?.Invoke(); } catch { }
+                try { _nativeResizeStarted?.Invoke(); } catch { /* a callback threw; it must not break native resize handling */ }
                 break;
 
             case WmExitSizeMove:
@@ -515,7 +515,7 @@ internal sealed class WindowsBrowserFrameController : IDisposable
         // Avalonia only refreshes its monitor cache on WM_DISPLAYCHANGE (it ignores SPI_SETWORKAREA).
         // Forwarding a synthetic one straight to its WndProc is side-effect free and makes the next
         // Avalonia maximize use the current work area.
-        try { CallWindowProcW(_previousWndProc, _hwnd, WmDisplayChange, IntPtr.Zero, IntPtr.Zero); } catch { }
+        try { CallWindowProcW(_previousWndProc, _hwnd, WmDisplayChange, IntPtr.Zero, IntPtr.Zero); } catch { /* best-effort teardown; the resource may already be closed */ }
     }
 
     private void RefitMaximizedToLiveWorkArea()
@@ -687,10 +687,10 @@ internal sealed class WindowsBrowserFrameController : IDisposable
         _disposed = true;
         HidePrivacyCurtain();
         ClearVisualState();
-        try { Win32Properties.RemoveWindowStylesCallback(_window, _stylesCallback); } catch { }
+        try { Win32Properties.RemoveWindowStylesCallback(_window, _stylesCallback); } catch { /* best-effort teardown; the resource may already be closed */ }
         if (_hwnd != IntPtr.Zero && _previousWndProc != IntPtr.Zero)
         {
-            try { SetWindowLongPtrCompat(_hwnd, GwlpWndProc, _previousWndProc); } catch { }
+            try { SetWindowLongPtrCompat(_hwnd, GwlpWndProc, _previousWndProc); } catch { /* best-effort teardown; the resource may already be closed */ }
         }
         if (_zoomInCursor != IntPtr.Zero) DestroyCursor(_zoomInCursor);
         if (_zoomOutCursor != IntPtr.Zero) DestroyCursor(_zoomOutCursor);

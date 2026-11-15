@@ -95,7 +95,7 @@ public partial class MainWindow
     {
         if (_workspace.Active?.Id == image.Id && ImageView.IsVisible && !string.IsNullOrWhiteSpace(_currentPath))
         {
-            try { return Path.GetFullPath(_currentPath); } catch { }
+            try { return Path.GetFullPath(_currentPath); } catch { /* invalid path: fall through to the raw value */ }
         }
         return image.Path;
     }

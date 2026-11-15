@@ -20,6 +20,7 @@ namespace Glide.Core.Tests;
 /// Balanced), embedded previews were upscaled and never rotated, GIF frames were not placed on their
 /// logical screen, and every file was read into memory in full.
 /// </summary>
+// Source-text contract kept: this asserts on production source (UI code-behind, native/installer files or a repo-wide scan) that cannot be run headlessly; behavioural coverage lives in the other test files.
 [Collection("ShellThumbnailProvider")]
 public sealed class ShellThumbnailProviderTests : IDisposable
 {

@@ -390,7 +390,7 @@ public partial class MainWindow
                             : await provider.TryGetFileFromPathAsync(new Uri(path));
                         if (storage is not null) item.SetFile(storage);
                     }
-                    catch { }
+                    catch { /* drag payload is optional; the drag proceeds without the storage item */ }
                 }
                 data.Add(item);
             }

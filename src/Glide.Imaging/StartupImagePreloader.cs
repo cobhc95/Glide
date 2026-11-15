@@ -212,7 +212,7 @@ public static class StartupImagePreloader
             DisposeWhenDone(task);
             throw;
         }
-        catch { }
+        catch { /* preload is speculative; a failure just means the normal load path runs */ }
 
         // Timed out or failed: this consumer will decode itself, so the preload result (a native
         // pixel buffer of up to hundreds of MB) must be freed when the worker finishes. It used to leak.

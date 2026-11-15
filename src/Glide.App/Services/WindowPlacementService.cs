@@ -131,7 +131,7 @@ public static class WindowPlacementService
             var legacy = Path.Combine(SettingsStore.GetSettingsDirectory(), "popup-placement.json");
             if (File.Exists(legacy)) File.Delete(legacy);
         }
-        catch { }
+        catch (Exception loggedEx) { Glide.Diagnostics.Runtime.LiveDiagnosticTrace.WriteException("placement", "legacy_placement_cleanup_failed", loggedEx); }
     }
 
     internal static (IReadOnlyList<ScreenWorkArea> Screens, ScreenWorkArea Primary) ScreensOf(Window window)
@@ -146,7 +146,7 @@ public static class WindowPlacementService
             if (window.Screens.Primary is { } p)
                 primary = new ScreenWorkArea(p.WorkingArea.X, p.WorkingArea.Y, p.WorkingArea.Width, p.WorkingArea.Height, p.Scaling);
         }
-        catch { }
+        catch { /* screen enumeration can fail during display changes; placement then uses its defaults */ }
         return (screens, primary);
     }
 
@@ -252,7 +252,7 @@ public static class WindowPlacementService
                     _captured = new WindowPlacementState { X = _normalPosition.X, Y = _normalPosition.Y };
                 }
             }
-            catch { }
+            catch { /* window metrics unavailable mid-close; the previously captured placement is kept */ }
         }
     }
 }

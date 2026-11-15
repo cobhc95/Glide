@@ -355,7 +355,7 @@ public partial class MainWindow
             var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
             if (clipboard is not null) await clipboard.SetTextAsync(text);
         }
-        catch { }
+        catch { /* clipboard can be locked by another app; nothing to recover */ }
         ShowExplorerMessage(paths.Count == 1 ? "Copied the path" : $"Copied {paths.Count} paths");
     }
 }

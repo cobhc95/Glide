@@ -23,7 +23,7 @@ internal static class ExplorerLocations
                 if (list.Any(l => string.Equals(l.Path, full, StringComparison.OrdinalIgnoreCase))) return;
                 list.Add(new ExplorerLocation(name, full, icon));
             }
-            catch { }
+            catch { /* an unreachable location is simply left out of the list */ }
         }
         Add("Desktop", Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "Desktop");
         Add("Downloads", Platform.WindowsKnownFolders.DownloadsIfExists(), "Download");
@@ -53,10 +53,10 @@ internal static class ExplorerLocations
                         : drive.VolumeLabel;
                     list.Add(new ExplorerLocation($"{label} ({drive.Name.TrimEnd('\\')})", drive.RootDirectory.FullName, "Drive"));
                 }
-                catch { }
+                catch { /* a drive that cannot be queried (ejected, offline) is left out of the list */ }
             }
         }
-        catch { }
+        catch { /* drive enumeration failure leaves the other locations intact */ }
         return list;
     }
 }

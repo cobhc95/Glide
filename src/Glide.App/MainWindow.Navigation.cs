@@ -182,7 +182,7 @@ public partial class MainWindow
                 await PresentCurrentAsync();
             }
         }
-        catch (OperationCanceledException) { }
+        catch (OperationCanceledException) { /* cancellation is the expected way to stop this work */ }
         catch (Exception ex)
         {
             if (!IsFolderSessionCurrent(session)) return;
@@ -400,7 +400,7 @@ public partial class MainWindow
                             }, DispatcherPriority.Background);
                         }
                     }
-                    catch { }
+                    catch { /* retiring the old bitmap is cleanup; the new image is already shown */ }
                 });
             }
             else if (old is not null && _loader.GetLeaseCount(old) > 1)
@@ -444,7 +444,7 @@ public partial class MainWindow
                         using var readyEvent = EventWaitHandle.OpenExisting(notifyName);
                         readyEvent.Set();
                     }
-                    catch { }
+                    catch { /* best-effort teardown; the resource may already be closed */ }
                 }
 
                 if (App.BenchmarkExitAfterFirstFrame)
@@ -569,7 +569,7 @@ public partial class MainWindow
                 warmed = warmed.Distinct(StringComparer.OrdinalIgnoreCase).Count()
             });
         }
-        catch (OperationCanceledException) { }
+        catch (OperationCanceledException) { /* cancellation is the expected way to stop this work */ }
         catch (Exception ex)
         {
             _diagnostics.Write("prefetch", "surrounding_folder_failed", new { path = currentPath, error = ex.GetType().Name });
@@ -672,7 +672,7 @@ public partial class MainWindow
                                 new { path = firstFrame.Path, request = request.ImageRequestId, cacheHit = full.CacheHit, preparedHit = full.PreparedFrameHit, promoted = fullPromoted });
                         }, DispatcherPriority.Background);
                     }
-                    catch { }
+                    catch { /* diagnostic write after the refine step; must not disturb navigation */ }
                 });
                 return;
             }
@@ -739,7 +739,7 @@ public partial class MainWindow
                                 cacheHit = refined.CacheHit, preparedHit = refined.PreparedFrameHit, promoted });
                     }, DispatcherPriority.Background);
                 }
-                catch { }
+                catch { /* diagnostic write after the refine step; must not disturb navigation */ }
             });
         }
         catch (OperationCanceledException)
@@ -850,7 +850,7 @@ public partial class MainWindow
                     if (StatusStatsText.Text == message) UpdateStatusStats();
                 }, DispatcherPriority.Background);
             }
-            catch (OperationCanceledException) { }
+            catch (OperationCanceledException) { /* cancellation is the expected way to stop this work */ }
         });
     }
 
@@ -963,7 +963,7 @@ public partial class MainWindow
                 await Task.Delay(25, token);
             }
         }
-        catch (OperationCanceledException) { }
+        catch (OperationCanceledException) { /* cancellation is the expected way to stop this work */ }
         finally
         {
             if (!token.IsCancellationRequested)
@@ -1132,11 +1132,11 @@ public partial class MainWindow
                             await PresentCurrentAsync(rapidPreviewOnly: false, forceFull: true);
                         });
                     }
-                    catch (OperationCanceledException) { }
+                    catch (OperationCanceledException) { /* cancellation is the expected way to stop this work */ }
                     catch (Exception ex) { _diagnostics.Write("navigation", "rapid_settle_failed", new { error = ex.GetType().Name }); }
                 }, DispatcherPriority.Render);
             }
-            catch (OperationCanceledException) { }
+            catch (OperationCanceledException) { /* cancellation is the expected way to stop this work */ }
             catch (Exception ex) { _diagnostics.Write("navigation", "rapid_settle_failed", new { error = ex.GetType().Name }); }
         }, CancellationToken.None);
     }
@@ -1169,11 +1169,11 @@ public partial class MainWindow
                             await PresentCurrentAsync(rapidPreviewOnly: false, forceFull: true);
                         });
                     }
-                    catch (OperationCanceledException) { }
+                    catch (OperationCanceledException) { /* cancellation is the expected way to stop this work */ }
                     catch (Exception ex) { _diagnostics.Write("decode", "preview_quality_recovery_failed", new { path, error = ex.GetType().Name }); }
                 }, DispatcherPriority.Background);
             }
-            catch (OperationCanceledException) { }
+            catch (OperationCanceledException) { /* cancellation is the expected way to stop this work */ }
             catch (Exception ex) { _diagnostics.Write("decode", "preview_quality_recovery_failed", new { path, error = ex.GetType().Name }); }
         }, CancellationToken.None);
     }

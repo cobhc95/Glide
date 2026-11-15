@@ -77,12 +77,12 @@ public partial class SettingsWindow
             {
                 foreach (var file in Directory.EnumerateFiles(cacheDirectory, "thumbcache_*.db"))
                 {
-                    try { File.Delete(file); removed++; } catch { }
+                    try { File.Delete(file); removed++; } catch { /* a locked cache file is skipped and not counted as removed */ }
                 }
             }
         }
-        catch { }
-        try { SHChangeNotify(0x08000000, 0, IntPtr.Zero, IntPtr.Zero); } catch { }
+        catch (Exception loggedEx) { Glide.Diagnostics.Runtime.LiveDiagnosticTrace.WriteException("thumbnails", "cache_clear_failed", loggedEx); }
+        try { SHChangeNotify(0x08000000, 0, IntPtr.Zero, IntPtr.Zero); } catch { /* shell refresh notification is cosmetic */ }
         ThumbnailDiagnosticsText.Text = $"Thumbnail cache refresh requested ({removed} cache files removed). " +
                                         "Restart Explorer if thumbnails still appear stale.";
         PageSubtitle.Text = "Thumbnail cache refresh requested.";

@@ -2,6 +2,7 @@ using System.Text.Json;
 
 namespace Glide.Core.Tests;
 
+// Source-text contract kept: this asserts on production source (UI code-behind, native/installer files or a repo-wide scan) that cannot be run headlessly; behavioural coverage lives in the other test files.
 public sealed class OverlayAnimationAreaTests
 {
     [Fact]

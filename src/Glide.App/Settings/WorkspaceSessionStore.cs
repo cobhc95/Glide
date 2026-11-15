@@ -138,7 +138,7 @@ public static class WorkspaceSessionStore
             }
             finally
             {
-                try { if (File.Exists(temp)) File.Delete(temp); } catch { }
+                try { if (File.Exists(temp)) File.Delete(temp); } catch { /* best-effort temp cleanup; the write outcome is already decided */ }
             }
         }
     }

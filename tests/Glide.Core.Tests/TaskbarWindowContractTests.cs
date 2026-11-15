@@ -5,6 +5,7 @@ namespace Glide.Core.Tests;
 /// "minimizing makes the window vanish" regressions. Every top-level Glide window must own its own
 /// taskbar button; the old single-representative suppression must not come back.
 /// </summary>
+// Source-text contract kept: this asserts on production source (UI code-behind, native/installer files or a repo-wide scan) that cannot be run headlessly; behavioural coverage lives in the other test files.
 public sealed class TaskbarWindowContractTests
 {
     [Fact]

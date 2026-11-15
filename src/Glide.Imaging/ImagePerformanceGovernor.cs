@@ -66,7 +66,7 @@ public static class ImagePerformanceGovernor
                 availableLimit = Math.Max(8L * 1024 * 1024, info.TotalAvailableMemoryBytes / 16);
             }
         }
-        catch { }
+        catch { /* memory info unavailable: keep the conservative default limit */ }
         return Math.Max(8L * 1024 * 1024, Math.Min(Current.MaxSpeculativeCompressedFileBytes, Math.Min(budgetLimit, availableLimit)));
     }
 

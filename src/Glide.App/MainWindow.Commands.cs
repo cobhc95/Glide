@@ -114,7 +114,7 @@ public partial class MainWindow
             if (tabId is { } id) await ExecuteTabGestureAsync(id, action, "side_button");
             else await ExecuteGestureActionAsync(action, 0, slotId);
         }
-        catch (OperationCanceledException) { }
+        catch (OperationCanceledException) { /* cancellation is the expected way to stop this work */ }
         catch (Exception ex)
         {
             _diagnostics.Write("input", "side_button_gesture_failed", new { slot = slotId, error = ex.GetType().Name, ex.Message });
@@ -304,7 +304,7 @@ public partial class MainWindow
         e.Handled = true;
         await ExecuteActionAsync(action, "hotkey");
         }
-        catch (OperationCanceledException) { }
+        catch (OperationCanceledException) { /* cancellation is the expected way to stop this work */ }
         catch (Exception ex)
         {
             _diagnostics.Write("input", "key_command_failed", new { key = e.Key.ToString(), error = ex.GetType().Name, ex.Message });
@@ -475,7 +475,7 @@ public partial class MainWindow
                     await Task.Yield();
             }
         }
-        catch (OperationCanceledException) { }
+        catch (OperationCanceledException) { /* cancellation is the expected way to stop this work */ }
     }
 
     private Task<bool> NavigateRapidStepAsync(int delta, CancellationToken token) =>
@@ -665,7 +665,7 @@ public partial class MainWindow
                 _diagnostics.Write("input", "command_unmapped", new { command = command.ToString() });
             await _commands.ExecuteAsync(command).ConfigureAwait(true);
         }
-        catch (OperationCanceledException) { }
+        catch (OperationCanceledException) { /* cancellation is the expected way to stop this work */ }
         catch (Exception ex)
         {
             _diagnostics.Write("input", "command_failed", new { command = command.ToString(), error = ex.GetType().Name, ex.Message });
@@ -1258,7 +1258,7 @@ public partial class MainWindow
         {
             if (!string.Equals(_currentPath, image, StringComparison.OrdinalIgnoreCase))
             {
-                try { await OpenAsImageTabAsync(image); await Task.Delay(700); } catch { }
+                try { await OpenAsImageTabAsync(image); await Task.Delay(700); } catch { /* one image failing to open must not stop the rest */ }
             }
             if (Viewport.Bitmap is not { } bitmap)
             {

@@ -56,7 +56,7 @@ public partial class MainWindow
         DisposeDetachedBitmap(viewportBitmap);
         if (!ReferenceEquals(interactionBitmap, viewportBitmap))
             DisposeDetachedBitmap(interactionBitmap);
-        try { _loader.PurgeCaches(); } catch { }
+        try { _loader.PurgeCaches(); } catch { /* cache purge during shutdown is best effort */ }
     }
 
     private void DisposeDetachedBitmap(Bitmap? bitmap)
@@ -168,7 +168,7 @@ public partial class MainWindow
                 SetProcessWorkingSetSize(Process.GetCurrentProcess().Handle, (IntPtr)(-1), (IntPtr)(-1));
             }
         }
-        catch { }
+        catch { /* working-set trim is an optional memory optimisation */ }
         App.PublishCurrentSettings(_settings);
         App.UpdateTrayIconState(_settings);
         // Closing the warm window is what releases Avalonia's composition target. The process and
@@ -333,6 +333,7 @@ public partial class MainWindow
             var child = new MainWindow();
             child.QueueOpen(fullPath);
             ShowSecondaryWindow(child);
+            _diagnostics.Write("launch", "open_decision", LaunchDecisionLog.Build("folder", null, behavior, null, true, isPendingWarmReceiver, false, false, false, "new_window"));
             await ReleaseWarmPresentationGateAsync(safeFrameReady: true);
             return new(requestId, ExternalLaunchItemStatus.Accepted, "Opened folder in new window.");
         }
@@ -348,6 +349,8 @@ public partial class MainWindow
             _workspace.AddBrowser(fullPath);
             await ActivateWorkspaceAsync();
         }
+        _diagnostics.Write("launch", "open_decision", LaunchDecisionLog.Build("folder", null, behavior, null, true, isPendingWarmReceiver, false, false, false,
+            string.Equals(behavior, "Overwrite existing tab", StringComparison.OrdinalIgnoreCase) ? "overwrote_active_tab" : "new_tab"));
         RestoreFromMinimizedIfNeeded();
         Activate();
         await ReleaseWarmPresentationGateAsync(safeFrameReady: true);
@@ -420,6 +423,7 @@ public partial class MainWindow
             if (string.Equals(duplicateBehavior, "Refresh existing image", StringComparison.OrdinalIgnoreCase))
             {
                 await duplicateWindow.RefreshExistingImageFromExternalAsync(path);
+                _diagnostics.Write("launch", "open_decision", LaunchDecisionLog.Build("image", path, behavior, duplicateBehavior, true, isPendingWarmReceiver, wasSpeedBoostStandby, true, false, "reused_existing_refresh"));
                 if (wasSpeedBoostStandby && !ReferenceEquals(duplicateWindow, this))
                     ReturnToSpeedBoostStandbyAfterDelegatedOpen();
                 return new(requestId, ExternalLaunchItemStatus.Accepted, "Refreshed already-open image.");
@@ -427,6 +431,7 @@ public partial class MainWindow
             if (string.Equals(duplicateBehavior, "Open new tab", StringComparison.OrdinalIgnoreCase))
             {
                 await OpenAsImageTabAsync(path, openInNewTab: true);
+                _diagnostics.Write("launch", "open_decision", LaunchDecisionLog.Build("image", path, behavior, duplicateBehavior, true, isPendingWarmReceiver, wasSpeedBoostStandby, true, false, "new_tab"));
                 if (wasSpeedBoostStandby)
                     ShowImageSurface();
                 RestoreFromMinimizedIfNeeded();
@@ -436,6 +441,7 @@ public partial class MainWindow
             var duplicateChild = new MainWindow();
             duplicateChild.QueueOpen(path);
             ShowSecondaryWindow(duplicateChild);
+            _diagnostics.Write("launch", "open_decision", LaunchDecisionLog.Build("image", path, behavior, duplicateBehavior, true, isPendingWarmReceiver, wasSpeedBoostStandby, true, false, "new_window"));
             if (wasSpeedBoostStandby)
                 ReturnToSpeedBoostStandbyAfterDelegatedOpen();
             return new(requestId, ExternalLaunchItemStatus.Accepted, "Opened duplicate image in a separate Glide window.");
@@ -446,6 +452,7 @@ public partial class MainWindow
             var child = new MainWindow();
             child.QueueOpen(path);
             ShowSecondaryWindow(child);
+            _diagnostics.Write("launch", "open_decision", LaunchDecisionLog.Build("image", path, behavior, null, true, isPendingWarmReceiver, wasSpeedBoostStandby, false, false, "new_window"));
             if (wasSpeedBoostStandby)
                 ReturnToSpeedBoostStandbyAfterDelegatedOpen();
             return new(requestId, ExternalLaunchItemStatus.Accepted, "Opened image in new window.");
@@ -464,6 +471,8 @@ public partial class MainWindow
         var replaceDefaultHome = IsDefaultHomeOnlyWorkspace();
         // A placeholder Home replaced by a launched file is not a page to go Back to: that tab's history starts at the image.
         await OpenAsImageTabAsync(path, openInNewTab: !overwriteExistingTab && !replaceDefaultHome, startNewHistory: replaceDefaultHome);
+        _diagnostics.Write("launch", "open_decision", LaunchDecisionLog.Build("image", path, behavior, null, true, isPendingWarmReceiver, wasSpeedBoostStandby, false, replaceDefaultHome,
+            overwriteExistingTab ? "overwrote_active_tab" : replaceDefaultHome ? "replaced_home_tab" : "new_tab"));
         if (wasSpeedBoostStandby)
         {
             ShowImageSurface();
@@ -562,7 +571,7 @@ public partial class MainWindow
             await LoadPathAsync(newPath, updateActiveTab: true);
             RebuildTabStrip();
         }
-        catch { }
+        catch { /* open of the renamed file failed; the tab keeps its previous state */ }
     }
 
     private async Task DeleteCurrentFileAsync()
@@ -926,7 +935,7 @@ public partial class MainWindow
             }.ToJsonString();
             File.AppendAllText(path, row + Environment.NewLine);
         }
-        catch { }
+        catch { /* diagnostic row append only; must not disturb the viewer */ }
     }
     internal async Task<string> RunFullDiagnosticExportAsync(string? targetDir = null)
     {
@@ -943,7 +952,7 @@ public partial class MainWindow
         }
         finally
         {
-            try { settingsWindow.Close(); } catch { }
+            try { settingsWindow.Close(); } catch { /* best-effort teardown; the resource may already be closed */ }
         }
     }
 }

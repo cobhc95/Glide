@@ -177,7 +177,7 @@ public sealed partial class WindowsExplorerHost : NativeControlHost, IExplorerBr
                 return true;
             }, IntPtr.Zero);
         }
-        catch { }
+        catch { /* theming the hosted shell windows is cosmetic */ }
         Emit("theme_applied", new { theme = _themeChoice, hwnd = HostHandle.ToInt64() });
     }
 
@@ -193,7 +193,7 @@ public sealed partial class WindowsExplorerHost : NativeControlHost, IExplorerBr
             _ = SendMessage(hwnd, 0x031A /* WM_THEMECHANGED */, IntPtr.Zero, IntPtr.Zero);
             _ = InvalidateRect(hwnd, IntPtr.Zero, true);
         }
-        catch { }
+        catch { /* theming the hosted shell window is cosmetic */ }
     }
 
     private void NavigateCore(string folder)
@@ -243,17 +243,17 @@ public sealed partial class WindowsExplorerHost : NativeControlHost, IExplorerBr
         if (_browser is null) return;
         if (_eventsCookie != 0)
         {
-            try { _browser.Unadvise(_eventsCookie); } catch { }
+            try { _browser.Unadvise(_eventsCookie); } catch { /* best-effort teardown; the resource may already be closed */ }
             _eventsCookie = 0;
         }
         if (_eventsInterface != IntPtr.Zero)
         {
-            try { Marshal.Release(_eventsInterface); } catch { }
+            try { Marshal.Release(_eventsInterface); } catch { /* best-effort teardown; the resource may already be closed */ }
             _eventsInterface = IntPtr.Zero;
         }
-        try { IUnknown_SetSite(_browserPointer, IntPtr.Zero); } catch { }
-        try { _browser.Destroy(); } catch { }
-        try { ((ComObject)(object)_browser).FinalRelease(); } catch { }
+        try { IUnknown_SetSite(_browserPointer, IntPtr.Zero); } catch { /* site clear during teardown; the host may already be gone */ }
+        try { _browser.Destroy(); } catch { /* best-effort teardown; the resource may already be closed */ }
+        try { ((ComObject)(object)_browser).FinalRelease(); } catch { /* best-effort teardown; the resource may already be closed */ }
         _browser = null;
         if (_browserPointer != IntPtr.Zero)
         {
@@ -384,9 +384,9 @@ public sealed partial class WindowsExplorerHost : NativeControlHost, IExplorerBr
         }
         finally
         {
-            if (dataObjectRaw is ComObject data) { try { data.FinalRelease(); } catch { } }
+            if (dataObjectRaw is ComObject data) { try { data.FinalRelease(); } catch { /* best-effort teardown; the resource may already be closed */ } }
             if (dataPointer != IntPtr.Zero) Marshal.Release(dataPointer);
-            if (viewObject is ComObject viewCom) { try { viewCom.FinalRelease(); } catch { } }
+            if (viewObject is ComObject viewCom) { try { viewCom.FinalRelease(); } catch { /* best-effort teardown; the resource may already be closed */ } }
         }
     }
 

@@ -1,10 +1,14 @@
-﻿using Avalonia;
+﻿using System.Diagnostics;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media;
+using Avalonia.Rendering.Composition;
+using Avalonia.Rendering.Composition.Transport;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
+using Glide.App.Platform;
 using Glide.App.Services;
 using Glide.Core.Commands;
 
@@ -202,9 +206,29 @@ public partial class MainWindow
         else EnterFullscreen();
     }
 
+    // ---- Fullscreen enter / exit (reworked in 5.0.2) ------------------------------------------------------------
+    // Leaving fullscreen used to feel like the app reloading: the whole top level went to Opacity 0 (Glide's HWND
+    // is transparency-capable, so the desktop showed through) for at least three render passes, the window walked
+    // through an intermediate Normal state (Maximized origin: fullscreen -> maximized rect -> normal rect ->
+    // maximized rect, each a real WM_SIZE), and every one of those resizes re-ran the compact chrome, the status
+    // bar sizing and a full tab-strip rebuild. Now: one native state change where possible, the final chrome is
+    // applied before the native change so the synchronous WM_SIZE layout pass is the only one, per-resize chrome
+    // work is done once at the end, and only a Normal<->fullscreen change (a large geometry change that would show
+    // the previous frame clipped or stretched) is hidden, with a DWM cloak that is lifted on the first composed
+    // frame at the final geometry. Maximized<->fullscreen is not hidden at all.
+
+    /// <summary>True while EnterFullscreen/ExitFullscreen change the native state: SizeChanged skips per-resize chrome work.</summary>
+    private bool _fullscreenTransitionActive;
+    private int _fullscreenTransitionResizeEvents;
+    private int _fullscreenFenceGeneration;
+    private bool _fullscreenFenceCloaked;
+    private IntPtr _fullscreenFenceHwnd;
+    private long _fullscreenFenceStartedTimestamp;
+
     private void EnterFullscreen()
     {
         if (WindowState == WindowState.FullScreen) return;
+        var started = Stopwatch.GetTimestamp();
         CancelSelectionForFullscreenTransition();
         var priorState = WindowState;
         var priorPosition = Position;
@@ -218,92 +242,134 @@ public partial class MainWindow
         _fullscreenNormalPosition = _lastNormalWindowPosition;
         _fullscreenNormalSize = _lastNormalWindowSize;
         _fullscreen.Capture(priorState, priorPosition, priorWidth, priorHeight);
-        WindowState = WindowState.FullScreen;
+        var fenced = FullscreenTransitionPlanner.PlanEnterFence(priorState) == FullscreenTransitionFence.Cloak && BeginFullscreenTransitionFence();
+        _fullscreenTransitionResizeEvents = 0;
+        _fullscreenTransitionActive = true;
+        try
+        {
+            // Final chrome first, so the layout pass Windows runs synchronously inside the state change already
+            // lays out the fullscreen chrome (instead of the windowed chrome at fullscreen size, then again).
+            ApplyChromeLayoutForWindowState(WindowState.FullScreen);
+            WindowState = WindowState.FullScreen;
+        }
+        finally
+        {
+            _fullscreenTransitionActive = false;
+            if (fenced) ScheduleFullscreenTransitionReveal("enter");
+        }
         ApplyChromeLayoutForWindowState();
-        _diagnostics.Write("fullscreen", "entered", new { previousState = priorState, previousPosition = priorPosition, previousWidth = priorWidth, previousHeight = priorHeight });
+        ApplyChromeSizingAfterFullscreenTransition();
         ResetFullscreenCursorTimer();
         FinishFullscreenTransition();
+        RefreshTabStripAfterFullscreenTransition();
+        _diagnostics.Write("fullscreen", "entered", new
+        {
+            previousState = priorState, previousPosition = priorPosition, previousWidth = priorWidth, previousHeight = priorHeight,
+            fence = fenced ? "cloak" : "none",
+            resizeEvents = _fullscreenTransitionResizeEvents,
+            transitionMs = Math.Round(Stopwatch.GetElapsedTime(started).TotalMilliseconds, 2)
+        });
     }
 
     private void ExitFullscreen(bool forceMaximized)
     {
         if (WindowState != WindowState.FullScreen) return;
+        var started = Stopwatch.GetTimestamp();
         CancelSelectionForFullscreenTransition();
         StopFullscreenCursorAutoHide();
-        // Leaving fullscreen goes through an intermediate Normal state before the remembered
-        // placement (or Maximized/Minimized) is applied. Hide the top level for that transition so
-        // the window never flashes at the wrong place/size; it is revealed once placement settles.
-        HideForFullscreenExitTransition();
-        WindowState = WindowState.Normal;
         var snapshot = _fullscreen.Restore();
-        var exitBehavior = forceMaximized ? "Maximized" : (_settings.FullscreenExitBehavior ?? "Restore size and location");
-        // Whatever the exit behaviour is, put the ordinary window back to its real normal bounds first.
-        // Going straight to Maximized from here used to leave the fullscreen/maximized geometry as the
-        // "restored" rectangle, so un-maximizing later produced a screen-sized window.
-        ReapplyNormalBoundsAfterFullscreen();
-        if (string.Equals(exitBehavior, "Restore size and location", StringComparison.OrdinalIgnoreCase))
+        var exitBehavior = forceMaximized ? FullscreenTransitionPlanner.MaximizedBehavior : (_settings.FullscreenExitBehavior ?? FullscreenTransitionPlanner.RestoreBehavior);
+        var plan = FullscreenTransitionPlanner.PlanExit(snapshot.State, exitBehavior, forceMaximized, NativeFullscreenRestoreRectIsRememberedNormal(snapshot));
+        var fenced = plan.Fence == FullscreenTransitionFence.Cloak && BeginFullscreenTransitionFence();
+        var boundsReapplied = false;
+        _fullscreenTransitionResizeEvents = 0;
+        _fullscreenTransitionActive = true;
+        try
         {
-            if (!_fullscreenNormalKnown && snapshot.State == WindowState.Normal && snapshot.Width > 0 && snapshot.Height > 0)
+            ApplyChromeLayoutForWindowState(plan.TargetState);
+            if (plan.StepThroughNormal)
             {
-                Width = snapshot.Width;
-                Height = snapshot.Height;
-                Position = snapshot.Position;
+                // Legacy path (Minimized target, or remembered bounds that differ from the rectangle Avalonia saved
+                // on entry): put the ordinary window on its real normal bounds first so the Win32 restore rectangle
+                // and the remembered placement are the normal bounds, never fullscreen/maximized geometry.
+                WindowState = WindowState.Normal;
+                boundsReapplied = ReapplyNormalBoundsAfterFullscreen(snapshot, allowSnapshotFallback: false);
             }
-            if (snapshot.State == WindowState.Maximized) WindowState = WindowState.Maximized;
-            else if (snapshot.State == WindowState.Minimized) WindowState = WindowState.Minimized;
+            // Maximized origin: Avalonia's Win32 fullscreen kept WS_MAXIMIZE and the native restore rectangle, so a
+            // direct Maximized needs no intermediate Normal geometry and un-maximizing later still returns to the
+            // real normal bounds. Normal origin: leaving fullscreen restores the rectangle saved on entry.
+            if (WindowState != plan.TargetState) WindowState = plan.TargetState;
+            if (plan.TargetState == WindowState.Normal)
+                boundsReapplied |= ReapplyNormalBoundsAfterFullscreen(snapshot, allowSnapshotFallback: true);
+            else if (!plan.StepThroughNormal)
+                RestateRememberedNormalPlacement();
         }
-        else if (string.Equals(exitBehavior, "Minimized", StringComparison.OrdinalIgnoreCase))
+        finally
         {
-            WindowState = WindowState.Minimized;
-        }
-        else
-        {
-            WindowState = WindowState.Maximized;
+            _fullscreenTransitionActive = false;
+            if (fenced) ScheduleFullscreenTransitionReveal("exit");
         }
         ApplyChromeLayoutForWindowState();
+        ApplyChromeSizingAfterFullscreenTransition();
+        FinishFullscreenTransition();
+        RefreshTabStripAfterFullscreenTransition();
         _diagnostics.Write("fullscreen", "exited", new
         {
             restoredState = WindowState.ToString(),
             forcedMaximized = forceMaximized, exitBehavior,
+            path = plan.Path, fence = fenced ? "cloak" : "none", boundsReapplied,
+            resizeEvents = _fullscreenTransitionResizeEvents,
+            transitionMs = Math.Round(Stopwatch.GetElapsedTime(started).TotalMilliseconds, 2),
             position = Position.ToString(), Width, Height
         });
-        FinishFullscreenTransition();
-        RevealAfterFullscreenExitTransition();
     }
 
-    private int _fullscreenExitFenceGeneration;
-    private bool _fullscreenExitFenceActive;
-
-    private void HideForFullscreenExitTransition()
+    /// <summary>
+    /// Whether the rectangle Avalonia restores when fullscreen ends (the live geometry captured on entry) is already
+    /// the remembered normal placement. Only meaningful for a window that entered fullscreen from Normal.
+    /// </summary>
+    private bool NativeFullscreenRestoreRectIsRememberedNormal((WindowState State, PixelPoint Position, double Width, double Height) snapshot)
     {
-        // The warm-presentation gate already owns Opacity; never fight it.
-        if (_warmPresentationGateActive || _fullscreenExitFenceActive) return;
-        _fullscreenExitFenceActive = true;
-        _fullscreenExitFenceGeneration++;
-        Opacity = 0;
+        if (snapshot.State != WindowState.Normal || !_fullscreenNormalKnown) return true;
+        return FullscreenTransitionPlanner.SameGeometry(snapshot.Position, new Size(snapshot.Width, snapshot.Height),
+            _fullscreenNormalPosition, _fullscreenNormalSize, RenderScaling);
     }
 
-    private void RevealAfterFullscreenExitTransition()
+    /// <summary>
+    /// Re-applies the remembered normal bounds after leaving fullscreen, but only when the live window is not
+    /// already there (a no-op Width/Height/Position re-assignment still costs native round trips and, with
+    /// fractional DPI rounding, could nudge the window by a pixel). Returns true when the geometry was changed.
+    /// </summary>
+    private bool ReapplyNormalBoundsAfterFullscreen((WindowState State, PixelPoint Position, double Width, double Height) snapshot, bool allowSnapshotFallback)
     {
-        if (!_fullscreenExitFenceActive) return;
-        var generation = _fullscreenExitFenceGeneration;
-        void Reveal()
+        if (!_fullscreenNormalKnown)
         {
-            if (!_fullscreenExitFenceActive || generation != _fullscreenExitFenceGeneration) return;
-            _fullscreenExitFenceActive = false;
-            if (!_warmPresentationGateActive) Opacity = _sessionOpacity;
+            if (!allowSnapshotFallback || snapshot.State != WindowState.Normal || snapshot.Width <= 0 || snapshot.Height <= 0) return false;
+            if (FullscreenTransitionPlanner.SameGeometry(Position, ClientSize, snapshot.Position, new Size(snapshot.Width, snapshot.Height), RenderScaling)) return false;
+            Width = snapshot.Width;
+            Height = snapshot.Height;
+            Position = snapshot.Position;
+            return true;
         }
-        // Reveal after the restored placement has been laid out and one frame composed; the timer
-        // is a safety net so the window can never stay invisible.
-        Dispatcher.UIThread.Post(() =>
+        var position = _fullscreenNormalPosition;
+        var size = _fullscreenNormalSize;
+        var changed = false;
+        if (!FullscreenTransitionPlanner.SameGeometry(Position, ClientSize, position, size, RenderScaling))
         {
-            if (!_fullscreenExitFenceActive || generation != _fullscreenExitFenceGeneration) return;
-            RequestAnimationFrame(_ => Dispatcher.UIThread.Post(Reveal, DispatcherPriority.Render));
-        }, DispatcherPriority.Loaded);
-        DispatcherTimer.RunOnce(Reveal, TimeSpan.FromMilliseconds(250));
+            Width = Math.Max(MinWidth, size.Width);
+            Height = Math.Max(MinHeight, size.Height);
+            Position = position;
+            changed = true;
+        }
+        RestateRememberedNormalPlacement();
+        return changed;
     }
 
-    private void ReapplyNormalBoundsAfterFullscreen()
+    /// <summary>
+    /// Resizing while Normal fires the normal-placement tracker with transient geometry; restate the remembered
+    /// normal bounds immediately and once more after the transition settles (bookkeeping only, no native calls).
+    /// </summary>
+    private void RestateRememberedNormalPlacement()
     {
         if (!_fullscreenNormalKnown) return;
         var position = _fullscreenNormalPosition;
@@ -318,13 +384,129 @@ public partial class MainWindow
             _settings.WindowWidth = size.Width;
             _settings.WindowHeight = size.Height;
         }
-        Width = Math.Max(MinWidth, size.Width);
-        Height = Math.Max(MinHeight, size.Height);
-        Position = position;
-        // Resizing while Normal fires the normal-placement tracker with transient geometry; restate the
-        // remembered values immediately and once more after the transition settles.
         Assert();
         Dispatcher.UIThread.Post(() => { if (WindowState != WindowState.FullScreen) Assert(); }, DispatcherPriority.Loaded);
+    }
+
+    /// <summary>The compact title-bar and status-bar sizing that SizeChanged skipped during the transition, run once.</summary>
+    private void ApplyChromeSizingAfterFullscreenTransition()
+    {
+        ApplyCompactChromeLayout();
+        ApplyStatusBarSize();
+        if (_wholeAppOverlayMode) Dispatcher.UIThread.Post(AlignWholeAppOverlayChromeToPixels, DispatcherPriority.Render);
+    }
+
+    /// <summary>
+    /// One tab-strip rebuild for the final width (it used to run on every intermediate WM_SIZE). With the title bar
+    /// visible it is rebuilt before the first frame at the new size; with hidden fullscreen chrome it is not on
+    /// screen, so the rebuild is kept off the transition frame.
+    /// </summary>
+    private void RefreshTabStripAfterFullscreenTransition()
+    {
+        bool Needed() => !_tabDrag.IsActive && _physicalDraggedTabId is null && Math.Abs(Bounds.Width - _lastTabLayoutWidth) >= 24;
+        if (!Needed()) return;
+        if (ChromeBorder.IsVisible)
+        {
+            // Lay out the final chrome first so the strip width the rebuild reads is the new one.
+            UpdateLayout();
+            _lastTabLayoutWidth = Bounds.Width;
+            RebuildTabStrip();
+            return;
+        }
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (!Needed()) return;
+            _lastTabLayoutWidth = Bounds.Width;
+            RebuildTabStrip();
+        }, DispatcherPriority.Background);
+    }
+
+    /// <summary>
+    /// Cloaks the HWND (DWM) for a Normal&lt;-&gt;fullscreen change. Returns false when nothing was hidden (not on
+    /// Windows, no HWND, window not shown, or the warm-presentation gate already suppresses it).
+    /// </summary>
+    private bool BeginFullscreenTransitionFence()
+    {
+        if (_warmPresentationGateActive || !IsVisible) return false;
+        if (_fullscreenFenceCloaked)
+        {
+            _fullscreenFenceGeneration++; // a newer transition takes over the pending reveal
+            return true;
+        }
+        var platform = TryGetPlatformHandle();
+        if (platform is null || platform.Handle == IntPtr.Zero ||
+            !string.Equals(platform.HandleDescriptor, "HWND", StringComparison.OrdinalIgnoreCase))
+            return false;
+        if (!WindowCloak.TrySet(platform.Handle, cloaked: true)) return false;
+        _fullscreenFenceGeneration++;
+        _fullscreenFenceCloaked = true;
+        _fullscreenFenceHwnd = platform.Handle;
+        _fullscreenFenceStartedTimestamp = Stopwatch.GetTimestamp();
+        return true;
+    }
+
+    /// <summary>
+    /// Reveals the cloaked window on the first frame composed at the final geometry: the composition batch is
+    /// requested from inside the next render pass (after this transition's layout is queued, before it is
+    /// committed), so its Rendered task completes only once that frame has been presented; DwmFlush then waits for
+    /// DWM to compose it. A timer is the safety net so the window can never stay hidden.
+    /// </summary>
+    private void ScheduleFullscreenTransitionReveal(string transition)
+    {
+        if (!_fullscreenFenceCloaked) return;
+        var generation = _fullscreenFenceGeneration;
+        DispatcherTimer.RunOnce(() => RevealFullscreenTransition(generation, transition, "timeout"),
+            TimeSpan.FromMilliseconds(FullscreenTransitionPlanner.RevealTimeoutMs));
+        try
+        {
+            RequestAnimationFrame(frameTime =>
+            {
+                if (!_fullscreenFenceCloaked || generation != _fullscreenFenceGeneration) return;
+                CompositionBatch? batch = null;
+                try { batch = ElementComposition.GetElementVisual(this)?.Compositor.RequestCompositionBatchCommitAsync(); }
+                catch (Exception ex) { _diagnostics.Write("fullscreen", "reveal_batch_failed", new { ex.Message }); }
+                _ = RevealWhenComposedAsync(batch, generation, transition);
+            });
+        }
+        catch (Exception ex)
+        {
+            _diagnostics.Write("fullscreen", "reveal_schedule_failed", new { ex.Message });
+            RevealFullscreenTransition(generation, transition, "schedule_failed");
+        }
+    }
+
+    private async Task RevealWhenComposedAsync(CompositionBatch? batch, int generation, string transition)
+    {
+        var reason = batch is null ? "no_compositor" : "rendered";
+        try
+        {
+            if (batch is not null)
+                await batch.Rendered.WaitAsync(TimeSpan.FromMilliseconds(FullscreenTransitionPlanner.RevealTimeoutMs)).ConfigureAwait(false);
+            await Task.Run(WindowCloak.Flush).WaitAsync(TimeSpan.FromMilliseconds(100)).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            reason = "frame_wait_timeout"; // reveal anyway; the RunOnce timer would otherwise do it a little later
+        }
+        catch (Exception ex)
+        {
+            reason = "frame_wait_failed:" + ex.GetType().Name;
+        }
+        Dispatcher.UIThread.Post(() => RevealFullscreenTransition(generation, transition, reason), DispatcherPriority.Send);
+    }
+
+    private void RevealFullscreenTransition(int generation, string transition, string reason)
+    {
+        if (!_fullscreenFenceCloaked || generation != _fullscreenFenceGeneration) return;
+        _fullscreenFenceCloaked = false;
+        var hwnd = _fullscreenFenceHwnd;
+        _fullscreenFenceHwnd = IntPtr.Zero;
+        var uncloaked = WindowCloak.TrySet(hwnd, cloaked: false);
+        _diagnostics.Write("fullscreen", "revealed", new
+        {
+            transition, reason, uncloaked,
+            hiddenMs = Math.Round(Stopwatch.GetElapsedTime(_fullscreenFenceStartedTimestamp).TotalMilliseconds, 2)
+        });
     }
 
     private void CancelSelectionForFullscreenTransition()

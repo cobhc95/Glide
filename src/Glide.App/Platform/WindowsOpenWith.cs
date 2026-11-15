@@ -11,6 +11,6 @@ internal static class WindowsOpenWith
     public static void Show(string path)
     {
         if (!OperatingSystem.IsWindows() || !File.Exists(path)) return;
-        try { var info = new OPENASINFO { pcszFile = path, pcszClass = null, oaifInFlags = OAIF_EXEC }; _ = SHOpenWithDialog(IntPtr.Zero, ref info); } catch { }
+        try { var info = new OPENASINFO { pcszFile = path, pcszClass = null, oaifInFlags = OAIF_EXEC }; _ = SHOpenWithDialog(IntPtr.Zero, ref info); } catch { /* the shell dialog is unavailable; nothing to fall back to */ }
     }
 }

@@ -3,6 +3,7 @@ using Glide.Imaging;
 
 namespace Glide.Core.Tests;
 
+// Source-text contract kept: this asserts on production source (UI code-behind, native/installer files or a repo-wide scan) that cannot be run headlessly; behavioural coverage lives in the other test files.
 public sealed class OverlayVideoTests
 {
     private static string FixturePath => Path.Combine(AppContext.BaseDirectory, "Fixtures", "overlay-video.mp4");

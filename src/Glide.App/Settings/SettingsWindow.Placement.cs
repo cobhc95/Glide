@@ -156,6 +156,6 @@ public partial class SettingsWindow
             _placementCaptured = true;
             _lastPlacement.WriteTo(_committed);
         }
-        catch { }
+        catch { /* placement capture is best effort; the last captured placement stays */ }
     }
 }

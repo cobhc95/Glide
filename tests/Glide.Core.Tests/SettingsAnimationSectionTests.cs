@@ -7,6 +7,7 @@ namespace Glide.Core.Tests;
 /// Window-in-Window overlays, so they live in the "Overlay animation" card of the Slideshow &amp;
 /// overlays page and the standalone Animation tab/category is gone.
 /// </summary>
+// Source-text contract kept: this asserts on production source (UI code-behind, native/installer files or a repo-wide scan) that cannot be run headlessly; behavioural coverage lives in the other test files.
 public sealed class SettingsAnimationSectionTests
 {
     private static readonly XNamespace X = "http://schemas.microsoft.com/winfx/2006/xaml";

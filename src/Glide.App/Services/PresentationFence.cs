@@ -46,7 +46,7 @@ internal sealed class PresentationFence
             {
                 Dispatcher.UIThread.Post(() =>
                 {
-                    try { viewport.PresentationDrawRecorded -= handler; } catch { }
+                    try { viewport.PresentationDrawRecorded -= handler; } catch { /* handler may already be detached */ }
                 }, DispatcherPriority.Send);
             }
             registration.Dispose();

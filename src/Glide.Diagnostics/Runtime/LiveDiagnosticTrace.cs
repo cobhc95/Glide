@@ -102,7 +102,7 @@ public static class LiveDiagnosticTrace
                 }
             }
         }
-        catch { }
+        catch { /* the trace writer must never throw into the code it observes */ }
     }
 
     public static void Write(string subsystem, string name, object? data = null)
@@ -152,7 +152,7 @@ public static class LiveDiagnosticTrace
             _wake.Set();
             DrainQueue();
         }
-        catch { }
+        catch { /* the trace writer must never throw into the code it observes */ }
     }
 
     private static void PreservePreviousAbnormalTrace(string downloads)
@@ -168,7 +168,7 @@ public static class LiveDiagnosticTrace
             var previous = System.IO.Path.Combine(downloads, "Glide-Diagnostic-Previous-AbnormalExit.txt");
             File.Copy(_path, previous, overwrite: true);
         }
-        catch { }
+        catch { /* previous-run copy is a courtesy; the trace itself is unaffected */ }
     }
 
     private static string ReadTail(string path, int maxBytes)
@@ -187,7 +187,7 @@ public static class LiveDiagnosticTrace
     private static void OpenWriter(bool overwrite)
     {
         if (string.IsNullOrWhiteSpace(_path)) return;
-        try { _writer?.Dispose(); } catch { }
+        try { _writer?.Dispose(); } catch { /* best-effort teardown; the resource may already be closed */ }
         var stream = new FileStream(_path, overwrite ? FileMode.Create : FileMode.Append,
             FileAccess.Write, FileShare.ReadWrite | FileShare.Delete, 4096, FileOptions.None);
         _writer = new StreamWriter(stream, new UTF8Encoding(false)) { AutoFlush = true };

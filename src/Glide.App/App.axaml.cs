@@ -231,7 +231,7 @@ public partial class App : Application
                     icon.Icon = new WindowIcon(Avalonia.Platform.AssetLoader.Open(new Uri("avares://Glide/Assets/Glide.ico")));
                 }
             }
-            catch { }
+            catch { /* tray icon is optional; the tray falls back to no custom icon */ }
 
             var menu = new NativeMenu();
             var openItem = new NativeMenuItem("Open Glide");
@@ -255,7 +255,7 @@ public partial class App : Application
             TrayIcon.SetIcons(Current!, icons);
             TrayIconInstance = icon;
         }
-        catch { }
+        catch { /* tray icon is optional; the app runs without it */ }
     }
 
     public static void UpdateTrayIconState(Settings.GlideSettingsState? settings = null)

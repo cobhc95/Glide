@@ -1,5 +1,6 @@
 namespace Glide.Core.Tests;
 
+// Source-text contract kept: this asserts on production source (UI code-behind, native/installer files or a repo-wide scan) that cannot be run headlessly; behavioural coverage lives in the other test files.
 public sealed class OverlayPointerOwnershipContractTests
 {
     [Fact]
@@ -9,7 +10,7 @@ public sealed class OverlayPointerOwnershipContractTests
 
         Assert.Contains("var ownsOverlayPointer = ReferenceEquals(_capturedPointer, e.Pointer)", source, StringComparison.Ordinal);
         Assert.Contains("if (!ownsOverlayPointer) return;", source, StringComparison.Ordinal);
-        Assert.Contains("try { _capturedPointer?.Capture(null); } catch { }", source, StringComparison.Ordinal);
+        Assert.Matches(@"try \{ _capturedPointer\?\.Capture\(null\); \} catch( \{ /\*[^*]*\*/ \}| \{ \})", source);
         Assert.DoesNotContain("var middle = e.InitialPressMouseButton == MouseButton.Middle;\n        e.Pointer.Capture(null);", source, StringComparison.Ordinal);
     }
 

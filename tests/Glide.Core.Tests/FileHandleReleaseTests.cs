@@ -70,6 +70,7 @@ public sealed class FileHandleReleaseTests
     /// sharing; otherwise a background read that outlives the viewer (notably the Speed Boost warm
     /// process) blocks Explorer delete/move and reports the file as locked by Glide.
     /// </summary>
+    // Source scan on purpose: it guards every file in src/ against a bare File.OpenRead / FileShare.Read, which no single runtime test can reach.
     [Fact]
     public void EveryUserImageReadOpenPermitsDeleteSharing()
     {
@@ -95,12 +96,20 @@ public sealed class FileHandleReleaseTests
 
     /// <summary>Svg.Skia must never be handed a path: a third-party loader may retain the handle.</summary>
     [Fact]
-    public void SvgDecoderLoadsFromMemoryInsteadOfTheFilePath()
+    public void SvgDecoderDoesNotKeepTheSourceFileLocked()
     {
-        var root = FindRepositoryRoot();
-        var svg = File.ReadAllText(Path.Combine(root, "src", "Glide.Imaging", "SvgDecoder.cs"));
-        Assert.DoesNotContain("svg.Load(path)", svg, StringComparison.Ordinal);
-        Assert.Contains("FileShare.ReadWrite | FileShare.Delete", svg, StringComparison.Ordinal);
+        var dir = Path.Combine(Path.GetTempPath(), "glide-svg-handle-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var path = Path.Combine(dir, "image.svg");
+        File.WriteAllText(path, "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\"><rect width=\"16\" height=\"16\" fill=\"red\"/></svg>");
+        try
+        {
+            SvgDecoder.TryProbeDimensions(path, out _);
+            if (SvgDecoder.TryDecode(path, 64, out var bitmap)) bitmap?.Dispose();
+            File.Move(path, path + ".renamed"); // throws IOException if a handle without delete sharing remains
+            File.Delete(path + ".renamed");
+        }
+        finally { try { Directory.Delete(dir, true); } catch { /* temp cleanup only */ } }
     }
 
     private static string FindRepositoryRoot()

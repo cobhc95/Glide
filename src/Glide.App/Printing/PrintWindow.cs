@@ -638,7 +638,7 @@ public sealed class PrintWindow : Window
             _cache.Invalidate(printer);
             _ = SelectPrinterAsync(debounce: false);
         }
-        catch { }
+        catch { /* printer defaults are optional; the dialog keeps its current choices */ }
     }
 
     /// <summary>

@@ -1090,7 +1090,7 @@ public partial class MainWindow
     {
         if (!Directory.Exists(folder)) return;
         string? first = null;
-        try { first = Directory.EnumerateFiles(folder).Where(ImageNavigator.IsSupported).OrderBy(p => p, Glide.Core.ImageSortOrder.CreateComparer()).FirstOrDefault(); } catch { }
+        try { first = Directory.EnumerateFiles(folder).Where(ImageNavigator.IsSupported).OrderBy(p => p, Glide.Core.ImageSortOrder.CreateComparer()).FirstOrDefault(); } catch { /* unreadable folder: no first image is chosen */ }
         if (first is not null) await OpenAsImageTabAsync(first);
     }
 

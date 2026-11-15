@@ -359,7 +359,7 @@ public partial class MainWindow
                     var path = AutomaticOverlayLayoutPath();
                     if (File.Exists(path)) File.Delete(path);
                 }
-                catch { }
+                catch { /* best-effort cleanup; a locked or missing file is harmless */ }
             }
         }
     }
@@ -627,6 +627,8 @@ public partial class MainWindow
         Viewport.SelectionBufferFraction = Math.Clamp(percent, 0, 100) / 100d;
     }
 
+    private static readonly string[] StatusSizeClasses = { "statusTiny", "statusVerySmall", "statusSmall", "statusMedium", "statusLarge", "statusExtraLarge" };
+
     private void ApplyStatusBarSize()
     {
         if (ViewerStatusSurface is null || StatusStatsText is null) return;
@@ -663,9 +665,7 @@ public partial class MainWindow
         var showStats = Bounds.Width >= 260;
         StatusStatsText.IsVisible = showStats;
 
-        foreach (var cls in new[] { "statusTiny", "statusVerySmall", "statusSmall", "statusMedium", "statusLarge", "statusExtraLarge" })
-            ViewerStatusSurface.Classes.Remove(cls);
-        ViewerStatusSurface.Classes.Add(normalized switch
+        var sizeClass = normalized switch
         {
             "Tiny" => "statusTiny",
             "Very small" => "statusVerySmall",
@@ -673,7 +673,12 @@ public partial class MainWindow
             "Large" => "statusLarge",
             "Extra large" => "statusExtraLarge",
             _ => "statusSmall"
-        });
+        };
+        // Runs on every resize and window-state change: only touch the classes when the size class really
+        // changes. Removing and re-adding the same class re-evaluated the styles of the whole status bar each time.
+        foreach (var cls in StatusSizeClasses)
+            if (cls != sizeClass) ViewerStatusSurface.Classes.Remove(cls);
+        if (!ViewerStatusSurface.Classes.Contains(sizeClass)) ViewerStatusSurface.Classes.Add(sizeClass);
 
         var availableWidth = Math.Max(120d, Bounds.Width - 28d);
         // The bar may use whatever width the window allows; it still hugs its content (it is centred

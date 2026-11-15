@@ -5,6 +5,7 @@ namespace Glide.Core.Tests;
 /// genuine Windows minimize; Speed Boost standby may only be entered by closing the last window, and
 /// only when a tray icon actually exists to bring the window back.
 /// </summary>
+// Source-text contract kept: this asserts on production source (UI code-behind, native/installer files or a repo-wide scan) that cannot be run headlessly; behavioural coverage lives in the other test files.
 public sealed class MinimizeBehaviorContractTests
 {
     [Fact]

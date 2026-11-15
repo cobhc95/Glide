@@ -6,6 +6,7 @@ namespace Glide.Core.Tests;
 /// DIB behavior requires the Windows desktop host, so these checks prevent a future change from
 /// silently restoring Avalonia Window-per-overlay ownership or per-frame bitmap work.
 /// </summary>
+// Source-text contract kept: this asserts on production source (UI code-behind, native/installer files or a repo-wide scan) that cannot be run headlessly; behavioural coverage lives in the other test files.
 public sealed class NativeOverlayWindowRendererContractTests
 {
     [Fact]

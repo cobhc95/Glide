@@ -21,6 +21,7 @@ namespace Glide.Core.Tests;
 /// the "Alt+Shift+S does nothing" report (the default was stored as "Alt+Shift+S" but the keyboard adapter
 /// produces "Shift+Alt+S", and the router compared the strings literally).
 /// </summary>
+// Source-text contract kept: this asserts on production source (UI code-behind, native/installer files or a repo-wide scan) that cannot be run headlessly; behavioural coverage lives in the other test files.
 [Collection(AvaloniaHeadlessCollection.Name)]
 public sealed class HotkeyEndToEndTests
 {

@@ -92,7 +92,7 @@ public static class ImageHeaderProbe
         catch { return null; }
         finally
         {
-            try { stream.Position = origin; } catch { }
+            try { stream.Position = origin; } catch { /* non-seekable stream; the position reset is best effort */ }
             if (rented is not null) ArrayPool<byte>.Shared.Return(rented);
         }
     }

@@ -473,7 +473,7 @@ public sealed class WindowInWindowOverlayManager : IDisposable
             }
             if (automatic) current.Restart(); // nothing else playable: keep this one going
         }
-        catch (OperationCanceledException) { }
+        catch (OperationCanceledException) { /* cancellation is the expected way to stop this work */ }
         finally { _switchingVideo.Remove(id); }
     }
 
@@ -1138,7 +1138,7 @@ public sealed class WindowInWindowOverlayManager : IDisposable
         _pendingFullscreenDrag = null;
         var rightClickWithoutDrag = e.InitialPressMouseButton == MouseButton.Right && _pan is { Started: false };
         var middle = e.InitialPressMouseButton == MouseButton.Middle;
-        try { _capturedPointer?.Capture(null); } catch { }
+        try { _capturedPointer?.Capture(null); } catch { /* pointer capture already released; nothing to undo */ }
         ClearPointerState(releaseCapture: false);
         if (middle)
         {
@@ -1241,7 +1241,7 @@ public sealed class WindowInWindowOverlayManager : IDisposable
             Invalidate();
             Diagnostic?.Invoke("overlay_refreshed", new { path, id });
         }
-        catch (OperationCanceledException) { }
+        catch (OperationCanceledException) { /* cancellation is the expected way to stop this work */ }
         catch (Exception ex) { Diagnostic?.Invoke("overlay_refresh_failed", new { path, error = ex.GetType().Name }); }
     }
 
@@ -1525,7 +1525,7 @@ public sealed class WindowInWindowOverlayManager : IDisposable
         _inputHost.Cursor = _cursorBeforeAreaDraw;
         _cursorBeforeAreaDraw = null;
         if (TopLevel.GetTopLevel(_inputHost) is { } top) top.RemoveHandler(InputElement.KeyDownEvent, AreaDrawKeyDown);
-        try { _capturedPointer?.Capture(null); } catch { }
+        try { _capturedPointer?.Capture(null); } catch { /* pointer capture already released; nothing to undo */ }
         _capturedPointer = null;
 
         var host = _inputHost.Bounds.Size;
@@ -2078,7 +2078,7 @@ public sealed class WindowInWindowOverlayManager : IDisposable
     {
         if (releaseCapture)
         {
-            try { _capturedPointer?.Capture(null); } catch { }
+            try { _capturedPointer?.Capture(null); } catch { /* pointer capture already released; nothing to undo */ }
         }
         _capturedPointer = null;
         _drag = null; _pendingFullscreenDrag = null; _resize = null; _pan = null; _opacityDrag = null; _seekDrag = null; _volumeDrag = null;

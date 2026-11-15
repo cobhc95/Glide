@@ -163,7 +163,7 @@ internal static class SkiaDecodeGuard
         catch { return false; }
         finally
         {
-            try { stream.Position = start; } catch { }
+            try { stream.Position = start; } catch { /* non-seekable stream; the position reset is best effort */ }
         }
     }
 }

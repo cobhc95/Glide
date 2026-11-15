@@ -21,7 +21,7 @@ internal static class WindowsKnownFolders
                     if (!string.IsNullOrWhiteSpace(path) && Directory.Exists(path)) return path;
                 }
             }
-            catch { }
+            catch { /* shell lookup failed: fall back to the next candidate folder */ }
             finally
             {
                 if (ptr != IntPtr.Zero) Marshal.FreeCoTaskMem(ptr);
@@ -48,7 +48,7 @@ internal static class WindowsKnownFolders
                     }
                 }
             }
-            catch { }
+            catch { /* folder cannot be created: fall back to the next candidate folder */ }
             finally
             {
                 if (ptr != IntPtr.Zero) Marshal.FreeCoTaskMem(ptr);

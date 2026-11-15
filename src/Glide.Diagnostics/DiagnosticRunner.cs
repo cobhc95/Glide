@@ -453,7 +453,7 @@ public static class DiagnosticRunner
                 sw.Stop();
 
                 var trace = ParsePerfTrace(tempTrace);
-                try { if (File.Exists(tempTrace)) File.Delete(tempTrace); } catch { }
+                try { if (File.Exists(tempTrace)) File.Delete(tempTrace); } catch { /* best-effort cleanup; a locked or missing file is harmless */ }
 
                 if (!signaled)
                 {
@@ -617,7 +617,7 @@ public static class DiagnosticRunner
                 ImageDiagnosticFixtures.WriteTo(tempFixturesDir);
                 ScanDirectoryForFormats(tempFixturesDir, resolved);
             }
-            catch { }
+            catch { /* fixture generation is optional; formats without a fixture are reported as skipped */ }
         }
 
         return SortByCommonFormats(resolved);
@@ -636,7 +636,7 @@ public static class DiagnosticRunner
                 }
             }
         }
-        catch { }
+        catch { /* unreadable folder: the formats found so far are kept */ }
     }
 
     private static List<(string Format, string FilePath)> SortByCommonFormats(Dictionary<string, string> dict)
@@ -717,7 +717,7 @@ public static class DiagnosticRunner
                 }
             }
         }
-        catch { }
+        catch { /* a malformed trace line ends parsing; metrics gathered so far are kept */ }
 
         return trace;
     }

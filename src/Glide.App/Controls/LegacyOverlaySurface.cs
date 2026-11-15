@@ -80,7 +80,7 @@ public sealed class LegacyOverlaySurface : Control
         if (!OperatingSystem.IsWindows() || _nativeRenderer is not null) return;
         var renderer = new NativeOverlayWindowRenderer(owner);
         if (!renderer.IsAvailable) { renderer.Dispose(); return; }
-        try { ElementComposition.SetElementChildVisual(this, null); } catch { }
+        try { ElementComposition.SetElementChildVisual(this, null); } catch { /* best-effort teardown; the resource may already be closed */ }
         _compositorVisual = null;
         _nativeRenderer = renderer;
         if (_latestSnapshot is not null) renderer.Publish(_latestSnapshot);
@@ -97,7 +97,7 @@ public sealed class LegacyOverlaySurface : Control
     {
         _nativeRenderer?.Dispose();
         _nativeRenderer = null;
-        try { ElementComposition.SetElementChildVisual(this, null); } catch { }
+        try { ElementComposition.SetElementChildVisual(this, null); } catch { /* best-effort teardown; the resource may already be closed */ }
         _compositorVisual = null;
         _latestSnapshot = null;
     }

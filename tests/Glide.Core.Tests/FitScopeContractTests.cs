@@ -5,6 +5,7 @@ namespace Glide.Core.Tests;
 /// controls must route through <c>ApplyStatusBarFit</c> so the chosen mode can carry to the rest of
 /// the session and, when configured, persist as the default view for future launches.
 /// </summary>
+// Source-text contract kept: this asserts on production source (UI code-behind, native/installer files or a repo-wide scan) that cannot be run headlessly; behavioural coverage lives in the other test files.
 public sealed class FitScopeContractTests
 {
     [Fact]

@@ -277,7 +277,7 @@ internal sealed class NativeOverlayWindowRenderer : IDisposable
         _ownerHwnd = owner.TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
         _canStart = OperatingSystem.IsWindows() && _ownerHwnd != IntPtr.Zero;
         _thread = new Thread(Loop) { IsBackground = true, Name = "Glide native overlay motion" };
-        try { _thread.Priority = ThreadPriority.AboveNormal; } catch { }
+        try { _thread.Priority = ThreadPriority.AboveNormal; } catch { /* thread priority is a hint */ }
         if (_canStart) { _thread.Start(); _ready.Wait(1000); }
         OverlayNavigationTrace.Mark(IsAvailable ? OverlayNavigationTrace.Kind.BackendStarted : OverlayNavigationTrace.Kind.BackendUnavailable,
             a: IsAvailable ? 1 : 0, detail: "NativeOverlayWindowRenderer");
@@ -576,7 +576,7 @@ internal sealed class NativeOverlayWindowRenderer : IDisposable
         var handle = _mmcssHandle;
         _mmcssHandle = IntPtr.Zero;
         if (handle == IntPtr.Zero) return;
-        try { AvRevertMmThreadCharacteristics(handle); } catch { }
+        try { AvRevertMmThreadCharacteristics(handle); } catch { /* MMCSS revert is best effort at thread exit */ }
     }
 
     private static bool TryCopyBitmap(Bitmap bitmap, out byte[] pixels, out int width, out int height)

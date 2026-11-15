@@ -69,7 +69,7 @@ public static class ImageSaveService
         }
         finally
         {
-            try { if (File.Exists(temp)) File.Delete(temp); } catch { }
+            try { if (File.Exists(temp)) File.Delete(temp); } catch { /* best-effort temp cleanup; the save result is already decided */ }
         }
     }
 }

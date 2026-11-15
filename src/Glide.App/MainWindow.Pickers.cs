@@ -47,7 +47,7 @@ public partial class MainWindow
         {
             if (_windowLifetimeCts.IsCancellationRequested || !IsEffectivelyVisible) return;
             try { await EnsureOverlays().LoadLayoutAsync(layoutPath, _windowLifetimeCts.Token); }
-            catch (OperationCanceledException) { }
+            catch (OperationCanceledException) { /* cancellation is the expected way to stop this work */ }
         }, DispatcherPriority.Loaded);
     }
 

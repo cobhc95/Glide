@@ -103,8 +103,8 @@ internal static class ExplorerModel
                 if (onlyImages && !entry.IsImage) continue;
                 result.Add(entry);
             }
-            catch (IOException) { }
-            catch (UnauthorizedAccessException) { }
+            catch (IOException) { /* an inaccessible entry is skipped in the listing */ }
+            catch (UnauthorizedAccessException) { /* an inaccessible entry is skipped in the listing */ }
         }
         return result;
     }

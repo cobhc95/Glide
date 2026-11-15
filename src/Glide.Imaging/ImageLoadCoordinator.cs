@@ -264,7 +264,7 @@ public sealed class ImageLoadCoordinator : IDisposable
         _ = Task.Run(async () =>
         {
             try { await Task.Delay(ImageRefinementScheduler.RapidBrowseWindowMs, token).ConfigureAwait(false); _navigationActivity = ImageNavigationActivity.NormalBrowse; }
-            catch (OperationCanceledException) { }
+            catch (OperationCanceledException) { /* cancellation is the expected way to stop this work */ }
         }, CancellationToken.None);
     }
 
@@ -368,7 +368,7 @@ public sealed class ImageLoadCoordinator : IDisposable
                 if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("foreground_join_inflight_prefetch", ImageFormatRegistry.GetLongestExtension(path));
                 try { await inflight.WaitAsync(cancellationToken).ConfigureAwait(false); }
                 catch (OperationCanceledException) { throw; }
-                catch { }
+                catch { /* the in-flight prefetch failed; the foreground load below decodes the file itself */ }
             }
             lock (_cacheGate) _prefetchCts.Cancel();
         }
@@ -921,7 +921,7 @@ public sealed class ImageLoadCoordinator : IDisposable
             }
         }
         catch (OperationCanceledException) { throw; }
-        catch { }
+        catch { /* cache/prepare failure is non-fatal; the caller decodes without the cache */ }
         finally { _compressedWarmGate.Release(); }
     }
 
@@ -931,7 +931,7 @@ public sealed class ImageLoadCoordinator : IDisposable
         {
             // A concurrent trim/purge may evict the entry between lookup and lease; read from disk then.
             try { return (buffer.CreateReadStream(), true); }
-            catch (ObjectDisposedException) { }
+            catch (ObjectDisposedException) { /* entry was evicted between lookup and lease; read from disk instead */ }
         }
 
         var options = FileOptions.Asynchronous | (sequential ? FileOptions.SequentialScan : FileOptions.None);

@@ -91,7 +91,7 @@ public partial class SettingsWindow
             if (Screens.ScreenFromWindow(this) is { } screen)
                 dialog.MaxHeight = Math.Max(200, screen.WorkingArea.Height / Math.Max(1.0, RenderScaling) - 80);
         }
-        catch { }
+        catch { /* screen lookup only caps the dialog height; the default height is fine */ }
         PopupPlacementStore.Track(dialog, "profile-add");
         ok.Click += (_, _) => dialog.Close(box.Text?.Trim());
         cancel.Click += (_, _) => dialog.Close((string?)null);

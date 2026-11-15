@@ -13,6 +13,7 @@ namespace Glide.Core.Tests;
 /// Every "large image" here is a synthetic header or a synthetic memory snapshot: no test allocates a
 /// full-size frame, and the fake decoder backend only ever creates tiny bitmaps.
 /// </summary>
+// Source-text contract kept: this asserts on production source (UI code-behind, native/installer files or a repo-wide scan) that cannot be run headlessly; behavioural coverage lives in the other test files.
 [Collection(AvaloniaHeadlessCollection.Name)]
 public sealed class SecurityHardening50Tests : IDisposable
 {

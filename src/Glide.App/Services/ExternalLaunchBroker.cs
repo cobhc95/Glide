@@ -48,7 +48,7 @@ internal static class ExternalLaunchBroker
                 using var identity = WindowsIdentity.GetCurrent();
                 if (identity.User?.Value is { Length: > 0 } sid) return sid;
             }
-            catch { }
+            catch { /* identity lookup failed: the caller falls back to the user name */ }
         }
         return Environment.UserDomainName + "\\" + Environment.UserName;
     }
@@ -230,7 +230,7 @@ internal static class ExternalLaunchBroker
                 await client.ConnectAsync(attemptCts.Token).ConfigureAwait(false);
                 if (OperatingSystem.IsWindows())
                 {
-                    try { AllowSetForegroundWindow(-1); } catch { }
+                    try { AllowSetForegroundWindow(-1); } catch { /* foreground permission is best effort */ }
                 }
                 using var writer = new StreamWriter(client, new UTF8Encoding(false), leaveOpen: true) { AutoFlush = true };
                 using var reader = new StreamReader(client, Encoding.UTF8, leaveOpen: true);
@@ -418,7 +418,7 @@ internal static class ExternalLaunchBroker
                 }
             }
         }
-        catch (OperationCanceledException) { }
+        catch (OperationCanceledException) { /* cancellation is the expected way to stop this work */ }
     }
 
     private static void StopTakeoverMonitorLocked()
@@ -426,14 +426,14 @@ internal static class ExternalLaunchBroker
         var cts = _takeoverCts;
         _takeoverCts = null;
         _takeoverTask = null;
-        try { cts?.Cancel(); } catch { }
+        try { cts?.Cancel(); } catch { /* best-effort teardown; the resource may already be closed */ }
         cts?.Dispose();
     }
 
     private static void ReleasePresenceLocked()
     {
-        try { _presence?.Reset(); } catch { }
-        try { _presence?.Dispose(); } catch { }
+        try { _presence?.Reset(); } catch { /* best-effort teardown; the resource may already be closed */ }
+        try { _presence?.Dispose(); } catch { /* best-effort teardown; the resource may already be closed */ }
         _presence = null;
         _ownsPresence = false;
         if (_state != BrokerState.Stopping) _state = BrokerState.Follower;
@@ -441,10 +441,10 @@ internal static class ExternalLaunchBroker
 
     private static void StopServerBounded(CancellationTokenSource cts, Task? task)
     {
-        try { cts.Cancel(); } catch { }
+        try { cts.Cancel(); } catch { /* best-effort teardown; the resource may already be closed */ }
         if (task is not null)
         {
-            try { task.Wait(TimeSpan.FromSeconds(2)); } catch { }
+            try { task.Wait(TimeSpan.FromSeconds(2)); } catch { /* bounded wait during shutdown; the task is abandoned */ }
         }
         cts.Dispose();
     }
@@ -492,7 +492,7 @@ internal static class ExternalLaunchBroker
                     {
                         if (_ownsPresence)
                         {
-                            try { _presence?.Set(); } catch { }
+                            try { _presence?.Set(); } catch { /* best-effort teardown; the resource may already be closed */ }
                             _state = BrokerState.Ready;
                         }
                     }
@@ -561,7 +561,7 @@ internal static class ExternalLaunchBroker
                 SchedulePendingDispatch();
             }
             catch (OperationCanceledException) when (token.IsCancellationRequested) { break; }
-            catch (OperationCanceledException) { }
+            catch (OperationCanceledException) { /* cancellation is the expected way to stop this work */ }
             catch
             {
                 try { await Task.Delay(50, token).ConfigureAwait(false); }

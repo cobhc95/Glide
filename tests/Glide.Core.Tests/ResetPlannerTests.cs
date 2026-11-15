@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Text.RegularExpressions;
+using Glide.App.Printing;
 using Glide.App.Settings;
 using Glide.Core.Reset;
 using Glide.Core.Settings;
@@ -7,6 +8,7 @@ using Glide.Core.Settings;
 namespace Glide.Core.Tests;
 
 /// <summary>Reset Glide: which concrete files, folders and registry values each item removes (nothing is deleted here).</summary>
+[Collection("PrintSettingsStoreStatics")]
 public sealed class ResetPlannerTests
 {
     private static IReadOnlyList<ResetTarget> Targets(ResetScratch s, ResetItemId id) => ResetPlanner.TargetsFor(s.Environment, id);
@@ -209,15 +211,39 @@ public sealed class ResetPlannerTests
     // ---- the lists in ResetCatalog must stay in step with the real stores and settings state ----
 
     [Fact]
-    public void Catalogue_file_names_match_the_stores_that_write_them()
+    public void Catalogue_file_names_match_what_the_stores_actually_write()
     {
+        // Behavioural: run the real stores against an isolated directory and check the files they create.
+        var dir = Path.Combine(Path.GetTempPath(), "glide-reset-names-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var previous = SettingsStore.SettingsDirectoryOverrideForTests.Value;
+        SettingsStore.SettingsDirectoryOverrideForTests.Value = dir;
+        PrintSettingsStore.DirectoryOverrideForTests = dir;
+        try
+        {
+            SettingsStore.Save(new GlideSettingsState());
+            ProfileStore.Add("Reset names", new GlideSettingsState());
+            WorkspaceSessionStore.Save([new Glide.Core.Workspace.HomeTabState(Guid.NewGuid())], 0);
+            PrintSettingsStore.Save(new PrintDocumentSettings());
+            foreach (var name in new[] { ResetCatalog.SettingsFileName, ResetCatalog.ProfilesFileName, ResetCatalog.SessionFileName, ResetCatalog.PrintSettingsFileName })
+                Assert.True(File.Exists(Path.Combine(dir, name)), name + " was not written by its store");
+        }
+        finally
+        {
+            PrintSettingsStore.DirectoryOverrideForTests = null;
+            SettingsStore.SettingsDirectoryOverrideForTests.Value = previous;
+            try { Directory.Delete(dir, true); } catch { /* temp cleanup only */ }
+        }
+    }
+
+    [Fact]
+    public void Catalogue_file_names_match_the_stores_that_write_them_in_source()
+    {
+        // Source-text on purpose: these names are private constants of stores that need the registry, the app window or
+        // a real profile folder to run; the stores covered behaviourally above are checked in the test before this one.
         string Source(string path) => SourceText.Read(path);
-        Assert.Contains($"\"{ResetCatalog.SettingsFileName}\"", Source("src/Glide.App/Settings/SettingsStore.cs"));
         Assert.Contains($"\"{ResetCatalog.LaunchPolicyFileName}\"", Source("src/Glide.App/Settings/SettingsStore.cs"));
-        Assert.Contains($"\"{ResetCatalog.ProfilesFileName}\"", Source("src/Glide.App/Settings/ProfileStore.cs"));
         Assert.Contains($"\"{ResetCatalog.HistoryFileName}\"", Source("src/Glide.App/Settings/RecentHistoryStore.cs"));
-        Assert.Contains($"\"{ResetCatalog.SessionFileName}\"", Source("src/Glide.App/Settings/WorkspaceSessionStore.cs"));
-        Assert.Contains($"\"{ResetCatalog.PrintSettingsFileName}\"", Source("src/Glide.App/Printing/PrintDocumentSettings.cs"));
         Assert.Contains($"\"{ResetCatalog.ThumbnailSettingsFileName}\"", Source("src/Glide.App/Platform/ThumbnailSettingsStore.cs"));
         Assert.Contains($"\"{ResetCatalog.OverlayLayoutFileName}\"", Source("src/Glide.App/MainWindow.Pickers.cs"));
         Assert.Contains($"\"{ResetCatalog.StartupDiagnosticsFolderName}\"", Source("src/Glide.App/MainWindow.Sessions.cs"));
