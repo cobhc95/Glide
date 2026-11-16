@@ -8,7 +8,7 @@ using Glide.Core.Settings;
 namespace Glide.Core.Tests;
 
 /// <summary>Reset Glide: which concrete files, folders and registry values each item removes (nothing is deleted here).</summary>
-[Collection("PrintSettingsStoreStatics")]
+[Collection(StoreStaticsCollection.Name)]
 public sealed class ResetPlannerTests
 {
     private static IReadOnlyList<ResetTarget> Targets(ResetScratch s, ResetItemId id) => ResetPlanner.TargetsFor(s.Environment, id);

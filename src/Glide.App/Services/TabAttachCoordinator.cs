@@ -40,6 +40,8 @@ public sealed class TabAttachCoordinator
             });
         }
         TargetIndex = Target?.GetTabInsertIndex(cursor) ?? -1;
+        // The marker shows exactly the index a release commits (TargetIndex), for ordinary and native drags.
+        Target?.SetTabAttachInsertMarker(TargetIndex);
     }
 
     public void Clear()

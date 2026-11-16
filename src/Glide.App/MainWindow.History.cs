@@ -191,7 +191,7 @@ public partial class MainWindow
     /// </summary>
     internal Task BackOrPreviousAsync()
     {
-        if (ActiveHistory?.CanGoBack == true) return NavigateBackAsync();
+        if (CrossTabHistory.CanGo(ActiveHistory, -1, _settings.ExplorerBackReturnsToImage)) return NavigateBackAsync();
         if (_workspace.Active is ImageTabState && ImageView.IsVisible) return NavigateKeyboardAsync(-1);
         return Task.CompletedTask;
     }
@@ -220,7 +220,17 @@ public partial class MainWindow
                 target = history.GoTo(index, ResolveHistoryTarget);
                 skipped = before - history.Count;
             }
-            else target = history.Step(direction, ResolveHistoryTarget, out skipped);
+            else
+            {
+                // A jump from an image to an Explorer tab (Ctrl+E ...) is one chronological step (CrossTabHistory).
+                var decision = CrossTabHistory.Decide(history, direction, _settings.ExplorerBackReturnsToImage);
+                if (decision is { Kind: CrossTabStepKind.ToOtherTab, Link: { } link })
+                {
+                    await CrossTabStepAsync(active, history, link, direction);
+                    return;
+                }
+                target = history.Step(direction, ResolveHistoryTarget, out skipped);
+            }
             var fellBack = _historyResolvedToParent;
 
             _diagnostics.Write("navigation", "history_step", new
@@ -241,6 +251,63 @@ public partial class MainWindow
         {
             UpdateHistoryNavigationState();
         }
+    }
+
+    /// <summary>
+    /// Back from an Explorer tab to the image the user jumped from (its tab, or a new one when it was closed), or Forward
+    /// from that image back to the Explorer tab. The Explorer history itself does not move, so Forward lands on the same
+    /// folder and selection.
+    /// </summary>
+    private async Task CrossTabStepAsync(TabState active, NavigationHistory history, CrossTabLink link, int direction)
+    {
+        _diagnostics.Write("navigation", "history_cross_tab", new { direction, kind = link.Kind.ToString(), path = link.Path });
+        if (direction < 0)
+        {
+            if (!File.Exists(link.Path)) { ShowHistoryNotice("That image no longer exists."); return; }
+            var arrival = CrossTabHistory.ArrivalIndex(history, link);
+            var explorerLink = new CrossTabLink(active.Id, NavigationEntryKind.Explorer,
+                (active as BrowserTabState)?.Folder ?? history.Current?.Path ?? string.Empty, history.Current?.SelectedPath);
+            Guid imageTabId;
+            // The Explorer window opened by Ctrl+E (New window): Back goes to the picture in the original window.
+            if (_workspace.Tabs.All(t => t.Id != link.TabId) && await TryReturnToImageInOtherWindowAsync(link)) return;
+            if (_workspace.Tabs.FirstOrDefault(t => t.Id == link.TabId) is ImageTabState source)
+            {
+                imageTabId = source.Id;
+                _workspace.Select(imageTabId);
+                if (!NavigationEntry.PathsEqual(source.Path, link.Path)) _workspace.ReplaceTab(new ImageTabState(imageTabId, link.Path));
+            }
+            else
+            {
+                imageTabId = _workspace.AddImage(link.Path).Id;
+                // Back from the Explorer tab again finds the reopened tab.
+                if (arrival >= 0)
+                {
+                    var current = history.Index;
+                    history.GoTo(arrival);
+                    history.UpdateCurrent(e => e with { ReturnTo = link with { TabId = imageTabId } });
+                    history.GoTo(current);
+                }
+            }
+            RebuildTabStrip();
+            var imageHistory = HistoryFor(_workspace.Active!);
+            imageHistory.Record(NavigationEntry.Image(link.Path));
+            if (!NavigationEntry.PathsEqual(imageHistory.Current?.Path, link.Path)) imageHistory.Replace(NavigationEntry.Image(link.Path));
+            CrossTabHistory.MarkReturned(imageHistory, explorerLink);
+            UpdateTabNavigationButtons();
+            await ActivateWorkspaceAsync();
+            // Again after the image tab recorded what it shows (same image keeps the link; this covers a path rewrite).
+            if (_workspace.Active?.Id == imageTabId) CrossTabHistory.MarkReturned(HistoryFor(_workspace.Active), explorerLink);
+            return;
+        }
+        if (_workspace.Tabs.FirstOrDefault(t => t.Id == link.TabId) is BrowserTabState explorer)
+        {
+            _workspace.Select(explorer.Id);
+            RebuildTabStrip();
+            await ActivateWorkspaceAsync();
+            return;
+        }
+        // The Explorer tab was closed: open the folder again with the same item selected (a new arrival from this image).
+        await ShowPathInExplorerTabAsync(link.SelectedPath is { } selected && (File.Exists(selected) || Directory.Exists(selected)) ? selected : link.Path);
     }
 
     private NavigationEntry? ResolveHistoryTarget(NavigationEntry entry)
@@ -279,7 +346,9 @@ public partial class MainWindow
                 return;
             }
             case NavigationEntryKind.Image:
-                _workspace.ReplaceTab(new ImageTabState(active.Id, target.Path!));
+                // Back after Ctrl+E in the same tab: the picture comes back at the zoom and position it was left at.
+                var returnView = _locateReturnViews.Remove(active.Id, out var saved) && NavigationEntry.PathsEqual(saved.Path, target.Path) ? saved.View : null;
+                _workspace.ReplaceTab(new ImageTabState(active.Id, target.Path!) { ViewState = returnView });
                 RebuildTabStrip();
                 await ActivateWorkspaceAsync();
                 return;
@@ -322,19 +391,32 @@ public partial class MainWindow
     private void UpdateHistoryNavigationState()
     {
         var history = ActiveHistory;
-        var canBack = history?.CanGoBack == true;
-        var canForward = history?.CanGoForward == true;
+        var mode = _settings.ExplorerBackReturnsToImage;
+        var canBack = CrossTabHistory.CanGo(history, -1, mode);
+        var canForward = CrossTabHistory.CanGo(history, 1, mode);
+        var backTip = HistoryTip(-1, CrossTabHistory.Decide(history, -1, mode));
+        var forwardTip = HistoryTip(1, CrossTabHistory.Decide(history, 1, mode));
         // Title bar: dimmed and inert rather than IsEnabled = false. A disabled control is skipped by hit testing, so a click
         // on it would fall through to the caption (window drag, double-click maximize); an inactive button just does nothing.
         // Its tooltip keeps showing the live shortcut.
-        if (_titleBarButtons.TryGetValue("nav.back", out var back)) SetHistoryButtonAvailable(back, canBack);
-        if (_titleBarButtons.TryGetValue("nav.forward", out var forward)) SetHistoryButtonAvailable(forward, canForward);
+        if (_titleBarButtons.TryGetValue("nav.back", out var back)) { SetHistoryButtonAvailable(back, canBack); ToolTip.SetTip(back, backTip); }
+        if (_titleBarButtons.TryGetValue("nav.forward", out var forward)) { SetHistoryButtonAvailable(forward, canForward); ToolTip.SetTip(forward, forwardTip); }
         if (_browserSurface is { } surface && _workspace.Active is BrowserTabState)
         {
             surface.BackButton.IsEnabled = canBack;
             surface.ForwardButton.IsEnabled = canForward;
+            ToolTip.SetTip(surface.BackButton, backTip);
+            ToolTip.SetTip(surface.ForwardButton, forwardTip);
             surface.HistoryButton.IsEnabled = history is { Count: > 1 };
         }
+    }
+
+    /// <summary>"Back to 4K Wallpapers 1 (1).jpg (Alt+Left)" when Back leaves the tab, else "Back (Alt+Left)"; live keys.</summary>
+    private string HistoryTip(int direction, CrossTabStep step)
+    {
+        var text = step.Link is { } link ? CrossTabHistory.Describe(direction, link) : direction < 0 ? "Back" : "Forward";
+        var command = direction < 0 ? Glide.Core.Commands.GlideCommand.NavigateBack : Glide.Core.Commands.GlideCommand.NavigateForward;
+        return $"{text} ({ShortcutFor(command)})"; // same live-binding format as RefreshDynamicTooltips
     }
 
     private static void SetHistoryButtonAvailable(Button button, bool available)

@@ -778,7 +778,7 @@ public partial class MainWindow
             [GlideCommand.PreviousFolder] = () => RunSerializedNavigationResultAsync(() => TryNavigateSiblingFolderAsync(-1)), [GlideCommand.NextFolder] = () => RunSerializedNavigationResultAsync(() => TryNavigateSiblingFolderAsync(1)),
             // "Explore/Browse containing folder" (hotkey folder.exploreParent). It used to be an empty stub, which is why the
             // action did nothing. It is the same operation as the title-bar Show in Explorer button and follows its target setting.
-            [GlideCommand.ExploreParentFolder] = OpenContainingFolderAsync,
+            [GlideCommand.ExploreParentFolder] = OpenContainingFolderOrAlternativeAsync,
             // The five fit / size commands follow "Fit control scope" exactly like the status bar buttons: same code path (ApplyStatusBarFit).
             [GlideCommand.FitImage] = () => { ApplyStatusBarFit("Fit image", Viewport.Fit); return Task.CompletedTask; }, [GlideCommand.FitWidth] = () => { ApplyStatusBarFit("Fit width", Viewport.FitWidth); return Task.CompletedTask; }, [GlideCommand.FitHeight] = () => { ApplyStatusBarFit("Fit height", Viewport.FitHeight); return Task.CompletedTask; }, [GlideCommand.FitWindow] = () => { ApplyStatusBarFit("Fit to window", Viewport.FitWindow); return Task.CompletedTask; }, [GlideCommand.ActualSize] = () => { ApplyStatusBarFit("100%", Viewport.ActualSize); return Task.CompletedTask; },
             [GlideCommand.ToggleFitActual] = () => { if (Viewport.ZoomPercent == 100) Viewport.Fit(); else Viewport.ActualSize(); return Task.CompletedTask; }, [GlideCommand.ZoomIn] = () => { Viewport.ZoomStep(true); return Task.CompletedTask; }, [GlideCommand.ZoomOut] = () => { Viewport.ZoomStep(false); return Task.CompletedTask; },
@@ -789,7 +789,7 @@ public partial class MainWindow
             [GlideCommand.DetachTab] = async () => { if (_workspace.Active is { } a) await DetachTabAsync(a.Id, this.PointToScreen(new Point(Bounds.Width / 2, 48))); }, [GlideCommand.CloseWindow] = () => { Close(); return Task.CompletedTask; }, [GlideCommand.ExitApplication] = ExitGlideAsync, [GlideCommand.ToggleFullscreen] = () => { ToggleFullscreen(); return Task.CompletedTask; }, [GlideCommand.StartPauseSlideshow] = ToggleSlideshowAsync, [GlideCommand.StopSlideshow] = () => { StopSlideshow(true); return Task.CompletedTask; },
             [GlideCommand.ToggleImageInfo] = () => Event(InfoClicked), [GlideCommand.ClearSelection] = HandleEscapeAsync, [GlideCommand.Settings] = () => Event(SettingsClicked), [GlideCommand.AddOverlay] = () => Event(OverlayAddClicked), [GlideCommand.SaveOverlayLayout] = () => Event(OverlaySaveClicked), [GlideCommand.LoadOverlayLayout] = () => Event(OverlayLoadClicked), [GlideCommand.ResetSelectedOverlayZoom] = () => { EnsureOverlays().ResetSelectedZoom(); return Task.CompletedTask; }, [GlideCommand.BringSelectedOverlayFront] = () => { EnsureOverlays().BringSelectedToFront(); return Task.CompletedTask; },
             [GlideCommand.ToggleAlwaysOnTop] = () => Event(AlwaysOnTopClicked), [GlideCommand.ToggleTransparency] = () => Event(TransparencyClicked), [GlideCommand.ShowContextMenu] = () => { ShowViewerContextMenu(); return Task.CompletedTask; }, [GlideCommand.BrowserBack] = () => Event(BrowserBackClicked), [GlideCommand.BrowserForward] = () => Event(BrowserForwardClicked), [GlideCommand.BrowserUp] = () => Event(BrowserUpClicked),
-            [GlideCommand.CopyImage] = () => { CopyImagePixels(); return Task.CompletedTask; }, [GlideCommand.ExportSelection] = ExportSelectionAsync, [GlideCommand.CopyFile] = () => { CopyImageFile(); return Task.CompletedTask; }, [GlideCommand.CopyFileName] = () => CopyTextAsync(_currentPath is null ? null : Path.GetFileName(_currentPath)), [GlideCommand.CopyFolderPath] = () => CopyTextAsync(_currentPath is null ? null : Path.GetDirectoryName(_currentPath)), [GlideCommand.CopyFullPath] = () => CopyTextAsync(_currentPath), [GlideCommand.RenameFile] = RenameCurrentFileAsync, [GlideCommand.DeleteFile] = DeleteCurrentFileAsync, [GlideCommand.OpenContainingFolder] = OpenContainingFolderAsync, [GlideCommand.Print] = PrintCurrentImageAsync, [GlideCommand.SaveImage] = SaveCurrentImageAsync, [GlideCommand.SaveImageAs] = SaveCurrentImageAsAsync, [GlideCommand.ExternalProgram1] = () => { LaunchExternal(1); return Task.CompletedTask; }, [GlideCommand.ExternalProgram2] = () => { LaunchExternal(2); return Task.CompletedTask; }, [GlideCommand.ExternalProgram3] = () => { LaunchExternal(3); return Task.CompletedTask; }
+            [GlideCommand.CopyImage] = () => { CopyImagePixels(); return Task.CompletedTask; }, [GlideCommand.ExportSelection] = ExportSelectionAsync, [GlideCommand.CopyFile] = () => { CopyImageFile(); return Task.CompletedTask; }, [GlideCommand.CopyFileName] = () => CopyTextAsync(_currentPath is null ? null : Path.GetFileName(_currentPath)), [GlideCommand.CopyFolderPath] = () => CopyTextAsync(_currentPath is null ? null : Path.GetDirectoryName(_currentPath)), [GlideCommand.CopyFullPath] = () => CopyTextAsync(_currentPath), [GlideCommand.RenameFile] = RenameCurrentFileAsync, [GlideCommand.DeleteFile] = DeleteCurrentFileAsync, [GlideCommand.OpenContainingFolder] = OpenContainingFolderOrAlternativeAsync, [GlideCommand.Print] = PrintCurrentImageAsync, [GlideCommand.SaveImage] = SaveCurrentImageAsync, [GlideCommand.SaveImageAs] = SaveCurrentImageAsAsync, [GlideCommand.ExternalProgram1] = () => { LaunchExternal(1); return Task.CompletedTask; }, [GlideCommand.ExternalProgram2] = () => { LaunchExternal(2); return Task.CompletedTask; }, [GlideCommand.ExternalProgram3] = () => { LaunchExternal(3); return Task.CompletedTask; }
         };
         actions[GlideCommand.JumpForward10] = () => NavigateMouseAsync(10);
         actions[GlideCommand.JumpBack10] = () => NavigateMouseAsync(-10);
@@ -813,6 +813,7 @@ public partial class MainWindow
         actions[GlideCommand.TabToolTipLarger] = () => { StepTabToolTipTextSize(1); return Task.CompletedTask; };
         actions[GlideCommand.TabToolTipSmaller] = () => { StepTabToolTipTextSize(-1); return Task.CompletedTask; };
         actions[GlideCommand.ShowFolderInWindowsExplorer] = () => { ShowFolderInWindowsExplorer(); return Task.CompletedTask; };
+        actions[GlideCommand.ShowInAlternativeFileManager] = () => { ShowInAlternativeFileManager(); return Task.CompletedTask; };
         actions[GlideCommand.ResetTransparency] = () => Event(TransparencyResetClicked);
         actions[GlideCommand.ClearRecentHistory] = () => Event(ClearRecentHistoryClicked);
         actions[GlideCommand.CycleRecentHistorySize] = () => Event(ResizeRecentHistoryClicked);
@@ -853,7 +854,7 @@ public partial class MainWindow
     /// <summary>Explorer tab: the folder being browsed; elsewhere: the current image's folder, with the image selected.</summary>
     private void ShowFolderInWindowsExplorer()
     {
-        if (_workspace.Active is BrowserTabState browser) { ExplorerShell.Reveal(browser.Folder, directory: true); return; }
+        if (_workspace.Active is BrowserTabState browser) { ExplorerShell.RevealSelected(browser.Folder, ExplorerRevealSelection(browser)); return; }
         if (!string.IsNullOrWhiteSpace(_currentPath) && File.Exists(_currentPath)) WindowsExplorerLocateLauncher(_currentPath);
     }
 
@@ -926,10 +927,15 @@ public partial class MainWindow
             ToolTip.SetTip(_browserSurface.UpButton, BindingHints.WithShortcuts("Up one folder", upKeys));
             ToolTip.SetShowDelay(_browserSurface.UpButton, 650);
             Tip(_browserSurface.RefreshButton, "Refresh", GlideCommand.RefreshFolder);
+            // Show in File Explorer: the action's live keys; the button's context menu lists the other targets.
+            var windowsKeys = HotkeyCatalog.ShortcutsForAction("explorer.showInWindows", _settings.Hotkeys);
+            ToolTip.SetTip(_browserSurface.WindowsExplorerButton,
+                BindingHints.WithShortcuts("Show in Windows File Explorer, with the selected item selected", windowsKeys));
             // Ctrl+F is a fixed registry shortcut: read it from there instead of typing it a second time.
             _browserSurface.FilterBox.Watermark = BindingHints.FixedShortcut("fixed.explorer.filter") is { } filterKeys
                 ? $"Filter this folder ({filterKeys})" : "Filter this folder";
         }
+        UpdateHistoryNavigationState(); // Back / Forward tips may name a cross-tab target ("Back to x.jpg")
     }
 
     private void CopyImagePixels()

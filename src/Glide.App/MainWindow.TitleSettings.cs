@@ -139,8 +139,8 @@ public partial class MainWindow
 
         if (_titleBarButtons.TryGetValue("window.alwaysOnTop", out var topmostButton))
             SetActiveClass(topmostButton, ActiveAlwaysOnTop);
-        UpdateHistoryNavigationState();
         RefreshTitleActionTooltips();
+        UpdateHistoryNavigationState(); // after the tooltips: Back / Forward may name a cross-tab target
         // Rebuilding resets every button to visible; reapply the width-based one-at-a-time reveal.
         ApplyCompactChromeLayout();
     }
@@ -201,8 +201,7 @@ public partial class MainWindow
         }
         else if (id == "file.locate")
         {
-            items.Add(BuildShowInExplorerTargetMenuItem("Show in Glide's Explorer tab", ShowInExplorerTargets.GlideTab, "Browser"));
-            items.Add(BuildShowInExplorerTargetMenuItem("Show in Windows File Explorer", ShowInExplorerTargets.WindowsExplorer, "FolderLocate"));
+            items.AddRange(BuildFileManagerTargetMenuItems(includeGlideTab: true, tickTarget: true));
             items.Add(new MenuItem { Header = "-" });
         }
         var current = TitleBarButtonCatalog.Normalize(_settings.TitleBarButtons).ToList();
@@ -539,6 +538,9 @@ public partial class MainWindow
     {
         ThemePaletteApplier.Apply(_settings.ThemeChoice, _settings.AccentChoice, _settings.GlowChoice, _settings.GlowIntensityPercent, _settings.CustomAccentHex, _settings.CustomGlowHex, _settings.MainBackgroundChoice, _settings.CustomMainBackgroundHex);
         ApplyTopmostState(forceNative: true);
+        // GIF controls visibility depends on "Show GIF controls only on GIFs": re-evaluate on every settings change
+        // (the XAML default is hidden, so this also gives the always-shown default its first layout at startup).
+        UpdateGifStatusUi();
         KeyboardNavigation.SetTabNavigation(this, _settings.EnableTabFocusNavigation ? KeyboardNavigationMode.Continue : KeyboardNavigationMode.None);
         // Window.Background is a compositor contract, not the normal theme surface. Keep the
         // top-level transparent for the lifetime of the HWND and paint the ordinary application
@@ -826,12 +828,25 @@ public partial class MainWindow
     private void StatusSurfacePointerPressed(object? sender, PointerPressedEventArgs e)
     {
         if (!e.GetCurrentPoint(sender as Visual ?? ViewerStatusSurface).Properties.IsRightButtonPressed) return;
+        // This handler tunnels before the button sees the press: right-click on the minimise/auto-hide button
+        // toggles auto-hide on release, so the bar's menu must not open over it.
+        if (IsStatusCollapseButtonSource(e.Source)) return;
         e.Handled = true;
         var owned = BuildStatusSurfaceContextMenu();
         // The menu is a popup window: the pointer leaves the bar while it is open, but an auto-hidden bar must stay put.
         _statusMenuOpen = true;
         owned.Closed += (_, _) => { _statusMenuOpen = false; UpdateStatusHoverReveal(_lastWindowPointer); };
         owned.Open(sender as Control ?? ViewerStatusSurface);
+    }
+
+    /// <summary>True when <paramref name="source"/> is (inside) a status bar minimise/auto-hide button.</summary>
+    internal bool IsStatusCollapseButtonSource(object? source)
+    {
+        for (var v = source as Visual; v is not null; v = v.GetVisualParent())
+        {
+            if (ReferenceEquals(v, StatusCollapseButton) || (_homeSurface is not null && ReferenceEquals(v, _homeSurface.StatusCollapseButton))) return true;
+        }
+        return false;
     }
 
     /// <summary>The status bar's right-click menu (also used by tests).</summary>

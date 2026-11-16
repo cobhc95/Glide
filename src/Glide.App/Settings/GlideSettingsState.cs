@@ -173,6 +173,19 @@ public sealed record GlideSettingsState
     public string ExplorerDefaultView { get; set; } = "Large thumbnails";
     public bool ExplorerShowHiddenFiles { get; set; }
     public bool ExplorerShowOnlyImages { get; set; } = true;
+    // Explorer wheel speed multiplier (0.25 - 4). One notch scrolls 1 / 2 / 3 rows by view; this scales it.
+    public double ExplorerScrollSpeed { get; set; } = 1.0;
+    // Explorer wheel scroll amount mode (Explorer.ExplorerScrollModes) and its fixed rows / pixels values.
+    public string ExplorerScrollMode { get; set; } = "One row per notch";
+    public int ExplorerScrollRows { get; set; } = 3;
+    public int ExplorerScrollPixels { get; set; } = 100;
+    // What Back does in an Explorer tab reached from a picture (Glide.Core.Navigation.ExplorerBackReturnModes).
+    public string ExplorerLocateOpensIn { get; set; } = Glide.Core.Navigation.ExplorerLocateTargets.Default;
+    public string ExplorerBackReturnsToImage { get; set; } = "Folders, then back to the picture";
+    // Alternative file manager for the Explorer toolbar's "Show in" button (right / middle click) and its action.
+    // Empty path = none. Arguments use {path} for the folder or selected file; empty arguments = "{path}" quoted.
+    public string AlternativeFileManagerPath { get; set; } = string.Empty;
+    public string AlternativeFileManagerArguments { get; set; } = "\"{path}\"";
     public bool FullscreenStatusAlwaysOn { get; set; } = true;
     public bool FullscreenKeepTabBarOpen { get; set; }
     /// <summary>Fullscreen with the Explorer tab selected keeps the title/tab bar docked above the Explorer navigation row. On by default; files without the key get true.</summary>
@@ -667,6 +680,8 @@ public static class ShowInExplorerTargets
 {
     public const string GlideTab = "Glide's Explorer tab";
     public const string WindowsExplorer = "Windows File Explorer";
+    /// <summary>The program set in explorer.altFileManagerPath (offered in the button's menu only once one is set).</summary>
+    public const string Alternative = "Alternative file manager";
 
     /// <summary>
     /// Maps any stored value to one of the two choices. Unknown / empty values and the legacy hidden
@@ -675,7 +690,10 @@ public static class ShowInExplorerTargets
     /// "Windows File Explorer" value keeps Windows File Explorer.
     /// </summary>
     public static string Normalize(string? value) =>
-        string.Equals(value?.Trim(), WindowsExplorer, StringComparison.OrdinalIgnoreCase) ? WindowsExplorer : GlideTab;
+        string.Equals(value?.Trim(), WindowsExplorer, StringComparison.OrdinalIgnoreCase) ? WindowsExplorer
+        : string.Equals(value?.Trim(), Alternative, StringComparison.OrdinalIgnoreCase) ? Alternative : GlideTab;
+
+    public static bool IsAlternative(string? value) => Normalize(value) == Alternative;
 
     public static bool IsWindowsExplorer(string? value) => Normalize(value) == WindowsExplorer;
 }

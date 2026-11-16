@@ -19,8 +19,8 @@ public sealed class StatusBarCustomizerWindow : Window
 {
     private const string GroupsCategory = "Status-bar groups";
     private readonly List<string> _shown;
-    private readonly ListBox _availableList = new() { SelectionMode = SelectionMode.Single };
-    private readonly ListBox _shownList = new() { SelectionMode = SelectionMode.Single };
+    private readonly ListBox _availableList = new() { SelectionMode = SelectionMode.Single, [ScrollViewer.HorizontalScrollBarVisibilityProperty] = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled };
+    private readonly ListBox _shownList = new() { SelectionMode = SelectionMode.Single, [ScrollViewer.HorizontalScrollBarVisibilityProperty] = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled };
 
     public StatusBarCustomizerWindow(string stored)
     {
@@ -118,17 +118,15 @@ public sealed class StatusBarCustomizerWindow : Window
     {
         var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("34,*"), Margin = new Thickness(2, 3), Background = Brushes.Transparent };
         grid.Children.Add(new GlideIconView { Kind = StatusBarGroupCatalog.IconOf(id), Width = 20, Height = 20, StrokeWidth = 1.55, VerticalAlignment = VerticalAlignment.Center });
-        var label = new TextBlock { Text = StatusBarGroupCatalog.LabelOf(id), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(5, 0, 0, 0) };
+        var label = new TextBlock { Text = StatusBarGroupCatalog.LabelOf(id), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(5, 0, 0, 0), TextTrimming = TextTrimming.CharacterEllipsis, TextWrapping = TextWrapping.NoWrap, IsHitTestVisible = false };
+        // The columns are narrow: a long name is trimmed with an ellipsis, and the full name is always in the tooltip.
+        // The tooltip lives on the ListBoxItem, the element under the pointer anywhere on the row; the label itself is not
+        // hit-testable, so it can never become a separate (nested) tooltip host.
         Grid.SetColumn(label, 1); grid.Children.Add(label);
-        return new ListBoxItem { Tag = id, Content = grid, HorizontalContentAlignment = HorizontalAlignment.Stretch, Background = Brushes.Transparent, Cursor = new Cursor(StandardCursorType.Hand) };
+        return new ListBoxItem { Tag = id, Content = grid, HorizontalContentAlignment = HorizontalAlignment.Stretch, Background = Brushes.Transparent, Cursor = new Cursor(StandardCursorType.Hand), [ToolTip.TipProperty] = label.Text };
     }
 
-    private static ListBoxItem Heading(string text) => new()
-    {
-        IsEnabled = false,
-        Focusable = false,
-        Content = new TextBlock { Text = text, FontWeight = FontWeight.SemiBold, FontSize = 12, Foreground = new SolidColorBrush(Color.Parse("#8E9AA8")), Margin = new Thickness(4, 8, 0, 2) }
-    };
+    private static ListBoxItem Heading(string text) => CustomizerListHeading.Create(text);
 
     private bool IsShown(string id) => _shown.Contains(id, StringComparer.OrdinalIgnoreCase);
 

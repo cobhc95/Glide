@@ -400,6 +400,8 @@ public static class SettingsStore
             // "Windows File Explorer" is kept.
             loaded.ShowInExplorerTarget = ShowInExplorerTargets.Normalize(loaded.ShowInExplorerTarget);
             loaded.ExplorerDefaultView = ExplorerDefaultViews.Normalize(loaded.ExplorerDefaultView);
+            loaded.ExplorerLocateOpensIn = Glide.Core.Navigation.ExplorerLocateTargets.Normalize(loaded.ExplorerLocateOpensIn);
+        loaded.ExplorerBackReturnsToImage = Glide.Core.Navigation.ExplorerBackReturnModes.Normalize(loaded.ExplorerBackReturnsToImage);
 
             // 2.9-9 changes the fresh/default selection zoom-out mapping to reverse proportional scale.
             // If the property was absent in an older settings payload, adopt the new default. If an

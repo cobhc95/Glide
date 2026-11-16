@@ -388,8 +388,7 @@ public partial class MainWindow
                 // with the HWND. A stale Maximized value used to send SC_RESTORE to an
                 // already-normal, half-screen window instead of maximizing it.
                 var restore = TryGetNativeZoomed(out var zoomed) ? zoomed : WindowState == WindowState.Maximized;
-                if (!TrySendNativeSystemCommand(restore ? ScRestore : ScMaximize))
-                    WindowState = restore ? WindowState.Normal : WindowState.Maximized;
+                ApplyMaximizeRestoreTransition(restore, "caption_button");
                 break;
             case "Close Glide":
                 if (Environment.TickCount64 < Volatile.Read(ref _suppressCloseUntilTick))
@@ -541,12 +540,52 @@ public partial class MainWindow
         var restore = TryGetNativeZoomed(out var zoomed) ? zoomed : WindowState == WindowState.Maximized;
         Dispatcher.UIThread.Post(async () =>
         {
-            TrySendNativeSystemCommand(restore ? ScRestore : ScMaximize);
+            ApplyMaximizeRestoreTransition(restore, "gesture");
             await Task.Delay(180);
             var nowZoomed = TryGetNativeZoomed(out var z) && z;
             if (restore ? nowZoomed : !nowZoomed)
                 WindowState = restore ? WindowState.Normal : WindowState.Maximized;
         }, DispatcherPriority.Background);
+    }
+
+    /// <summary>
+    /// Maximize / restore through the same flash-free pipeline as fullscreen enter/exit (image double-click):
+    /// final chrome applied before the native change, per-WM_SIZE chrome/status/tab-strip work suppressed during
+    /// it and run once afterwards, and the Normal&lt;-&gt;Maximized geometry jump (including the shell's min/max
+    /// animation, which with a custom-chrome HWND visibly starts from the restored rectangle / lower-left) hidden
+    /// behind a DWM cloak that is lifted on the first frame composed at the final geometry.
+    /// </summary>
+    private void ApplyMaximizeRestoreTransition(bool restore, string source)
+    {
+        if (WindowState == WindowState.FullScreen) return;
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
+        var target = restore ? WindowState.Normal : WindowState.Maximized;
+        if (!restore && WindowState == WindowState.Normal) TrackNormalWindowPlacement();
+        var fenced = FullscreenTransitionPlanner.PlanMaximizeToggleFence(WindowState, target) == FullscreenTransitionFence.Cloak
+            && BeginFullscreenTransitionFence();
+        _fullscreenTransitionResizeEvents = 0;
+        _fullscreenTransitionActive = true;
+        try
+        {
+            ApplyChromeLayoutForWindowState(target);
+            if (!TrySendNativeSystemCommand(restore ? ScRestore : ScMaximize) || WindowState != target)
+                WindowState = target;
+        }
+        finally
+        {
+            _fullscreenTransitionActive = false;
+            if (fenced) ScheduleFullscreenTransitionReveal(restore ? "restore" : "maximize");
+        }
+        ApplyChromeLayoutForWindowState();
+        ApplyChromeSizingAfterFullscreenTransition();
+        FinishFullscreenTransition();
+        RefreshTabStripAfterFullscreenTransition();
+        _diagnostics.Write("window", "maximize_toggle", new
+        {
+            source, restore, state = WindowState.ToString(), fence = fenced ? "cloak" : "none",
+            resizeEvents = _fullscreenTransitionResizeEvents,
+            transitionMs = Math.Round(System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds, 2)
+        });
     }
 
     private PointerPressedEventArgs? _pendingChromeDragPress;

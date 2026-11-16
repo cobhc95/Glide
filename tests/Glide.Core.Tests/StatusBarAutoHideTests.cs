@@ -1356,7 +1356,9 @@ public sealed class StatusBarAutoHideTests
             {
                 _clockMs = 1_000_000;
                 SetField(window, "_statusRevealClock", (Func<long>)(() => _clockMs));   // tests drive the hide delay
-                SetField(window, "_settings", new GlideSettingsState { ShowStatusSurface = true });
+                SetField(window, "_settings", new GlideSettingsState { ShowStatusSurface = true, StatusGifControlsOnlyOnGifs = true });
+                // The bar geometry below assumes no GIF group (no animated image open); the GIF controls are always shown by default.
+                Invoke(window, "UpdateGifStatusUi");
                 window.Width = 1000; window.Height = 700;
                 window.Show();
                 ImageView(window).IsVisible = true;

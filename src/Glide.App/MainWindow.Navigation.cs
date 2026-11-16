@@ -262,9 +262,6 @@ public partial class MainWindow
         }
     }
 
-    /// <summary>Explorer wheel step per notch: about 1.5 notches per visible page (at least one 48 px line).</summary>
-    internal static double ExplorerWheelScrollStep(double viewportHeight) => Math.Max(48, viewportHeight / 1.5);
-
     private async Task NavigateFromViewportAsync(int delta)
     {
         try
@@ -371,6 +368,9 @@ public partial class MainWindow
                 if (_settings.AnimateGifs && GifAnimationPlayer.IsGif(path))
                     EnsureGifPlayer().Start(path);
                 else _gifPlayer?.Stop();
+                // Re-evaluate on every image change: Stop() only reports when it had a state, and a GIF player
+                // whose presentation was superseded no longer has an animation without raising StateChanged.
+                UpdateGifStatusUi();
             }
 
             // A newer click may have arrived while this frame was being attached. Do not let an
@@ -1497,13 +1497,14 @@ public partial class MainWindow
                     SetExplorerViewMode(_browserViewMode + (e.Delta.Y > 0 ? -1 : 1));
                     return;
                 }
-                // a plain wheel notch scrolls 2/3 of the visible list, so about 1.5 notches turn a page.
+                // A plain wheel notch scrolls by rows (1 / 2 / 3 by view, times the Explorer scroll speed setting).
                 if (e.KeyModifiers == KeyModifiers.None && e.Delta.Y != 0)
                 {
                     var viewer = browser.ScrollViewer;
-                    var step = ExplorerWheelScrollStep(viewer.Viewport.Height);
+                    var change = Glide.App.Explorer.ExplorerWheelScroll.OffsetChange(_browserViewMode, e.Delta.Y, _settings.ExplorerScrollSpeed, ExplorerGridSpacing,
+                        _settings.ExplorerScrollMode, _settings.ExplorerScrollRows, _settings.ExplorerScrollPixels);
                     var max = Math.Max(0, viewer.Extent.Height - viewer.Viewport.Height);
-                    viewer.Offset = new Vector(viewer.Offset.X, Math.Clamp(viewer.Offset.Y - e.Delta.Y * step, 0, max));
+                    viewer.Offset = new Vector(viewer.Offset.X, Math.Clamp(viewer.Offset.Y + change, 0, max));
                     e.Handled = true;
                 }
                 return;
@@ -1520,6 +1521,7 @@ public partial class MainWindow
         browser.ScrollViewer.ScrollChanged += (_, e) => { if (e.OffsetDelta.Y != 0) NoteExplorerSessionChanged(); };
         browser.ViewModeChanged += (_, e) => BrowserViewModeChanged(browser.ViewModeCombo, e);
         browser.WindowsExplorerRequested += (_, _) => BrowserWindowsExplorerClicked(browser, new RoutedEventArgs());
+        AttachExplorerToolbarRevealMenu(browser.WindowsExplorerButton);
         browser.FilterTextChanged += (_, e) => BrowserFilterTextChanged(browser.FilterBox, e);
         browser.FilterKeyPressed += (_, e) => BrowserFilterKeyDown(browser.FilterBox, e);
         WireExplorerInput(browser);

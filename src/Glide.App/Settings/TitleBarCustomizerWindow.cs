@@ -11,8 +11,8 @@ namespace Glide.App.Settings;
 public sealed class TitleBarCustomizerWindow : Window
 {
     private readonly List<string> _shown;
-    private readonly ListBox _availableList = new();
-    private readonly ListBox _shownList = new();
+    private readonly ListBox _availableList = new() { [ScrollViewer.HorizontalScrollBarVisibilityProperty] = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled };
+    private readonly ListBox _shownList = new() { [ScrollViewer.HorizontalScrollBarVisibilityProperty] = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled };
 
     public TitleBarCustomizerWindow(IEnumerable<string> current)
     {
@@ -125,9 +125,12 @@ public sealed class TitleBarCustomizerWindow : Window
             };
         }
         grid.Children.Add(icon);
-        var label = new TextBlock { Text = definition.Label, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(5, 0, 0, 0) };
+        var label = new TextBlock { Text = definition.Label, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(5, 0, 0, 0), TextTrimming = TextTrimming.CharacterEllipsis, TextWrapping = TextWrapping.NoWrap, IsHitTestVisible = false };
+        // The columns are narrow: a long name is trimmed with an ellipsis, and the full name is always in the tooltip.
+        // The tooltip lives on the ListBoxItem, the element under the pointer anywhere on the row; the label itself is not
+        // hit-testable, so it can never become a separate (nested) tooltip host.
         Grid.SetColumn(label, 1); grid.Children.Add(label);
-        return new ListBoxItem { Tag = definition.Id, Content = grid, HorizontalContentAlignment = HorizontalAlignment.Stretch };
+        return new ListBoxItem { Tag = definition.Id, Content = grid, HorizontalContentAlignment = HorizontalAlignment.Stretch, Background = Brushes.Transparent, [ToolTip.TipProperty] = definition.Label };
     }
 
     private void RebuildLists(string? selectShown = null)
@@ -141,12 +144,7 @@ public sealed class TitleBarCustomizerWindow : Window
                             !_shown.Contains(d.Id, StringComparer.OrdinalIgnoreCase))
                 .ToList();
             if (inCategory.Count == 0) continue;
-            _availableList.Items.Add(new ListBoxItem
-            {
-                IsEnabled = false,
-                Focusable = false,
-                Content = new TextBlock { Text = category, FontWeight = FontWeight.SemiBold, FontSize = 12, Foreground = new SolidColorBrush(Color.Parse("#8E9AA8")), Margin = new Thickness(4, 8, 0, 2) }
-            });
+            _availableList.Items.Add(CustomizerListHeading.Create(category));
             foreach (var definition in inCategory) _availableList.Items.Add(Row(definition));
         }
 

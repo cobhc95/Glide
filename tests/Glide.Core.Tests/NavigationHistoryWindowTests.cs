@@ -275,6 +275,302 @@ public sealed class NavigationHistoryWindowTests
         finally { try { Directory.Delete(folder, true); } catch { } }
     }
 
+    // ---- Back / Forward across a jump from an image to an Explorer tab (Ctrl+E) --------------------------------------
+
+    /// <summary>An image tab on a.png, then Ctrl+E (the real hotkey) to an Explorer tab of its folder.</summary>
+    private static async Task<(Guid ImageTab, Guid ExplorerTab, string Image)> JumpToExplorerAsync(MainWindow window, string folder)
+    {
+        Invoke(window, "RebuildTitleActionStrip");
+        await Activate(window);
+        var image = Path.Combine(folder, "a.png");
+        await (Task)Invoke(window, "OpenAsImageTabAsync", image, false, false)!;
+        await Settle();
+        var imageTab = Workspace(window).Active!.Id;
+        // The cross-tab tests cover "Existing or new tab" (the default is now Same tab).
+        if (Settings(window).ExplorerLocateOpensIn == ExplorerLocateTargets.SameTab) Settings(window).ExplorerLocateOpensIn = ExplorerLocateTargets.ExistingOrNewTab;
+        await Press(window, Key.E, RawInputModifiers.Control);
+        await Settle();
+        var explorer = Assert.IsType<BrowserTabState>(Workspace(window).Active);
+        Assert.True(NavigationEntry.PathsEqual(folder, explorer.Folder));
+        return (imageTab, explorer.Id, image);
+    }
+
+    private static string CrossTabFolder()
+    {
+        var folder = TempFolder("a.png", "b.png");
+        var sub = Path.Combine(folder, "sub");
+        Directory.CreateDirectory(sub);
+        File.WriteAllBytes(Path.Combine(sub, "c.png"), Png(8, 8));
+        return folder;
+    }
+
+    [Fact]
+    public async Task Ctrl_E_then_Back_returns_to_the_image_tab_and_Forward_returns_to_the_Explorer_tab()
+    {
+        var folder = CrossTabFolder();
+        try
+        {
+            await OnWindow(async (window, _) =>
+            {
+                var (imageTab, explorerTab, image) = await JumpToExplorerAsync(window, folder);
+                var back = TitleButton(window, "nav.back");
+                Assert.False(back.Classes.Contains("inactive"));
+                Assert.Equal("Back to a.png (Alt+Left)", ToolTip.GetTip(back)?.ToString());
+
+                await ClickTitle(window, "nav.back");
+                Assert.Equal(imageTab, Workspace(window).Active!.Id);
+                Assert.Equal(image, Assert.IsType<ImageTabState>(Workspace(window).Active).Path);
+                Assert.False(TitleButton(window, "nav.forward").Classes.Contains("inactive"));
+                Assert.StartsWith("Forward to ", ToolTip.GetTip(TitleButton(window, "nav.forward"))?.ToString());
+
+                await Press(window, Key.Right, RawInputModifiers.Alt);                 // Forward
+                Assert.Equal(explorerTab, Workspace(window).Active!.Id);
+                Assert.True(NavigationEntry.PathsEqual(folder, Assert.IsType<BrowserTabState>(Workspace(window).Active).Folder));
+
+                await Press(window, Key.Left, RawInputModifiers.Alt);                  // Back again: the image again
+                Assert.Equal(imageTab, Workspace(window).Active!.Id);
+            });
+        }
+        finally { try { Directory.Delete(folder, true); } catch { } }
+    }
+
+    [Fact]
+    public async Task After_browsing_a_subfolder_Back_walks_the_folders_first_then_returns_to_the_image()
+    {
+        var folder = CrossTabFolder();
+        try
+        {
+            await OnWindow(async (window, _) =>
+            {
+                var (imageTab, explorerTab, _) = await JumpToExplorerAsync(window, folder);
+                Invoke(window, "NavigateBrowserTo", Path.Combine(folder, "sub"), true, null);
+                await Settle();
+                Assert.EndsWith("sub", Assert.IsType<BrowserTabState>(Workspace(window).Active).Folder);
+                Assert.Equal("Back (Alt+Left)", ToolTip.GetTip(TitleButton(window, "nav.back"))?.ToString());
+
+                await window.NavigateBackAsync();
+                await Settle();
+                Assert.Equal(explorerTab, Workspace(window).Active!.Id);
+                Assert.True(NavigationEntry.PathsEqual(folder, Assert.IsType<BrowserTabState>(Workspace(window).Active).Folder));
+
+                await window.NavigateBackAsync();
+                await Settle();
+                Assert.Equal(imageTab, Workspace(window).Active!.Id);
+            });
+        }
+        finally { try { Directory.Delete(folder, true); } catch { } }
+    }
+
+    [Fact]
+    public async Task Straight_back_mode_skips_the_browsed_folders_and_Folders_only_never_leaves_the_Explorer_tab()
+    {
+        var folder = CrossTabFolder();
+        try
+        {
+            await OnWindow(async (window, _) =>
+            {
+                Settings(window).ExplorerBackReturnsToImage = ExplorerBackReturnModes.StraightToPicture;
+                var (imageTab, explorerTab, _) = await JumpToExplorerAsync(window, folder);
+                Invoke(window, "NavigateBrowserTo", Path.Combine(folder, "sub"), true, null);
+                await Settle();
+                await window.NavigateBackAsync();
+                await Settle();
+                Assert.Equal(imageTab, Workspace(window).Active!.Id);
+                await window.NavigateForwardAsync();                                   // back to the Explorer tab, still in sub
+                await Settle();
+                Assert.Equal(explorerTab, Workspace(window).Active!.Id);
+                Assert.EndsWith("sub", Assert.IsType<BrowserTabState>(Workspace(window).Active).Folder);
+
+                Settings(window).ExplorerBackReturnsToImage = ExplorerBackReturnModes.FoldersOnly;
+                await window.NavigateBackAsync();                                      // sub -> folder
+                await Settle();
+                await window.NavigateBackAsync();                                      // nothing more: stays
+                await Settle();
+                Assert.Equal(explorerTab, Workspace(window).Active!.Id);
+                Assert.True(NavigationEntry.PathsEqual(folder, Assert.IsType<BrowserTabState>(Workspace(window).Active).Folder));
+                Invoke(window, "UpdateTabNavigationButtons");
+                Assert.True(TitleButton(window, "nav.back").Classes.Contains("inactive"));
+            });
+        }
+        finally { try { Directory.Delete(folder, true); } catch { } }
+    }
+
+    [Fact]
+    public async Task Back_reopens_the_image_in_a_new_tab_when_its_tab_was_closed()
+    {
+        var folder = CrossTabFolder();
+        try
+        {
+            await OnWindow(async (window, _) =>
+            {
+                var (imageTab, explorerTab, image) = await JumpToExplorerAsync(window, folder);
+                Workspace(window).Close(imageTab);
+                Workspace(window).Select(explorerTab);
+                await Activate(window);
+                await window.NavigateBackAsync();
+                await Settle();
+                var reopened = Assert.IsType<ImageTabState>(Workspace(window).Active);
+                Assert.NotEqual(imageTab, reopened.Id);
+                Assert.Equal(image, reopened.Path);
+                Assert.Equal(1, Workspace(window).Tabs.Count(t => t is ImageTabState));
+
+                await window.NavigateForwardAsync();
+                await Settle();
+                Assert.Equal(explorerTab, Workspace(window).Active!.Id);
+                await window.NavigateBackAsync();                                      // the reopened tab, not another one
+                await Settle();
+                Assert.Equal(reopened.Id, Workspace(window).Active!.Id);
+            });
+        }
+        finally { try { Directory.Delete(folder, true); } catch { } }
+    }
+
+    // ---- "Open a picture's folder in" (explorer.locateOpensIn) ---------------------------------------------------------
+
+    [Fact]
+    public async Task Same_tab_Ctrl_E_turns_the_tab_into_Explorer_and_Back_Forward_stay_in_that_tab()
+    {
+        var folder = CrossTabFolder();
+        try
+        {
+            await OnWindow(async (window, _) =>
+            {
+                Assert.Equal(ExplorerLocateTargets.SameTab, Settings(window).ExplorerLocateOpensIn);
+                Invoke(window, "RebuildTitleActionStrip");
+                await Activate(window);
+                var image = Path.Combine(folder, "a.png");
+                await (Task)Invoke(window, "OpenAsImageTabAsync", image, false, false)!;
+                await Settle();
+                var tabId = Workspace(window).Active!.Id;
+                var tabCount = Workspace(window).Tabs.Count;
+
+                await Press(window, Key.E, RawInputModifiers.Control);
+                await Settle();
+                var explorer = Assert.IsType<BrowserTabState>(Workspace(window).Active);
+                Assert.Equal(tabId, explorer.Id);
+                Assert.Equal(tabCount, Workspace(window).Tabs.Count);
+                Assert.True(NavigationEntry.PathsEqual(folder, explorer.Folder));
+                var history = History(window, tabId);
+                Assert.Equal(NavigationEntryKind.Explorer, history.Current!.Kind);
+                Assert.True(NavigationEntry.PathsEqual(image, history.Current.SelectedPath));
+                Assert.Null(history.Current.ReturnTo);                               // a plain push, no cross-tab link
+
+                await window.NavigateBackAsync();
+                await Settle();
+                Assert.Equal(tabId, Workspace(window).Active!.Id);
+                Assert.Equal(image, Assert.IsType<ImageTabState>(Workspace(window).Active).Path);
+                Assert.Equal(tabCount, Workspace(window).Tabs.Count);
+
+                await window.NavigateForwardAsync();
+                await Settle();
+                Assert.Equal(tabId, Workspace(window).Active!.Id);
+                Assert.True(NavigationEntry.PathsEqual(folder, Assert.IsType<BrowserTabState>(Workspace(window).Active).Folder));
+                Assert.Equal(tabCount, Workspace(window).Tabs.Count);
+            });
+        }
+        finally { try { Directory.Delete(folder, true); } catch { } }
+    }
+
+    [Fact]
+    public async Task Always_a_new_tab_opens_another_Explorer_tab_on_a_second_Ctrl_E()
+    {
+        var folder = CrossTabFolder();
+        try
+        {
+            await OnWindow(async (window, _) =>
+            {
+                Settings(window).ExplorerLocateOpensIn = ExplorerLocateTargets.NewTab;
+                Invoke(window, "RebuildTitleActionStrip");
+                await Activate(window);
+                var image = Path.Combine(folder, "a.png");
+                await (Task)Invoke(window, "OpenAsImageTabAsync", image, false, false)!;
+                await Settle();
+                var imageTab = Workspace(window).Active!.Id;
+                await Press(window, Key.E, RawInputModifiers.Control);
+                Assert.IsType<BrowserTabState>(Workspace(window).Active);
+                Workspace(window).Select(imageTab);
+                await Activate(window);
+                await Press(window, Key.E, RawInputModifiers.Control);
+                Assert.Equal(2, Workspace(window).Tabs.Count(t => t is BrowserTabState b && NavigationEntry.PathsEqual(b.Folder, folder)));
+                // Cross-tab Back still returns to the picture.
+                await window.NavigateBackAsync();
+                await Settle();
+                Assert.Equal(imageTab, Workspace(window).Active!.Id);
+            });
+        }
+        finally { try { Directory.Delete(folder, true); } catch { } }
+    }
+
+    [Fact]
+    public async Task New_window_opens_a_Glide_window_with_the_folder_and_Back_returns_to_the_picture_window()
+    {
+        var folder = CrossTabFolder();
+        try
+        {
+            await OnWindow(async (window, _) =>
+            {
+                Settings(window).ExplorerLocateOpensIn = ExplorerLocateTargets.NewWindow;
+                Invoke(window, "RebuildTitleActionStrip");
+                await Activate(window);
+                var image = Path.Combine(folder, "a.png");
+                await (Task)Invoke(window, "OpenAsImageTabAsync", image, false, false)!;
+                await Settle();
+                var imageTab = Workspace(window).Active!.Id;
+                var tabCount = Workspace(window).Tabs.Count;
+                await Press(window, Key.E, RawInputModifiers.Control);
+                await Settle();
+                var child = window.LastLocateWindowForTests;
+                Assert.NotNull(child);
+                try
+                {
+                    var explorer = Assert.IsType<BrowserTabState>(Workspace(child!).Active);
+                    Assert.True(NavigationEntry.PathsEqual(folder, explorer.Folder));
+                    Assert.Equal(tabCount, Workspace(window).Tabs.Count);              // the picture's window is unchanged
+                    Assert.Equal(imageTab, Workspace(window).Active!.Id);
+
+                    await child!.NavigateBackAsync();
+                    await Settle();
+                    Assert.Equal(imageTab, Workspace(window).Active!.Id);
+                    Assert.DoesNotContain(Workspace(child).Tabs, t => t is ImageTabState); // no duplicate image tab in the new window
+                }
+                finally
+                {
+                    child!.ActionInterceptorForTests = (_, _) => true;
+                    child.Close();
+                }
+            });
+        }
+        finally { try { Directory.Delete(folder, true); } catch { } }
+    }
+
+    [Fact]
+    public async Task Plain_Explorer_folder_history_is_unchanged_without_an_image_jump()
+    {
+        var folder = CrossTabFolder();
+        try
+        {
+            await OnWindow(async (window, _) =>
+            {
+                Invoke(window, "RebuildTitleActionStrip");
+                var tab = Workspace(window).AddBrowser(folder);
+                await Activate(window);
+                Assert.True(TitleButton(window, "nav.back").Classes.Contains("inactive"));
+                Invoke(window, "NavigateBrowserTo", Path.Combine(folder, "sub"), true, null);
+                await Settle();
+                Assert.Equal("Back (Alt+Left)", ToolTip.GetTip(TitleButton(window, "nav.back"))?.ToString());
+                await window.NavigateBackAsync();
+                await Settle();
+                Assert.Equal(tab.Id, Workspace(window).Active!.Id);
+                Assert.True(NavigationEntry.PathsEqual(folder, Assert.IsType<BrowserTabState>(Workspace(window).Active).Folder));
+                await window.NavigateBackAsync();
+                await Settle();
+                Assert.Equal(tab.Id, Workspace(window).Active!.Id);
+                Assert.True(TitleButton(window, "nav.back").Classes.Contains("inactive"));
+            });
+        }
+        finally { try { Directory.Delete(folder, true); } catch { } }
+    }
+
     // ---- helpers ----------------------------------------------------------------------------------------------------
 
     private static async Task Activate(MainWindow window)

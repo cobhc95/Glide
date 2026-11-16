@@ -27,7 +27,7 @@
       <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,*,Auto,Auto,Auto" ColumnSpacing="5" Margin="9,6">
         <Button x:Name="BrowserBackButton" Classes="browserTool" Click="BrowserBackClicked" ToolTip.Tip="Back"><controls:GlideIconView Kind="Previous" Classes="toolbarGlyph"/></Button>
         <Button x:Name="BrowserForwardButton" Grid.Column="1" Classes="browserTool" Click="BrowserForwardClicked" ToolTip.Tip="Forward"><controls:GlideIconView Kind="Next" Classes="toolbarGlyph"/></Button>
-        <Button x:Name="BrowserHistoryButton" Grid.Column="2" Classes="browserTool" Width="22" Click="BrowserHistoryClicked" ToolTip.Tip="Recent locations"><controls:GlideIconView Kind="Down" Width="11" Height="11" StrokeWidth="1.8"/></Button>
+        <Button x:Name="BrowserHistoryButton" Grid.Column="2" Classes="browserTool" Click="BrowserHistoryClicked" ToolTip.Tip="Recent locations"><controls:GlideIconView Kind="History" Classes="toolbarGlyph"/></Button>
         <Button x:Name="BrowserUpButton" Grid.Column="3" Classes="browserTool" Click="BrowserUpClicked" ToolTip.Tip="Up one folder"><controls:GlideIconView Kind="Up" Classes="toolbarGlyph"/></Button>
         <Button x:Name="BrowserRefreshButton" Grid.Column="4" Classes="browserTool" Click="BrowserRefreshClicked" ToolTip.Tip="Refresh"><controls:GlideIconView Kind="Refresh" Classes="toolbarGlyph"/></Button>
         <controls:ExplorerAddressBar x:Name="BrowserAddressBar" Grid.Column="5" NavigateRequested="BrowserAddressNavigateRequested"/>
@@ -40,7 +40,7 @@
           <ComboBoxItem Content="List"/>
           <ComboBoxItem Content="Details"/>
         </ComboBox>
-        <Button x:Name="BrowserWindowsExplorerButton" Grid.Column="8" Classes="browserTool" Click="BrowserWindowsExplorerClicked" ToolTip.Tip="Show this folder in Windows File Explorer"><controls:GlideIconView Kind="FolderLocate" Classes="toolbarGlyph"/></Button>
+        <Button x:Name="BrowserWindowsExplorerButton" Grid.Column="8" Classes="browserTool" Click="BrowserWindowsExplorerClicked" ToolTip.Tip="Show in Windows File Explorer"><controls:GlideIconView Kind="FolderLocate" Classes="toolbarGlyph"/></Button>
       </Grid>
     </Border>
 

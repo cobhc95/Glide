@@ -4,6 +4,36 @@ All notable changes to Glide Image Viewer are documented here. The format is bas
 [Keep a Changelog](https://keepachangelog.com/), and the project uses dotted feature releases with
 hyphenated follow-up corrections (for example `4.2.0-1`).
 
+## [5.0.5] - 2026-11-16
+
+Thanks to Vertigo for yet another round of detailed testing and feedback.
+
+### Added
+- Back / Forward now cross the jump from a picture to its folder: after Ctrl+E (Show in Explorer tab / Open file location), Back from the Explorer tab (toolbar, title bar, Alt+Left, mouse back button) returns to the picture's tab, reopening the picture if that tab was closed, and Forward returns to the Explorer tab. The buttons' tooltips name the target ("Back to photo.jpg"). New setting **Back after opening a picture's folder**: Folders, then back to the picture (default), Straight back to the picture, or Folders only (the old behaviour).
+- New setting **Open a picture's folder in** (Settings > Tabs > Explorer tab) for Ctrl+E / Show in Explorer tab / Open file location and the title-bar button's "Show in Glide's Explorer tab": **Same tab** (new default: the image tab becomes the Explorer view with the file selected; Back returns to the picture in that tab at its zoom and position, Forward goes back to the folder), **Existing or new tab** (the previous behaviour), **Always a new tab**, or **New window** (Back there returns to the picture in the original window). "Back after opening a picture's folder" is greyed out for Same tab. The Alternative file manager path also gets a **Browse…** button (picks a program, starting in its current folder or Program Files) and a clear (x) button.
+- Explorer scroll amount setting: one row per wheel notch in every view (default; the distance follows the view's row height), a fixed number of rows (1-20, default 3), the per-view 1 / 2 / 3 rows, or a fixed pixel distance (10-1000, default 100). Rows / Pixels per notch are greyed out unless their mode is selected. The Explorer scroll speed setting (0.25x-4x) multiplies every mode.
+- Alternative file manager (path + `{path}` argument template). It appears as **Show in <program>** in the right-click menu of the title-bar Show in Explorer button (where it can also be the left-click target) and of the Explorer toolbar's File Explorer button; before one is set, **Show in other file manager... (Set up)** opens Settings at the path. Left-click on the Explorer toolbar button stays Windows File Explorer. Both targets have hotkey actions.
+- Cancelling Settings with unsaved changes offers Keep editing, Discard or Apply.
+- Hotkey search box has a clear (x) button; "Show all hotkeys" shows whenever the list is filtered.
+- Text overlay accepts `\n` as well as `<br>` for line breaks.
+- Insertion marker when dragging a tab back onto a window.
+
+### Fixed
+- The Settings category buttons no longer show a tooltip that only repeated their label.
+- Maximize/restore from the title-bar button, title-bar double-click or hotkey no longer flashes or jumps to the corner.
+- Tabs dragged partway now stay where the preview showed them; drops between tabs land at the marker.
+- Right-clicking the status bar's auto-hide button no longer opens the bar menu.
+- Settings sections no longer jump when collapsed.
+- GIF controls follow the "only for GIFs" setting on every image and settings change.
+- Text overlay font size changes are smooth.
+- The "x change(s)" footer tooltip shows anywhere over the message.
+- Open file location reuses an Explorer tab already showing that folder.
+- Show in File Explorer selects the current item.
+- Recent locations uses a clock icon.
+- Long names in the title bar/status bar customisers are trimmed with a full-text tooltip.
+- Tooltips no longer get stuck open after a click opens a dialog. A stuck tooltip used to block every other tooltip.
+- The Settings change summary opens its list on hover or click.
+
 ## [5.0.4] - 2026-11-16
 
 About 112 of the 196 recognised extensions now decode on a clean Windows install. Settings from 5.0.x load unchanged.

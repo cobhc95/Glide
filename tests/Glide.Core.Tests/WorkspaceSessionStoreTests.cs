@@ -4,6 +4,7 @@ using Glide.Core.Workspace;
 namespace Glide.Core.Tests;
 
 /// <summary>The "Open last session" file: optional Explorer selection/scroll fields, old files, atomic writes.</summary>
+[Collection(StoreStaticsCollection.Name)]
 public sealed class WorkspaceSessionStoreTests
 {
     private const string FileName = "glide.workspace-session.json";

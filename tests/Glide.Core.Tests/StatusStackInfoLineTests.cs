@@ -677,7 +677,9 @@ public sealed class StatusStackInfoLineTests
                 _clockMs = 1_000_000;
                 SetField(window, "_statusRevealClock", (Func<long>)(() => _clockMs));
                 // A fresh state: every status setting at its default, so stacking is ON exactly as for a new user.
-                SetField(window, "_settings", new GlideSettingsState { ShowStatusSurface = true });
+                SetField(window, "_settings", new GlideSettingsState { ShowStatusSurface = true, StatusGifControlsOnlyOnGifs = true });
+                // The bar geometry below assumes no GIF group (no animated image open); the GIF controls are always shown by default.
+                Invoke(window, "UpdateGifStatusUi");
                 window.Width = 1000; window.Height = 700;
                 window.Show();
                 ImageView(window).IsVisible = true;

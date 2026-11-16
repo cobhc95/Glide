@@ -1,4 +1,4 @@
-using Glide.Core.Settings;
+﻿using Glide.Core.Settings;
 using Glide.App.Settings;
 
 namespace Glide.Core.Tests;
@@ -28,8 +28,8 @@ public sealed class SettingsCatalogTests
     [Fact]
     public void Glide_catalog_has_248_current_and_no_future_entries()
     {
-        Assert.Equal(288, SettingsCatalog.All.Count);
-        Assert.Equal(288, SettingsCatalog.All.Count(x => x.FuturePhase is null));
+        Assert.Equal(296, SettingsCatalog.All.Count);
+        Assert.Equal(296, SettingsCatalog.All.Count(x => x.FuturePhase is null));
         Assert.Empty(SettingsCatalog.All.Where(x => x.FuturePhase is not null));
         Assert.Contains(SettingsCatalog.All, x => x.Id == "performance.speedBoost" && x.FuturePhase is null && (bool)x.DefaultValue);
         Assert.Contains(SettingsCatalog.All, x => x.Id == "performance.startWithWindowsInBackground" && x.FuturePhase is null && !(bool)x.DefaultValue);

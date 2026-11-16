@@ -16,6 +16,10 @@ public sealed record NavigationEntry(NavigationEntryKind Kind, string? Path)
     public double ScrollY { get; init; }
     /// <summary>Explorer: view mode index (icon size / details) when it was left; null when unknown.</summary>
     public int? ViewMode { get; init; }
+    /// <summary>Explorer: the user arrived here from this image tab (Ctrl+E ...); Back returns to it (<see cref="CrossTabHistory"/>).</summary>
+    public CrossTabLink? ReturnTo { get; init; }
+    /// <summary>Image: Back came here from this Explorer tab; Forward returns to it.</summary>
+    public CrossTabLink? ForwardTo { get; init; }
 
     public static NavigationEntry Home() => new(NavigationEntryKind.Home, null);
     public static NavigationEntry Explorer(string folder, string? selectedPath = null, double scrollY = 0, int? viewMode = null) =>
@@ -78,7 +82,7 @@ public sealed class NavigationHistory
         if (Index < _entries.Count - 1) _entries.RemoveRange(Index + 1, _entries.Count - Index - 1);
         if (Current is { } current && current.SameLocation(entry))
         {
-            _entries[Index] = entry;
+            _entries[Index] = KeepLinks(current, entry);
             return;
         }
         _entries.Add(entry);
@@ -95,7 +99,7 @@ public sealed class NavigationHistory
     {
         ArgumentNullException.ThrowIfNull(entry);
         if (Current is null) { Push(entry); return; }
-        _entries[Index] = entry;
+        _entries[Index] = KeepLinks(Current, entry);
     }
 
     /// <summary>Changes the current entry in place (for example to remember the Explorer selection).</summary>
@@ -210,6 +214,12 @@ public sealed class NavigationHistory
     }
 
     public NavigationHistory Clone() => FromState(Snapshot(), Capacity);
+
+    // The same place shown again keeps its cross-tab Back / Forward links (CrossTabHistory); another place drops them.
+    private static NavigationEntry KeepLinks(NavigationEntry current, NavigationEntry entry) =>
+        current.SameLocation(entry) && entry.ReturnTo is null && entry.ForwardTo is null
+            ? entry with { ReturnTo = current.ReturnTo, ForwardTo = current.ForwardTo }
+            : entry;
 
     // A missing folder that resolved to its parent can land on the same place as its neighbour; keep one of them.
     private void RemoveAdjacentDuplicate()

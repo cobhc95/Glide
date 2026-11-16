@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Headless;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.LogicalTree;
 using Avalonia.Threading;
 using Glide.App;
 using Glide.App.Settings;
@@ -21,6 +22,7 @@ public sealed class TitleBarLocateButtonTests
 {
     private const string TabHeader = "Show in Glide's Explorer tab";
     private const string WindowsHeader = "Show in Windows File Explorer";
+    private const string OtherHeader = "Show in other file manager…";
 
     public TitleBarLocateButtonTests(AvaloniaHeadlessFixture fixture) { _ = fixture; }
 
@@ -106,10 +108,11 @@ public sealed class TitleBarLocateButtonTests
             var headers = MenuHeaders(window);
             Assert.Equal(TabHeader + "  ✓", headers[0]);
             Assert.Equal(WindowsHeader, headers[1]);
-            Assert.Equal("-", headers[2]);
-            Assert.Equal("Move left", headers[3]);
-            Assert.Equal("Move right", headers[4]);
-            Assert.Equal("Remove from title bar", headers[5]);
+            Assert.Equal(OtherHeader, headers[2]);
+            Assert.Equal("-", headers[3]);
+            Assert.Equal("Move left", headers[4]);
+            Assert.Equal("Move right", headers[5]);
+            Assert.Equal("Remove from title bar", headers[6]);
             Assert.Contains("Customize title-bar buttons…", headers);
             Assert.Equal(1, headers.Count(h => h.EndsWith("✓", StringComparison.Ordinal)));
             return Task.CompletedTask;
@@ -354,6 +357,161 @@ public sealed class TitleBarLocateButtonTests
         finally { try { Directory.Delete(folder, true); } catch { } }
     }
 
+    [Fact]
+    public async Task ShowPathInExplorerTabAsync_reuses_an_inactive_Explorer_tab_already_showing_the_folder()
+    {
+        var (folder, file) = TempImage();
+        try
+        {
+            await OnWindow(async window =>
+            {
+                var explorer = new BrowserTabState(Guid.NewGuid(), Path.GetFullPath(folder));
+                var image = new ImageTabState(Guid.NewGuid(), file);
+                Workspace(window).Reset(new TabState[] { explorer, new HomeTabState(Guid.NewGuid()), image }, 2);
+                await (Task)Invoke(window, "ShowPathInExplorerTabAsync", file)!;
+                Assert.Equal(3, Workspace(window).Tabs.Count);
+                Assert.Equal(explorer.Id, Workspace(window).Active!.Id);
+                var targets = (System.Collections.IDictionary)typeof(MainWindow)
+                    .GetField("_browserHighlightTargets", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(window)!;
+                // Either still pending or already consumed by the surface; it must never point at another tab.
+                Assert.True(!targets.Contains(explorer.Id) || Equals(targets[explorer.Id], file));
+            }, new List<string>());
+        }
+        finally { try { Directory.Delete(folder, true); } catch { } }
+    }
+
+    [Fact]
+    public async Task ShowPathInExplorerTabAsync_opens_a_new_tab_when_no_Explorer_tab_shows_the_folder()
+    {
+        var (folder, file) = TempImage();
+        var other = Path.Combine(folder, "sub");
+        Directory.CreateDirectory(other);
+        try
+        {
+            await OnWindow(async window =>
+            {
+                Workspace(window).Reset(new TabState[] { new BrowserTabState(Guid.NewGuid(), other), new ImageTabState(Guid.NewGuid(), file) }, 1);
+                await (Task)Invoke(window, "ShowPathInExplorerTabAsync", file)!;
+                Assert.Equal(3, Workspace(window).Tabs.Count);
+                Assert.Equal(Path.GetFullPath(folder), Assert.IsType<BrowserTabState>(Workspace(window).Active).Folder);
+            }, new List<string>());
+        }
+        finally { try { Directory.Delete(folder, true); } catch { } }
+    }
+
+    // ---- alternative file manager entry -------------------------------------------------------------
+
+    [Fact]
+    public async Task Alternative_entry_reads_Set_up_without_a_program_and_names_the_program_once_set()
+    {
+        await OnWindow(window =>
+        {
+            var menu = (ContextMenu)Invoke(window, "BuildTitleActionContextMenu", "file.locate")!;
+            var other = menu.ItemsSource!.Cast<object>().OfType<MenuItem>().ElementAt(2);
+            var panel = Assert.IsType<StackPanel>(other.Header);
+            var texts = panel.Children.OfType<TextBlock>().ToList();
+            Assert.Equal(OtherHeader, texts[0].Text);
+            Assert.Equal("Set up", texts[1].Text);
+            Assert.True(texts[1].Opacity < 1, "the Set up hint is muted");
+
+            Settings(window).AlternativeFileManagerPath = @"""C:\Tools\TotalCmd64.exe""";
+            var headers = MenuHeaders(window);
+            Assert.Equal(WindowsHeader, headers[1]);
+            Assert.Equal("Show in TotalCmd64", headers[2]);
+            Assert.Equal("-", headers[3]);
+            return Task.CompletedTask;
+        });
+    }
+
+    [Fact]
+    public async Task Unset_alternative_entry_opens_Settings_at_the_path_setting_with_its_card_expanded()
+    {
+        await OnWindow(async window =>
+        {
+            window.Show();
+            for (var i = 0; i < 10; i++) { Dispatcher.UIThread.RunJobs(); await Task.Delay(10); }
+            Click(window, OtherHeader);
+            await AssertSettingsRevealsAlternativePath(window);
+        });
+    }
+
+    [Fact]
+    public async Task Unset_alternative_hotkey_action_also_opens_Settings_at_the_path_setting()
+    {
+        await OnWindow(async window =>
+        {
+            window.Show();
+            for (var i = 0; i < 10; i++) { Dispatcher.UIThread.RunJobs(); await Task.Delay(10); }
+            await Command(window, GlideCommand.ShowInAlternativeFileManager);
+            await AssertSettingsRevealsAlternativePath(window);
+        });
+    }
+
+    private static async Task AssertSettingsRevealsAlternativePath(MainWindow window)
+    {
+        SettingsWindow? settings = null;
+        Control? highlighted = null;
+        for (var i = 0; i < 200; i++)
+        {
+            Dispatcher.UIThread.RunJobs();
+            settings = GetField(window, "_openSettingsWindow") as SettingsWindow;
+            highlighted = settings is null ? null : SettingsField<Control?>(settings, "_revealHighlightTarget");
+            if (highlighted is not null) break;
+            await Task.Delay(20);
+        }
+        Assert.NotNull(settings);
+        try
+        {
+            Assert.NotNull(highlighted);
+            var card = SettingsField<Dictionary<string, Glide.App.Controls.SettingsCard>>(settings!, "_settingCard")["explorer.altFileManagerPath"];
+            Assert.True(card.IsExpanded, "the card holding the path setting is expanded");
+            var page = SettingsField<Dictionary<Glide.App.Controls.SettingsCard, string>>(settings!, "_pageOfCard")[card];
+            Assert.Equal(page, SettingsField<string>(settings!, "_activeCategory"));
+            var box = settings!.FindControl<TextBox>("AlternativeFileManagerPathBox")!;
+            Assert.True(ReferenceEquals(highlighted, box) || highlighted!.GetLogicalDescendants().Contains(box), "the highlighted row holds the path box");
+        }
+        finally { settings!.Close(); Dispatcher.UIThread.RunJobs(); }
+    }
+
+    [Fact]
+    public async Task Set_alternative_entry_launches_it_through_the_seam_and_becomes_the_ticked_target()
+    {
+        var (folder, file) = TempImage();
+        var calls = new List<(string Exe, string Args)>();
+        var previous = Glide.App.Explorer.ExplorerHost.LaunchAlternativeFileManager;
+        Glide.App.Explorer.ExplorerHost.LaunchAlternativeFileManager = (exe, args) => { calls.Add((exe, args)); return true; };
+        try
+        {
+            var launched = new List<string>();
+            await OnWindow(async window =>
+            {
+                Settings(window).AlternativeFileManagerPath = @"C:\Tools\TotalCmd64.exe";
+                Settings(window).AlternativeFileManagerArguments = "/O \"{path}\"";
+                ShowImageTab(window, file);
+
+                Click(window, "Show in TotalCmd64");
+                Assert.Equal(new[] { (@"C:\Tools\TotalCmd64.exe", $"/O \"{file}\"") }, calls);
+                Assert.Equal(ShowInExplorerTargets.Alternative, Settings(window).ShowInExplorerTarget);
+                var headers = MenuHeaders(window);
+                Assert.Equal("Show in TotalCmd64  ✓", headers[2]);
+                Assert.Equal(1, headers.Count(h => h.EndsWith("✓", StringComparison.Ordinal)));
+
+                // The button's left-click (the locate command) now opens the alternative too.
+                await Command(window);
+                Assert.Equal(2, calls.Count);
+            }, launched);
+            Assert.Empty(launched);
+        }
+        finally
+        {
+            Glide.App.Explorer.ExplorerHost.LaunchAlternativeFileManager = previous;
+            try { Directory.Delete(folder, true); } catch { }
+        }
+    }
+
+    private static T SettingsField<T>(SettingsWindow settings, string name) =>
+        (T)typeof(SettingsWindow).GetField(name, Flags)!.GetValue(settings)!;
+
     // ---- helpers ------------------------------------------------------------------------------------
 
     private static (string Folder, string File) TempImage()
@@ -380,7 +538,7 @@ public sealed class TitleBarLocateButtonTests
             try
             {
                 // Work on a pristine in-memory state; never the user's settings.
-                SetField(window, "_settings", new GlideSettingsState());
+                SetField(window, "_settings", new GlideSettingsState { ExplorerLocateOpensIn = Glide.Core.Navigation.ExplorerLocateTargets.ExistingOrNewTab });
                 await body(window);
             }
             finally
@@ -422,14 +580,21 @@ public sealed class TitleBarLocateButtonTests
     private static List<string> MenuHeaders(MainWindow window)
     {
         var menu = (ContextMenu)Invoke(window, "BuildTitleActionContextMenu", "file.locate")!;
-        return menu.ItemsSource!.Cast<object>().OfType<MenuItem>().Select(i => i.Header?.ToString() ?? "").ToList();
+        return menu.ItemsSource!.Cast<object>().OfType<MenuItem>().Select(HeaderText).ToList();
     }
+
+    /// <summary>A plain string header, or the first line of a header panel (text plus a muted hint such as "Set up").</summary>
+    private static string HeaderText(MenuItem item) => item.Header switch
+    {
+        StackPanel panel => panel.Children.OfType<TextBlock>().First().Text ?? "",
+        var other => other?.ToString() ?? ""
+    };
 
     /// <summary>Raises Click on the freshly built menu's item (the same path a user click takes).</summary>
     private static void Click(MainWindow window, string headerStartsWith)
     {
         var menu = (ContextMenu)Invoke(window, "BuildTitleActionContextMenu", "file.locate")!;
-        var item = menu.ItemsSource!.Cast<object>().OfType<MenuItem>().First(i => (i.Header?.ToString() ?? "").StartsWith(headerStartsWith, StringComparison.Ordinal));
+        var item = menu.ItemsSource!.Cast<object>().OfType<MenuItem>().First(i => HeaderText(i).StartsWith(headerStartsWith, StringComparison.Ordinal));
         item.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
     }
 

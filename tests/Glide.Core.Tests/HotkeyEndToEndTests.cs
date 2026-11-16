@@ -1,4 +1,4 @@
-﻿using Avalonia;
+using Avalonia;
 using System.Reflection;
 using System.Text.RegularExpressions;
 using Avalonia.Controls;
@@ -139,7 +139,8 @@ public sealed class HotkeyEndToEndTests
                 SetField(window, "_currentPath", file);
                 var imageTabId = workspace.Active!.Id;
 
-                // 1. Glide's own Explorer tab (default): a real Ctrl+E press opens it on the image's folder.
+                // 1. Glide's own Explorer tab (Existing or new tab mode): a real Ctrl+E press opens it on the image's folder.
+                Settings(window).ExplorerLocateOpensIn = Glide.Core.Navigation.ExplorerLocateTargets.ExistingOrNewTab;
                 await Press(window, Key.E, RawInputModifiers.Control);
                 for (var i = 0; i < 100 && workspace.Active is not BrowserTabState; i++) { Dispatcher.UIThread.RunJobs(); await Task.Delay(20); }
                 Assert.Contains(routed, a => a.Id == "folder.exploreParent");

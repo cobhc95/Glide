@@ -134,10 +134,6 @@ public sealed class Release503Tests
         Assert.Equal(expected, ExplorerDefaultViews.Normalize(saved));
 
     [Fact]
-    public void Explorer_wheel_turns_a_page_in_about_one_and_a_half_notches() =>
-        Assert.Equal(1.5, 600 / MainWindow.ExplorerWheelScrollStep(600), 3);
-
-    [Fact]
     public void Hotkey_conflict_prompt_uses_real_quotes_not_mojibake()
     {
         var map = HotkeyCatalog.CreateDefaultMap();

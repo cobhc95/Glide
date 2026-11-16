@@ -175,6 +175,7 @@ public partial class SettingsWindow : Window
         _loadingControls = true;
         Glide.Core.GlidePerformanceTrace.Mark("settings_ctor_start");
         InitializeComponent();
+        WireDirtySummaryPopup();
         Glide.Core.GlidePerformanceTrace.Mark("settings_xaml_ready");
         // Single-source the visible product version from assembly metadata (Directory.Build.props), so
         // the About/footer label can never drift behind the actual build again.
@@ -215,6 +216,8 @@ public partial class SettingsWindow : Window
         BuildCardMap();
         _hotkeyCaptureFlashTimer.Tick += (_, _) => ToggleHotkeyCaptureFlash();
         HotkeyPresetCombo.SelectionChanged += (_, _) => UpdateHotkeyPresetButtons();
+        ExplorerScrollModeCombo.SelectionChanged += (_, _) => UpdateExplorerScrollModeRows();
+        ExplorerLocateOpensInCombo.SelectionChanged += (_, _) => UpdateLocateDependentControls();
         _searchDebounceTimer.Tick += (_, _) =>
         {
             _searchDebounceTimer.Stop();
@@ -300,7 +303,7 @@ public partial class SettingsWindow : Window
                     e.Handled = true;
             });
         }
-        Closed += (_, _) => { _hotkeyCaptureFlashTimer.Stop(); _searchDebounceTimer.Stop(); _previewDisposed = true; _searchRenderVersion++; Updates = null; };
+        Closed += (_, _) => { _hotkeyCaptureFlashTimer.Stop(); _searchDebounceTimer.Stop(); _previewDebounceTimer?.Stop(); _previewDisposed = true; _searchRenderVersion++; Updates = null; };
     }
 
     private void SettingsSurfacePointerPressed(object? sender, PointerPressedEventArgs e)
@@ -555,8 +558,18 @@ public partial class SettingsWindow : Window
             TabSideAutoHideCheck.IsChecked = s.TabSideAutoHide;
             TabTopAutoHideCheck.IsChecked = s.TabTopAutoHide;
             SelectByText(ExplorerDefaultViewCombo, ExplorerDefaultViews.Normalize(s.ExplorerDefaultView));
+            SelectByText(ExplorerLocateOpensInCombo, Glide.Core.Navigation.ExplorerLocateTargets.Normalize(s.ExplorerLocateOpensIn));
+            UpdateLocateDependentControls();
+            SelectByText(ExplorerBackReturnsToImageCombo, Glide.Core.Navigation.ExplorerBackReturnModes.Normalize(s.ExplorerBackReturnsToImage));
             ExplorerShowHiddenFilesCheck.IsChecked = s.ExplorerShowHiddenFiles;
             ExplorerShowOnlyImagesCheck.IsChecked = s.ExplorerShowOnlyImages;
+            ExplorerScrollSpeedBox.Value = (decimal)Glide.App.Explorer.ExplorerWheelScroll.ClampSpeed(s.ExplorerScrollSpeed);
+            SelectByText(ExplorerScrollModeCombo, Glide.App.Explorer.ExplorerScrollModes.Normalize(s.ExplorerScrollMode));
+            ExplorerScrollRowsBox.Value = Glide.App.Explorer.ExplorerWheelScroll.ClampRows(s.ExplorerScrollRows);
+            ExplorerScrollPixelsBox.Value = Glide.App.Explorer.ExplorerWheelScroll.ClampPixels(s.ExplorerScrollPixels);
+            UpdateExplorerScrollModeRows();
+            AlternativeFileManagerPathBox.Text = s.AlternativeFileManagerPath;
+            AlternativeFileManagerArgumentsBox.Text = s.AlternativeFileManagerArguments;
             SelectByText(LastTabBehaviorCombo, string.IsNullOrWhiteSpace(s.LastTabCloseBehavior) ? "Open home page" : s.LastTabCloseBehavior);
             ConfirmCloseMultipleTabsCheck.IsChecked = s.ConfirmCloseMultipleTabs;
             // Legacy "Browser page" (removed in 4.7.0) stays migrated to Welcome; 4.8.0 stores "Explorer page".
@@ -798,8 +811,16 @@ public partial class SettingsWindow : Window
         state.TabSideAutoHide = TabSideAutoHideCheck.IsChecked == true;
         state.TabTopAutoHide = TabTopAutoHideCheck.IsChecked == true;
         state.ExplorerDefaultView = ExplorerDefaultViews.Normalize(SelectedText(ExplorerDefaultViewCombo, ExplorerDefaultViews.Default));
+        state.ExplorerLocateOpensIn = Glide.Core.Navigation.ExplorerLocateTargets.Normalize(SelectedText(ExplorerLocateOpensInCombo, Glide.Core.Navigation.ExplorerLocateTargets.Default));
+        state.ExplorerBackReturnsToImage = Glide.Core.Navigation.ExplorerBackReturnModes.Normalize(SelectedText(ExplorerBackReturnsToImageCombo, Glide.Core.Navigation.ExplorerBackReturnModes.Default));
         state.ExplorerShowHiddenFiles = ExplorerShowHiddenFilesCheck.IsChecked == true;
         state.ExplorerShowOnlyImages = ExplorerShowOnlyImagesCheck.IsChecked == true;
+        state.ExplorerScrollSpeed = Glide.App.Explorer.ExplorerWheelScroll.ClampSpeed((double)(ExplorerScrollSpeedBox.Value ?? 1m));
+        state.ExplorerScrollMode = Glide.App.Explorer.ExplorerScrollModes.Normalize(SelectedText(ExplorerScrollModeCombo, Glide.App.Explorer.ExplorerScrollModes.Default));
+        state.ExplorerScrollRows = Glide.App.Explorer.ExplorerWheelScroll.ClampRows((int)(ExplorerScrollRowsBox.Value ?? 3m));
+        state.ExplorerScrollPixels = Glide.App.Explorer.ExplorerWheelScroll.ClampPixels((int)(ExplorerScrollPixelsBox.Value ?? 100m));
+        state.AlternativeFileManagerPath = (AlternativeFileManagerPathBox.Text ?? string.Empty).Trim();
+        state.AlternativeFileManagerArguments = AlternativeFileManagerArgumentsBox.Text ?? string.Empty;
         state.LastTabCloseBehavior = SelectedText(LastTabBehaviorCombo, "Open home page");
         state.ConfirmCloseMultipleTabs = ConfirmCloseMultipleTabsCheck.IsChecked == true;
         if (state.ConfirmCloseMultipleTabs) state.RememberedMultiTabCloseChoice = "Ask";
@@ -865,6 +886,19 @@ public partial class SettingsWindow : Window
             pair.Value.PropertyChanged += ValueControlChanged;
     }
 
+    /// <summary>Greys out the Rows / Pixels per notch rows unless their scroll amount mode is selected.</summary>
+    /// <summary>"Back after opening a picture's folder" only matters when the folder opens in another tab or window.</summary>
+    private void UpdateLocateDependentControls() =>
+        ExplorerBackReturnsToImageRow.IsEnabled = Glide.Core.Navigation.ExplorerLocateTargets.Normalize(
+            SelectedText(ExplorerLocateOpensInCombo, Glide.Core.Navigation.ExplorerLocateTargets.Default)) != Glide.Core.Navigation.ExplorerLocateTargets.SameTab;
+
+    private void UpdateExplorerScrollModeRows()
+    {
+        var mode = Glide.App.Explorer.ExplorerScrollModes.Normalize(SelectedText(ExplorerScrollModeCombo, Glide.App.Explorer.ExplorerScrollModes.Default));
+        ExplorerScrollRowsRow.IsEnabled = mode == Glide.App.Explorer.ExplorerScrollModes.FixedRows;
+        ExplorerScrollPixelsRow.IsEnabled = mode == Glide.App.Explorer.ExplorerScrollModes.Pixels;
+    }
+
     private void ValueControlChanged(object? sender, AvaloniaPropertyChangedEventArgs e)
     {
         if (_loadingControls) return;
@@ -878,8 +912,27 @@ public partial class SettingsWindow : Window
 
         // Reading ~200 controls, applying the whole preview to the live app and re-diffing the state is
         // heavy; doing it inside the click made the control look unresponsive. Let the control repaint
-        // first, and coalesce a burst of changes (spinner, typing) into one pass.
-        ScheduleLivePreview();
+        // first, and coalesce a burst of changes (spinner, typing) into one pass. Spinner and text edits arrive as a
+        // rapid stream (holding an arrow, typing a template), so they are debounced: one pass once the burst settles.
+        if (sender is NumericUpDown or TextBox) ScheduleDebouncedLivePreview();
+        else ScheduleLivePreview();
+    }
+
+    internal static readonly TimeSpan LivePreviewDebounce = TimeSpan.FromMilliseconds(110);
+    private DispatcherTimer? _previewDebounceTimer;
+
+    private void ScheduleDebouncedLivePreview()
+    {
+        _previewDebounceTimer ??= CreatePreviewDebounceTimer();
+        _previewDebounceTimer.Stop();
+        _previewDebounceTimer.Start();
+    }
+
+    private DispatcherTimer CreatePreviewDebounceTimer()
+    {
+        var timer = new DispatcherTimer { Interval = LivePreviewDebounce };
+        timer.Tick += (_, _) => { timer.Stop(); ScheduleLivePreview(); };
+        return timer;
     }
 
     private bool _previewScheduled;
@@ -1063,6 +1116,37 @@ public partial class SettingsWindow : Window
     private List<SettingChange> GetNetChanges(GlideSettingsState? current = null) =>
         SettingsChangeSet.Compute(_committed, current ?? ReadControls());
 
+    internal static readonly TimeSpan DirtySummaryHoverDelay = TimeSpan.FromMilliseconds(350);
+    private DispatcherTimer? _dirtySummaryHoverTimer;
+
+    /// <summary>Footer change summary popup: opens after a short hover, closes on exit; click, Enter or Space toggles it.</summary>
+    private void WireDirtySummaryPopup()
+    {
+        var timer = _dirtySummaryHoverTimer = new DispatcherTimer { Interval = DirtySummaryHoverDelay };
+        timer.Tick += (_, _) => { timer.Stop(); DirtySummaryPopup.IsOpen = true; };
+        DirtySummaryHost.PointerEntered += (_, _) => { timer.Stop(); timer.Start(); };
+        DirtySummaryHost.PointerExited += (_, _) => { timer.Stop(); DirtySummaryPopup.IsOpen = false; };
+        DirtySummaryHost.PointerReleased += (_, e) =>
+        {
+            if (e.InitialPressMouseButton != MouseButton.Left) return;
+            ToggleDirtySummaryPopup();
+            e.Handled = true;
+        };
+        DirtySummaryHost.KeyDown += (_, e) =>
+        {
+            if (e.Key is Key.Enter or Key.Space) { ToggleDirtySummaryPopup(); e.Handled = true; }
+            else if (e.Key == Key.Escape && DirtySummaryPopup.IsOpen) { DirtySummaryPopup.IsOpen = false; e.Handled = true; }
+        };
+        DirtySummaryHost.LostFocus += (_, _) => { if (!DirtySummaryHost.IsPointerOver) DirtySummaryPopup.IsOpen = false; };
+        Deactivated += (_, _) => { timer.Stop(); DirtySummaryPopup.IsOpen = false; };
+    }
+
+    internal void ToggleDirtySummaryPopup()
+    {
+        _dirtySummaryHoverTimer?.Stop();
+        DirtySummaryPopup.IsOpen = !DirtySummaryPopup.IsOpen;
+    }
+
     private void UpdateDirtyState(GlideSettingsState? current = null)
     {
         current ??= ReadControls();
@@ -1075,10 +1159,9 @@ public partial class SettingsWindow : Window
             _ => $"{changes.Count} changes"
         };
         DirtyHintText.IsVisible = changes.Count > 0;
-        var changeTip = changes.Count == 0 ? "No net changes." : string.Join("\n", changes.Select(c => $"{c.Name}: {c.Before} → {c.After}"));
-        ToolTip.SetTip(DirtySummaryHost, changeTip);
-        ToolTip.SetTip(DirtyText, changeTip);
-        ToolTip.SetTip(DirtyHintText, changeTip);
+        // The change list lives in the summary's own popup (hover ~350 ms, or click / Enter / Space), not a ToolTip:
+        // setting the text here refreshes it while it is open.
+        DirtySummaryPopupText.Text = changes.Count == 0 ? "No net changes." : string.Join("\n", changes.Select(c => $"{c.Name}: {c.Before} → {c.After}"));
         UpdateCardBadges();
     }
 
@@ -1222,25 +1305,78 @@ public partial class SettingsWindow : Window
     /// collapsing a section keeps its header where it was on screen (or pins it to the top when the
     /// header had scrolled out above), so the page does not jump to a different section.
     /// </summary>
-    private void AnchorCollapsedCardHeader(SettingsCard card)
+    /// <summary>
+    /// Keeps a card's header exactly where it was (under the pointer that clicked it) when the card collapses.
+    /// Two things used to make the page jump: the correction ran a frame later (after the shifted page had been drawn),
+    /// and collapsing near the bottom shrank the page below the current scroll offset, so the scroll viewer clamped it and
+    /// the header could not be held. Layout is now run at once and the page gets temporary bottom slack that is given
+    /// back as soon as the user scrolls up again.
+    /// </summary>
+    internal void AnchorCollapsedCardHeader(SettingsCard card)
     {
-        if (card.IsExpanded || _loadingControls || SearchPanel.IsVisible || !card.IsEffectivelyVisible) return;
-        // Layout has not run yet: this is still the header's position before the body disappears.
+        // Expanding grows the page below the header, so the header already stays put (and programmatic expands that reveal a
+        // search result must not be pinned); only a collapse can pull the page out from under the pointer.
+        if (card.IsExpanded || _loadingControls || _bulkExpandChange || SearchPanel.IsVisible || !card.IsEffectivelyVisible) return;
+        // Layout has not run yet: this is still the header's position before the body changes.
         if (card.TranslatePoint(new Point(0, 0), ContentScroll) is not { } before) return;
-        var anchorY = Math.Max(0, before.Y);
-        Dispatcher.UIThread.Post(() =>
-        {
-            if (!card.IsEffectivelyVisible || card.TranslatePoint(new Point(0, 0), ContentScroll) is not { } after) return;
-            var shift = after.Y - anchorY;
-            if (Math.Abs(shift) < 0.5) return;
-            ContentScroll.Offset = new Vector(ContentScroll.Offset.X,
-                Math.Clamp(ContentScroll.Offset.Y + shift, 0, Math.Max(0, ContentScroll.ScrollBarMaximum.Y)));
-        }, DispatcherPriority.Loaded);
+        if (ContentScroll.Content is not Control content) return;
+        _anchoringCardHeader = true;
+        try { AnchorCardHeaderCore(card, content, before); }
+        finally { _anchoringCardHeader = false; }
     }
+
+    private bool _anchoringCardHeader;
+
+    private void AnchorCardHeaderCore(SettingsCard card, Control content, Point before)
+    {
+        content.UpdateLayout();
+        ContentScroll.UpdateLayout();
+        if (card.TranslatePoint(new Point(0, 0), ContentScroll) is not { } after) return;
+        var desired = ContentScroll.Offset.Y + (after.Y - before.Y);
+        var natural = Math.Max(0, ContentScroll.Extent.Height - _settingsScrollSlack);
+        SetSettingsScrollSlack(Math.Max(0, desired + ContentScroll.Viewport.Height - natural));
+        ContentScroll.UpdateLayout();
+        ContentScroll.Offset = new Vector(ContentScroll.Offset.X, Math.Clamp(desired, 0, Math.Max(0, ContentScroll.ScrollBarMaximum.Y)));
+        ContentScroll.UpdateLayout();
+    }
+
+    private double _settingsScrollSlack;
+    private bool _bulkExpandChange;
+    private Thickness? _settingsContentBaseMargin;
+    private bool _settingsScrollSlackHooked;
+
+    private void SetSettingsScrollSlack(double slack)
+    {
+        if (ContentScroll.Content is not Control content) return;
+        _settingsContentBaseMargin ??= content.Margin;
+        if (!_settingsScrollSlackHooked)
+        {
+            _settingsScrollSlackHooked = true;
+            // Give the slack back as the user scrolls up (never more than keeps the current offset valid).
+            ContentScroll.ScrollChanged += (_, _) =>
+            {
+                if (_settingsScrollSlack <= 0 || _anchoringCardHeader) return;
+                var natural = Math.Max(0, ContentScroll.Extent.Height - _settingsScrollSlack);
+                var needed = Math.Max(0, ContentScroll.Offset.Y + ContentScroll.Viewport.Height - natural);
+                if (needed < _settingsScrollSlack - 0.5) SetSettingsScrollSlack(needed);
+            };
+        }
+        slack = Math.Round(Math.Max(0, slack), 2);
+        if (Math.Abs(slack - _settingsScrollSlack) < 0.01) return;
+        _settingsScrollSlack = slack;
+        var b = _settingsContentBaseMargin.Value;
+        content.Margin = new Thickness(b.Left, b.Top, b.Right, b.Bottom + slack);
+    }
+
+    /// <summary>Test hook: the temporary bottom slack currently added to the page.</summary>
+    internal double SettingsScrollSlackForTests => _settingsScrollSlack;
 
     private void SetActivePageCardsExpanded(bool expanded)
     {
-        foreach (var card in ActivePageCards()) card.IsExpanded = expanded;
+        _bulkExpandChange = true;
+        try { foreach (var card in ActivePageCards()) card.IsExpanded = expanded; }
+        finally { _bulkExpandChange = false; }
+        SetSettingsScrollSlack(0);
         UpdateExpandCollapseButtons();
     }
 
@@ -1294,6 +1430,7 @@ public partial class SettingsWindow : Window
         SettingsCard? aliasCard = null;
         if (LegacyPageAliases.TryGetValue(key, out var alias)) _cardById.TryGetValue(alias.CardId, out aliasCard);
         RememberCategoryScroll();
+        SetSettingsScrollSlack(0);
         _activeCategory = group.Key;
         var plainSwitch = aliasCard is null && revealTarget is null;
         var restoreOffset = restoreScroll && plainSwitch &&
@@ -2142,7 +2279,7 @@ public partial class SettingsWindow : Window
         M("updates.checkDaily", UpdateCheckDailyCheck); M("updates.dontRemind", UpdateDontRemindCheck);
         M("general.startupAction", StartupActionCombo); M("general.startupCustomPath", StartupCustomPathBox); M("general.newTabAction", NewTabActionCombo); M("general.newTabCustomPath", NewTabCustomPathBox); M("titlebar.customize", CustomizeTitleBarButton); M("settings.alwaysExpand", SettingsAlwaysExpandSwitch); M("escape.resetRememberedClose", ResetEscChoiceButton);
         M("status.visible", StatusCheck); M("status.hoverWhenClosed", StatusHoverWhenClosedCheck); M("view.scrollbars", ShowScrollbarsCheck); M("window.fullPathTitle", FullPathTitleCheck); M("fullscreen.hideCursor", HideCursorFullscreenCheck); M("fullscreen.hideCursorDelay", FullscreenHideCursorDelayBox);
-        M("fullscreen.autoHideChrome", AutoHideFullscreenChromeCheck); M("fullscreen.keepTabBarOpen", FullscreenKeepTabBarOpenCheck); M("fullscreen.keepTitleBarForExplorer", FullscreenKeepTitleBarForExplorerCheck); M("tabs.enabled", TabsCheck); M("window.showInExplorerTarget", ShowInExplorerTargetCombo); M("explorer.defaultView", ExplorerDefaultViewCombo); M("explorer.showHidden", ExplorerShowHiddenFilesCheck); M("explorer.onlyImages", ExplorerShowOnlyImagesCheck); M("tabs.showBackButton", TabBarBackButtonCheck); M("tabs.showForwardButton", TabBarForwardButtonCheck); M("fullscreen.statusAlways", FullscreenStatusAlwaysCheck);
+        M("fullscreen.autoHideChrome", AutoHideFullscreenChromeCheck); M("fullscreen.keepTabBarOpen", FullscreenKeepTabBarOpenCheck); M("fullscreen.keepTitleBarForExplorer", FullscreenKeepTitleBarForExplorerCheck); M("tabs.enabled", TabsCheck); M("window.showInExplorerTarget", ShowInExplorerTargetCombo); M("explorer.defaultView", ExplorerDefaultViewCombo); M("explorer.locateOpensIn", ExplorerLocateOpensInCombo); M("explorer.backReturnsToImage", ExplorerBackReturnsToImageCombo); M("explorer.showHidden", ExplorerShowHiddenFilesCheck); M("explorer.onlyImages", ExplorerShowOnlyImagesCheck); M("explorer.scrollSpeed", ExplorerScrollSpeedBox); M("explorer.scrollMode", ExplorerScrollModeCombo); M("explorer.scrollRows", ExplorerScrollRowsBox); M("explorer.scrollPixels", ExplorerScrollPixelsBox); M("explorer.altFileManagerPath", AlternativeFileManagerPathBox); M("explorer.altFileManagerArguments", AlternativeFileManagerArgumentsBox); M("tabs.showBackButton", TabBarBackButtonCheck); M("tabs.showForwardButton", TabBarForwardButtonCheck); M("fullscreen.statusAlways", FullscreenStatusAlwaysCheck);
         M("caption.windowedMinimize", CaptionWindowedMinimizeCombo); M("caption.windowedMaximize", CaptionWindowedMaximizeCombo); M("caption.windowedClose", CaptionWindowedCloseCombo);
         M("caption.fullscreenMinimize", CaptionFullscreenMinimizeCombo); M("caption.fullscreenMaximize", CaptionFullscreenMaximizeCombo); M("caption.fullscreenClose", CaptionFullscreenCloseCombo);
         M("windows.alwaysOnTop", AlwaysOnTopCheck); M("windows.alwaysOnTopMode", AlwaysOnTopModeCombo); M("fullscreen.exitBehavior", FullscreenExitBehaviorCombo); M("windows.sameImageBehavior", SameImageBehaviorCombo); M("window.centerOnDisplay", AutoCenterWindowOnRestoreCheck); M("view.defaultMode", DefaultViewCombo); M("view.animateGifs", AnimateGifsCheck); M("view.pointerZoom", PointerZoomCheck); M("view.keepZoom", PreserveZoomCheck);
@@ -2203,19 +2340,15 @@ public partial class SettingsWindow : Window
                 ToolTip.SetShowDelay(control, 650);
             }
         }
-        foreach (var nav in NavigationRail.Children.OfType<Button>())
-        {
-            var key = nav.Tag?.ToString() ?? "";
-            ToolTip.SetTip(nav, $"Open {GroupOf(key).Title} settings");
-            ToolTip.SetShowDelay(nav, 650);
-        }
+        // Category buttons carry no tooltip: their label already says everything ("Open X settings" only repeated it).
+        foreach (var nav in NavigationRail.Children.OfType<Button>()) ToolTip.SetTip(nav, null);
         ToolTip.SetTip(SearchBox, "Search Glide settings. Use the category filter to search everywhere or limit results to one section.");
         ToolTip.SetShowDelay(SearchBox, 650);
         ToolTip.SetTip(ChangeShortcutButton, "Capture a replacement shortcut for the selected action. Double-click a hotkey row to do the same thing.");
         ToolTip.SetTip(AddShortcutButton, "Add another shortcut to the selected action without replacing existing shortcuts.");
         ToolTip.SetTip(RemoveShortcutButton, "Remove the selected shortcut from this action.");
         ToolTip.SetTip(ResetHotkeysButton, "Restore all keyboard shortcuts to Glide defaults.");
-        ToolTip.SetTip(CustomizeTitleBarButton, "Choose, add, remove and reorder any of the 22 title/tab-bar utility buttons.");
+        ToolTip.SetTip(CustomizeTitleBarButton, $"Choose, add, remove and reorder any of the {TitleBarButtonCatalog.All.Count} title/tab-bar utility buttons.");
     }
 
     private void ApplyClicked(object? sender, RoutedEventArgs e)
@@ -2245,8 +2378,16 @@ public partial class SettingsWindow : Window
     private async void CancelClicked(object? sender, RoutedEventArgs e)
     {
         var changes = GetNetChanges();
-        if (changes.Count > 0 && _committed.ConfirmDiscardSettingsChanges &&
-            !await ConfirmChangesAsync("Discard settings changes?", "These net changes will be discarded:", changes, "Close Anyway", allowDontRemind: true)) return;
+        if (changes.Count > 0 && _committed.ConfirmDiscardSettingsChanges)
+        {
+            var choice = await ConfirmUnsavedChangesAsync("Unsaved settings changes", "Settings has unapplied net changes:", changes);
+            if (choice == UnsavedSettingsChoice.KeepEditing) return;
+            if (choice == UnsavedSettingsChoice.Apply)
+            {
+                OkClicked(sender, e);
+                return;
+            }
+        }
         _closeWithoutRollback = true;
         // Close first so the dialog disappears immediately (as it does for OK), then restore the
         // committed state behind it only if a preview was actually applied.
@@ -2287,14 +2428,43 @@ public partial class SettingsWindow : Window
         }
 
         e.Cancel = true;
-        if (_committed.ConfirmDiscardSettingsChanges &&
-            !await ConfirmChangesAsync("Discard settings changes?", "Settings has unapplied net changes:", changes, "Close Anyway", allowDontRemind: true)) return;
+        if (_committed.ConfirmDiscardSettingsChanges)
+        {
+            var choice = await ConfirmUnsavedChangesAsync("Unsaved settings changes", "Settings has unapplied net changes:", changes);
+            if (choice == UnsavedSettingsChoice.KeepEditing) return;
+            if (choice == UnsavedSettingsChoice.Apply)
+            {
+                OkClicked(this, new RoutedEventArgs());
+                return;
+            }
+        }
         _closeWithoutRollback = true;
         Close();
         RollbackPreviewDeferred();
     }
 
-    private async Task<bool> ConfirmChangesAsync(string title, string intro, IReadOnlyList<SettingChange> changes, string confirmLabel, bool allowDontRemind = false)
+    /// <summary>What to do with unapplied changes when Settings is cancelled or closed.</summary>
+    public enum UnsavedSettingsChoice { KeepEditing, Discard, Apply }
+
+    /// <summary>Test hook: answers the unsaved-changes prompt instead of showing the dialog.</summary>
+    internal Func<IReadOnlyList<SettingChange>, UnsavedSettingsChoice>? UnsavedChangesPromptForTests { get; set; }
+
+    /// <summary>
+    /// Cancel / close with unapplied changes: Apply and Close, Discard Changes (closes and rolls the preview back) or
+    /// Keep Editing (the dialog stays open with every change intact). Escape and the dialog's own close button keep editing.
+    /// </summary>
+    private async Task<UnsavedSettingsChoice> ConfirmUnsavedChangesAsync(string title, string intro, IReadOnlyList<SettingChange> changes)
+    {
+        if (UnsavedChangesPromptForTests is { } prompt) return prompt(changes);
+        var result = await ConfirmChangesCoreAsync(title, intro, changes, "Discard Changes", allowDontRemind: true, applyLabel: "Apply and Close", backLabel: "Keep Editing");
+        return result switch { 1 => UnsavedSettingsChoice.Discard, 2 => UnsavedSettingsChoice.Apply, _ => UnsavedSettingsChoice.KeepEditing };
+    }
+
+    private async Task<bool> ConfirmChangesAsync(string title, string intro, IReadOnlyList<SettingChange> changes, string confirmLabel, bool allowDontRemind = false) =>
+        await ConfirmChangesCoreAsync(title, intro, changes, confirmLabel, allowDontRemind) == 1;
+
+    /// <summary>0 = go back / keep editing, 1 = confirm (discard), 2 = apply (only when <paramref name="applyLabel"/> is given).</summary>
+    private async Task<int> ConfirmChangesCoreAsync(string title, string intro, IReadOnlyList<SettingChange> changes, string confirmLabel, bool allowDontRemind = false, string? applyLabel = null, string backLabel = "Go Back")
     {
         var list = new StackPanel { Spacing = 6 };
         foreach (var change in changes)
@@ -2307,12 +2477,19 @@ public partial class SettingsWindow : Window
             Margin = new Thickness(0, 2, 0, 0)
         };
         var confirm = new Button { Content = confirmLabel, MinWidth = 126 };
-        confirm.Classes.Add("primaryAction");
-        var back = new Button { Content = "Go Back", MinWidth = 100 };
+        confirm.Classes.Add(applyLabel is null ? "primaryAction" : "secondaryAction");
+        var back = new Button { Content = backLabel, MinWidth = 100 };
         back.Classes.Add("secondaryAction");
+        Button? apply = null;
+        if (applyLabel is not null)
+        {
+            apply = new Button { Content = applyLabel, MinWidth = 126 };
+            apply.Classes.Add("primaryAction");
+        }
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, HorizontalAlignment = HorizontalAlignment.Right };
         buttons.Children.Add(back);
         buttons.Children.Add(confirm);
+        if (apply is not null) buttons.Children.Add(apply);
         var root = new StackPanel { Margin = new Thickness(22), Spacing = 14 };
         var warningBrush = new SolidColorBrush(Color.Parse(Glide.App.ThemePalette.Warning));
         var warningGlyph = new Border
@@ -2342,16 +2519,18 @@ public partial class SettingsWindow : Window
             Topmost = Topmost
         };
         PopupPlacementStore.Track(dialog, "settings-discard-confirm");
-        confirm.Click += (_, _) => dialog.Close(true);
-        back.Click += (_, _) => dialog.Close(false);
-        var accepted = await dialog.ShowDialog<bool>(this);
+        confirm.Click += (_, _) => dialog.Close(1);
+        back.Click += (_, _) => dialog.Close(0);
+        if (apply is not null) apply.Click += (_, _) => dialog.Close(2);
+        var result = await dialog.ShowDialog<int>(this);
+        var accepted = result == 1;
         if (accepted && allowDontRemind && dontRemind.IsChecked == true)
         {
             // Persist this one preference even though every other staged change is intentionally discarded.
             _committed.ConfirmDiscardSettingsChanges = false;
             _apply(_committed.CloneState(), true);
         }
-        return accepted;
+        return result;
     }
 
     private void RestoreDefaultsClicked(object? sender, RoutedEventArgs e) => RestoreDefaults();
@@ -2393,6 +2572,49 @@ public partial class SettingsWindow : Window
         _ = WindowsFileAssociationRegistration.OpenDefaultAppsPage(out var message);
         WindowsIntegrationStatusText.Text = message;
     }
+
+    /// <summary>Test seam for the "Choose a file manager" picker: (window, start folder) -> chosen path or null.</summary>
+    internal static Func<SettingsWindow, string?, Task<string?>>? AlternativeFileManagerPickerOverride { get; set; }
+
+    private static string? AlternativeFileManagerStartFolder(string? current)
+    {
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(current))
+            {
+                var dir = Path.GetDirectoryName(Environment.ExpandEnvironmentVariables(current.Trim().Trim('"')));
+                if (!string.IsNullOrWhiteSpace(dir) && Directory.Exists(dir)) return dir;
+            }
+        }
+        catch { /* unusable path: start in Program Files */ }
+        var programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+        return Directory.Exists(programFiles) ? programFiles : null;
+    }
+
+    internal async Task BrowseAlternativeFileManagerAsync()
+    {
+        var start = AlternativeFileManagerStartFolder(AlternativeFileManagerPathBox.Text);
+        string? path;
+        if (AlternativeFileManagerPickerOverride is { } pick) path = await pick(this, start);
+        else
+        {
+            var options = new FilePickerOpenOptions
+            {
+                Title = "Choose a file manager",
+                AllowMultiple = false,
+                FileTypeFilter = new[] { new FilePickerFileType("Programs") { Patterns = new[] { "*.exe" } } }
+            };
+            if (start is not null) options.SuggestedStartLocation = await StorageProvider.TryGetFolderFromPathAsync(start);
+            var files = await StorageProvider.OpenFilePickerAsync(options);
+            path = files.FirstOrDefault()?.TryGetLocalPath();
+        }
+        if (string.IsNullOrWhiteSpace(path)) return;
+        AlternativeFileManagerPathBox.Text = path;
+    }
+
+    private async void BrowseAlternativeFileManagerClicked(object? sender, RoutedEventArgs e) => await BrowseAlternativeFileManagerAsync();
+
+    private void ClearAlternativeFileManagerClicked(object? sender, RoutedEventArgs e) => AlternativeFileManagerPathBox.Text = string.Empty;
 
     private async void BrowseExternalClicked(object? sender, RoutedEventArgs e)
     {

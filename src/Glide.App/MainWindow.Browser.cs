@@ -986,9 +986,36 @@ public partial class MainWindow
     // Toolbar: show the current folder in Windows File Explorer
     // ------------------------------------------------------------------------------------------
 
-    private void BrowserWindowsExplorerClicked(object? sender, RoutedEventArgs e)
+    // Left-click: Windows File Explorer (through the registry action). Right-click: the target menu (MainWindow.AltFileManager.cs).
+    private void BrowserWindowsExplorerClicked(object? sender, RoutedEventArgs e) =>
+        _ = ExecuteCommandAsync(GlideCommand.ShowFolderInWindowsExplorer);
+
+    private bool HasAlternativeFileManager => !string.IsNullOrWhiteSpace(_settings.AlternativeFileManagerPath);
+
+    /// <summary>The item to preselect when revealing an Explorer tab's folder: the current / a selected item of that folder.</summary>
+    private string? ExplorerRevealSelection(BrowserTabState browser)
     {
-        if (_workspace.Active is BrowserTabState browser) ExplorerShell.Reveal(browser.Folder, directory: true);
+        if (_explorerDisplayedTabId != browser.Id || !string.Equals(_explorerLoadedFolder, browser.Folder, StringComparison.OrdinalIgnoreCase)) return null;
+        var current = _browserCurrentIndex >= 0 && _browserCurrentIndex < _browserEntries.Count ? _browserEntries[_browserCurrentIndex].Path : null;
+        var pick = PickExplorerSessionSelection(_browserSelection, current, browser.Folder);
+        return pick is not null && (File.Exists(pick) || Directory.Exists(pick)) ? pick : null;
+    }
+
+    /// <summary>Explorer tab: the selected item (or the folder); elsewhere: the current image. Nothing set: Settings at the path setting.</summary>
+    private void ShowInAlternativeFileManager()
+    {
+        if (!HasAlternativeFileManager)
+        {
+            OpenSettingsAtSetting(AlternativeFileManagerSettingId);
+            return;
+        }
+        string? path = null;
+        if (_workspace.Active is BrowserTabState browser) path = ExplorerRevealSelection(browser) ?? browser.Folder;
+        else if (!string.IsNullOrWhiteSpace(_currentPath) && File.Exists(_currentPath)) path = _currentPath;
+        if (path is null) return;
+        var ok = ExplorerShell.OpenInAlternative(_settings.AlternativeFileManagerPath, _settings.AlternativeFileManagerArguments, path);
+        _diagnostics.Write("explorer", ok ? "alternative_file_manager_opened" : "alternative_file_manager_failed", new { path });
+        if (!ok && _workspace.Active is BrowserTabState) ShowExplorerMessage("The alternative file manager could not be started. Check its path in Settings.", isError: true);
     }
 
     // ------------------------------------------------------------------------------------------

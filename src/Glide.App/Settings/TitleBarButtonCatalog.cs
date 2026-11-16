@@ -94,7 +94,9 @@ public static class TitleBarButtonCatalog
     /// Label of the Show-in-Explorer button for the chosen target (the button's tooltip follows the
     /// <see cref="GlideSettingsState.ShowInExplorerTarget"/> setting; the catalogue lists the default).
     /// </summary>
-    public static string LocateLabel(string? target) => ShowInExplorerTargets.IsWindowsExplorer(target)
+    public static string LocateLabel(string? target) => ShowInExplorerTargets.IsAlternative(target)
+        ? "Show in alternative file manager"
+        : ShowInExplorerTargets.IsWindowsExplorer(target)
         ? "Show in File Explorer (select current image)"
         : "Show in Explorer tab (select current image)";
 

@@ -49,6 +49,17 @@ internal static class FullscreenTransitionPlanner
     public static FullscreenTransitionFence PlanEnterFence(WindowState priorState) =>
         priorState == WindowState.Normal ? FullscreenTransitionFence.Cloak : FullscreenTransitionFence.None;
 
+    /// <summary>
+    /// Title-bar maximize/restore (caption button, title-bar double-click, hotkey). Normal&lt;-&gt;Maximized is a large
+    /// geometry change, so it is fenced exactly like Normal&lt;-&gt;fullscreen; a no-op or fullscreen source is not.
+    /// </summary>
+    public static FullscreenTransitionFence PlanMaximizeToggleFence(WindowState currentState, WindowState targetState) =>
+        currentState != targetState &&
+        currentState is WindowState.Normal or WindowState.Maximized &&
+        targetState is WindowState.Normal or WindowState.Maximized
+            ? FullscreenTransitionFence.Cloak
+            : FullscreenTransitionFence.None;
+
     /// <param name="capturedState">The window state captured when fullscreen was entered.</param>
     /// <param name="exitBehavior">The <c>FullscreenExitBehavior</c> setting (null = restore).</param>
     /// <param name="forceMaximized">"Exit fullscreen maximized" caption action.</param>

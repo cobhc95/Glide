@@ -3,6 +3,7 @@ using Glide.App.Settings;
 
 namespace Glide.Core.Tests;
 
+[Collection(StoreStaticsCollection.Name)]
 public sealed class SettingsStoreRoundTripTests
 {
     [Theory]

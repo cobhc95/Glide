@@ -22,13 +22,17 @@ public partial class BrowserSurface : UserControl
     public event EventHandler<TextChangedEventArgs>? FilterTextChanged;
     public event EventHandler<KeyEventArgs>? FilterKeyPressed;
 
-    public BrowserSurface() => InitializeComponent();
+    public BrowserSurface()
+    {
+        InitializeComponent();
+    }
 
     public Button BackButton => BrowserBackButton;
     public Button ForwardButton => BrowserForwardButton;
     public Button HistoryButton => BrowserHistoryButton;
     public Button UpButton => BrowserUpButton;
     public Button RefreshButton => BrowserRefreshButton;
+    public Button WindowsExplorerButton => BrowserWindowsExplorerButton;
     public ExplorerAddressBar AddressBar => BrowserAddressBar;
     public TextBox FilterBox => BrowserFilterBox;
     public ComboBox ViewModeCombo => BrowserViewModeCombo;

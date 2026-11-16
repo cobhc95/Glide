@@ -55,17 +55,34 @@ public partial class MainWindow
         UpdateFolderCounter(folderPath);
     }
 
-    /// <summary><c>&lt;br&gt;</c> (also <c>&lt;br/&gt;</c>, <c>&lt;br /&gt;</c>, any case) in the text overlay template starts a new line.</summary>
+    /// <summary><c>&lt;br&gt;</c> (also <c>&lt;br/&gt;</c>, <c>&lt;br /&gt;</c>, any case) and the typed two-character
+    /// escape <c>\n</c> in the text overlay template start a new line.</summary>
     internal static string ApplyTextOverlayLineBreaks(string text) =>
-        System.Text.RegularExpressions.Regex.Replace(text, @"<br\s*/?>", "\n", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+        System.Text.RegularExpressions.Regex.Replace(text, @"<br\s*/?>|\\n", "\n", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    // Last folder-position result. Restyling the text overlay (font size spinner, colour...) re-runs UpdatePictureCounter on
+    // every tick; without this each tick hid the folder line, re-enumerated the sibling folders on the thread pool and
+    // re-laid the overlay out when the result arrived, which is what made dragging the font size feel slow.
+    private (string Folder, bool Hidden, string? Order, bool Grandparent, string Result)? _folderCounterCache;
 
     private async void UpdateFolderCounter(string folderPath)
     {
-        FolderCounterText.IsVisible = false;
-        if (!_settings.ShowFolderCounter || string.IsNullOrWhiteSpace(folderPath)) return;
+        if (!_settings.ShowFolderCounter || string.IsNullOrWhiteSpace(folderPath))
+        {
+            FolderCounterText.IsVisible = false;
+            return;
+        }
         var includeHidden = _settings.FolderNavIncludeHidden;
         var order = _settings.FolderNavOrder;
         var grandparent = _settings.FolderCounterIncludeGrandparent;
+        if (_folderCounterCache is { } cached && cached.Hidden == includeHidden && cached.Grandparent == grandparent &&
+            string.Equals(cached.Order, order, StringComparison.Ordinal) && string.Equals(cached.Folder, folderPath, StringComparison.OrdinalIgnoreCase))
+        {
+            FolderCounterText.Text = cached.Result;
+            FolderCounterText.IsVisible = cached.Result.Length > 0;
+            return;
+        }
+        FolderCounterText.IsVisible = false;
         var result = await Task.Run(() =>
         {
             try
@@ -89,6 +106,7 @@ public partial class MainWindow
             catch { return ""; }
         });
         if (!_settings.ShowFolderCounter || !string.Equals(Path.GetDirectoryName(_currentPath ?? ""), folderPath, StringComparison.OrdinalIgnoreCase) || grandparent != _settings.FolderCounterIncludeGrandparent || includeHidden != _settings.FolderNavIncludeHidden || order != _settings.FolderNavOrder) return;
+        _folderCounterCache = (folderPath, includeHidden, order, grandparent, result);
         FolderCounterText.Text = result;
         FolderCounterText.IsVisible = result.Length > 0;
     }

@@ -168,6 +168,9 @@ internal static class SettingAccessors
         ["tabs.position"] = Text(s => s.TabStripPosition, (s, v) => s.TabStripPosition = v),
         ["tabs.sideAutoHide"] = Bool(s => s.TabSideAutoHide, (s, v) => s.TabSideAutoHide = v),
         ["tabs.topAutoHide"] = Bool(s => s.TabTopAutoHide, (s, v) => s.TabTopAutoHide = v),
+        ["explorer.scrollMode"] = Text(s => s.ExplorerScrollMode, (s, v) => s.ExplorerScrollMode = v),
+        ["explorer.locateOpensIn"] = Text(s => s.ExplorerLocateOpensIn, (s, v) => s.ExplorerLocateOpensIn = v),
+        ["explorer.backReturnsToImage"] = Text(s => s.ExplorerBackReturnsToImage, (s, v) => s.ExplorerBackReturnsToImage = v),
         ["explorer.defaultView"] = Text(s => s.ExplorerDefaultView, (s, v) => s.ExplorerDefaultView = v),
         ["tabs.lastTabBehavior"] = Text(s => s.LastTabCloseBehavior, (s, v) => s.LastTabCloseBehavior = v),
         ["tabs.homePage"] = Text(s => s.HomePageMode, (s, v) => s.HomePageMode = v),
@@ -196,8 +199,17 @@ internal static class SettingAccessors
             case "window.showInExplorerTarget":
                 state.ShowInExplorerTarget = ShowInExplorerTargets.Normalize(state.ShowInExplorerTarget);
                 break;
+            case "explorer.locateOpensIn":
+                state.ExplorerLocateOpensIn = Glide.Core.Navigation.ExplorerLocateTargets.Normalize(state.ExplorerLocateOpensIn);
+                break;
+            case "explorer.backReturnsToImage":
+                state.ExplorerBackReturnsToImage = Glide.Core.Navigation.ExplorerBackReturnModes.Normalize(state.ExplorerBackReturnsToImage);
+                break;
             case "explorer.defaultView":
                 state.ExplorerDefaultView = ExplorerDefaultViews.Normalize(state.ExplorerDefaultView);
+                break;
+            case "explorer.scrollMode":
+                state.ExplorerScrollMode = Glide.App.Explorer.ExplorerScrollModes.Normalize(state.ExplorerScrollMode);
                 break;
             case "navigation.sortOrder":
                 state.NavigationSortOrder = Glide.Core.ImageSortOrder.NormalizeDisplayName(state.NavigationSortOrder);

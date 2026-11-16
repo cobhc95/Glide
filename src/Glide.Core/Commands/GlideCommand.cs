@@ -125,5 +125,7 @@ public enum GlideCommand
     /// <summary>Settings > Back up and restore: Export (save a .glidebackup file). Appended (5.0.4).</summary>
     ExportGlideBackup,
     /// <summary>Settings > Back up and restore: Import (choose a .glidebackup file, then what to import). Appended (5.0.4).</summary>
-    ImportGlideBackup
+    ImportGlideBackup,
+    /// <summary>Explorer tab: show the folder (with the selected item selected) in the alternative file manager set in Settings. Appended (5.0.4).</summary>
+    ShowInAlternativeFileManager
 }

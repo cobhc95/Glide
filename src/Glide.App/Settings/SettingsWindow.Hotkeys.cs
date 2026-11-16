@@ -23,6 +23,7 @@ public partial class SettingsWindow
         if (_loadingControls) return;
         // Typing in the filter leaves a "Search hotkey" result view.
         if (_hotkeyLookupShortcut is not null) ClearHotkeyLookup(rebuild: false);
+        UpdateHotkeyFilterChrome();
         // Short debounce so typing never rebuilds the list on every keystroke.
         _hotkeyFilterTimer ??= new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(140) };
         _hotkeyFilterTimer.Stop();
@@ -153,21 +154,52 @@ public partial class SettingsWindow
     {
         EndHotkeyLookupCapture(HotkeyLookup.Describe(_workingHotkeys, shortcut));
         _hotkeyLookupShortcut = shortcut;
-        ClearHotkeyLookupButton.IsVisible = true;
+        UpdateHotkeyFilterChrome();
         BuildHotkeyRows(HotkeyFilterBox?.Text);
     }
 
-    private void ClearHotkeyLookupClicked(object? sender, RoutedEventArgs e)
+    /// <summary>"Show all hotkeys": leaves a Search hotkey result and clears the text filter, so every shortcut is listed.</summary>
+    private void ClearHotkeyLookupClicked(object? sender, RoutedEventArgs e) => ShowAllHotkeys();
+
+    /// <summary>The (x) inside the filter box: same as Show all hotkeys.</summary>
+    private void ClearHotkeyFilterClicked(object? sender, RoutedEventArgs e)
     {
-        ClearHotkeyLookup(rebuild: true);
+        ShowAllHotkeys();
+        HotkeyFilterBox?.Focus();
+    }
+
+    internal void ShowAllHotkeys()
+    {
+        _hotkeyFilterTimer?.Stop();
+        _hotkeyLookupShortcut = null;
+        if (HotkeyFilterBox is not null && !string.IsNullOrEmpty(HotkeyFilterBox.Text))
+        {
+            var loading = _loadingControls;
+            _loadingControls = true;           // no debounced rebuild: the list is rebuilt once below
+            try { HotkeyFilterBox.Text = string.Empty; }
+            finally { _loadingControls = loading; }
+        }
         HotkeyCaptureText.Text = string.Empty;
+        UpdateHotkeyFilterChrome();
+        BuildHotkeyRows();
+    }
+
+    /// <summary>True while the shortcut list shows only part of the hotkeys (text filter or a Search hotkey result).</summary>
+    internal bool IsHotkeyListFiltered => !string.IsNullOrWhiteSpace(HotkeyFilterBox?.Text) || _hotkeyLookupShortcut is not null;
+
+    /// <summary>The (x) and "Show all hotkeys" are shown exactly while the list is filtered.</summary>
+    private void UpdateHotkeyFilterChrome()
+    {
+        var filtered = IsHotkeyListFiltered;
+        if (ClearHotkeyLookupButton is not null) ClearHotkeyLookupButton.IsVisible = filtered;
+        if (ClearHotkeyFilterButton is not null) ClearHotkeyFilterButton.IsVisible = !string.IsNullOrEmpty(HotkeyFilterBox?.Text) || _hotkeyLookupShortcut is not null;
     }
 
     /// <summary>Leaves the Search hotkey result view and goes back to the normal list.</summary>
     private void ClearHotkeyLookup(bool rebuild)
     {
         _hotkeyLookupShortcut = null;
-        if (ClearHotkeyLookupButton is not null) ClearHotkeyLookupButton.IsVisible = false;
+        UpdateHotkeyFilterChrome();
         if (rebuild) BuildHotkeyRows(HotkeyFilterBox?.Text);
     }
 

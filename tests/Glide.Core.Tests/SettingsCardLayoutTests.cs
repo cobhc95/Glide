@@ -275,6 +275,7 @@ public sealed class SettingsCardLayoutTests
             Assert.Equal(groupKeys.OrderBy(x => x), navKeys.OrderBy(x => x));
             foreach (var (key, title) in navKeys.Zip(navTitles))
                 Assert.Equal(title, groupTitles[groupKeys.IndexOf(key)]);
+            Assert.All(rail, b => Assert.Null(ToolTip.GetTip(b))); // category buttons have no tooltip
 
             var combo = Named<ComboBox>(window, "SearchCategoryCombo");
             var comboItems = combo.Items.OfType<ComboBoxItem>().Select(i => (string)i.Content!).ToList();

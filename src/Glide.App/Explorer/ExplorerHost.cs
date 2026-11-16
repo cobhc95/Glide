@@ -16,6 +16,9 @@ internal static class ExplorerHost
     /// <summary>Show a path in Windows File Explorer. (path, isDirectory).</summary>
     internal static Action<string, bool>? RevealInWindows { get; set; }
 
+    /// <summary>Starts the alternative file manager. (exe, arguments) => started.</summary>
+    internal static Func<string, string, bool>? LaunchAlternativeFileManager { get; set; }
+
     /// <summary>The "Open with..." chooser for a file.</summary>
     internal static Action<string>? OpenWith { get; set; }
 

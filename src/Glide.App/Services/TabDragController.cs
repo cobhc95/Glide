@@ -88,7 +88,10 @@ public sealed class TabDragController
             (_host.TabStripContains(_lastScreen) ? _host.GetInsertIndex(_lastScreen) : _targetIndex);
         // once neighbours have swapped, a pointer that drifts just off the strip keeps the last
         // in-strip slot, so release commits that order instead of snapping back.
-        _host.ApplyPreview(id, now.X - _start.X, _ordinaryAttach.Target is not null);
+        // The in-strip preview reports the insertion index it shows; that (not the raw pointer midpoint)
+        // is what release commits, so a drop always matches the last live preview.
+        var previewIndex = _host.ApplyPreview(id, now.X - _start.X, _ordinaryAttach.Target is not null);
+        if (_ordinaryAttach.Target is null && previewIndex >= 0) _targetIndex = previewIndex;
         _host.Diagnostic("drag", new { id, screenX = _lastScreen.X, screenY = _lastScreen.Y, targetWindow = _ordinaryAttach.Target?.Title ?? "", targetIndex = _targetIndex });
         e.Handled = true;
     }
@@ -100,6 +103,8 @@ public sealed class TabDragController
         var wasDrag = _active;
         var target = _ordinaryAttach.Target;
         var targetIndex = _targetIndex;
+        // Snapshot first: releasing capture raises PointerCaptureLost synchronously, which clears the state
+        // (and the visuals) before the reorder below runs.
         _host.ReleaseCapture(e.Pointer);
         try
         {
@@ -179,7 +184,8 @@ public sealed class TabDragHost
     public required Func<PixelPoint, bool> IsBeyondTearOff { get; init; }
     public required Func<PixelPoint, bool> TabStripContains { get; init; }
     public required Func<PixelPoint, int> GetInsertIndex { get; init; }
-    public required Action<Guid, double, bool> ApplyPreview { get; init; }
+    /// <summary>Applies the live reorder preview and returns the insertion index it shows (-1 = none, e.g. attach target).</summary>
+    public required Func<Guid, double, bool, int> ApplyPreview { get; init; }
     public required Action ClearVisuals { get; init; }
     public required Func<Guid, PixelPoint, Task> BeginSoleNativeMoveAsync { get; init; }
     public required Func<Guid, PixelPoint, Task> BeginTearOffAsync { get; init; }

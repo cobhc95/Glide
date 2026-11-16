@@ -46,8 +46,16 @@ internal static class ToolTipGuard
         if (_registered) return;
         _registered = true;
 
-        ToolTip.ToolTipOpeningEvent.AddClassHandler<Control>((control, _) =>
+        ToolTip.ToolTipOpeningEvent.AddClassHandler<Control>((control, e) =>
         {
+            // The show delay can expire after a click opened a modal dialog: the owner window is then disabled or
+            // inactive, never sees the pointer leave, and the tip would float over the dialog blocking every other tip.
+            if (TopLevel.GetTopLevel(control) is Window { IsActive: false } or Window { IsEnabled: false })
+            {
+                if (e is Avalonia.Interactivity.CancelRoutedEventArgs cancel) cancel.Cancel = true;
+                return;
+            }
+            Track(control);
             if (TopLevel.GetTopLevel(control) is not { } top) return;
             var origin = control.TranslatePoint(default, top);
             if (origin is null) return;
@@ -62,6 +70,35 @@ internal static class ToolTipGuard
         // is open when the wheel turns is gone before the content moves underneath it.
         InputElement.PointerWheelChangedEvent.AddClassHandler<Control>((control, _) => CloseOpenToolTips(control),
             Avalonia.Interactivity.RoutingStrategies.Tunnel, handledEventsToo: true);
+
+        // Stuck tooltips: the ToolTipService closes a tip only when it sees the pointer leave its owner. A click
+        // that opens a modal dialog (ShowDialog disables the owner window, so it never gets the leave/move) or
+        // rebuilds the owner leaves the tip open, floating over the dialog, and while the service still holds
+        // that owner no other tooltip opens anywhere (footer change summary, customiser rows). So every open tip
+        // is closed on any pointer press, whenever a window stops being active, and whenever a window opens.
+        InputElement.PointerPressedEvent.AddClassHandler<TopLevel>((_, _) => CloseAllOpenToolTips(),
+            Avalonia.Interactivity.RoutingStrategies.Tunnel, handledEventsToo: true);
+        WindowBase.IsActiveProperty.Changed.AddClassHandler<Window>((_, e) =>
+        {
+            if (e.NewValue is false) CloseAllOpenToolTips();
+        });
+        Window.WindowOpenedEvent.AddClassHandler<Window>((_, _) => CloseAllOpenToolTips());
+    }
+
+    private static readonly List<WeakReference<Control>> s_openOwners = new();
+
+    private static void Track(Control control)
+    {
+        s_openOwners.RemoveAll(r => !r.TryGetTarget(out var c) || ReferenceEquals(c, control) || !c.CheckAccess());
+        s_openOwners.Add(new WeakReference<Control>(control));
+    }
+
+    /// <summary>Closes every tooltip that has opened and may still be open, in any window.</summary>
+    internal static void CloseAllOpenToolTips()
+    {
+        foreach (var r in s_openOwners)
+            if (r.TryGetTarget(out var c) && c.CheckAccess() && ToolTip.GetIsOpen(c)) ToolTip.SetIsOpen(c, false);
+        s_openOwners.Clear();
     }
 
     /// <summary>Closes the tooltip of <paramref name="source"/> and of every visual parent that has one open.</summary>

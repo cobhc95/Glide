@@ -181,8 +181,10 @@
             <controls:SettingsCard CardId="appearance-text-overlay" Title="Text overlay" Subtitle="The picture counter over the image and the folder position line under it" Icon="Info" IsExpanded="False">
               <StackPanel Classes="settingsCardBody" Spacing="10">
                 <CheckBox x:Name="PictureCounterCheck" Content="Show text overlay"/>
-                <Grid ColumnDefinitions="205,330,*" Margin="6,0,0,0"><TextBlock Text="Text overlay template" VerticalAlignment="Center"/><TextBox x:Name="PictureTemplateBox" Grid.Column="1" Width="320" Text="[{index}/{total}]" ToolTip.Tip="Combine tokens freely. See the token list directly below."/></Grid>
-                <TextBlock Classes="phaseNote" Margin="6,-2,8,2" TextWrapping="Wrap" Text="Tokens: {index}, {total}, {file}, {filename}, {stem}, {extension}, {format}, {folder}, {folderpath}, {path}, {width}, {height}, {dimensions}, {megapixels}, {filesize}, {filesizebytes}, {zoom}. Example: {stem}  •  {dimensions}  •  {filesize}  •  {index}/{total}"/>
+                <Grid ColumnDefinitions="205,330,*" Margin="6,0,0,0"><TextBlock Text="Text overlay template" VerticalAlignment="Center"/><TextBox x:Name="PictureTemplateBox" Grid.Column="1" Width="320" Text="[{index}/{total}]" ToolTip.Tip="Combine tokens freely. See the token list directly below. Type &lt;br&gt; or 
+ to start a new line."/></Grid>
+                <TextBlock Classes="phaseNote" Margin="6,-2,8,2" TextWrapping="Wrap" Text="Tokens: {index}, {total}, {file}, {filename}, {stem}, {extension}, {format}, {folder}, {folderpath}, {path}, {width}, {height}, {dimensions}, {megapixels}, {filesize}, {filesizebytes}, {zoom}. Line break: &lt;br&gt; or 
+. Example: {stem}  •  {dimensions}  •  {filesize}  •  {index}/{total}"/>
                 <Grid ColumnDefinitions="245,220,*" Margin="6,0,0,0"><TextBlock Text="Text overlay position" VerticalAlignment="Center"/><ComboBox x:Name="PicturePositionCombo" Grid.Column="1" Width="210"><ComboBoxItem Content="Top left"/><ComboBoxItem Content="Top center"/><ComboBoxItem Content="Top right"/><ComboBoxItem Content="Bottom left"/><ComboBoxItem Content="Bottom center"/><ComboBoxItem Content="Bottom right"/></ComboBox></Grid>
                 <Grid ColumnDefinitions="245,150,*" Margin="6,0,0,0"><TextBlock Text="Text overlay font size" VerticalAlignment="Center"/><NumericUpDown x:Name="PictureFontSizeBox" Grid.Column="1" Minimum="8" Maximum="48"/></Grid>
                 <CheckBox x:Name="PictureBoldCheck" Content="Text overlay bold"/>
@@ -266,6 +268,7 @@
                   <ComboBox x:Name="ShowInExplorerTargetCombo" Grid.Column="1" Width="240" ToolTip.Tip="What the title-bar Show in File Explorer button does. You can also right-click that button to switch.">
                     <ComboBoxItem Content="Glide's Explorer tab"/>
                     <ComboBoxItem Content="Windows File Explorer"/>
+                    <ComboBoxItem Content="Alternative file manager"/>
                   </ComboBox>
                 </Grid>
             </StackPanel>
@@ -363,8 +366,56 @@
                     <ComboBoxItem Content="Details"/>
                   </ComboBox>
                 </Grid>
+                <Grid ColumnDefinitions="260,230,*" Margin="6,0,0,0">
+                  <TextBlock Text="Open a picture's folder in" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                  <ComboBox x:Name="ExplorerLocateOpensInCombo" Grid.Column="1" Width="220" ToolTip.Tip="Where Ctrl+E (Show in Explorer tab, Open file location) shows the picture's folder. Same tab: Back returns to the picture in that tab.">
+                    <ComboBoxItem Content="Same tab"/>
+                    <ComboBoxItem Content="Existing or new tab"/>
+                    <ComboBoxItem Content="Always a new tab"/>
+                    <ComboBoxItem Content="New window"/>
+                  </ComboBox>
+                </Grid>
+                <Grid x:Name="ExplorerBackReturnsToImageRow" ColumnDefinitions="260,230,*" Margin="6,0,0,0" ToolTip.Tip="Only used when a picture's folder opens in another tab or window. With Same tab, Back is the tab's own history.">
+                  <TextBlock Text="Back after opening a picture's folder" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                  <ComboBox x:Name="ExplorerBackReturnsToImageCombo" Grid.Column="1" Width="220">
+                    <ComboBoxItem Content="Folders, then back to the picture"/>
+                    <ComboBoxItem Content="Straight back to the picture"/>
+                    <ComboBoxItem Content="Folders only"/>
+                  </ComboBox>
+                </Grid>
                 <CheckBox x:Name="ExplorerShowHiddenFilesCheck" Content="Show hidden files in Explorer tab"/>
                 <CheckBox x:Name="ExplorerShowOnlyImagesCheck" Content="Explorer tab lists only folders and images (off: every file type)"/>
+                <Grid ColumnDefinitions="260,230,*" Margin="6,0,0,0">
+                  <TextBlock Text="Explorer scroll amount" VerticalAlignment="Center"/>
+                  <ComboBox x:Name="ExplorerScrollModeCombo" Grid.Column="1" Width="220" ToolTip.Tip="How far one mouse-wheel notch scrolls. Rows move by the current view's row height.">
+                    <ComboBoxItem Content="One row per notch"/>
+                    <ComboBoxItem Content="Rows per notch (fixed)"/>
+                    <ComboBoxItem Content="Per view (1 / 2 / 3)"/>
+                    <ComboBoxItem Content="Pixels per notch"/>
+                  </ComboBox>
+                </Grid>
+                <Grid x:Name="ExplorerScrollRowsRow" ColumnDefinitions="260,230,*" Margin="6,0,0,0">
+                  <TextBlock Text="Rows per notch" VerticalAlignment="Center"/>
+                  <NumericUpDown x:Name="ExplorerScrollRowsBox" Grid.Column="1" Width="220" Minimum="1" Maximum="20" Increment="1" FormatString="0" ToolTip.Tip="Used when Explorer scroll amount is Rows per notch (fixed)."/>
+                </Grid>
+                <Grid x:Name="ExplorerScrollPixelsRow" ColumnDefinitions="260,230,*" Margin="6,0,0,0">
+                  <TextBlock Text="Pixels per notch" VerticalAlignment="Center"/>
+                  <NumericUpDown x:Name="ExplorerScrollPixelsBox" Grid.Column="1" Width="220" Minimum="10" Maximum="1000" Increment="10" FormatString="0" ToolTip.Tip="Used when Explorer scroll amount is Pixels per notch; ignores row size."/>
+                </Grid>
+                <Grid ColumnDefinitions="260,230,*" Margin="6,0,0,0">
+                  <TextBlock Text="Explorer scroll speed (x)" VerticalAlignment="Center"/>
+                  <NumericUpDown x:Name="ExplorerScrollSpeedBox" Grid.Column="1" Width="220" Minimum="0.25" Maximum="4" Increment="0.25" FormatString="0.##" ToolTip.Tip="Wheel speed multiplier applied on top of the Explorer scroll amount, in every mode."/>
+                </Grid>
+                <Grid ColumnDefinitions="260,*,Auto,Auto" ColumnSpacing="7" Margin="6,0,0,0">
+                  <TextBlock Text="Alternative file manager (.exe)" VerticalAlignment="Center"/>
+                  <TextBox x:Name="AlternativeFileManagerPathBox" Grid.Column="1" Watermark="Empty: none" ToolTip.Tip="Offered in the right-click menu of the Show in File Explorer buttons (title bar and Explorer toolbar)."/>
+                  <Button x:Name="AlternativeFileManagerBrowseButton" Grid.Column="2" Classes="secondaryAction" Content="Browse…" Click="BrowseAlternativeFileManagerClicked" ToolTip.Tip="Choose a file manager program (.exe)"/>
+                  <Button x:Name="AlternativeFileManagerClearButton" Grid.Column="3" Classes="secondaryAction" MinWidth="0" Padding="10,4" Content="✕" Click="ClearAlternativeFileManagerClicked" ToolTip.Tip="Clear: no alternative file manager"/>
+                </Grid>
+                <Grid ColumnDefinitions="260,*" Margin="6,0,0,0">
+                  <TextBlock Text="Alternative file manager arguments" VerticalAlignment="Center"/>
+                  <TextBox x:Name="AlternativeFileManagerArgumentsBox" Grid.Column="1" ToolTip.Tip="{}{path} is replaced with the selected file, or the folder when nothing is selected."/>
+                </Grid>
               </StackPanel>
             </controls:SettingsCard>
             <controls:SettingsCard CardId="tabs-detach" Title="Moving tabs between windows" Subtitle="Drag tabs out into new windows or onto another window" Icon="Move" IsExpanded="False">
@@ -460,7 +511,11 @@
                   <Button x:Name="DeleteHotkeyPresetButton" Classes="secondaryAction" Content="Delete preset" Click="DeleteHotkeyPresetClicked" ToolTip.Tip="Delete the selected custom preset. Built-in presets cannot be deleted."/>
                 </WrapPanel>
                 <Grid ColumnDefinitions="*,Auto" Margin="6,2,0,0" ColumnSpacing="10">
-                  <TextBox x:Name="HotkeyFilterBox" Watermark="Filter shortcuts: action, category or key (for example slideshow, Ctrl, F5)" ToolTip.Tip="Filter the shortcut list as you type. Every word must match the action name, its category or one of its keys." TextChanged="HotkeyFilterChanged"/>
+                  <TextBox x:Name="HotkeyFilterBox" Watermark="Filter shortcuts: action, category or key (for example slideshow, Ctrl, F5)" ToolTip.Tip="Filter the shortcut list as you type. Every word must match the action name, its category or one of its keys." TextChanged="HotkeyFilterChanged">
+                    <TextBox.InnerRightContent>
+                      <Button x:Name="ClearHotkeyFilterButton" IsVisible="False" Click="ClearHotkeyFilterClicked" Background="Transparent" BorderThickness="0" Padding="8,0" Margin="0" VerticalAlignment="Stretch" Cursor="Hand" Focusable="False" ToolTip.Tip="Clear the filter and show every shortcut"><TextBlock Text="✕" FontSize="12" VerticalAlignment="Center" Foreground="{DynamicResource BrushMuted}"/></Button>
+                    </TextBox.InnerRightContent>
+                  </TextBox>
                   <Button x:Name="SearchHotkeyButton" Grid.Column="1" Classes="secondaryAction" Content="Search hotkey" Click="SearchHotkeyClicked" controls:SettingsCard.SettingIds="hotkeys.searchHotkey" ToolTip.Tip="Press this, then press a key or combination. The list shows which action it is assigned to, or tells you it is not assigned. Esc cancels."/>
                 </Grid>
                 <Grid ColumnDefinitions="*,Auto" Margin="6,0,8,0" ColumnSpacing="10">
@@ -687,9 +742,18 @@
             </Grid>
           </Grid>
           <StackPanel Grid.Column="1" VerticalAlignment="Center" Orientation="Horizontal" Spacing="10">
-            <StackPanel x:Name="DirtySummaryHost" VerticalAlignment="Center" Margin="0,0,8,0" Spacing="1">
-              <TextBlock x:Name="DirtyText" HorizontalAlignment="Right" Foreground="{DynamicResource BrushMuted}"/>
-              <TextBlock x:Name="DirtyHintText" HorizontalAlignment="Right" Foreground="{DynamicResource BrushAccent}" FontSize="11" FontStyle="Italic" Text="Hover over to view changes"/>
+            <StackPanel x:Name="DirtySummaryHost" VerticalAlignment="Center" Margin="0,0,8,0" Spacing="0" Background="Transparent"
+                        Focusable="True" Cursor="Hand" AutomationProperties.Name="Show the list of changes">
+              <!-- Own hover/click popup for the change list (not the ToolTip service): see UpdateDirtyState. -->
+              <Popup x:Name="DirtySummaryPopup" PlacementTarget="{Binding #DirtySummaryHost}" Placement="Top" VerticalOffset="-6"
+                     IsLightDismissEnabled="False" Topmost="False">
+                <Border Background="{DynamicResource ToolTipBackground}" BorderBrush="{DynamicResource ToolTipBorderBrush}"
+                        BorderThickness="1" CornerRadius="4" Padding="8,5" MaxWidth="560" IsHitTestVisible="False">
+                  <TextBlock x:Name="DirtySummaryPopupText" Foreground="{DynamicResource ToolTipForeground}" FontSize="12" TextWrapping="Wrap"/>
+                </Border>
+              </Popup>
+              <TextBlock x:Name="DirtyText" IsHitTestVisible="False" HorizontalAlignment="Right" Foreground="{DynamicResource BrushMuted}"/>
+              <TextBlock x:Name="DirtyHintText" IsHitTestVisible="False" HorizontalAlignment="Right" Foreground="{DynamicResource BrushAccent}" FontSize="11" FontStyle="Italic" Text="Hover or click to view changes"/>
             </StackPanel>
             <Button Classes="secondaryAction" Height="34" MinWidth="80" Content="Cancel" Click="CancelClicked"/>
             <Button x:Name="ApplyButton" Classes="secondaryAction" Height="34" MinWidth="80" Content="Apply" Click="ApplyClicked"/>

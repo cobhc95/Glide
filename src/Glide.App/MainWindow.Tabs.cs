@@ -417,12 +417,13 @@ public partial class MainWindow
             await _tabDrag.PointerMovedAsync(id, body, e);
     }
 
-    private void ApplyTabDragPreview(Guid draggedId, double draggedOffsetX)
+    private int ApplyTabDragPreview(Guid draggedId, double draggedOffsetX)
     {
-        var borders = TabStripPanel.Children.OfType<Border>().ToList();
-        var originalIndex = _workspace.Tabs.ToList().FindIndex(t => t.Id == draggedId);
+        var borders = TabStripPanel.Children.OfType<Border>().Where(b => b.Classes.Contains("glideTab")).ToList();
         var moving = borders.FirstOrDefault(b => Equals(b.DataContext, draggedId));
-        if (moving is null || originalIndex < 0) return;
+        // Index in the strip that is actually drawn (same list the neighbours are animated from).
+        var originalIndex = moving is null ? -1 : borders.IndexOf(moving);
+        if (moving is null || originalIndex < 0) return -1;
 
         var vertical = SideTabsActive;
         TranslateTransform Along(double offset) => vertical ? new TranslateTransform(0, offset) : new TranslateTransform(offset, 0);
@@ -440,13 +441,12 @@ public partial class MainWindow
         // begins yielding after roughly one-quarter tab width and reaches its destination by
         // three-quarters; later neighbours follow the same rolling window. This tracks Chromium's
         // physical feel much more closely while keeping the dragged tab exactly under the pointer.
-        if (_tabAttach.Target is not null) return;
+        if (_tabAttach.Target is not null) return -1;
         var slot = Math.Max(1, (vertical ? moving.Bounds.Height : moving.Bounds.Width) + 3);
         var slotsTravelled = draggedOffsetX / slot;
         // the slot the preview shows (a neighbour counts as swapped once it is half way across)
         // is exactly what release commits, so a drop never snaps back after tabs visibly swapped.
-        var previewPosition = Math.Clamp(originalIndex + (int)Math.Round(slotsTravelled, MidpointRounding.AwayFromZero), 0, borders.Count - 1);
-        _tabDragPreviewInsertIndex = previewPosition > originalIndex ? previewPosition + 1 : previewPosition;
+        var previewInsertIndex = Glide.Core.TabDragPolicy.PreviewInsertIndex(originalIndex, borders.Count, draggedOffsetX, slot);
         static double Smooth(double t)
         {
             t = Math.Clamp(t, 0, 1);
@@ -474,6 +474,7 @@ public partial class MainWindow
                 borders[i].RenderTransform = Along(slot * progress);
             }
         }
+        return previewInsertIndex;
     }
 
     private async void TabDragPointerReleased(object? sender, PointerReleasedEventArgs e)
@@ -504,11 +505,8 @@ public partial class MainWindow
 
     private void ClearTabDragState() => _tabDrag.Clear();
 
-    private int _tabDragPreviewInsertIndex = -1;
-
     private void ClearTabVisuals()
     {
-        _tabDragPreviewInsertIndex = -1;
         foreach (var border in TabStripPanel.Children.OfType<Border>())
         {
             border.RenderTransform = null;
@@ -562,7 +560,6 @@ public partial class MainWindow
         DetachAsync = DetachTabAsync,
         ReorderAsync = (id, index) =>
         {
-            if (_tabDragPreviewInsertIndex >= 0) index = _tabDragPreviewInsertIndex;
             _workspace.Move(id, index);
             _diagnostics.Write("tabs", "reordered", new { id, targetIndex = index });
             return Task.CompletedTask;
@@ -870,13 +867,16 @@ public partial class MainWindow
         var panelOrigin = TabStripPanel.TranslatePoint(new Point(0, 0), this) ?? new Point(0, 0);
         var vertical = SideTabsActive;
         var clientX = vertical ? pointInWindow.Y - panelOrigin.Y : pointInWindow.X - panelOrigin.X;
-        var borders = TabStripPanel.Children.OfType<Border>().Where(x => x.Classes.Contains("glideTab")).ToList();
-        for (var i = 0; i < borders.Count; i++)
-        {
-            var midpoint = vertical ? borders[i].Bounds.Y + borders[i].Bounds.Height / 2 : borders[i].Bounds.X + borders[i].Bounds.Width / 2;
-            if (clientX < midpoint) return i;
-        }
-        return borders.Count;
+        return Glide.Core.TabDragPolicy.InsertIndexFromPointer(TabSlotsAlongStrip(), clientX);
+    }
+
+    /// <summary>Layout slots (start, length) of the tab bodies along the strip axis, untransformed (drag previews use RenderTransform only).</summary>
+    private List<(double Start, double Length)> TabSlotsAlongStrip()
+    {
+        var vertical = SideTabsActive;
+        return TabStripPanel.Children.OfType<Border>().Where(x => x.Classes.Contains("glideTab"))
+            .Select(b => vertical ? (b.Bounds.Y, b.Bounds.Height) : (b.Bounds.X, b.Bounds.Width))
+            .ToList();
     }
 
     internal void SetTabAttachHighlight(bool enabled)
@@ -885,7 +885,51 @@ public partial class MainWindow
         {
             if (!ChromeBorder.Classes.Contains("attachTargetStrip")) ChromeBorder.Classes.Add("attachTargetStrip");
         }
-        else ChromeBorder.Classes.Remove("attachTargetStrip");
+        else
+        {
+            ChromeBorder.Classes.Remove("attachTargetStrip");
+            SetTabAttachInsertMarker(-1);
+        }
+    }
+
+    private Border? _tabInsertMarker;
+
+    /// <summary>
+    /// Shows (index &gt;= 0) or hides the insertion marker for a tab dropped into this window from another one. The
+    /// marker is drawn at exactly the index the drop commits (both come from <see cref="GetTabInsertIndex"/>).
+    /// </summary>
+    internal void SetTabAttachInsertMarker(int index)
+    {
+        if (index < 0)
+        {
+            if (_tabInsertMarker is not null) _tabInsertMarker.IsVisible = false;
+            return;
+        }
+        var layer = Avalonia.Controls.Primitives.AdornerLayer.GetAdornerLayer(TabStripPanel);
+        if (layer is null) return;
+        if (_tabInsertMarker is null)
+        {
+            _tabInsertMarker = new Border
+            {
+                IsHitTestVisible = false,
+                CornerRadius = new CornerRadius(1.5),
+                ZIndex = 100,
+            };
+            _tabInsertMarker.Bind(Border.BackgroundProperty, this.GetResourceObservable("BrushAccent"));
+            Avalonia.Controls.Primitives.AdornerLayer.SetAdornedElement(_tabInsertMarker, TabStripPanel);
+        }
+        if (!layer.Children.Contains(_tabInsertMarker)) layer.Children.Add(_tabInsertMarker);
+        var vertical = SideTabsActive;
+        var position = Glide.Core.TabDragPolicy.InsertMarkerPosition(TabSlotsAlongStrip(), index, TabStripPanel.Spacing);
+        const double thickness = 3;
+        _tabInsertMarker.HorizontalAlignment = vertical ? Avalonia.Layout.HorizontalAlignment.Stretch : Avalonia.Layout.HorizontalAlignment.Left;
+        _tabInsertMarker.VerticalAlignment = vertical ? Avalonia.Layout.VerticalAlignment.Top : Avalonia.Layout.VerticalAlignment.Stretch;
+        _tabInsertMarker.Width = vertical ? double.NaN : thickness;
+        _tabInsertMarker.Height = vertical ? thickness : double.NaN;
+        _tabInsertMarker.Margin = vertical
+            ? new Thickness(0, Math.Max(0, position - thickness / 2), 0, 0)
+            : new Thickness(Math.Max(0, position - thickness / 2), 4, 0, 4);
+        _tabInsertMarker.IsVisible = true;
     }
 
     internal void OnAttachTargetClosed(MainWindow closedWindow)
@@ -1202,8 +1246,8 @@ public partial class MainWindow
         // Every Back / Forward control (title-bar buttons, Explorer toolbar) follows the active tab's history.
         UpdateHistoryNavigationState();
         if (TabNavBackButton is null || TabNavForwardButton is null) return;
-        var canBack = ActiveHistory?.CanGoBack == true;
-        var canForward = ActiveHistory?.CanGoForward == true;
+        var canBack = Glide.Core.Navigation.CrossTabHistory.CanGo(ActiveHistory, -1, _settings.ExplorerBackReturnsToImage);
+        var canForward = Glide.Core.Navigation.CrossTabHistory.CanGo(ActiveHistory, 1, _settings.ExplorerBackReturnsToImage);
         _titleNavCanBack = canBack;
         _titleNavCanForward = canForward;
         TabNavBackButton.Classes.Set("inactive", !canBack);

@@ -1,6 +1,6 @@
 # Glide Image Viewer
 
-> **Glide 5.0.4 is available:** download the [installer or portable archive](https://github.com/cobhc95/Glide/releases/latest). Many more formats now open out of the box, HEIC, AVIF, JPEG XL and camera RAW among them, with Explorer thumbnails for every format Glide decodes and Save as writing about 30 formats. 5.0.4 also adds Back up and restore, and Glide is now licensed under GPL-3.0-or-later. See [What changed since 4.7.1](#what-changed-since-471).
+> **Glide 5.0.5 is available:** download the [installer or portable archive](https://github.com/cobhc95/Glide/releases/latest). 5.0.5 is a usability round from tester feedback: Ctrl+E can open a picture's folder in the same tab with Back returning to the picture, finer Explorer scrolling, and an alternative file manager option ([release notes](docs/releases/release-notes-5.0.5.md)). Since 5.0.4, many more formats now open out of the box, HEIC, AVIF, JPEG XL and camera RAW among them, with Explorer thumbnails for every format Glide decodes and Save as writing about 30 formats. 5.0.4 also adds Back up and restore, and Glide is now licensed under GPL-3.0-or-later. See [What changed since 4.7.1](#what-changed-since-471).
 
 ## Fast. Multi-tabbed. Multi-window. Highly customizable.
 
@@ -15,7 +15,7 @@
 Windows x64 only. No .NET runtime is required. Get the files from the [latest release](https://github.com/cobhc95/Glide/releases/latest):
 
 * **`Glide.Setup.exe`**: the installer (requires administrator rights). Installs to Program Files by default, adds Glide to Windows' Open With menu, registers Explorer thumbnails and, with *Integrate with Windows* (on by default), opens Windows' Default apps page for Glide.
-* **`Glide-5.0.4-Portable.zip`**: the portable build. Extract it anywhere and run `Glide.exe`; no installation or administrator rights are needed.
+* **`Glide-5.0.5-Portable.zip`**: the portable build. Extract it anywhere and run `Glide.exe`; no installation or administrator rights are needed.
 * **`Glide.Setup.sha256`**: the installer's checksum. To verify the download, run `certutil -hashfile Glide.Setup.exe SHA256` and compare the result with the value in this file.
 
 Upgrading from 5.0.x or 4.x keeps your settings (older files are migrated once, and your own key bindings and customised title bar are kept). The installer closes Glide before upgrading.
