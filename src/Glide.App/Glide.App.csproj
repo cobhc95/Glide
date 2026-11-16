@@ -17,8 +17,8 @@
     <Description>Glide Image Viewer</Description>
     <Copyright>Copyright (c) cobhc95</Copyright>
     <!-- CET shadow stack: the .NET 10 NativeAOT link marks the exe /CETCOMPAT by default (the .NET 8 one did not).
-         Glide loads third-party native code in-process (Explorer shell extensions, WIC codecs, the FFmpeg pack,
-         codecs\ providers); one DLL that is not CET compatible terminates the process with 0xC0000409 on
+         Glide loads third-party native code in-process (Explorer shell extensions, WIC and Media Foundation
+         codecs, codecs\ providers); one DLL that is not CET compatible terminates the process with 0xC0000409 on
          CET-capable PCs. 5.0.1 keeps the .NET 8 behaviour (off). Turning it on needs a manual interop test pass on
          a CET-capable PC first (docs\NET10-MIGRATION-PLAN.md, decision 1). The native C++ DLLs keep /CETCOMPAT. -->
     <CETCompat>false</CETCompat>

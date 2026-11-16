@@ -680,9 +680,3 @@ public static partial class NativeImageDecoder
     [LibraryImport("Glide.Native", EntryPoint = "GlideFreeImageBuffer")]
     private static partial void GlideFreeImageBuffer(IntPtr data);
 }
-
-public readonly record struct ImageDimensions(int Width, int Height)
-{
-    public bool IsValid => Width > 0 && Height > 0;
-    public int LongestSide => Math.Max(Width, Height);
-}

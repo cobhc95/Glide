@@ -1,6 +1,5 @@
 using System.Buffers.Binary;
 using System.Runtime.InteropServices;
-using System.Security.Cryptography;
 using Avalonia;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform;
@@ -29,7 +28,6 @@ public sealed class SecurityHardening50Tests : IDisposable
     public void Dispose()
     {
         DecodeMemoryGuard.SnapshotOverrideForTests = null;
-        VideoDecoderPack.ResetVerificationForTests();
         try { Directory.Delete(_dir, recursive: true); } catch { }
     }
 
@@ -444,159 +442,6 @@ public sealed class SecurityHardening50Tests : IDisposable
         var register = script.IndexOf("RegisterGlideAssociations;", post, StringComparison.Ordinal);
         Assert.True(install > step && script.IndexOf("LockDownInstallFolder(AppDir, False)", install, StringComparison.Ordinal) < post);
         Assert.True(lockAfterPost > post && lockAfterPost < register, "the folder must be locked down before Glide.exe runs elevated");
-    }
-
-    // ================================================== D. FFmpeg pack verified at load time ========
-
-    private (string Directory, VideoDecoderPack.PinnedLibrary[] Pins) FakePack()
-    {
-        var directory = Path.Combine(_dir, "ffmpeg-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(directory);
-        var pins = new List<VideoDecoderPack.PinnedLibrary>();
-        foreach (var (name, size) in new[] { ("avutil-test.dll", 3000), ("avcodec-test.dll", 5000) })
-        {
-            var bytes = new byte[size];
-            new Random(size).NextBytes(bytes);
-            File.WriteAllBytes(Path.Combine(directory, name), bytes);
-            pins.Add(new(name, size, Convert.ToHexString(SHA256.HashData(bytes))));
-        }
-        return (directory, pins.ToArray());
-    }
-
-    [Fact]
-    public void Downloaded_ffmpeg_libraries_are_hashed_in_every_process_and_held_until_exit()
-    {
-        var (directory, pins) = FakePack();
-        try
-        {
-            Assert.True(VideoDecoderPack.TryVerifyLibraries(directory, pins));
-            Assert.Equal(2, VideoDecoderPack.LastVerificationHashedFiles);
-            // Nothing is written beside the libraries any more (5.0.1: the forgeable stamp is gone).
-            Assert.False(File.Exists(Path.Combine(directory, VideoDecoderPack.LegacyVerifiedStampFileName)));
-            // While verified, nobody can rewrite, delete or swap a library.
-            var library = Path.Combine(directory, pins[0].Name);
-            Assert.ThrowsAny<IOException>(() => new FileStream(library, FileMode.Open, FileAccess.Write, FileShare.ReadWrite).Dispose());
-            Assert.ThrowsAny<Exception>(() => File.Delete(library));
-            Assert.ThrowsAny<Exception>(() => File.Move(library, library + ".old"));
-            Assert.True(File.Exists(library));
-
-            // Within the same process the verified set is reused (cheap)...
-            Assert.True(VideoDecoderPack.TryVerifyLibraries(directory, pins));
-
-            // ...but the next process (simulated) hashes every library again.
-            VideoDecoderPack.ResetVerificationForTests();
-            Assert.True(VideoDecoderPack.TryVerifyLibraries(directory, pins));
-            Assert.Equal(2, VideoDecoderPack.LastVerificationHashedFiles);
-        }
-        finally { VideoDecoderPack.ResetVerificationForTests(); }
-    }
-
-    [Fact]
-    public void A_forged_legacy_stamp_never_lets_a_tampered_library_through_and_is_removed()
-    {
-        var (directory, pins) = FakePack();
-        try
-        {
-            // Tamper with a library (same size), then forge a 5.0.0-style stamp that "vouches" for exactly this
-            // file: name, size, write/creation time and the pinned hash.
-            var target = Path.Combine(directory, pins[1].Name);
-            var bytes = File.ReadAllBytes(target);
-            bytes[100] ^= 0xFF;
-            File.WriteAllBytes(target, bytes);
-            var stamp = Path.Combine(directory, VideoDecoderPack.LegacyVerifiedStampFileName);
-            File.WriteAllLines(stamp, pins.Select(pin =>
-            {
-                var info = new FileInfo(Path.Combine(directory, pin.Name));
-                return string.Join('|', pin.Name, info.Length, info.LastWriteTimeUtc.Ticks, info.CreationTimeUtc.Ticks, pin.Sha256.ToUpperInvariant());
-            }));
-
-            Assert.False(VideoDecoderPack.TryVerifyLibraries(directory, pins));
-            Assert.False(File.Exists(stamp));
-
-            // Valid files still load, and a stamp beside them changes nothing.
-            bytes[100] ^= 0xFF;
-            File.WriteAllBytes(target, bytes);
-            File.WriteAllText(stamp, "anything");
-            Assert.True(VideoDecoderPack.TryVerifyLibraries(directory, pins));
-            Assert.Equal(2, VideoDecoderPack.LastVerificationHashedFiles);
-            Assert.False(File.Exists(stamp));
-        }
-        finally { VideoDecoderPack.ResetVerificationForTests(); }
-    }
-
-    [Fact]
-    public void Hashing_the_real_ffmpeg_pack_stays_well_under_a_second()
-    {
-        // Measured against the real pinned DLLs when they are on this PC (developer PCs, build.cmd).
-        var bin = Path.Combine(RepositoryRoot(), "native", "third_party", "ffmpeg", "bin");
-        if (!VideoDecoderPack.PinnedLibraries.All(pin => File.Exists(Path.Combine(bin, pin.Name)))) return;
-        try
-        {
-            // Warm the file cache once (the first activation after a reboot reads from disk; that is I/O, not hashing).
-            Assert.True(VideoDecoderPack.TryVerifyLibraries(bin, VideoDecoderPack.PinnedLibraries));
-            VideoDecoderPack.ResetVerificationForTests();
-            Assert.True(VideoDecoderPack.TryVerifyLibraries(bin, VideoDecoderPack.PinnedLibraries));
-            Assert.Equal(5, VideoDecoderPack.LastVerificationHashedFiles);
-            Assert.True(VideoDecoderPack.LastVerificationDuration < TimeSpan.FromSeconds(1),
-                $"hashing the pack took {VideoDecoderPack.LastVerificationDuration.TotalMilliseconds:F0} ms");
-        }
-        finally { VideoDecoderPack.ResetVerificationForTests(); }
-    }
-
-    [Fact]
-    public void Modified_missing_or_resized_ffmpeg_libraries_are_refused()
-    {
-        var (directory, pins) = FakePack();
-        try
-        {
-            Assert.True(VideoDecoderPack.TryVerifyLibraries(directory, pins));
-            VideoDecoderPack.ResetVerificationForTests();
-
-            // Same size, different content and a new write time: the hash fails.
-            var target = Path.Combine(directory, pins[1].Name);
-            var bytes = File.ReadAllBytes(target);
-            bytes[100] ^= 0xFF;
-            File.WriteAllBytes(target, bytes);
-            File.SetLastWriteTimeUtc(target, DateTime.UtcNow.AddMinutes(5));
-            Assert.False(VideoDecoderPack.TryVerifyLibraries(directory, pins));
-
-            File.WriteAllBytes(target, bytes.Take(10).ToArray());
-            Assert.False(VideoDecoderPack.TryVerifyLibraries(directory, pins));
-
-            File.Delete(target);
-            Assert.False(VideoDecoderPack.TryVerifyLibraries(directory, pins));
-        }
-        finally { VideoDecoderPack.ResetVerificationForTests(); }
-    }
-
-    [Fact]
-    public void Pinned_ffmpeg_hashes_match_the_published_pack_libraries()
-    {
-        Assert.Equal(5, VideoDecoderPack.PinnedLibraries.Length);
-        Assert.All(VideoDecoderPack.PinnedLibraries, pin => Assert.Equal(64, pin.Sha256.Length));
-        // The pack is built from native\third_party\ffmpeg\bin (tools\package-ffmpeg-pack.ps1); when the
-        // fetched FFmpeg is present (developer PCs, build.cmd) the pinned values must match it.
-        var bin = Path.Combine(RepositoryRoot(), "native", "third_party", "ffmpeg", "bin");
-        if (!Directory.Exists(bin)) return;
-        foreach (var pin in VideoDecoderPack.PinnedLibraries)
-        {
-            var file = Path.Combine(bin, pin.Name);
-            Assert.True(File.Exists(file), pin.Name);
-            Assert.Equal(pin.Bytes, new FileInfo(file).Length);
-            using var stream = File.OpenRead(file);
-            Assert.Equal(pin.Sha256, Convert.ToHexString(SHA256.HashData(stream)));
-        }
-    }
-
-    [Fact]
-    public void Ffmpeg_download_override_must_be_https_or_this_pc()
-    {
-        var pinned = VideoDecoderPack.ResolvePackUrl(null);
-        Assert.StartsWith("https://github.com/", pinned, StringComparison.Ordinal);
-        Assert.Equal(pinned, VideoDecoderPack.ResolvePackUrl("http://example.com/pack.zip"));
-        Assert.Equal(pinned, VideoDecoderPack.ResolvePackUrl("file://server/share/pack.zip"));
-        Assert.Equal("https://example.com/pack.zip", VideoDecoderPack.ResolvePackUrl("https://example.com/pack.zip"));
-        Assert.Equal("http://127.0.0.1:8080/pack.zip", VideoDecoderPack.ResolvePackUrl("http://127.0.0.1:8080/pack.zip"));
     }
 
     // ===================================================== E. per-user single-instance names ========

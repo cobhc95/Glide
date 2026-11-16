@@ -338,6 +338,7 @@ public partial class MainWindow : Window
         ChromeBorder.AddHandler(InputElement.PointerMovedEvent, ChromePointerMovedForDrag, RoutingStrategies.Bubble, true);
         ChromeBorder.AddHandler(InputElement.PointerReleasedEvent, (_, _) => ClearPendingChromeDrag(), RoutingStrategies.Bubble, true);
         ChromeBorder.PointerCaptureLost += (_, _) => _pendingChromeDragPress = null;
+        WireTitleBarInputTrace();
         ViewerStatusSurface.AddHandler(InputElement.PointerPressedEvent, StatusSurfacePointerPressed, RoutingStrategies.Tunnel, true);
         // Right-click on "+" offers the explicit tab kinds, including the Explorer tab.
         NewTabButton.ContextRequested += (_, e) =>

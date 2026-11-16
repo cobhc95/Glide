@@ -21,11 +21,16 @@ ArchitecturesInstallIn64BitMode=x64compatible
 ; (build 14393) and later, the same floor as .NET 8; older Windows gets a clear Setup message instead of a
 ; silent startup failure.
 MinVersion=10.0.14393
+; Shows the GNU GPL v3 on a licence page before installation (path is relative to this script).
+LicenseFile=..\LICENSE
 OutputDir=..\dist-installer
 OutputBaseFilename=Glide Setup
 SetupIconFile=..\src\Glide.App\Assets\Glide.ico
-Compression=lzma
-SolidCompression=no
+Compression=lzma2/ultra64
+SolidCompression=yes
+LZMAUseSeparateProcess=yes
+LZMANumFastBytes=273
+LZMADictionarySize=65536
 WizardStyle=modern
 UsePreviousAppDir=yes
 CloseApplications=yes
@@ -34,6 +39,11 @@ UninstallDisplayIcon={app}\{#MyAppExeName}
 VersionInfoVersion={#MyAppVersion}.0
 VersionInfoProductName={#MyAppName}
 VersionInfoDescription=Glide Image Viewer Setup
+
+[Tasks]
+; Ticked by default (also for silent installs). Unticked, Setup installs the files only: no Open With,
+; no Explorer thumbnails, no default-viewer claims (Settings -> Windows integration can add them later).
+Name: "integrate"; Description: "Integrate with Windows for all supported image formats (Open With, Explorer thumbnails, default viewer for formats no other app opens)"; GroupDescription: "Windows integration:"
 
 [Files]
 Source: "..\dist\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -162,8 +172,8 @@ end;
 // packages read and execute.
 // - Under Program Files the inherited permissions are already that, so nothing changes.
 // - A per-user folder inside this user's own profile (for example %LOCALAPPDATA%\Programs\Glide) is
-//   left as it is: the profile is already private to the user, and Glide may keep its settings and the
-//   optional FFmpeg download beside it (%LOCALAPPDATA%\Glide), which needs the user's write access.
+//   left as it is: the profile is already private to the user, and Glide keeps its settings beside it
+//   (%LOCALAPPDATA%\Glide), which needs the user's write access.
 
 function IsUnderFolder(const Path, Root: String): Boolean;
 var
@@ -241,6 +251,19 @@ begin
     Exec(ExePath, '--register-file-associations', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 end;
 
+procedure OpenDefaultAppsForGlide;
+var
+  ErrorCode: Integer;
+begin
+  { Windows does not let any app make itself the default for types another app owns (the protected
+    UserChoice). Glide already became the default for formats nothing else opens; for the rest, show the
+    user Windows' own Default apps page for Glide, where one "Set default" press does it. Opened as the
+    original (non-elevated) user, since Settings belongs to that session. Falls back to the general page. }
+  if not ShellExecAsOriginalUser('open', 'ms-settings:defaultapps?registeredAppMachine=Glide', '', '',
+    SW_SHOWNORMAL, ewNoWait, ErrorCode) then
+    ShellExecAsOriginalUser('open', 'ms-settings:defaultapps', '', '', SW_SHOWNORMAL, ewNoWait, ErrorCode);
+end;
+
 procedure UnregisterGlideAssociations;
 var
   ResultCode: Integer;
@@ -290,8 +313,15 @@ begin
     { Again with every file, before Glide.exe runs elevated from this folder. }
     if InstallFolderNeedsLockdown(AppDir) then
       LockDownInstallFolder(AppDir, True);
-    RegisterGlideAssociations;
-    RegisterGlideThumbnails;
+    if WizardIsTaskSelected('integrate') then
+    begin
+      { --register-file-associations: Open With for every recognised format, plus Glide as the default
+        viewer for formats no other app handles (recorded, so uninstall removes exactly those). }
+      RegisterGlideAssociations;
+      RegisterGlideThumbnails;
+      if not WizardSilent then
+        OpenDefaultAppsForGlide;
+    end;
   end;
 end;
 

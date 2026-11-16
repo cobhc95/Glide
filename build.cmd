@@ -124,6 +124,41 @@ if errorlevel 1 (
   goto :fail
 )
 
+rem Bundled optional codec provider (AVIF/HEIC/JXL/JPEG 2000). Built once from pinned, verified
+rem upstream sources by tools\build-codecs.ps1 and cached under LOCALAPPDATA\Glide-build-cache;
+rem source handover ZIPs carry no DLLs, so a fresh checkout builds it here.
+if not exist "codecs\glidecodecs.dll" (
+  echo Building bundled codec provider ^(first run fetches pinned sources; cached afterwards^)...
+  powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File "tools\build-codecs.ps1"
+  if errorlevel 1 (
+    echo ERROR: Could not build the bundled codec provider ^(tools\build-codecs.ps1^).
+    set "GLIDE_BUILD_RC=1"
+    goto :fail
+  )
+)
+
+rem Explorer thumbnail codec library (camera RAW, EXR, DICOM/NIfTI/FITS/PFM, ORA/KRA/PDN/XCF, GPU textures,
+rem ZIP PSD): Glide's managed decoders as a NativeAOT DLL, src\Glide.ThumbnailCodecs. Rebuilt every run from
+rem the current sources and published to codecs\glidemanaged.dll BEFORE the thumbnail provider is built,
+rem because the provider pins the SHA-256 of both codec libraries at build time. It has no .glidecodec.json
+rem manifest, so codecs.index.json never lists it and the viewer's decode routing is unchanged.
+echo Building Explorer thumbnail codec library ^(NativeAOT^)...
+set "PATH=%PATH%;%ProgramFiles(x86)%\Microsoft Visual Studio\Installer"
+if exist "artifacts\glidemanaged-publish" rmdir /s /q "artifacts\glidemanaged-publish"
+dotnet publish src\Glide.ThumbnailCodecs\Glide.ThumbnailCodecs.csproj -c Release -r win-x64 -o "artifacts\glidemanaged-publish" -nologo
+if errorlevel 1 (
+  echo ERROR: Could not build the Explorer thumbnail codec library ^(src\Glide.ThumbnailCodecs^).
+  set "GLIDE_BUILD_RC=1"
+  goto :fail
+)
+if not exist codecs mkdir codecs
+copy /y "artifacts\glidemanaged-publish\glidemanaged.dll" "codecs\glidemanaged.dll" >nul
+if errorlevel 1 (
+  echo ERROR: Could not stage codecs\glidemanaged.dll.
+  set "GLIDE_BUILD_RC=1"
+  goto :fail
+)
+
 if exist codecs (
   echo Generating lazy codec routing index...
   powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File "tools\generate-codec-index.ps1" -CodecDirectory "codecs"
@@ -181,14 +216,6 @@ if exist native\Glide.Native\CMakeLists.txt (
         echo [1/8] Native CMake cache targets a different generator/platform; resetting it...
         rmdir /s /q "native\Glide.Native\build"
       )
-    )
-
-    rem The fallback video decoder links against a pinned, hash-verified LGPL FFmpeg build.
-    powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File "tools\fetch-ffmpeg.ps1"
-    if errorlevel 1 (
-      echo ERROR: Could not fetch the bundled FFmpeg build ^(tools\fetch-ffmpeg.ps1^).
-      set "GLIDE_BUILD_RC=1"
-      goto :fail
     )
 
     echo [1/8] Configuring/refreshing native bridge for x64...
@@ -313,6 +340,28 @@ if errorlevel 1 (
 rem Post-build cleanup: fast mode keeps dist\, so drop any symbol files left by earlier builds.
 del /q "dist\*.pdb" >nul 2>nul
 
+rem Licence files ship in dist\ so the portable ZIP and the installer (both built from dist\) carry them.
+copy /y "LICENSE" "dist\LICENSE" >nul
+if errorlevel 1 (
+  echo ERROR: Could not stage LICENSE into dist.
+  set "GLIDE_BUILD_RC=1"
+  goto :fail
+)
+copy /y "THIRD-PARTY-NOTICES.md" "dist\THIRD-PARTY-NOTICES.md" >nul
+if errorlevel 1 (
+  echo ERROR: Could not stage THIRD-PARTY-NOTICES.md into dist.
+  set "GLIDE_BUILD_RC=1"
+  goto :fail
+)
+if exist "licenses" (
+  xcopy /e /i /y /q "licenses" "dist\licenses" >nul
+  if errorlevel 1 (
+    echo ERROR: Could not stage licenses into dist.
+    set "GLIDE_BUILD_RC=1"
+    goto :fail
+  )
+)
+
 if not defined GLIDE_NATIVE_DLL (
   if exist "native\Glide.Native\build\Release\Glide.Native.dll" set "GLIDE_NATIVE_DLL=%CD%\native\Glide.Native\build\Release\Glide.Native.dll"
   if not defined GLIDE_NATIVE_DLL if exist "native\Glide.Native\build\Glide.Native.dll" set "GLIDE_NATIVE_DLL=%CD%\native\Glide.Native\build\Glide.Native.dll"
@@ -330,8 +379,27 @@ if not exist "dist\Glide.Native.dll" (
   goto :fail
 )
 
-rem FFmpeg is not shipped: Glide downloads it only if Windows can't play a video (see tools\package-ffmpeg-pack.ps1).
-if exist "dist\ffmpeg" rmdir /s /q "dist\ffmpeg"
+rem Optional decoder providers (DLL + manifest + license NOTICE + generated index) ship in dist\codecs,
+rem before the portable ZIP is made so the ZIP and the installer carry the same payload. No runtime download.
+if exist "dist\codecs" rmdir /s /q "dist\codecs"
+if exist "codecs\codecs.index.json" (
+  mkdir "dist\codecs"
+  copy /y "codecs\codecs.index.json" "dist\codecs\" >nul
+  for %%F in ("codecs\*.glidecodec.json") do (
+    copy /y "%%~fF" "dist\codecs\" >nul
+    rem name.glidecodec.json pairs with name.dll and name.NOTICE.txt
+    for %%G in ("%%~nF") do (
+      if exist "codecs\%%~nG.dll" copy /y "codecs\%%~nG.dll" "dist\codecs\" >nul
+      if exist "codecs\%%~nG.NOTICE.txt" copy /y "codecs\%%~nG.NOTICE.txt" "dist\codecs\" >nul
+    )
+  )
+)
+rem The thumbnail codec library has no manifest (the viewer does not route through it); the provider
+rem loads it from <app>\codecs by its pinned hash, so it must ship next to the provider's other codecs.
+if exist "codecs\glidemanaged.dll" (
+  if not exist "dist\codecs" mkdir "dist\codecs"
+  copy /y "codecs\glidemanaged.dll" "dist\codecs\" >nul
+)
 
 rem Explorer thumbnail provider ships alongside the native bridge. It is optional at runtime: the app
 rem simply reports the provider as unavailable when the DLL is absent.
@@ -356,11 +424,23 @@ if "!GLIDE_SIGNING!"=="1" (
   )
 )
 
-rem Release deliverables: a clean portable archive and a directly testable EXE.
+rem Release deliverable: a clean portable archive. (The former root Glide-<ver>.exe copy is gone: it was a
+rem 37 MB duplicate of dist\Glide.exe that could not run without the DLLs next to it.)
+rem 7-Zip's deflate (-mx9 -mpass=15) gives a standard ZIP ~0.7 MB smaller than Compress-Archive; fall back
+rem to Compress-Archive when 7-Zip is not installed.
 if exist "Glide-%GLIDE_VERSION%-Portable.zip" del /q "Glide-%GLIDE_VERSION%-Portable.zip"
 if exist "Glide-%GLIDE_VERSION%.exe" del /q "Glide-%GLIDE_VERSION%.exe"
-copy /y "dist\Glide.exe" "Glide-%GLIDE_VERSION%.exe" >nul
-powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "Compress-Archive -Path 'dist\*' -DestinationPath 'Glide-%GLIDE_VERSION%-Portable.zip' -CompressionLevel Optimal"
+set "GLIDE_7Z="
+if exist "%ProgramFiles%\7-Zip\7z.exe" set "GLIDE_7Z=%ProgramFiles%\7-Zip\7z.exe"
+if defined GLIDE_7Z (
+  pushd dist
+  "!GLIDE_7Z!" a -tzip -mx9 -mfb=258 -mpass=15 -bd -bso0 -bsp0 "..\Glide-%GLIDE_VERSION%-Portable.zip" *
+  set "GLIDE_ZIP_RC=!errorlevel!"
+  popd
+  if not "!GLIDE_ZIP_RC!"=="0" cmd /c exit /b !GLIDE_ZIP_RC!
+) else (
+  powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "Compress-Archive -Path 'dist\*' -DestinationPath 'Glide-%GLIDE_VERSION%-Portable.zip' -CompressionLevel Optimal"
+)
 if errorlevel 1 (
   echo ERROR: Portable ZIP creation failed.
   set "GLIDE_BUILD_RC=!errorlevel!"
@@ -382,8 +462,6 @@ if "%GLIDE_FAST%"=="1" (
   if errorlevel 1 goto :fail
 )
 
-rem Optional decoder-provider payloads are copied when present; no runtime download.
-if exist codecs xcopy /e /i /y /q codecs dist\codecs >nul
 
 if /I "%GLIDE_SKIP_INSTALLER%"=="1" (
   call :progress 94 "Installer package skipped"
@@ -411,7 +489,6 @@ echo.
 echo ============================================================
 echo   BUILD COMPLETE - portable: dist\
 echo   PORTABLE ZIP: Glide-%GLIDE_VERSION%-Portable.zip
-echo   EXE:          Glide-%GLIDE_VERSION%.exe
 if /I "%GLIDE_SKIP_INSTALLER%"=="1" (
   echo   INSTALLER: skipped by caller
 ) else (

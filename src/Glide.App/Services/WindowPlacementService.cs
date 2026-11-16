@@ -88,6 +88,29 @@ public static class WindowPlacementService
         SettingsStore.SaveWindowPlacements(snapshot);
     }
 
+    /// <summary>
+    /// Back up and restore: replaces the remembered placement of every window named in <paramref name="placements"/> (already
+    /// validated against this PC's monitors by the importer) and writes the store. Windows not in the backup keep theirs.
+    /// </summary>
+    public static void Import(IReadOnlyDictionary<string, WindowPlacementState> placements)
+    {
+        if (placements is null || placements.Count == 0) return;
+        Dictionary<string, WindowPlacementState> snapshot;
+        lock (Gate)
+        {
+            var store = EnsureLoaded();
+            var now = DateTime.UtcNow.Ticks;
+            foreach (var (key, value) in placements)
+                if (!string.IsNullOrWhiteSpace(key) && value is not null) store[key] = value with { LastUsedUtcTicks = now };
+            if (store.Count > SettingsStore.MaxWindowPlacements)
+                foreach (var stale in store.OrderBy(kv => kv.Value.LastUsedUtcTicks).Take(store.Count - SettingsStore.MaxWindowPlacements).Select(kv => kv.Key).ToArray())
+                    store.Remove(stale);
+            snapshot = GlideSettingsState.ClonePlacements(store);
+        }
+        if (PersistOverrideForTests is { } sink) { sink(snapshot); return; }
+        SettingsStore.SaveWindowPlacements(snapshot);
+    }
+
     /// <summary>Copies the live store into <paramref name="state"/> (called right before the main window saves settings).</summary>
     public static void ApplyTo(GlideSettingsState state)
     {

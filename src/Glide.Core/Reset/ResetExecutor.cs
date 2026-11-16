@@ -89,6 +89,7 @@ public static class ResetExecutor
                 DirectoryTarget d => DeleteDirectory(d, d.Path, fs, options),
                 DirectoriesMatchingTarget m => DeleteMatches(m, isDirectory: true, env, fs, options),
                 JsonPropertiesTarget j => EditJson(j, fs, options),
+                SettingsFileResetTarget r => ResetSettingsFile(r, fs, options),
                 RegistryTreeTarget r => registry.DeleteKeyTree(r.SubKey)
                     ? new ResetTargetResult(r, ResetTargetOutcome.Removed) : new ResetTargetResult(r, ResetTargetOutcome.NothingToRemove),
                 RegistryValueTarget v => DeleteRegistryValue(v, registry),
@@ -182,6 +183,27 @@ public static class ResetExecutor
         }
         if (!changed) return new ResetTargetResult(target, ResetTargetOutcome.NothingToRemove);
 
+        var text = Serialize(root);
+        var error = Retry(() => fs.WriteAllTextAtomic(target.Path, text), options);
+        return error is null
+            ? new ResetTargetResult(target, ResetTargetOutcome.Removed)
+            : new ResetTargetResult(target, ResetTargetOutcome.Failed, error);
+    }
+
+    private static ResetTargetResult ResetSettingsFile(SettingsFileResetTarget target, IResetFileSystem fs, ResetExecutorOptions options)
+    {
+        if (!fs.FileExists(target.Path)) return new ResetTargetResult(target, ResetTargetOutcome.NothingToRemove);
+        JsonObject root;
+        try
+        {
+            root = JsonNode.Parse(fs.ReadAllText(target.Path)) as JsonObject ?? throw new InvalidDataException("not a JSON object");
+        }
+        catch (Exception ex) when (ex is JsonException or InvalidDataException or ArgumentException)
+        {
+            // Unreadable: nothing in it can be kept, and Glide starts with defaults without it.
+            return DeleteFile(target, target.Path, fs, options);
+        }
+        if (!AllSettingsReset.Apply(root, target.DefaultSettingsJson)) return new ResetTargetResult(target, ResetTargetOutcome.NothingToRemove);
         var text = Serialize(root);
         var error = Retry(() => fs.WriteAllTextAtomic(target.Path, text), options);
         return error is null

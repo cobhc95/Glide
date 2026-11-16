@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Microsoft.Win32;
 using Glide.Core;
@@ -7,8 +8,15 @@ namespace Glide.App.Platform;
 /// <summary>
 /// Windows Open-With/Capabilities registration for every extension Glide recognises. Glide adds
 /// itself automatically — per-user on first launch and machine-wide from the installer — so the user
-/// never has to configure it from Options. This deliberately never writes a UserChoice default
+/// never has to configure it from Options. This deliberately never writes (or forges) a UserChoice default
 /// association: Windows remains the authority for the user's default-app selection.
+///
+/// Default viewer, the legitimate way: for every format Glide can open that has no handler at all (no
+/// UserChoice, no other app's default ProgID or OpenWithProgids entry), registration sets Glide's ProgID as the
+/// extension's default value in the hive being registered, so otherwise unowned types open in Glide. Another
+/// app's default is never overwritten, every claim is recorded under Software\Glide\ClaimedDefaults, and
+/// unregistering removes exactly those (only while the value is still Glide's). For everything else the user
+/// picks Glide on Windows' own Default apps page (<see cref="OpenDefaultAppsPage"/>).
 /// </summary>
 internal static class WindowsFileAssociationRegistration
 {
@@ -19,6 +27,8 @@ internal static class WindowsFileAssociationRegistration
     private const string StateKeyPath = @"Software\Glide";
     private const string RegisteredVersionValue = "OpenWithRegistrationVersion";
     private const string OptOutValue = "OpenWithOptOut";
+    private const string ClaimedDefaultsKeyPath = @"Software\Glide\ClaimedDefaults";
+    private const string UserChoiceRoot = @"Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts";
 
     private const uint ShcneAssocChanged = 0x08000000;
     private const uint ShcnfIdList = 0x0000;
@@ -41,6 +51,10 @@ internal static class WindowsFileAssociationRegistration
 
             // A machine-wide install already puts Glide in Open With for every user of this PC.
             var machineWideRegistered = IsRegisteredInHive(Registry.LocalMachine, executable);
+
+            // A reset that deleted Glide's per-user ProgID but not the defaults it claimed would leave those
+            // extensions pointing at nothing; release them first (no-op when nothing was claimed).
+            ReleaseOrphanedClaims(Registry.CurrentUser);
 
             using var state = Registry.CurrentUser.CreateSubKey(StateKeyPath, writable: true);
             if (state is null) return;
@@ -158,6 +172,9 @@ internal static class WindowsFileAssociationRegistration
             using (var registered = hive.CreateSubKey(@"Software\RegisteredApplications", writable: true))
                 registered?.SetValue(ApplicationName, @"Software\Glide\Capabilities", RegistryValueKind.String);
 
+            // Unowned formats open in Glide by default (never another app's; see the class summary).
+            var claimed = ClaimUnownedDefaults(hive, perUser ? Registry.LocalMachine : Registry.CurrentUser, executable);
+
             if (perUser)
             {
                 // Record the version so startup does not rewrite ~600 values every launch, and clear
@@ -168,7 +185,8 @@ internal static class WindowsFileAssociationRegistration
             }
 
             NotifyAssociationChanged();
-            message = $"Glide is available in Windows Open With for {ImageFormatRegistry.Extensions.Count} recognised formats.";
+            message = $"Glide is available in Windows Open With for {ImageFormatRegistry.Extensions.Count} recognised formats" +
+                      (claimed > 0 ? $" and is the default viewer for {claimed} formats no other app handles." : ".");
             return true;
         }
         catch (Exception ex)
@@ -188,6 +206,8 @@ internal static class WindowsFileAssociationRegistration
 
         try
         {
+            // First, while the record of exactly which defaults are Glide's still exists.
+            ReleaseClaimedDefaults(hive);
             hive.DeleteSubKeyTree($@"Software\Classes\Applications\{ApplicationExe}", throwOnMissingSubKey: false);
             hive.DeleteSubKeyTree($@"Software\Classes\{ProgId}", throwOnMissingSubKey: false);
             hive.DeleteSubKeyTree(@"Software\Glide\Capabilities", throwOnMissingSubKey: false);
@@ -219,6 +239,201 @@ internal static class WindowsFileAssociationRegistration
             message = $"Removing Open With registration failed: {ex.Message}";
             return false;
         }
+    }
+
+    // ------------------------------------------------------------------ default viewer -----------
+
+    /// <summary>Everything the claim policy needs to know about one extension, read from the registry.</summary>
+    /// <param name="Extension">The extension (".heic").</param>
+    /// <param name="UserChoiceProgId">The current user's protected UserChoice ProgID, if any.</param>
+    /// <param name="TargetHiveDefault">Software\Classes\.ext default value in the hive being registered.</param>
+    /// <param name="OtherHiveDefault">The same value in the other hive (HKLM for per-user, HKCU for machine-wide).</param>
+    /// <param name="OtherHiveDefaultResolves">Whether <paramref name="OtherHiveDefault"/> names a registered, openable ProgID.</param>
+    /// <param name="OpenWithProgIds">OpenWithProgids entries of both hives.</param>
+    internal sealed record DefaultClaimFacts(
+        string Extension,
+        string? UserChoiceProgId,
+        string? TargetHiveDefault,
+        string? OtherHiveDefault,
+        bool OtherHiveDefaultResolves,
+        IReadOnlyCollection<string> OpenWithProgIds);
+
+    /// <summary>
+    /// Pure claim policy. Glide becomes an extension's default only when nothing else owns it: no UserChoice
+    /// (other than Glide), no other app in OpenWithProgids, no other value in the hive being written (even a
+    /// dangling one is never overwritten), and the other hive's default (if any) is Glide's or does not
+    /// resolve to a working handler.
+    /// </summary>
+    internal static bool ShouldClaimDefault(DefaultClaimFacts facts)
+    {
+        static bool IsNoneOrGlide(string? progId) => string.IsNullOrWhiteSpace(progId) || progId.Equals(ProgId, StringComparison.OrdinalIgnoreCase);
+        if (!IsNoneOrGlide(facts.UserChoiceProgId)) return false;
+        if (facts.OpenWithProgIds.Any(progId => !IsNoneOrGlide(progId))) return false;
+        if (!IsNoneOrGlide(facts.TargetHiveDefault)) return false;
+        if (!IsNoneOrGlide(facts.OtherHiveDefault) && facts.OtherHiveDefaultResolves) return false;
+        return true;
+    }
+
+    /// <summary>A recorded claim is released only while the extension's default is still Glide's ProgID.</summary>
+    internal static bool ShouldReleaseClaim(string? currentDefault) =>
+        currentDefault is not null && currentDefault.Equals(ProgId, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Formats Glide may become the default viewer for: those it can actually open on a clean PC (core and
+    /// built-in decoders, the in-box WIC formats and the bundled codec library's suffixes). Merely recognised
+    /// suffixes (.pdf, .dwg, .cdr, ...) and compound suffixes Windows cannot associate (.nii.gz) are never
+    /// claimed: double-clicking them must not land in an error page.
+    /// </summary>
+    internal static IReadOnlyList<string> DefaultClaimCandidates(IEnumerable<string> codecLibraryExtensions)
+    {
+        var codec = new HashSet<string>(codecLibraryExtensions, StringComparer.OrdinalIgnoreCase);
+        return ImageFormatRegistry.Extensions
+            .Where(extension => extension.LastIndexOf('.') == 0)
+            .Where(extension =>
+            {
+                var capability = CodecCapabilityRegistry.Describe(extension);
+                return capability.DecodeEnabled || capability.Tier == CodecTier.NativeOs || codec.Contains(extension);
+            })
+            .ToArray();
+    }
+
+    /// <summary>The Settings "Default apps" page for Glide (per-user or machine-wide registration).</summary>
+    internal static string DefaultAppsUri(bool perUser) =>
+        $"ms-settings:defaultapps?registeredApp{(perUser ? "User" : "Machine")}={Uri.EscapeDataString(ApplicationName)}";
+
+    /// <summary>
+    /// Opens Windows' Default apps page on Glide so the user can press "Set default" (the only supported way to
+    /// make Glide the default for formats another app already owns). Falls back to the general page.
+    /// </summary>
+    public static bool OpenDefaultAppsPage(out string message)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            message = "Default apps is only available on Windows.";
+            return false;
+        }
+        var perUser = false;
+        try
+        {
+            using var registered = Registry.CurrentUser.OpenSubKey(@"Software\RegisteredApplications");
+            perUser = registered?.GetValue(ApplicationName) is string;
+        }
+        catch { /* fall back to the machine-wide registration name */ }
+
+        foreach (var uri in new[] { DefaultAppsUri(perUser), "ms-settings:defaultapps" })
+        {
+            try
+            {
+                using var process = Process.Start(new ProcessStartInfo(uri) { UseShellExecute = true });
+                message = "Windows Default apps opened: choose \"Set default\" to open every supported format with Glide.";
+                return true;
+            }
+            catch { /* try the general page */ }
+        }
+        message = "Windows Default apps could not be opened.";
+        return false;
+    }
+
+    private static int ClaimUnownedDefaults(RegistryKey hive, RegistryKey otherHive, string executable)
+    {
+        var claimed = 0;
+        var codecDirectory = Path.Combine(Path.GetDirectoryName(executable) ?? AppContext.BaseDirectory, BundledCodecLibraries.FolderName);
+        using var record = hive.CreateSubKey(ClaimedDefaultsKeyPath, writable: true);
+        foreach (var extension in DefaultClaimCandidates(BundledCodecLibraries.AvailableExtensions(codecDirectory)))
+        {
+            try
+            {
+                if (!ShouldClaimDefault(ReadClaimFacts(hive, otherHive, extension))) continue;
+                using var key = hive.CreateSubKey($@"Software\Classes\{extension}", writable: true);
+                if (key is null) continue;
+                key.SetValue(string.Empty, ProgId, RegistryValueKind.String);
+                record?.SetValue(extension, ProgId, RegistryValueKind.String);
+                claimed++;
+            }
+            catch { /* one unreadable/locked extension must not stop the rest */ }
+        }
+        return claimed;
+    }
+
+    private static void ReleaseClaimedDefaults(RegistryKey hive)
+    {
+        try
+        {
+            using (var record = hive.OpenSubKey(ClaimedDefaultsKeyPath))
+            {
+                if (record is null) return;
+                foreach (var extension in record.GetValueNames())
+                {
+                    if (string.IsNullOrWhiteSpace(extension) || !extension.StartsWith('.')) continue;
+                    try
+                    {
+                        using var key = hive.OpenSubKey($@"Software\Classes\{extension}", writable: true);
+                        if (key is not null && ShouldReleaseClaim(key.GetValue(string.Empty) as string))
+                            key.DeleteValue(string.Empty, throwOnMissingValue: false);
+                    }
+                    catch { /* leave this one; continue with the rest */ }
+                }
+            }
+            hive.DeleteSubKeyTree(ClaimedDefaultsKeyPath, throwOnMissingSubKey: false);
+        }
+        catch { /* best effort: a leftover default only points at Glide */ }
+    }
+
+    private static void ReleaseOrphanedClaims(RegistryKey hive)
+    {
+        try
+        {
+            using var record = hive.OpenSubKey(ClaimedDefaultsKeyPath);
+            if (record is null) return;
+            using var progId = hive.OpenSubKey($@"Software\Classes\{ProgId}");
+            if (progId is not null) return;
+        }
+        catch { return; }
+        ReleaseClaimedDefaults(hive);
+    }
+
+    private static DefaultClaimFacts ReadClaimFacts(RegistryKey hive, RegistryKey otherHive, string extension)
+    {
+        string? userChoice = null;
+        foreach (var name in new[] { "UserChoice", "UserChoiceLatest" })
+        {
+            using var key = Registry.CurrentUser.OpenSubKey($@"{UserChoiceRoot}\{extension}\{name}");
+            if (key?.GetValue("ProgId") is string value && !string.IsNullOrWhiteSpace(value)) { userChoice = value; break; }
+        }
+
+        static string? DefaultOf(RegistryKey root, string extension)
+        {
+            using var key = root.OpenSubKey($@"Software\Classes\{extension}");
+            return key?.GetValue(string.Empty) as string;
+        }
+
+        var openWith = new List<string>();
+        foreach (var root in new[] { hive, otherHive })
+        {
+            using var key = root.OpenSubKey($@"Software\Classes\{extension}\OpenWithProgids");
+            if (key is not null) openWith.AddRange(key.GetValueNames().Where(name => !string.IsNullOrWhiteSpace(name)));
+        }
+
+        var otherDefault = DefaultOf(otherHive, extension);
+        return new DefaultClaimFacts(extension, userChoice, DefaultOf(hive, extension), otherDefault,
+            !string.IsNullOrWhiteSpace(otherDefault) && ProgIdResolves(otherDefault), openWith);
+    }
+
+    /// <summary>True when a ProgID is registered with something Windows can open it with.</summary>
+    private static bool ProgIdResolves(string progId)
+    {
+        // Packaged (Store) apps register AppX* ProgIDs through their package; treat them as working.
+        if (progId.StartsWith("AppX", StringComparison.OrdinalIgnoreCase)) return true;
+        foreach (var root in new[] { Registry.CurrentUser, Registry.LocalMachine })
+        {
+            try
+            {
+                using var key = root.OpenSubKey($@"Software\Classes\{progId}\shell");
+                if (key is not null) return true;
+            }
+            catch { /* unreadable: try the other hive */ }
+        }
+        return false;
     }
 
     private static bool IsRegisteredInHive(RegistryKey hive, string executable)

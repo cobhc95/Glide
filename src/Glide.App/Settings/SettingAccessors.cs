@@ -45,6 +45,7 @@ internal static class SettingAccessors
         ["tabs.enabled"] = Bool(s => s.TabsEnabled, (s, v) => s.TabsEnabled = v),
         ["fullscreen.statusAlways"] = Bool(s => s.FullscreenStatusAlwaysOn, (s, v) => s.FullscreenStatusAlwaysOn = v),
         ["fullscreen.keepTabBarOpen"] = Bool(s => s.FullscreenKeepTabBarOpen, (s, v) => s.FullscreenKeepTabBarOpen = v),
+        ["fullscreen.keepTitleBarForExplorer"] = Bool(s => s.FullscreenKeepTitleBarForExplorer, (s, v) => s.FullscreenKeepTitleBarForExplorer = v),
         ["windows.alwaysOnTop"] = Bool(s => s.AlwaysOnTop, (s, v) => s.AlwaysOnTop = v),
         ["window.centerOnDisplay"] = Bool(s => s.AutoCenterWindowOnRestore, (s, v) => s.AutoCenterWindowOnRestore = v),
         ["view.animateGifs"] = Bool(s => s.AnimateGifs, (s, v) => s.AnimateGifs = v),

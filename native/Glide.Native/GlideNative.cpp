@@ -697,81 +697,498 @@ extern "C" __declspec(dllexport) void __cdecl GlideFreeImageBuffer(void* data)
     if (data) CoTaskMemFree(data);
 }
 
-// Encodes an in-memory premultiplied BGRA crop through the same Windows Imaging
-// Component boundary used by the decoder.  Keeping this in the small native bridge
-// avoids pulling a second managed image stack into the application and preserves
-// real PNG/JPEG/BMP output on Windows.
-// format: 0 PNG, 1 JPEG, 2 BMP, 3 TIFF. quality (JPEG only) is 0..1; <=0 means 0.95.
+#include <cstdio>
+#include <vector>
+
+// ---------------------------------------------------------------------------------------------------
+// Encoding (Save / Save as / Save selection) through the Windows Imaging Component.
+//
+// Input is always the viewer's premultiplied BGRA (rotation/flip already baked in). Format ids are a
+// stable C ABI shared with NativeImageEncoder.WicFormat:
+//   0 PNG  1 JPEG  2 BMP  3 TIFF   (built into every Windows; the original 4.x set)
+//   4 GIF (single frame, 8-bit palette)  5 JPEG XR (.jxr/.wdp)  (built into every Windows)
+//   6 HEIF/HEIC (HEVC)  7 AVIF (HEIF container, AV1)  8 JPEG XL   (only when a Store codec registers an
+//     encoder; GlideProbeEncoderW tells the managed side whether this PC can write them)
+// quality is 0..1 for the lossy encoders (JPEG, JPEG XR, HEIF, AVIF, JPEG XL); <=0 means 0.95.
+// ---------------------------------------------------------------------------------------------------
+#include <wincodecsdk.h>
+#include <wrl/client.h>
+using Microsoft::WRL::ComPtr;
+
+namespace
+{
+    // Declared locally so the bridge builds against older Windows SDKs too (same values as wincodec.h).
+    const GUID GlideContainerHeif = { 0xe1e62521, 0x6787, 0x405b, { 0xa3, 0x39, 0x50, 0x07, 0x15, 0xb5, 0x76, 0x3f } };
+    const GUID GlideContainerJpegXL = { 0xfec14e3f, 0x427a, 0x4736, { 0xaa, 0xe6, 0x27, 0xed, 0x84, 0xf6, 0x93, 0x22 } };
+
+    enum : std::uint32_t
+    {
+        EncodePng = 0, EncodeJpeg = 1, EncodeBmp = 2, EncodeTiff = 3, EncodeGif = 4, EncodeJxr = 5,
+        EncodeHeif = 6, EncodeAvif = 7, EncodeJxl = 8, EncodeLast = 8
+    };
+
+    // GlideEncodeImage2W flags.
+    enum : std::uint32_t
+    {
+        EncodeCopyIcc = 1u << 0,      // copy the source's embedded ICC profile (colour context)
+        EncodeCopyExifXmp = 1u << 1,  // copy EXIF (IFD0 descriptive tags + Exif/GPS IFDs) and XMP; Orientation := 1
+        EncodeLossless = 1u << 2      // JPEG XR: lossless
+    };
+
+    // WICHeifCompressionOption values (wincodec.h, Windows 11 SDK).
+    constexpr BYTE HeifCompressionHevc = 2;
+    constexpr BYTE HeifCompressionAv1 = 3;
+
+    const GUID* EncodeContainer(std::uint32_t format)
+    {
+        switch (format)
+        {
+        case EncodePng: return &GUID_ContainerFormatPng;
+        case EncodeJpeg: return &GUID_ContainerFormatJpeg;
+        case EncodeBmp: return &GUID_ContainerFormatBmp;
+        case EncodeTiff: return &GUID_ContainerFormatTiff;
+        case EncodeGif: return &GUID_ContainerFormatGif;
+        case EncodeJxr: return &GUID_ContainerFormatWmp;
+        case EncodeHeif:
+        case EncodeAvif: return &GlideContainerHeif;
+        case EncodeJxl: return &GlideContainerJpegXL;
+        default: return nullptr;
+        }
+    }
+
+    struct ComScope
+    {
+        bool uninit = false;
+        bool ok = false;
+        ComScope()
+        {
+            const HRESULT hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+            uninit = SUCCEEDED(hr);
+            ok = SUCCEEDED(hr) || hr == RPC_E_CHANGED_MODE;
+        }
+        ~ComScope() { if (uninit) CoUninitialize(); }
+        ComScope(const ComScope&) = delete;
+        ComScope& operator=(const ComScope&) = delete;
+    };
+
+    // Writes one encoder option; an encoder that does not know the option keeps its default.
+    HRESULT WriteOption(IPropertyBag2* bag, const wchar_t* name, const VARIANT& value)
+    {
+        if (!bag) return E_POINTER;
+        PROPBAG2 option{};
+        option.pstrName = const_cast<LPOLESTR>(name);
+        VARIANT copy = value;
+        return bag->Write(1, &option, &copy);
+    }
+
+    HRESULT WriteFloatOption(IPropertyBag2* bag, const wchar_t* name, float value)
+    {
+        VARIANT v; VariantInit(&v); v.vt = VT_R4; v.fltVal = value;
+        return WriteOption(bag, name, v);
+    }
+
+    void CopyBlock(IWICComponentFactory* components, IWICMetadataQueryReader* reader, const wchar_t* from,
+                   IWICMetadataQueryWriter* writer, const wchar_t* to)
+    {
+        PROPVARIANT value; PropVariantInit(&value);
+        if (SUCCEEDED(reader->GetMetadataByName(from, &value)) && value.vt == VT_UNKNOWN && value.punkVal)
+        {
+            ComPtr<IWICMetadataQueryReader> blockReader;
+            ComPtr<IWICMetadataQueryWriter> blockWriter;
+            if (SUCCEEDED(value.punkVal->QueryInterface(IID_PPV_ARGS(&blockReader))) &&
+                SUCCEEDED(components->CreateQueryWriterFromReader(blockReader.Get(), &GUID_VendorMicrosoft, &blockWriter)))
+            {
+                PROPVARIANT block; PropVariantInit(&block);
+                block.vt = VT_UNKNOWN;
+                block.punkVal = blockWriter.Get(); // borrowed: SetMetadataByName takes its own reference
+                writer->SetMetadataByName(to, &block);
+            }
+        }
+        PropVariantClear(&value);
+    }
+
+    void CopyValue(IWICMetadataQueryReader* reader, const wchar_t* from, IWICMetadataQueryWriter* writer, const wchar_t* to)
+    {
+        PROPVARIANT value; PropVariantInit(&value);
+        if (SUCCEEDED(reader->GetMetadataByName(from, &value)) && value.vt != VT_EMPTY && value.vt != VT_UNKNOWN)
+            writer->SetMetadataByName(to, &value);
+        PropVariantClear(&value);
+    }
+
+    bool HasBlock(IWICMetadataQueryReader* reader, const wchar_t* name)
+    {
+        PROPVARIANT value; PropVariantInit(&value);
+        const bool found = SUCCEEDED(reader->GetMetadataByName(name, &value)) && value.vt == VT_UNKNOWN;
+        PropVariantClear(&value);
+        return found;
+    }
+
+    void SetUInt(IWICMetadataQueryWriter* writer, const wchar_t* name, VARTYPE type, std::uint32_t number)
+    {
+        PROPVARIANT value; PropVariantInit(&value);
+        value.vt = type;
+        if (type == VT_UI2) value.uiVal = static_cast<USHORT>(number); else value.ulVal = number;
+        writer->SetMetadataByName(name, &value);
+    }
+
+    // Copies colour profile and descriptive metadata from the first frame of `sourcePath`. Best effort:
+    // a source WIC cannot read, or a block the destination cannot hold, is skipped (the pixels still save).
+    // The EXIF thumbnail (IFD1, "/app1/thumb") is never copied: it would show the old orientation.
+    void CopySourceMetadata(IWICImagingFactory* factory, IWICBitmapFrameEncode* frame, std::uint32_t format,
+                            std::uint32_t flags, const wchar_t* sourcePath, std::uint32_t width, std::uint32_t height)
+    {
+        ComPtr<IWICBitmapDecoder> decoder;
+        ComPtr<IWICBitmapFrameDecode> source;
+        if (FAILED(factory->CreateDecoderFromFilename(sourcePath, nullptr, GENERIC_READ, WICDecodeMetadataCacheOnDemand, &decoder)) ||
+            FAILED(decoder->GetFrame(0, &source)))
+            return;
+
+        if ((flags & EncodeCopyIcc) && format != EncodeGif && format != EncodeBmp)
+        {
+            UINT count = 0;
+            if (SUCCEEDED(source->GetColorContexts(0, nullptr, &count)) && count > 0 && count <= 8)
+            {
+                IWICColorContext* contexts[8]{};
+                UINT created = 0;
+                for (; created < count; ++created)
+                    if (FAILED(factory->CreateColorContext(&contexts[created]))) break;
+                UINT actual = 0;
+                if (created == count && SUCCEEDED(source->GetColorContexts(count, contexts, &actual)))
+                {
+                    for (UINT i = 0; i < actual; ++i)
+                    {
+                        WICColorContextType type{};
+                        if (SUCCEEDED(contexts[i]->GetType(&type)) && type == WICColorContextProfile)
+                        {
+                            frame->SetColorContexts(1, &contexts[i]);
+                            break;
+                        }
+                    }
+                }
+                for (UINT i = 0; i < created; ++i) contexts[i]->Release();
+            }
+        }
+
+        if (!(flags & EncodeCopyExifXmp)) return;
+        const wchar_t* dstIfd = nullptr;
+        const wchar_t* dstXmp = nullptr;
+        switch (format)
+        {
+        case EncodeJpeg: dstIfd = L"/app1/ifd"; dstXmp = L"/xmp"; break;
+        case EncodeTiff:
+        case EncodeJxr: dstIfd = L"/ifd"; dstXmp = L"/ifd/xmp"; break;
+        case EncodeHeif:
+        case EncodeAvif:
+        case EncodeJxl: dstIfd = L"/ifd"; dstXmp = L"/xmp"; break;
+        default: return; // PNG/WebP metadata is written by the managed container writer; GIF/BMP hold none
+        }
+        ComPtr<IWICMetadataQueryReader> reader;
+        ComPtr<IWICMetadataQueryWriter> writer;
+        ComPtr<IWICComponentFactory> components;
+        if (FAILED(source->GetMetadataQueryReader(&reader)) || FAILED(frame->GetMetadataQueryWriter(&writer)) ||
+            FAILED(factory->QueryInterface(IID_PPV_ARGS(&components))))
+            return;
+
+        const wchar_t* srcIfd = HasBlock(reader.Get(), L"/app1/ifd") ? L"/app1/ifd" : HasBlock(reader.Get(), L"/ifd") ? L"/ifd" : nullptr;
+        if (srcIfd)
+        {
+            wchar_t from[96], to[96];
+            for (const wchar_t* sub : { L"exif", L"gps" })
+            {
+                swprintf_s(from, L"%s/%s", srcIfd, sub);
+                swprintf_s(to, L"%s/%s", dstIfd, sub);
+                CopyBlock(components.Get(), reader.Get(), from, writer.Get(), to);
+            }
+            // Descriptive IFD0 tags only: never the source's image-structure tags (size, strips, compression).
+            // ImageDescription, Make, Model, XResolution, YResolution, ResolutionUnit, Software, DateTime,
+            // Artist, Copyright.
+            for (const unsigned tag : { 270u, 271u, 272u, 282u, 283u, 296u, 305u, 306u, 315u, 33432u })
+            {
+                swprintf_s(from, L"%s/{ushort=%u}", srcIfd, tag);
+                swprintf_s(to, L"%s/{ushort=%u}", dstIfd, tag);
+                CopyValue(reader.Get(), from, writer.Get(), to);
+            }
+            // Rotation/flip is baked into the pixels, so the saved file is always upright.
+            swprintf_s(to, L"%s/{ushort=274}", dstIfd);
+            SetUInt(writer.Get(), to, VT_UI2, 1);
+            // The Exif IFD's pixel dimensions describe the stored image: swap them with a 90-degree turn.
+            swprintf_s(from, L"%s/exif", dstIfd);
+            PROPVARIANT probe; PropVariantInit(&probe);
+            if (SUCCEEDED(writer->GetMetadataByName(from, &probe)))
+            {
+                swprintf_s(to, L"%s/exif/{ushort=40962}", dstIfd);
+                SetUInt(writer.Get(), to, VT_UI4, width);
+                swprintf_s(to, L"%s/exif/{ushort=40963}", dstIfd);
+                SetUInt(writer.Get(), to, VT_UI4, height);
+            }
+            PropVariantClear(&probe);
+        }
+        else if (format == EncodeJpeg || format == EncodeTiff || format == EncodeJxr)
+        {
+            wchar_t to[96];
+            swprintf_s(to, L"%s/{ushort=274}", dstIfd);
+            SetUInt(writer.Get(), to, VT_UI2, 1);
+        }
+
+        const wchar_t* srcXmp = HasBlock(reader.Get(), L"/xmp") ? L"/xmp" : HasBlock(reader.Get(), L"/ifd/xmp") ? L"/ifd/xmp" : nullptr;
+        if (srcXmp)
+        {
+            CopyBlock(components.Get(), reader.Get(), srcXmp, writer.Get(), dstXmp);
+            wchar_t name[96];
+            swprintf_s(name, L"%s/tiff:Orientation", dstXmp);
+            writer->RemoveMetadataByName(name);
+        }
+    }
+
+    bool HasTransparency(const BYTE* pixels, std::uint32_t width, std::uint32_t height, std::uint32_t stride)
+    {
+        for (std::uint32_t y = 0; y < height; ++y)
+        {
+            const BYTE* row = pixels + static_cast<size_t>(y) * stride;
+            for (std::uint32_t x = 0; x < width; ++x)
+                if (row[x * 4 + 3] != 255) return true;
+        }
+        return false;
+    }
+
+    HRESULT EncodeToStream(IWICImagingFactory* factory, IStream* stream, std::uint32_t width, std::uint32_t height,
+                           std::uint32_t stride, const void* pixels, std::uint32_t format, float quality,
+                           std::uint32_t flags, const wchar_t* metadataSource)
+    {
+        const GUID* container = EncodeContainer(format);
+        if (!container) return E_INVALIDARG;
+        if (!(quality > 0.0f) || quality > 1.0f) quality = 0.95f;
+        ComPtr<IWICBitmap> bitmap;
+        ComPtr<IWICBitmapEncoder> encoder;
+        ComPtr<IWICBitmapFrameEncode> frame;
+        ComPtr<IPropertyBag2> properties;
+        HRESULT hr = factory->CreateBitmapFromMemory(width, height, GUID_WICPixelFormat32bppPBGRA, stride, stride * height,
+            static_cast<BYTE*>(const_cast<void*>(pixels)), &bitmap);
+        if (SUCCEEDED(hr)) hr = factory->CreateEncoder(*container, nullptr, &encoder);
+        if (SUCCEEDED(hr)) hr = encoder->Initialize(stream, WICBitmapEncoderNoCache);
+        if (SUCCEEDED(hr)) hr = encoder->CreateNewFrame(&frame, &properties);
+        if (FAILED(hr)) return hr;
+        if (properties)
+        {
+            switch (format)
+            {
+            case EncodeJpeg:
+                WriteFloatOption(properties.Get(), L"ImageQuality", quality);
+                break;
+            case EncodeJxr:
+                if (flags & EncodeLossless)
+                {
+                    VARIANT v; VariantInit(&v); v.vt = VT_BOOL; v.boolVal = VARIANT_TRUE;
+                    WriteOption(properties.Get(), L"Lossless", v);
+                }
+                else WriteFloatOption(properties.Get(), L"ImageQuality", quality);
+                break;
+            case EncodeHeif:
+            case EncodeAvif:
+            {
+                VARIANT v; VariantInit(&v); v.vt = VT_UI1;
+                v.bVal = format == EncodeAvif ? HeifCompressionAv1 : HeifCompressionHevc;
+                const HRESULT method = WriteOption(properties.Get(), L"HeifCompressionMethod", v);
+                // AVIF exists only through this option; an older HEIF encoder without it would write HEVC.
+                if (format == EncodeAvif && FAILED(method)) return method;
+                WriteFloatOption(properties.Get(), L"ImageQuality", quality);
+                break;
+            }
+            case EncodeJxl:
+                WriteFloatOption(properties.Get(), L"ImageQuality", quality);
+                break;
+            default:
+                break;
+            }
+        }
+        hr = frame->Initialize(properties.Get());
+        if (SUCCEEDED(hr)) hr = frame->SetSize(width, height);
+        if (FAILED(hr)) return hr;
+
+        ComPtr<IWICBitmapSource> source = bitmap;
+        ComPtr<IWICFormatConverter> straight;
+        ComPtr<IWICFormatConverter> converter;
+        ComPtr<IWICPalette> palette;
+        if (format == EncodeGif)
+        {
+            // GIF is 8-bit indexed: build an optimal 256-colour palette (one entry transparent when the
+            // image has transparency) and error-diffuse into it.
+            const bool transparent = HasTransparency(static_cast<const BYTE*>(pixels), width, height, stride);
+            hr = factory->CreateFormatConverter(&straight);
+            if (SUCCEEDED(hr)) hr = straight->Initialize(bitmap.Get(), GUID_WICPixelFormat32bppBGRA, WICBitmapDitherTypeNone, nullptr, 0.0, WICBitmapPaletteTypeCustom);
+            if (SUCCEEDED(hr)) hr = factory->CreatePalette(&palette);
+            if (SUCCEEDED(hr)) hr = palette->InitializeFromBitmap(straight.Get(), 256, transparent ? TRUE : FALSE);
+            if (SUCCEEDED(hr)) hr = factory->CreateFormatConverter(&converter);
+            if (SUCCEEDED(hr)) hr = converter->Initialize(straight.Get(), GUID_WICPixelFormat8bppIndexed,
+                WICBitmapDitherTypeErrorDiffusion, palette.Get(), 50.0, WICBitmapPaletteTypeCustom);
+            WICPixelFormatGUID indexed = GUID_WICPixelFormat8bppIndexed;
+            if (SUCCEEDED(hr)) hr = frame->SetPixelFormat(&indexed);
+            if (SUCCEEDED(hr) && !IsEqualGUID(indexed, GUID_WICPixelFormat8bppIndexed)) hr = WINCODEC_ERR_UNSUPPORTEDPIXELFORMAT;
+            if (SUCCEEDED(hr)) hr = frame->SetPalette(palette.Get());
+            if (SUCCEEDED(hr) && transparent)
+            {
+                WICColor colors[256]{};
+                UINT count = 0;
+                ComPtr<IWICMetadataQueryWriter> writer;
+                if (SUCCEEDED(palette->GetColors(256, colors, &count)) && SUCCEEDED(frame->GetMetadataQueryWriter(&writer)))
+                {
+                    for (UINT i = 0; i < count; ++i)
+                    {
+                        if ((colors[i] >> 24) != 0) continue;
+                        PROPVARIANT flag; PropVariantInit(&flag); flag.vt = VT_BOOL; flag.boolVal = VARIANT_TRUE;
+                        writer->SetMetadataByName(L"/grctlext/TransparencyFlag", &flag);
+                        PROPVARIANT index; PropVariantInit(&index); index.vt = VT_UI1; index.bVal = static_cast<BYTE>(i);
+                        writer->SetMetadataByName(L"/grctlext/TransparentColorIndex", &index);
+                        break;
+                    }
+                }
+            }
+            if (SUCCEEDED(hr)) source = converter;
+        }
+        else
+        {
+            // PNG/TIFF/JPEG XR keep alpha as straight 32-bit BGRA. JPEG and BMP use 24-bit BGR (the managed
+            // side has already composited transparency over the save background). HEIF/AVIF/JPEG XL ask for
+            // BGRA and take whatever the codec negotiates.
+            WICPixelFormatGUID pixelFormat = (format == EncodeJpeg || format == EncodeBmp) ? GUID_WICPixelFormat24bppBGR : GUID_WICPixelFormat32bppBGRA;
+            hr = frame->SetPixelFormat(&pixelFormat);
+            // SetPixelFormat is a negotiation: convert to what the encoder accepted.
+            if (SUCCEEDED(hr) && !IsEqualGUID(pixelFormat, GUID_WICPixelFormat32bppPBGRA))
+            {
+                hr = factory->CreateFormatConverter(&converter);
+                if (SUCCEEDED(hr)) hr = converter->Initialize(bitmap.Get(), pixelFormat, WICBitmapDitherTypeNone, nullptr, 0.0, WICBitmapPaletteTypeCustom);
+                if (SUCCEEDED(hr)) source = converter;
+            }
+        }
+        if (FAILED(hr)) return hr;
+        if (metadataSource && *metadataSource && (flags & (EncodeCopyIcc | EncodeCopyExifXmp)))
+            CopySourceMetadata(factory, frame.Get(), format, flags, metadataSource, width, height);
+        hr = frame->WriteSource(source.Get(), nullptr);
+        if (SUCCEEDED(hr)) hr = frame->Commit();
+        if (SUCCEEDED(hr)) hr = encoder->Commit();
+        return hr;
+    }
+
+    bool ValidEncodeInput(std::uint32_t width, std::uint32_t height, std::uint32_t stride, const void* pixels)
+    {
+        const std::uint64_t minimumStride = static_cast<std::uint64_t>(width) * 4ull;
+        const std::uint64_t bufferBytes = static_cast<std::uint64_t>(stride) * height;
+        return pixels && width > 0 && height > 0 && width <= std::numeric_limits<UINT>::max() / 4u &&
+            static_cast<std::uint64_t>(stride) >= minimumStride && bufferBytes <= std::numeric_limits<UINT>::max();
+    }
+
+    // Encodes into memory; on success the bytes are returned in a CoTaskMemAlloc block (GlideFreeImageBuffer).
+    HRESULT EncodeToMemory(IWICImagingFactory* factory, std::uint32_t width, std::uint32_t height, std::uint32_t stride,
+                           const void* pixels, std::uint32_t format, float quality, std::uint32_t flags,
+                           const wchar_t* metadataSource, void** outData, std::uint64_t* outSize)
+    {
+        ComPtr<IStream> memory;
+        HRESULT hr = CreateStreamOnHGlobal(nullptr, TRUE, &memory);
+        if (SUCCEEDED(hr)) hr = EncodeToStream(factory, memory.Get(), width, height, stride, pixels, format, quality, flags, metadataSource);
+        STATSTG stat{};
+        if (SUCCEEDED(hr)) hr = memory->Stat(&stat, STATFLAG_NONAME);
+        if (SUCCEEDED(hr) && (stat.cbSize.QuadPart == 0 || stat.cbSize.QuadPart > 0x7FFFFFFFull)) hr = E_FAIL;
+        HGLOBAL global = nullptr;
+        if (SUCCEEDED(hr)) hr = GetHGlobalFromStream(memory.Get(), &global);
+        if (FAILED(hr)) return hr;
+        const auto size = static_cast<size_t>(stat.cbSize.QuadPart);
+        void* copy = CoTaskMemAlloc(size);
+        if (!copy) return E_OUTOFMEMORY;
+        const void* locked = GlobalLock(global);
+        if (!locked) { CoTaskMemFree(copy); return E_FAIL; }
+        std::memcpy(copy, locked, size);
+        GlobalUnlock(global);
+        *outData = copy;
+        *outSize = size;
+        return S_OK;
+    }
+}
+
+// Encodes a premultiplied BGRA image. With `path` the result is written to that file; with a null path it is
+// returned in *outData/*outSize (free with GlideFreeImageBuffer). `metadataSource` (optional) is the original
+// file whose ICC profile / EXIF / XMP are carried over according to `flags`. Returns 1 on success.
+extern "C" __declspec(dllexport) int __cdecl GlideEncodeImage2W(const wchar_t* path,
+    std::uint32_t width, std::uint32_t height, std::uint32_t stride, const void* pixels, std::uint32_t format,
+    float quality, std::uint32_t flags, const wchar_t* metadataSource, void** outData, std::uint64_t* outSize)
+{
+    if (outData) *outData = nullptr;
+    if (outSize) *outSize = 0;
+    if (!ValidEncodeInput(width, height, stride, pixels) || format > EncodeLast) return 0;
+    if (!path && (!outData || !outSize)) return 0;
+    ComScope com;
+    if (!com.ok) return 0;
+    ComPtr<IWICImagingFactory> factory;
+    HRESULT hr = CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&factory));
+    if (FAILED(hr)) return 0;
+    if (!path)
+        return SUCCEEDED(EncodeToMemory(factory.Get(), width, height, stride, pixels, format, quality, flags, metadataSource, outData, outSize)) ? 1 : 0;
+    ComPtr<IWICStream> stream;
+    hr = factory->CreateStream(&stream);
+    if (SUCCEEDED(hr)) hr = stream->InitializeFromFilename(path, GENERIC_WRITE);
+    if (SUCCEEDED(hr)) hr = EncodeToStream(factory.Get(), stream.Get(), width, height, stride, pixels, format, quality, flags, metadataSource);
+    return SUCCEEDED(hr) ? 1 : 0;
+}
+
+// 1 when this PC can write `format`: a WIC encoder for its container is registered and (for the codecs that
+// come from optional Store extensions: HEIF, AVIF, JPEG XL) a small trial encode succeeds. Called lazily by the
+// managed side the first time a Save as list is built, never at startup.
+extern "C" __declspec(dllexport) int __cdecl GlideProbeEncoderW(std::uint32_t format)
+{
+    const GUID* container = EncodeContainer(format);
+    if (!container) return 0;
+    ComScope com;
+    if (!com.ok) return 0;
+    ComPtr<IWICImagingFactory> factory;
+    if (FAILED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&factory)))) return 0;
+    ComPtr<IEnumUnknown> components;
+    if (FAILED(factory->CreateComponentEnumerator(WICEncoder, WICComponentEnumerateDefault, &components))) return 0;
+    bool registered = false;
+    for (;;)
+    {
+        ComPtr<IUnknown> item;
+        ULONG fetched = 0;
+        if (components->Next(1, &item, &fetched) != S_OK || fetched == 0) break;
+        ComPtr<IWICBitmapEncoderInfo> info;
+        GUID itemContainer{};
+        if (SUCCEEDED(item.As(&info)) && SUCCEEDED(info->GetContainerFormat(&itemContainer)) && IsEqualGUID(itemContainer, *container))
+        {
+            registered = true;
+            break;
+        }
+    }
+    if (!registered) return 0;
+    if (format < EncodeHeif) return 1;
+    // The HEIF encoder is registered by the HEIF extension even when the HEVC/AV1 video encoder it needs is
+    // missing, so only a real encode proves the format is writable.
+    constexpr std::uint32_t side = 64;
+    std::vector<std::uint32_t> pixels(side * side);
+    for (std::uint32_t i = 0; i < side * side; ++i) pixels[i] = 0xFF000000u | (i * 2654435761u >> 8);
+    void* data = nullptr;
+    std::uint64_t size = 0;
+    const HRESULT hr = EncodeToMemory(factory.Get(), side, side, side * 4, pixels.data(), format, 0.8f, 0, nullptr, &data, &size);
+    bool ok = SUCCEEDED(hr) && data && size >= 12;
+    if (ok && format == EncodeAvif)
+    {
+        // Must really be AVIF (ISO-BMFF 'ftyp' with an 'avif'/'avis' brand), not HEVC in a HEIF container.
+        const auto* bytes = static_cast<const BYTE*>(data);
+        const size_t box = std::min<size_t>(static_cast<size_t>(size), (static_cast<size_t>(bytes[0]) << 24) | (bytes[1] << 16) | (bytes[2] << 8) | bytes[3]);
+        ok = std::memcmp(bytes + 4, "ftyp", 4) == 0;
+        bool brand = false;
+        for (size_t at = 8; ok && at + 4 <= box; at += 4)
+            if (std::memcmp(bytes + at, "avif", 4) == 0 || std::memcmp(bytes + at, "avis", 4) == 0) brand = true;
+        ok = ok && brand;
+    }
+    if (data) CoTaskMemFree(data);
+    return ok ? 1 : 0;
+}
+
+// Compatibility exports (4.x-5.0.3 managed code): formats 0-3, no metadata.
 extern "C" __declspec(dllexport) int __cdecl GlideEncodeImageExW(const wchar_t* path,
     std::uint32_t width, std::uint32_t height, std::uint32_t stride,
     const void* pixels, std::uint32_t format, float quality)
 {
-    const std::uint64_t minimumStride = static_cast<std::uint64_t>(width) * 4ull;
-    const std::uint64_t bufferBytes = static_cast<std::uint64_t>(stride) * height;
-    if (!path || !pixels || width == 0 || height == 0 || width > std::numeric_limits<UINT>::max() / 4u ||
-        static_cast<std::uint64_t>(stride) < minimumStride || bufferBytes > std::numeric_limits<UINT>::max() || format > 3) return 0;
-    if (!(quality > 0.0f) || quality > 1.0f) quality = 0.95f;
-    const HRESULT init = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-    const bool mustUninit = SUCCEEDED(init);
-    if (FAILED(init) && init != RPC_E_CHANGED_MODE) return 0;
-    IWICImagingFactory* factory = nullptr;
-    IWICStream* stream = nullptr;
-    IWICBitmap* bitmap = nullptr;
-    IWICFormatConverter* formatConverter = nullptr;
-    IWICBitmapFrameEncode* frame = nullptr;
-    IWICBitmapEncoder* encoder = nullptr;
-    IPropertyBag2* properties = nullptr;
-    int ok = 0;
-    HRESULT hr = CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
-                                  IID_PPV_ARGS(&factory));
-    if (SUCCEEDED(hr)) hr = factory->CreateStream(&stream);
-    if (SUCCEEDED(hr)) hr = stream->InitializeFromFilename(path, GENERIC_WRITE);
-    if (SUCCEEDED(hr)) hr = factory->CreateBitmapFromMemory(width, height,
-        GUID_WICPixelFormat32bppPBGRA, stride, stride * height,
-        static_cast<BYTE*>(const_cast<void*>(pixels)), &bitmap);
-    const GUID* container = format == 0 ? &GUID_ContainerFormatPng :
-                            format == 1 ? &GUID_ContainerFormatJpeg :
-                            format == 3 ? &GUID_ContainerFormatTiff : &GUID_ContainerFormatBmp;
-    // CreateEncoder returns an encoder; create the frame with its property bag
-    // so JPEG remains a genuine WIC encode.
-    if (SUCCEEDED(hr)) hr = factory->CreateEncoder(*container, nullptr, &encoder);
-    if (SUCCEEDED(hr)) hr = encoder->Initialize(stream, WICBitmapEncoderNoCache);
-    if (SUCCEEDED(hr)) hr = encoder->CreateNewFrame(&frame, &properties);
-    if (SUCCEEDED(hr) && format == 1 && properties)
-    {
-        PROPBAG2 option{}; option.pstrName = const_cast<LPOLESTR>(L"ImageQuality");
-        VARIANT value; VariantInit(&value); value.vt = VT_R4; value.fltVal = quality;
-        properties->Write(1, &option, &value); VariantClear(&value);
-    }
-    if (SUCCEEDED(hr)) hr = frame->Initialize(properties);
-    if (SUCCEEDED(hr)) hr = frame->SetSize(width, height);
-    // PNG keeps alpha as 32-bit BGRA. JPEG and the broadly compatible BMP path
-    // intentionally use 24-bit BGR; no undocumented BMP V5/alpha assumptions.
-    WICPixelFormatGUID pixelFormat = (format == 0 || format == 3) ? GUID_WICPixelFormat32bppBGRA : GUID_WICPixelFormat24bppBGR;
-    if (SUCCEEDED(hr)) hr = frame->SetPixelFormat(&pixelFormat);
-    IWICBitmapSource* source = bitmap;
-    // SetPixelFormat is a negotiation: use the encoder's returned format rather
-    // than assuming it accepted the request, and convert explicitly when needed.
-    if (SUCCEEDED(hr) && !IsEqualGUID(pixelFormat, GUID_WICPixelFormat32bppPBGRA))
-    {
-        hr = factory->CreateFormatConverter(&formatConverter);
-        if (SUCCEEDED(hr)) hr = formatConverter->Initialize(bitmap, pixelFormat,
-            WICBitmapDitherTypeNone, nullptr, 0.0, WICBitmapPaletteTypeCustom);
-        if (SUCCEEDED(hr)) source = formatConverter;
-    }
-    if (SUCCEEDED(hr)) hr = frame->WriteSource(source, nullptr);
-    if (SUCCEEDED(hr)) hr = frame->Commit();
-    if (SUCCEEDED(hr)) hr = encoder->Commit();
-    ok = SUCCEEDED(hr) ? 1 : 0;
-    if (properties) properties->Release();
-    if (frame) frame->Release();
-    if (encoder) encoder->Release();
-    if (formatConverter) formatConverter->Release();
-    if (bitmap) bitmap->Release();
-    if (stream) stream->Release();
-    if (factory) factory->Release();
-    if (mustUninit) CoUninitialize();
-    return ok;
+    if (!path || format > EncodeTiff) return 0;
+    return GlideEncodeImage2W(path, width, height, stride, pixels, format, quality, 0, nullptr, nullptr, nullptr);
 }
 
 extern "C" __declspec(dllexport) int __cdecl GlideEncodeImageW(const wchar_t* path,

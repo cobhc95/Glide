@@ -415,4 +415,91 @@ public sealed class SettingsWindowLayoutTests : IDisposable
             return Task.CompletedTask;
         });
     }
+
+    [Theory]
+    [InlineData(720, 480)]
+    [InlineData(930, 630)]
+    public async Task Footer_Restore_defaults_and_Reset_Glide_are_two_equal_buttons_whose_labels_fit(double width, double height)
+    {
+        await AvaloniaHeadlessFixture.RunOnUIThreadAsync(() =>
+        {
+            var window = Open(width, height, "General");
+            try
+            {
+                var area = new Rect(0, 0, window.Bounds.Width, window.Bounds.Height);
+                var left = Named<Grid>(window, "SettingsFooterLeft");
+                var restore = Named<Button>(window, "RestoreDefaultsButton");
+                var reset = Named<Button>(window, "OpenResetGlideButton");
+                var r = BoundsIn(restore, window);
+                var g = BoundsIn(reset, window);
+                var footer = BoundsIn(left, window);
+                // Same row, equal widths, ~8 DIP apart, together exactly the width the single button had (the footer column).
+                Assert.Equal(r.Top, g.Top, 1);
+                Assert.Equal(r.Width, g.Width, 1);
+                Assert.InRange(g.Left - r.Right, 6, 10);
+                Assert.Equal(footer.Left, r.Left, 1);
+                Assert.Equal(footer.Right, g.Right, 1);
+                Assert.Equal(196, footer.Width, 1);
+                Assert.True(r.Height <= 34 && g.Height <= 34);
+                // The footer row is no taller than before.
+                Assert.Equal(76, ((Grid)window.Content!).RowDefinitions[2].Height.Value);
+                foreach (var (button, rect) in new[] { (restore, r), (reset, g) })
+                {
+                    Assert.True(button.IsEffectivelyVisible && button.IsEffectivelyEnabled);
+                    Assert.True(button.Focusable && button.IsTabStop, $"{button.Name} must be reachable with Tab");
+                    Assert.True(area.Contains(rect.TopLeft) && area.Contains(rect.BottomRight - new Vector(0.5, 0.5)), $"{button.Name} {rect} is outside the window {area}");
+                    // The label (icon + text) fits inside the button: nothing is clipped.
+                    var content = (Control)button.Content!;
+                    content.Measure(Size.Infinity);
+                    var inner = rect.Width - button.Padding.Left - button.Padding.Right - button.BorderThickness.Left - button.BorderThickness.Right;
+                    Assert.True(content.DesiredSize.Width <= inner + 0.5, $"{button.Name}: label needs {content.DesiredSize.Width} DIP, has {inner}");
+                    Assert.False(string.IsNullOrWhiteSpace(ToolTip.GetTip(button) as string));
+                }
+                Assert.Equal("More reset options: history, window positions, hotkeys, caches, Windows integration", ToolTip.GetTip(reset));
+                Save(window, $"footer-reset-buttons-{width}x{height}.png");
+                Save(window, $"footer-reset-buttons-{width}x{height}@150.png", 1.5);
+            }
+            finally { window.Close(); }
+            return Task.CompletedTask;
+        });
+    }
+
+    [Fact]
+    public async Task Footer_Reset_Glide_button_clears_the_search_opens_the_card_scrolls_to_it_and_focuses_it()
+    {
+        await AvaloniaHeadlessFixture.RunOnUIThreadAsync(() =>
+        {
+            var window = Open(720, 480, "General");
+            try
+            {
+                // A search with a category filter is active and the card is collapsed.
+                Named<ComboBox>(window, "SearchCategoryCombo").SelectedIndex = 1;
+                var search = Named<TextBox>(window, "SearchBox");
+                search.Text = "zoom";
+                Call(window, "RunSearchRebuildCore", "zoom", false);
+                Dispatcher.UIThread.RunJobs();
+                var card = window.GetLogicalDescendants().OfType<Glide.App.Controls.SettingsCard>().Single(c => c.CardId == SettingsWindow.ResetCardId);
+                card.IsExpanded = false;
+
+                var button = Named<Button>(window, "OpenResetGlideButton");
+                button.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+                // The headless dispatcher does not lay out between jobs on its own; the real one lays out before the
+                // Loaded-priority reveal runs.
+                for (var i = 0; i < 3; i++) { window.UpdateLayout(); Dispatcher.UIThread.RunJobs(); }
+
+                Assert.True(string.IsNullOrEmpty(search.Text));
+                Assert.False(Named<StackPanel>(window, "SearchPanel").IsVisible);
+                Assert.True(Named<StackPanel>(window, "WindowsPanel").IsVisible);
+                Assert.True(card.IsExpanded);
+                var viewport = BoundsIn(Named<ScrollViewer>(window, "ContentScroll"), window);
+                var header = BoundsIn(card.Header, window);
+                Assert.True(header.Top >= viewport.Top - 0.5 && header.Bottom <= viewport.Bottom + 0.5, $"card header {header} is not in view {viewport}");
+                var first = Named<CheckBox>(window, "ResetAllSettingsCheck");
+                Assert.True(first.IsFocused, "the first Reset Glide tick box has keyboard focus");
+                Assert.False(first.IsChecked == true, "opening the card never ticks anything");
+            }
+            finally { window.Close(); }
+            return Task.CompletedTask;
+        });
+    }
 }

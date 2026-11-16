@@ -1,8 +1,8 @@
-using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
 using Glide.App.Platform;
+using Glide.Core.Data;
 using Glide.Core.Reset;
 
 namespace Glide.App.Settings;
@@ -12,10 +12,14 @@ namespace Glide.App.Settings;
 /// <see cref="ResetCoordinator"/> (Glide.Core), the confirmation is <see cref="ResetConfirmWindow"/>.
 /// The tick boxes are Action entries of the settings catalogue ("reset.*"): searchable, but never counted as changed
 /// settings, never part of Apply / profiles, and not bindable to hotkeys (SettingActionCatalog.Excluded).
+/// They are not written in XAML: <see cref="DataCategorySelector"/> builds them from the shared
+/// <see cref="GlideDataCategoryCatalog"/> (every category that can be reset), exactly like the Back up and restore card.
 /// </summary>
 public partial class SettingsWindow
 {
     private readonly Dictionary<ResetItemId, CheckBox> _resetChecks = new();
+    private DataCategorySelector _resetSelector = null!;
+    private Button _resetGoButton = null!;
 
     /// <summary>Tests: scratch folders, a fake registry and a fake process host instead of the real machine.</summary>
     internal Func<ResetServices>? ResetServicesOverride { get; set; }
@@ -29,34 +33,24 @@ public partial class SettingsWindow
     /// <summary>Raised with the report window when a reset could not run or finished with problems.</summary>
     internal event Action<ResetResultWindow>? ResetResultOpened;
 
+    /// <summary>
+    /// Builds the Reset Glide tick boxes and bar into ResetCategoryHost (before the Settings-search map is built, which
+    /// registers each tick box under its "reset.*" id).
+    /// </summary>
+    private void BuildResetSelector()
+    {
+        _resetSelector = new DataCategorySelector("Reset", GlideDataCapabilities.Reset, GlideDataCategoryCatalog.With(GlideDataCapabilities.Reset));
+        _resetGoButton = new Button { Name = "ResetGoButton", Content = "Reset selected...", IsEnabled = false, HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right };
+        _resetGoButton.Classes.Add("dangerAction");
+        _resetGoButton.Click += ResetGoClicked;
+        _resetSelector.AddAction(_resetGoButton);
+        ResetCategoryHost.Children.Add(_resetSelector);
+        foreach (var (id, check) in _resetSelector.Checks) _resetChecks[id] = check;
+    }
+
     private void InitializeResetCard()
     {
-        _resetChecks[ResetItemId.AllSettings] = ResetAllSettingsCheck;
-        _resetChecks[ResetItemId.HotkeysAndGestures] = ResetHotkeysCheck;
-        _resetChecks[ResetItemId.ProfilesAndPresets] = ResetProfilesCheck;
-        _resetChecks[ResetItemId.WindowPlacements] = ResetWindowPlacementCheck;
-        _resetChecks[ResetItemId.RecentHistory] = ResetRecentCheck;
-        _resetChecks[ResetItemId.LastSession] = ResetSessionCheck;
-        _resetChecks[ResetItemId.Caches] = ResetCachesCheck;
-        _resetChecks[ResetItemId.CodecPack] = ResetCodecPackCheck;
-        _resetChecks[ResetItemId.RegistryEntries] = ResetRegistryCheck;
-        _resetChecks[ResetItemId.StartupEntries] = ResetStartupCheck;
-
-        foreach (var info in ResetCatalog.Items)
-        {
-            var check = _resetChecks[info.Id];
-            var label = new StackPanel();
-            var title = new TextBlock { Text = info.Title };
-            title.Classes.Add("resetItemTitle");
-            var hint = new TextBlock { Text = info.Description, Margin = new Avalonia.Thickness(0, 1, 0, 0) };
-            hint.Classes.Add("resetItemHint");
-            label.Children.Add(title);
-            label.Children.Add(hint);
-            check.Content = label;
-            // The label is a panel (title + hint), so give assistive technology the plain title.
-            AutomationProperties.SetName(check, info.Title);
-            check.IsCheckedChanged += (_, _) => UpdateResetBar();
-        }
+        _resetSelector.SelectionChanged += UpdateResetBar;
         UpdateResetBar();
     }
 
@@ -67,19 +61,37 @@ public partial class SettingsWindow
     internal void UpdateResetBar()
     {
         var count = SelectedResetItems().Count;
-        ResetCountText.Text = count == 0 ? "Nothing selected" : $"{count} selected";
-        ResetGoButton.Content = count == 0 ? "Reset selected..." : $"Reset {count} selected...";
-        ResetGoButton.IsEnabled = count > 0;
+        _resetSelector.CountText.Text = DataCategorySelector.CountLabel(count);
+        _resetGoButton.Content = count == 0 ? "Reset selected..." : $"Reset {count} selected...";
+        _resetGoButton.IsEnabled = count > 0;
     }
 
-    private void SetAllResetChecks(bool value)
+    /// <summary>CardId of the Reset Glide card (Windows &amp; developer).</summary>
+    internal const string ResetCardId = "windows-reset";
+
+    /// <summary>Footer "Reset Glide" button: Restore defaults only resets options, everything else is on the Reset Glide card.</summary>
+    private void OpenResetGlideClicked(object? sender, RoutedEventArgs e) => OpenResetGlideCard();
+
+    /// <summary>
+    /// Shows Windows &amp; developer with the Reset Glide card expanded and scrolled into view, and puts keyboard focus on its
+    /// first tick box. A search in progress is cleared first (the category filter only narrows searches, so the page shows).
+    /// </summary>
+    internal void OpenResetGlideCard()
     {
-        foreach (var check in _resetChecks.Values) check.IsChecked = value;
-        UpdateResetBar();
+        if (!_cardById.TryGetValue(ResetCardId, out var card) || !_pageOfCard.TryGetValue(card, out var page)) return;
+        card.IsExpanded = true;
+        ShowCategory(page, clearSearch: true, revealTarget: card);
+        HighlightRevealedRow(card.Header);
+        if (_resetSelector.FirstCheck is { } first) FocusRevealedEditor(first, card);
+        // Clearing a search raises the search box's TextChanged later, and that re-shows the page at its remembered
+        // offset. Reveal the card once more after that has run, so it always ends up in view.
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (!string.Equals(_activeCategory, page, StringComparison.OrdinalIgnoreCase) || SearchPanel.IsVisible) return;
+            ScrollToReveal(card);
+        }, DispatcherPriority.Background);
     }
 
-    private void ResetSelectAllClicked(object? sender, RoutedEventArgs e) => SetAllResetChecks(true);
-    private void ResetClearClicked(object? sender, RoutedEventArgs e) => SetAllResetChecks(false);
     private async void ResetGoClicked(object? sender, RoutedEventArgs e)
     {
         try { await RunResetFlowAsync(); }
@@ -104,8 +116,8 @@ public partial class SettingsWindow
         var confirmation = await dialog.ShowDialog<ResetConfirmation?>(this);
         if (confirmation is null) return; // Cancel, Esc or the close button: nothing happens
 
-        ResetGoButton.IsEnabled = false;
-        ResetCountText.Text = "Resetting...";
+        _resetGoButton.IsEnabled = false;
+        _resetSelector.CountText.Text = "Resetting...";
         var result = await Task.Run(() => ResetCoordinator.Run(new ResetRequest(items, confirmation.SaveBackup), services));
         await ShowResetResultAsync(result);
     }

@@ -13,19 +13,35 @@ public static class CodecCapabilityRegistry
 {
     private static readonly HashSet<string> Core = new(ImageFormatRegistry.CoreFastPathExtensions, StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>Camera RAW suffixes decoded from their embedded camera JPEG (not .r3d/.ari/.cinema video RAWs).</summary>
+    public static IReadOnlyList<string> CameraRawPreviewExtensions { get; } = new[]
+    {
+        ".dng", ".cr2", ".cr3", ".crw", ".nef", ".nrw", ".arw", ".srf", ".sr2", ".raf", ".orf", ".ori", ".rw2", ".rwl",
+        ".pef", ".ptx", ".3fr", ".fff", ".iiq", ".cap", ".eip", ".mef", ".mos", ".mrw", ".x3f", ".erf", ".kdc", ".dcr",
+        ".k25", ".bay", ".srw", ".rwz", ".gpr", ".mdc", ".raw", ".dcs", ".drf", ".dsc", ".r2d", ".rw1",
+    };
+
     /// <summary>
     /// Suffixes Glide can decode in-process with a bundled decoder (no optional codec required):
-    /// the SVG vector rasteriser and the compact built-in raster decoders.
+    /// the SVG vector rasteriser, the compact built-in raster decoders and the managed (pure C#)
+    /// decoders for camera RAW previews, OpenEXR, scientific/medical, layered-editor and GPU texture
+    /// formats. Keep in sync with <c>BuiltInRasterDecoder.IsSupportedExtension</c> and
+    /// docs/format-coverage.md.
     /// </summary>
     private static readonly HashSet<string> BuiltInDecoded = new(new[]
     {
         ".svg", ".svgz",
         ".tga", ".targa", ".icb", ".vda", ".vst",
-        ".pcx", ".pnm", ".ppm", ".pgm", ".pbm", ".pam",
-        ".qoi", ".hdr", ".rgbe", ".wbmp", ".xbm", ".xpm",
+        ".pcx", ".pnm", ".ppm", ".pgm", ".pbm", ".pam", ".pfm",
+        ".qoi", ".hdr", ".rgbe", ".hdr.gz", ".wbmp", ".xbm", ".xpm",
         ".psd", ".psb", ".pdd",
-        ".sgi", ".rgb", ".rgba", ".bw"
-    }, StringComparer.OrdinalIgnoreCase);
+        ".sgi", ".rgb", ".rgba", ".bw",
+        ".exr",
+        ".dcm", ".dicom", ".ima", ".nii", ".nii.gz", ".fits", ".fit", ".fts", ".fts.gz",
+        ".ora", ".kra", ".pdn", ".xcf",
+        ".ktx", ".ktx2", ".pvr", ".astc",
+    }.Concat(CameraRawPreviewExtensions), StringComparer.OrdinalIgnoreCase);
+
     private static readonly object ExternalGate = new();
     private static readonly Dictionary<string, string> ExternalProviders = new(StringComparer.OrdinalIgnoreCase);
     public static IReadOnlyList<string> Extensions { get; } = ImageFormatRegistry.Extensions;
@@ -66,7 +82,7 @@ public static class CodecCapabilityRegistry
             or ".hdr" or ".rgbe" or ".dds" or ".wbmp" or ".xbm" or ".xpm";
         var modular = ext is ".avif" or ".avifs" or ".heic" or ".heif" or ".heics" or ".heifs" or ".hif"
             or ".jxl" or ".jp2" or ".j2k" or ".j2c" or ".jpc" or ".jpx" or ".jpf" or ".jpm" or ".mj2"
-            or ".svg" or ".svgz" or ".exr";
+            or ".svg" or ".svgz";
 
         var builtInDecoded = BuiltInDecoded.Contains(ext);
         var tier = externalProvider is not null ? CodecTier.ExternalProvider
@@ -83,7 +99,7 @@ public static class CodecCapabilityRegistry
         return new CodecCapability(ext, tier,
             externalProvider ?? (Core.Contains(ext) ? "Glide core (Avalonia/WIC)"
                 : native ? "Windows WIC/Avalonia on-demand"
-                : builtInDecoded ? (ext is ".svg" or ".svgz" ? "Glide vector (Svg.Skia)" : "Glide built-in raster decoder")
+                : builtInDecoded ? BuiltInProviderName(ext)
                 : builtInCandidate ? "Glide compact/provider route"
                 : modular ? "Optional modular provider"
                 : IsKnownExtension(ext) ? "Adaptive lazy route"
@@ -93,6 +109,17 @@ public static class CodecCapabilityRegistry
             ext is ".gif" or ".webp" or ".apng" or ".ani" or ".avifs" or ".heifs",
             ext is ".dng" or ".cr2" or ".cr3" or ".nef" or ".arw" or ".raf" or ".orf" or ".rw2");
     }
+
+    private static string BuiltInProviderName(string ext) => ext switch
+    {
+        ".svg" or ".svgz" => "Glide vector (Svg.Skia)",
+        ".exr" => "Glide built-in OpenEXR decoder",
+        ".dcm" or ".dicom" or ".ima" or ".nii" or ".nii.gz" or ".fits" or ".fit" or ".fts" or ".fts.gz" => "Glide built-in scientific/medical decoder",
+        ".ora" or ".kra" or ".pdn" or ".xcf" => "Glide built-in layered-document decoder",
+        ".ktx" or ".ktx2" or ".pvr" or ".astc" => "Glide built-in GPU texture decoder",
+        _ when CameraRawPreviewExtensions.Contains(ext) => "Glide built-in RAW preview decoder (embedded JPEG)",
+        _ => "Glide built-in raster decoder",
+    };
 
     private static bool IsKnownExtension(string extension) => Extensions.Contains(extension, StringComparer.OrdinalIgnoreCase);
     private static string Normalize(string value) => Match(value) ?? (value.StartsWith('.') ? value.ToLowerInvariant() : Path.GetExtension(value).ToLowerInvariant());

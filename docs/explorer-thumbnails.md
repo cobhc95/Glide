@@ -20,8 +20,56 @@ ThumbnailCore.cpp
       │                    + embedded thumbnail/preview extraction
       │                    + decoder-native reduced decode (IWICBitmapSourceTransform)
       ├─ Direct2D (D2D1SVG) SVG / SVGZ rasterised straight to the requested size
-      └─ compact raster     TGA, PCX, PNM/PBM/PGM/PPM/PAM, QOI, HDR/RGBE, WBMP, XBM, XPM, SGI
+      ├─ compact raster     TGA, PCX, PNM/PBM/PGM/PPM/PAM, QOI, HDR/RGBE, WBMP, XBM, XPM, SGI, PSD (raw/RLE)
+      └─ CodecProviders.cpp lazy, SHA-256-pinned codec libraries from <install>\codecs (ABI v2):
+           ├─ glidecodecs.dll   AVIF/AVIFS, HEIC/HEIF/HEICS/HEIFS/HIF, JPEG XL, JPEG 2000 family
+           └─ glidemanaged.dll  camera RAW (40 suffixes, embedded JPEG), OpenEXR, DICOM, NIfTI, FITS,
+                                PFM, OpenRaster, Krita, GIMP XCF, Paint.NET, KTX/KTX2/PVR/ASTC,
+                                ZIP-compressed PSD/PSB; also inflates SVGZ for Direct2D
 ```
+
+### Codec libraries
+
+Formats Windows cannot thumbnail on a clean PC (a HEIC showed a blank page icon: the in-box *Photo
+Thumbnail Provider* is registered for it but needs the optional HEIF Store codec) are decoded through the
+same libraries the viewer uses:
+
+- **`codecs\glidecodecs.dll`** — the bundled native codec provider (`codecs/README.md`), reused as is through
+  its ABI v2 `GlideCodecProvider_DecodePreviewSurface` export.
+- **`codecs\glidemanaged.dll`** — `src/Glide.ThumbnailCodecs`: Glide's managed decoders (`RawPreviewDecoder`,
+  `ExrDecoder`, `ScientificDecoders`, `LayeredEditorDecoders`/`PdnDecoder`, `TextureDecoders`, the PSD path of
+  `BuiltInRasterDecoder`) compiled from the *same source files* into a ~3.1 MB NativeAOT DLL with no Avalonia and
+  no Skia, exporting the same ABI v2. Embedded JPEG/PNG sub-images (RAW previews, ORA/KRA layers, PDN thumbnails,
+  DICOM JPEG) are decoded by the provider through WIC (`DecodeEncodedForHost`, registered with
+  `GlideManaged_SetHostDecoder`); the viewer keeps its Skia path (`ManagedCodecSupport.Skia.cs`), so its pixels
+  are unchanged. It has no `.glidecodec.json`, so `codecs.index.json` never lists it and the viewer's decode
+  routing is untouched. Workstation, non-concurrent GC with a 2 GiB heap hard limit; every export catches all
+  exceptions.
+
+Safety rules (all in `CodecProviders.cpp`):
+
+1. **Lazy**: a library is loaded only when a file of one of its suffixes is thumbnailed; JPEG/PNG/... never
+   touch it. Loaded modules stay pinned for the life of the thumbnail host (a NativeAOT DLL cannot unload).
+2. **Pinned hash**: CMake writes the SHA-256 of `codecs\glidecodecs.dll` and `codecs\glidemanaged.dll` into
+   `GlideCodecPins.h` at build time (`build.cmd` publishes `glidemanaged.dll` before building the provider). The
+   file is opened deny-write/deny-delete, hashed with BCrypt and loaded while that handle is still open, so the
+   verified bytes are the mapped bytes. A missing pin, missing file or mismatch disables that library only.
+3. **Load path**: absolute path + `LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32` — never the
+   image's folder, the current directory or PATH.
+4. **Spooling**: the ABI decodes from a path but Explorer hands providers a stream, so the bytes (max 256 MiB)
+   go to a `FILE_FLAG_DELETE_ON_CLOSE` temp file (`%TEMP%\glide-thumb-<pid>-<tid>-<n>.<ext>`), removed by the
+   kernel even if the host dies.
+5. **Caps and validation**: the file is probed first (refused above 65535 px per side or 128 MP); the returned
+   surface must be BGRA8 premultiplied, at most 32768 px per side / 64 MP, with a consistent stride and size.
+6. **Fault containment**: every call into a library runs under `__try/__except` (hardware faults and C++
+   exceptions), on top of the libraries' own guards and the existing `try/catch` in `GetThumbnail`.
+
+Order inside `Decode`: SVG/SVGZ → WebP → codec library for its suffixes (before WIC: a TIFF-based RAW would
+otherwise show WIC's tiny IFD0 strip) → WIC → compact decoders → `glidemanaged.dll` as the fallback for
+PSD/PSB/PDD the compact decoder cannot read. `tests/Glide.Core.Tests/ThumbnailCoverageTests.cs` renders a
+synthetic fixture of every format the viewer decodes through the provider and prints the per-extension matrix.
+
+Provider size: 542,720 bytes before, 575,488 after (+32 KiB; still only system imports, no MSVCP/VCRUNTIME).
 
 The provider **never** loads Glide.exe, .NET, Avalonia, settings, tabs, history or plugins, **never**
 creates a window, and **never** shows UI. All decoding happens in-process inside Explorer's isolated
@@ -171,7 +219,7 @@ new Glide format is thumbnail-capable with no provider change. Modes:
 
 | mode | behaviour |
 |---|---|
-| Recommended (default) | Glide owns the formats it decodes natively, and fills gaps where no handler exists |
+| Recommended (default) | Glide owns the formats it decodes natively, fills gaps where no handler exists, and takes codec-library formats (HEIC/AVIF/JXL/JPEG 2000/RAW/EXR/...) over from Windows' codec-dependent Photo Thumbnail Provider `{C7657C4A-…}` — never from a third-party handler, and only when the library is installed |
 | Glide for unsupported formats only | only extensions with no other registered thumbnail handler |
 | Glide for all supported formats | every supported extension, overriding existing handlers |
 | Custom | keeps the saved selection, else the formats currently routed to Glide, else Recommended |
@@ -182,9 +230,11 @@ Extension→handler detection reads `Software\Classes\<ext>\ShellEx\{E357FCCD-�
 
 - **`<text>` is not rendered by D2D's SVG support.** Shapes, gradients, clip paths and embedded
   raster images are all supported; text is the one D2D SVG gap.
-- Formats with **no in-box Windows codec and no bundled decoder** (HEIC/AVIF/JXL, RAW, PSD, DICOM,
-  PDF/TGA-in-container exotic variants) show a thumbnail only when the matching WIC/Shell handler is
-  installed on the machine — the provider returns a clean failure otherwise.
+- Formats Glide only *recognises* (PDF, AI/EPS, CDR, DWG, slide scanners, cinema RAW, ...) show a thumbnail
+  only when the matching WIC/Shell handler is installed on the machine — the provider returns a clean failure
+  otherwise.
+- **Compound suffixes** (`.nii.gz`, `.fts.gz`, `.hdr.gz`) never get a Glide thumbnail: Explorer resolves
+  handlers by the final suffix only, and claiming `.gz` would take over every gzip archive.
 - Windows remains responsible for the thumbnail cache; Glide does not maintain a second database.
   Use **Settings → Windows Integration → Refresh thumbnails** to clear the per-user `thumbcache_*.db`
   files and ask the shell to rebuild.

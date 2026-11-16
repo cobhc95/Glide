@@ -338,7 +338,26 @@ public static class SettingsStore
         {
             var path = GetSettingsPath();
             if (!File.Exists(path)) return new GlideSettingsState();
-            var json = File.ReadAllText(path);
+            var loaded = MigrateFromJson(File.ReadAllText(path), isSettingsFile: true);
+            SaveLaunchPolicyCache();
+            return loaded;
+        }
+        catch
+        {
+            return new GlideSettingsState();
+        }
+    }
+
+    /// <summary>
+    /// The settings loader proper: parses glide.settings.json text and runs every migration for the schema it records, then
+    /// stamps <see cref="CurrentSettingsSchema"/>. <see cref="Load"/> uses it for the settings file; a Glide backup import
+    /// runs its settings entries through it too, so an older backup migrates exactly like an older settings file.
+    /// <paramref name="isSettingsFile"/> false skips the process-wide side effects of loading the real file (the active sort
+    /// order and the diagnostics' skipped-defaults list). Throws on text that is not a settings object.
+    /// </summary>
+    internal static GlideSettingsState MigrateFromJson(string json, bool isSettingsFile)
+    {
+        {
             // Parse the settings payload once. Glide 2.1 deserialised the string and then parsed the
             // same JSON again for migration probes; that duplicated cold-launch JSON work.
             using var document = JsonDocument.Parse(json);
@@ -461,13 +480,15 @@ public static class SettingsStore
             loaded.SlideshowLeftClickAction = Glide.Core.Settings.SlideshowLeftClickActions.Normalize(loaded.SlideshowLeftClickAction);
             loaded.NavigationSortOrder = Glide.Core.ImageSortOrder.NormalizeDisplayName(loaded.NavigationSortOrder);
             // Activate the chosen order before any folder is enumerated.
-            Glide.Core.ImageSortOrder.Current = new Glide.Core.ImageSortSpec(Glide.Core.ImageSortOrder.ParseKey(loaded.NavigationSortOrder), loaded.NavigationSortDescending);
+            if (isSettingsFile)
+                Glide.Core.ImageSortOrder.Current = new Glide.Core.ImageSortSpec(Glide.Core.ImageSortOrder.ParseKey(loaded.NavigationSortOrder), loaded.NavigationSortDescending);
             loaded.SelectionBufferWindowedPercent = Math.Clamp(loaded.SelectionBufferWindowedPercent, 0, 100);
             loaded.SelectionBufferMaximizedPercent = Math.Clamp(loaded.SelectionBufferMaximizedPercent, 0, 100);
             loaded.Hotkeys ??= HotkeyCatalog.CreateDefaultMap();
             // Rows added by a later version (5.0.0: Back / Forward) get their defaults, except a key the saved map already
             // gives to another action: the user's binding is respected, never silently taken away.
-            LastSkippedHotkeyDefaults = HotkeyDefaultMigrations.AddMissingRows(loaded.Hotkeys);
+            var skippedDefaults = HotkeyDefaultMigrations.AddMissingRows(loaded.Hotkeys);
+            if (isSettingsFile) LastSkippedHotkeyDefaults = skippedDefaults;
             loaded.Gestures ??= GestureCatalog.CreateDefaultMap();
             // Schema 7 (4.8.0) folds the separate mouse toggles into explicit gesture bindings once,
             // so every user keeps exactly the behaviour they had (see GestureLegacyMigration).
@@ -529,12 +550,7 @@ public static class SettingsStore
                 if (!loaded.Hotkeys.ContainsKey(action.Id)) loaded.Hotkeys[action.Id] = action.DefaultShortcuts.ToList();
             foreach (var slot in GestureCatalog.Slots)
                 if (!loaded.Gestures.ContainsKey(slot.Id)) loaded.Gestures[slot.Id] = slot.DefaultActionId;
-            SaveLaunchPolicyCache();
             return loaded;
-        }
-        catch
-        {
-            return new GlideSettingsState();
         }
     }
 

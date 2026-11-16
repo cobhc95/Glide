@@ -26,7 +26,9 @@ public static class ResetPlanner
         switch (id)
         {
             case ResetItemId.AllSettings:
-                targets.Add(new FileTarget(settingsFile));
+                // Options only: hotkeys, window positions, remembered folders, the schema version... are kept (they belong to
+                // the other items or are not settings). The Settings window's Restore defaults runs the same AllSettingsReset.
+                targets.Add(new SettingsFileResetTarget(settingsFile, env.DefaultSettingsJson));
                 targets.Add(new FileTarget(Path.Combine(env.SettingsDirectory, ResetCatalog.LaunchPolicyFileName)));
                 targets.Add(new FileTarget(Path.Combine(env.SettingsDirectory, ResetCatalog.PrintSettingsFileName)));
                 targets.Add(new FileTarget(Path.Combine(env.SettingsDirectory, ResetCatalog.ThumbnailSettingsFileName)));
@@ -67,11 +69,8 @@ public static class ResetPlanner
                 targets.Add(new FileTarget(Path.Combine(env.TempDirectory, "glide-diagnostic-transfer.jpg")));
                 targets.Add(new DirectoryTarget(Path.Combine(env.TempDirectory, "glide_diagnostic_fixtures")));
                 targets.Add(new FilesMatchingTarget(env.TempDirectory, "glide_bench_*.tsv"));
-                break;
-
-            case ResetItemId.CodecPack:
-                // The pack lives in ffmpeg-<version>; ffmpeg-download-<guid> are leftovers of an interrupted download.
-                targets.Add(new DirectoriesMatchingTarget(env.LocalGlideDirectory, ResetCatalog.CodecPackFolderPattern));
+                // Files of the optional video decoder older Glide versions downloaded (no longer used; see LegacyVideoDecoderCleanup).
+                targets.Add(LegacyVideoDecoderCleanup.Target(env));
                 break;
 
             case ResetItemId.RegistryEntries:
@@ -117,6 +116,7 @@ public static class ResetPathGuard
         DirectoryTarget d => DirectoryRefusal(d.Path, env),
         DirectoriesMatchingTarget m => ListingRefusal(m.Directory, env) ?? PatternRefusal(m.Pattern),
         JsonPropertiesTarget j => FileRefusal(j.Path, env),
+        SettingsFileResetTarget r => FileRefusal(r.Path, env),
         _ => null,
     };
 

@@ -42,6 +42,8 @@ public static class CodecProviderAbi
     public const uint SupportsFull = 2;
     public const uint SupportsMetadata = 4;
     public const uint SupportsFrames = 8;
+    /// <summary>ABI v2 encode extension (5.0.4): GlideCodecProvider_EncodeSurface. Not part of the manifest; optional.</summary>
+    public const uint SupportsEncode = 16;
 
     public static bool IsSupportedVersion(uint version) => version is LegacyVersion or CurrentVersion;
 

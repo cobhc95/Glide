@@ -64,6 +64,22 @@ if not exist "dist\Glide.exe" (
   exit /b 1
 )
 
+rem Keep the licence files in dist\ (normally staged by build.cmd) when invoked against an older dist\.
+copy /y "LICENSE" "dist\LICENSE" >nul 2>nul
+copy /y "THIRD-PARTY-NOTICES.md" "dist\THIRD-PARTY-NOTICES.md" >nul 2>nul
+if exist "licenses" xcopy /e /i /y /q "licenses" "dist\licenses" >nul 2>nul
+
+rem The installer packages dist\ recursively. When it is invoked directly against an older dist\,
+rem refresh the bundled codec provider payload so Setup and the portable ZIP stay identical.
+if exist "codecs\glidecodecs.dll" if exist "codecs\codecs.index.json" (
+  if not exist "dist\codecs" mkdir "dist\codecs"
+  copy /y "codecs\glidecodecs.dll" "dist\codecs\" >nul
+  copy /y "codecs\glidecodecs.glidecodec.json" "dist\codecs\" >nul
+  copy /y "codecs\codecs.index.json" "dist\codecs\" >nul
+  if exist "codecs\glidecodecs.NOTICE.txt" copy /y "codecs\glidecodecs.NOTICE.txt" "dist\codecs\" >nul
+)
+if not exist "dist\codecs\glidecodecs.dll" echo WARNING: dist\codecs\glidecodecs.dll is missing; AVIF/HEIC/JXL/JPEG 2000 will not open in this installer build.
+
 set "ISCC="
 for /f "delims=" %%I in ('where ISCC.exe 2^>nul') do if not defined ISCC set "ISCC=%%I"
 

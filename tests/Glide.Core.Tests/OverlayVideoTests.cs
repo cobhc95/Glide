@@ -152,80 +152,70 @@ public sealed class OverlayVideoTests
 
     private static string Vp9FixturePath => Path.Combine(AppContext.BaseDirectory, "Fixtures", "overlay-video-vp9.webm");
 
-    [Theory]
-    [InlineData("overlay-video-vp9.webm")]
-    [InlineData("overlay-video.mp4")]
-    public async Task Bundled_ffmpeg_backend_plays_seeks_and_pauses(string fixture)
+    /// <summary>
+    /// 5.0.4: Glide no longer ships a fallback decoder. A VP9 WebM plays only when Windows has a VP9 decoder (the VP9
+    /// Video Extensions); otherwise Glide names the missing codec. Which branch runs depends on this PC's codecs.
+    /// </summary>
+    [Fact]
+    public async Task Vp9_webm_plays_with_the_windows_decoder_or_names_the_missing_codec()
     {
-        using var player = NativeVideoPlayer.TryOpen(Path.Combine(AppContext.BaseDirectory, "Fixtures", fixture), out var hr, VideoBackend.Ffmpeg);
-        Assert.True(player is not null, $"FFmpeg open failed 0x{hr:X8}");
-        player!.SetMuted(true);
-        var info = await player.WaitForReadyAsync(TimeSpan.FromSeconds(10), CancellationToken.None);
-        Assert.Equal(VideoPlaybackState.Ready, info.State);
-        Assert.Equal(VideoBackend.Ffmpeg, info.Backend);
-        Assert.Equal((160, 90), (info.Width, info.Height));
-        Assert.InRange(info.Duration, 1.8, 2.3);
-
-        var frame = new byte[80 * 45 * 4];
-        var deadline = DateTime.UtcNow.AddSeconds(5);
-        var frames = 0;
-        while (frames < 5 && DateTime.UtcNow < deadline) { if (player.TryReadFrame(frame, 80, 45)) frames++; await Task.Delay(10); }
-        Assert.True(frames >= 5, $"only {frames} frames");
-        Assert.Contains(frame.Where((_, i) => i % 4 != 3), b => b > 32);
-        Assert.All(Enumerable.Range(0, 80 * 45), i => Assert.Equal(255, frame[i * 4 + 3]));
-
-        player.Seek(1.2);
-        await Task.Delay(250);
-        Assert.InRange(player.GetInfo().Position, 1.15, 1.9);
-
-        player.SetPlaying(false);
-        var paused = player.GetInfo().Position;
-        await Task.Delay(200);
-        Assert.False(player.GetInfo().Playing);
-        Assert.Equal(paused, player.GetInfo().Position, 3);
+        var hasVp9 = NativeVideoPlayer.HasDecoder(VideoCodecCatalog.Vp9.Subtype, audio: false);
+        Assert.NotNull(hasVp9); // the probe itself must work on Windows
+        using var player = NativeVideoPlayer.TryOpen(Vp9FixturePath, out _);
+        var info = player is null ? default : await player.WaitForReadyAsync(TimeSpan.FromSeconds(10), CancellationToken.None);
+        var played = info.State == VideoPlaybackState.Ready && info.Width > 0;
+        var diagnosis = VideoPlaybackDiagnoser.Diagnose(Vp9FixturePath);
+        if (hasVp9 == true)
+        {
+            // This PC has the VP9 extension: the "missing codec" branch can't be observed here, Windows plays the file.
+            Assert.True(played, "Windows reports a VP9 decoder but could not play the fixture");
+            Assert.NotEqual(VideoDiagnosisKind.MissingCodecs, diagnosis.Kind);
+            return;
+        }
+        Assert.False(played);
+        Assert.Equal(VideoDiagnosisKind.MissingCodecs, diagnosis.Kind);
+        Assert.Equal("This video uses the VP9 codec, which isn't installed on this PC.", diagnosis.Message);
     }
 
     [Fact]
-    public async Task Ffmpeg_backend_never_blocks_deleting_the_file()
+    public void Playable_fixture_is_diagnosed_as_having_every_decoder()
     {
-        var copy = Path.Combine(Path.GetTempPath(), $"glide-video-{Guid.NewGuid():N}.webm");
-        File.Copy(Vp9FixturePath, copy);
-        using var player = NativeVideoPlayer.TryOpen(copy, out _, VideoBackend.Ffmpeg);
-        Assert.NotNull(player);
-        player!.SetMuted(true);
-        Assert.Equal(VideoPlaybackState.Ready, (await player.WaitForReadyAsync(TimeSpan.FromSeconds(10), CancellationToken.None)).State);
-        File.Delete(copy);
-        Assert.False(File.Exists(copy));
+        // H.264/AAC ship with Windows; the diagnosis must not invent a missing codec for them.
+        var diagnosis = VideoPlaybackDiagnoser.Diagnose(FixturePath);
+        Assert.Equal(VideoDiagnosisKind.DecodersPresent, diagnosis.Kind);
+        Assert.Contains("H.264 (AVC) video", diagnosis.Message, StringComparison.Ordinal);
+        Assert.Empty(diagnosis.MissingCodecs);
     }
 
     [Fact]
-    public void Ffmpeg_backend_rejects_garbage_without_crashing()
+    public void Windows_reports_its_built_in_h264_decoder()
     {
-        var garbage = Path.Combine(Path.GetTempPath(), $"glide-garbage-{Guid.NewGuid():N}.webm");
-        File.WriteAllBytes(garbage, Enumerable.Repeat((byte)0x5A, 4096).ToArray());
-        try { Assert.Null(NativeVideoPlayer.TryOpen(garbage, out _, VideoBackend.Ffmpeg)); }
-        finally { File.Delete(garbage); }
+        Assert.True(NativeVideoPlayer.HasDecoder(VideoCodecCatalog.H264.Subtype, audio: false));
+        Assert.True(NativeVideoPlayer.HasDecoder(VideoCodecCatalog.Aac.Subtype, audio: true));
+        // A subtype no decoder registers.
+        Assert.False(NativeVideoPlayer.HasDecoder(VideoCodecCatalog.Fcc("ZZQ9"), audio: false));
     }
 
     [Fact]
-    public void Overlay_sessions_try_windows_codecs_first_then_the_bundled_ffmpeg_fallback()
+    public void Overlay_sessions_use_only_the_codecs_installed_in_windows()
     {
         var session = ReadSource("src", "Glide.App", "Controls", "VideoOverlaySession.cs");
-        var windows = session.IndexOf("VideoBackend.MediaFoundation, options", StringComparison.Ordinal);
-        var fallback = session.IndexOf("VideoBackend.Ffmpeg, options", StringComparison.Ordinal);
-        Assert.True(windows > 0 && fallback > windows);
+        Assert.Contains("NativeVideoPlayer.TryOpen(path, out _)", session, StringComparison.Ordinal);
+        Assert.DoesNotContain("Backend", session, StringComparison.Ordinal);
+        Assert.DoesNotContain("Download", session, StringComparison.OrdinalIgnoreCase);
+        var window = ReadSource("src", "Glide.App", "MainWindow.Tabs.cs");
+        Assert.Contains("VideoPlaybackDiagnoser.Diagnose(path)", window, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Ffmpeg_is_delay_loaded_and_its_download_pack_carries_the_license()
+    public void Native_video_bridge_has_no_bundled_decoder()
     {
         var cmake = ReadSource("native", "Glide.Native", "CMakeLists.txt");
-        var build = ReadSource("build.cmd");
-        Assert.Contains("/DELAYLOAD:", cmake, StringComparison.Ordinal);
-        Assert.Contains(@"tools\fetch-ffmpeg.ps1", build, StringComparison.Ordinal);
-        var pack = ReadSource("tools", "package-ffmpeg-pack.ps1");
-        Assert.Contains("LICENSE.txt", pack, StringComparison.Ordinal);
-        Assert.Contains("NOTICE.txt", pack, StringComparison.Ordinal);
+        Assert.DoesNotContain("/DELAYLOAD:", cmake, StringComparison.Ordinal);
+        Assert.DoesNotContain("GlideVideoFfmpeg", cmake, StringComparison.Ordinal);
+        var video = ReadSource("native", "Glide.Native", "GlideVideo.cpp");
+        Assert.Contains("GlideVideoHasDecoder", video, StringComparison.Ordinal);
+        Assert.Contains("MFTEnumEx", video, StringComparison.Ordinal);
     }
 
     private static string ReadSource(params string[] segments)

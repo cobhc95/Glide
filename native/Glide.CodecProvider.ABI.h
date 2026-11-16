@@ -22,10 +22,15 @@ namespace glide_codec_abi
     inline constexpr std::uint32_t SupportsFull     = 1u << 1;
     inline constexpr std::uint32_t SupportsMetadata = 1u << 2;
     inline constexpr std::uint32_t SupportsFrames   = 1u << 3;
+    // ABI v2 extension (Glide 5.0.4): the provider can write images (GlideCodecProvider_EncodeSurface).
+    // Hosts that predate it ignore the bit; a v2 provider without it is decode-only, as before.
+    inline constexpr std::uint32_t SupportsEncode   = 1u << 4;
 
     // ABI v2 surface constants. Glide currently accepts only premultiplied BGRA8.
     inline constexpr std::uint32_t PixelFormatBgra8 = 1;
     inline constexpr std::uint32_t AlphaPremultiplied = 1;
+    // Encode input only: straight (unassociated) alpha.
+    inline constexpr std::uint32_t AlphaStraight = 2;
 
     struct ProviderInfo
     {
@@ -83,3 +88,9 @@ namespace glide_codec_abi
 // Metadata / frame exports (UTF-8 JSON in glide_codec_abi::Buffer) retain the v1 buffer shape:
 // GLIDE_CODEC_EXPORT int GLIDE_CODEC_CALL GlideCodecProvider_ReadMetadata(void* instance, const char* utf8Path, glide_codec_abi::Buffer* result);
 // GLIDE_CODEC_EXPORT int GLIDE_CODEC_CALL GlideCodecProvider_ReadFrames(void* instance, const char* utf8Path, glide_codec_abi::Buffer* result);
+//
+// ABI v2 encode extension when SupportsEncode is set (looked up with GetProcAddress; optional):
+// GLIDE_CODEC_EXPORT int GLIDE_CODEC_CALL GlideCodecProvider_EncodeSurface(void* instance, const char* utf8Path, const glide_codec_abi::Surface* surface, const char* format, float quality);
+//   Writes `surface` (BGRA8, AlphaPremultiplied or AlphaStraight) to utf8Path. `format` is a lower-case
+//   name such as "jp2", "j2k" or "webp"; quality >= 1 selects lossless, otherwise 0..1. Returns 1 on
+//   success. A null utf8Path and surface asks only whether `format` is supported (1) or not (0).

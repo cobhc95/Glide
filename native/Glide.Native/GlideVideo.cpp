@@ -4,8 +4,8 @@
 // frames inside its own overlay renderers (which own position, opacity, crop, zoom and motion).
 // Decoding, audio output, A/V sync, seeking and looping are owned by Media Foundation; this file
 // only exposes a tiny C ABI and copies the current frame, already scaled on the GPU, into a
-// caller-owned BGRA buffer. When Windows lacks a codec, the managed side reopens the file with the
-// bundled FFmpeg backend (GlideVideoFfmpeg.cpp) through the same exports.
+// caller-owned BGRA buffer. Glide ships no video decoders of its own: when Windows lacks a codec,
+// GlideVideoHasDecoder lets the managed side name exactly which one is missing.
 //
 // Files are opened with FILE_SHARE_DELETE so a playing overlay never blocks deleting or moving the
 // user's video (the same invariant every Glide image read follows).
@@ -397,13 +397,14 @@ namespace
     GlideVideoBackend* AsBackend(void* handle) { return static_cast<GlideVideoBackend*>(handle); }
 }
 
-// backendKind: 0 = Media Foundation (hardware decode, Windows codecs), 1 = bundled FFmpeg fallback.
+// backendKind is kept for ABI stability; only 0 (Media Foundation) exists.
 extern "C" __declspec(dllexport) int __cdecl GlideVideoOpenExW(const wchar_t* path, int backendKind, void** handle)
 {
     if (!path || !handle) return E_POINTER;
     *handle = nullptr;
+    if (backendKind != 0) return E_INVALIDARG;
     GlideVideoBackend* backend = nullptr;
-    const int hr = backendKind == 1 ? CreateFfmpegVideoBackend(path, &backend) : OpenMediaEngine(path, &backend);
+    const int hr = OpenMediaEngine(path, &backend);
     if (hr < 0) return hr;
     *handle = backend;
     return S_OK;
@@ -414,28 +415,28 @@ extern "C" __declspec(dllexport) int __cdecl GlideVideoOpenW(const wchar_t* path
     return GlideVideoOpenExW(path, 0, handle);
 }
 
-// Reports 1 when the file's first video stream is H.264 larger than HardwareDecodeMaxSide, which
-// Media Foundation cannot hardware-decode on this GPU. Reads only the container header, so it is
-// cheap. A file that cannot be probed reports 0 and keeps the normal open path.
-extern "C" __declspec(dllexport) int __cdecl GlideVideoExceedsHardwareDecodeLimitW(const wchar_t* path, int* exceeds)
+// Asks Media Foundation whether any decoder (software, hardware or a Microsoft Store video/audio
+// extension) accepts the given input subtype. *available is 1 when one is registered, 0 when none.
+// Only enumerates registrations; no decoder is loaded.
+extern "C" __declspec(dllexport) int __cdecl GlideVideoHasDecoder(const GUID* subtype, int isAudio, int* available)
 {
-    if (!path || !exceeds) return E_POINTER;
-    *exceeds = 0;
+    if (!subtype || !available) return E_POINTER;
+    *available = 0;
     if (!AcquireMediaFoundation()) return E_FAIL;
     ComScope com;
-    IMFSourceReader* reader = nullptr;
-    IMFMediaType* type = nullptr;
-    HRESULT hr = MFCreateSourceReaderFromURL(path, nullptr, &reader);
-    if (SUCCEEDED(hr)) hr = reader->GetNativeMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, 0, &type);
+    MFT_REGISTER_TYPE_INFO input{ isAudio ? MFMediaType_Audio : MFMediaType_Video, *subtype };
+    IMFActivate** activates = nullptr;
+    UINT32 count = 0;
+    const UINT32 flags = MFT_ENUM_FLAG_SYNCMFT | MFT_ENUM_FLAG_ASYNCMFT | MFT_ENUM_FLAG_HARDWARE |
+                         MFT_ENUM_FLAG_LOCALMFT | MFT_ENUM_FLAG_SORTANDFILTER;
+    const HRESULT hr = MFTEnumEx(isAudio ? MFT_CATEGORY_AUDIO_DECODER : MFT_CATEGORY_VIDEO_DECODER, flags,
+                                 &input, nullptr, &activates, &count);
     if (SUCCEEDED(hr))
     {
-        GUID subtype{};
-        UINT32 width = 0, height = 0;
-        if (SUCCEEDED(type->GetGUID(MF_MT_SUBTYPE, &subtype)) && SUCCEEDED(MFGetAttributeSize(type, MF_MT_FRAME_SIZE, &width, &height)))
-            *exceeds = IsEqualGUID(subtype, MFVideoFormat_H264) && (width > HardwareDecodeMaxSide || height > HardwareDecodeMaxSide) ? 1 : 0;
+        for (UINT32 i = 0; i < count; ++i) if (activates[i]) activates[i]->Release();
+        CoTaskMemFree(activates);
+        *available = count > 0 ? 1 : 0;
     }
-    SafeRelease(type);
-    SafeRelease(reader);
     ReleaseMediaFoundation();
     return hr;
 }

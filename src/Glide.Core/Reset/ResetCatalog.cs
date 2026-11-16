@@ -1,6 +1,6 @@
 namespace Glide.Core.Reset;
 
-/// <summary>The things Settings &gt; Windows &amp; developer &gt; Reset Glide can wipe. Order = order on screen and order of execution.</summary>
+/// <summary>The kinds of Glide data (Reset Glide and Back up and restore, see Glide.Core.Data.GlideDataCategoryCatalog). Order = order on screen and order of execution.</summary>
 public enum ResetItemId
 {
     AllSettings,
@@ -10,7 +10,6 @@ public enum ResetItemId
     RecentHistory,
     LastSession,
     Caches,
-    CodecPack,
     RegistryEntries,
     StartupEntries,
 }
@@ -41,36 +40,17 @@ public static class ResetCatalog
 {
     public const string CardSettingId = "reset.card";
 
+    /// <summary>
+    /// The Reset Glide tick boxes: every category of the shared <see cref="Glide.Core.Data.GlideDataCategoryCatalog"/> that can
+    /// be reset, in its order and with its wording (the Back up and restore card reads the same list).
+    /// </summary>
     public static IReadOnlyList<ResetItemInfo> Items { get; } =
-    [
-        new(ResetItemId.AllSettings, "reset.allSettings", ResetGroup.Settings,
-            "All settings", "Every option back to its default", true),
-        new(ResetItemId.HotkeysAndGestures, "reset.hotkeysGestures", ResetGroup.Settings,
-            "Hotkeys and mouse gestures", "Including custom presets", true),
-        new(ResetItemId.ProfilesAndPresets, "reset.profiles", ResetGroup.Settings,
-            "Saved profiles and presets", "Named profiles, interaction presets", true),
-        new(ResetItemId.WindowPlacements, "reset.windowPlacement", ResetGroup.Settings,
-            "Window sizes and positions", "Main, Settings, Print and dialogs", true),
-        new(ResetItemId.RecentHistory, "reset.recentHistory", ResetGroup.HistoryAndData,
-            "Recent files and Home list", "Recent images and folders", true),
-        new(ResetItemId.LastSession, "reset.lastSession", ResetGroup.HistoryAndData,
-            "Last session", "Open tabs, Explorer locations", true),
-        new(ResetItemId.Caches, "reset.caches", ResetGroup.HistoryAndData,
-            "Image and thumbnail caches", "Rebuilt automatically", false),
-        new(ResetItemId.CodecPack, "reset.codecPack", ResetGroup.HistoryAndData,
-            "Downloaded video codec pack", "FFmpeg files in local app data", true),
-        new(ResetItemId.RegistryEntries, "reset.registry", ResetGroup.WindowsIntegration,
-            "Registry entries", "Open With, file types, thumbnails", false),
-        new(ResetItemId.StartupEntries, "reset.startup", ResetGroup.WindowsIntegration,
-            "Startup and background entries", "Windows startup, Speed Boost task", true),
-    ];
+        Glide.Core.Data.GlideDataCategoryCatalog.With(Glide.Core.Data.GlideDataCapabilities.Reset)
+            .Select(x => new ResetItemInfo(x.Id, x.ResetSettingId, x.Group, x.Title,
+                x.DescriptionFor(Glide.Core.Data.GlideDataCapabilities.Reset), x.ResetNeedsRestart))
+            .ToArray();
 
-    public static string GroupTitle(ResetGroup group) => group switch
-    {
-        ResetGroup.Settings => "Settings",
-        ResetGroup.HistoryAndData => "History and data",
-        _ => "Windows integration",
-    };
+    public static string GroupTitle(ResetGroup group) => Glide.Core.Data.GlideDataCategoryCatalog.GroupTitle(group);
 
     public static ResetItemInfo Info(ResetItemId id) => Items.First(x => x.Id == id);
 
@@ -88,7 +68,6 @@ public static class ResetCatalog
     public const string PrintSettingsFileName = "print.settings.json";
     public const string ThumbnailSettingsFileName = "thumbnail.settings.json";
     public const string StartupDiagnosticsFolderName = "Startup Diagnostics";
-    public const string CodecPackFolderPattern = "ffmpeg-*";
 
     /// <summary>Properties of glide.settings.json removed by "Hotkeys and mouse gestures" (they fall back to the built-in maps).</summary>
     public static IReadOnlyList<string> HotkeyGestureProperties { get; } =
@@ -115,6 +94,45 @@ public static class ResetCatalog
 
     /// <summary>Settings switched off (not deleted: their default is on) by "Startup and background entries".</summary>
     public static IReadOnlyList<string> StartupSwitchProperties { get; } = ["StartWithWindowsInBackground", "SpeedBoostEnabled"];
+
+    /// <summary>Format version of glide.settings.json. Never reset and never lowered (a lower value would re-run old migrations).</summary>
+    public const string SettingsSchemaVersionProperty = "SettingsSchemaVersion";
+
+    /// <summary>The update checker's memory (last check, latest known version, last prompt): bookkeeping, not settings.</summary>
+    public static IReadOnlyList<string> UpdateCheckerMemoryProperties { get; } =
+    [
+        "UpdateLastCheckedUtc", "UpdateLastAttemptUtc", "UpdateLastAttemptFailed", "UpdateLatestKnownVersion",
+        "UpdateLatestKnownUrl", "UpdateLatestKnownPublishedUtc", "UpdateLastPromptedVersion", "UpdateLastPromptedUtc",
+    ];
+
+    /// <summary>The saved "User custom" performance preset (written by Save as User custom): a saved preset, not an option.</summary>
+    public static IReadOnlyList<string> SavedPerformancePresetProperties { get; } =
+    [
+        "PerformanceUserCustomSaved", "UserCustomPanQuality", "UserCustomAdaptivePreview", "UserCustomRefinementDelayMs",
+        "UserCustomSequentialReads", "UserCustomPrefetch", "UserCustomPrefetchDepth", "UserCustomBackgroundRefinement",
+        "UserCustomCacheItems", "UserCustomCompressedCacheMb", "UserCustomDecodedCacheMb", "UserCustomPreviewLongestSide",
+        "UserCustomRapidBrowsePreviewSize", "UserCustomProgressiveColor",
+    ];
+
+    /// <summary>
+    /// Values of glide.settings.json that "All settings" (and the Settings window's Restore defaults button, which uses the
+    /// same <see cref="AllSettingsReset"/>) leave exactly as they are: they are not options, or another reset item owns them.
+    /// The schema version; hotkeys and mouse gestures ("Hotkeys and mouse gestures"); the last profile folder ("Saved
+    /// profiles and presets"); every window size and position ("Window sizes and positions"); remembered folders ("Last
+    /// session"); the Windows startup switches ("Startup and background entries": resetting them would add or remove the
+    /// Windows Run entry); the update checker's memory and the saved User custom performance preset.
+    /// </summary>
+    public static IReadOnlyList<string> AllSettingsKeptProperties { get; } =
+        new[] { SettingsSchemaVersionProperty }
+            .Concat(HotkeyGestureProperties)
+            .Concat(ProfileProperties)
+            .Concat(WindowPlacementProperties)
+            .Concat(SessionLocationProperties)
+            .Concat(StartupSwitchProperties)
+            .Concat(UpdateCheckerMemoryProperties)
+            .Concat(SavedPerformancePresetProperties)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
 
     // ---- HKCU names (relative to HKEY_CURRENT_USER) ----
 

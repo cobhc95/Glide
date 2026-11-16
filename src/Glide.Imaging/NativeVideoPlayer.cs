@@ -5,18 +5,13 @@ namespace Glide.Imaging;
 /// <summary>Playback state snapshot reported by <see cref="NativeVideoPlayer"/>.</summary>
 public readonly record struct VideoPlaybackInfo(
     VideoPlaybackState State, int Width, int Height, bool Playing, bool Ended, bool Muted, bool Loop,
-    int Error, double Duration, double Position, double Volume, VideoBackend Backend = VideoBackend.MediaFoundation);
+    int Error, double Duration, double Position, double Volume);
 
 public enum VideoPlaybackState { Loading = 0, Ready = 1, Failed = -1 }
 
 /// <summary>
-/// Media Foundation uses Windows' own (often hardware) decoders; FFmpeg is the optional, downloaded software
-/// fallback for formats Windows can't decode on this PC (WebM, HEVC, AV1, MPEG-2 without extensions).
-/// </summary>
-public enum VideoBackend { MediaFoundation = 1, Ffmpeg = 2 }
-
-/// <summary>
-/// Managed owner of one Media Foundation player in Glide.Native. Every method is safe to call from
+/// Managed owner of one Media Foundation player in Glide.Native. Glide plays videos only with the codecs
+/// installed in Windows; <see cref="HasDecoder"/> tells which one is missing when a video can't be played. Every method is safe to call from
 /// any thread and after disposal (calls become no-ops). Frames are copied into caller buffers as
 /// opaque top-down BGRA, already scaled to the requested size on the GPU when one is available.
 /// </summary>
@@ -28,13 +23,13 @@ public sealed partial class NativeVideoPlayer : IDisposable
     private NativeVideoPlayer(IntPtr handle) => _handle = handle;
 
     /// <summary>Starts opening <paramref name="path"/>. Playback begins (looping) once loaded.</summary>
-    public static NativeVideoPlayer? TryOpen(string path, out int hresult, VideoBackend backend = VideoBackend.MediaFoundation)
+    public static NativeVideoPlayer? TryOpen(string path, out int hresult)
     {
         hresult = -1;
         if (!OperatingSystem.IsWindows() || string.IsNullOrWhiteSpace(path)) return null;
         try
         {
-            hresult = GlideVideoOpenExW(path, backend == VideoBackend.Ffmpeg ? 1 : 0, out var handle);
+            hresult = GlideVideoOpenExW(path, 0, out var handle);
             return hresult >= 0 && handle != IntPtr.Zero ? new NativeVideoPlayer(handle) : null;
         }
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
@@ -44,19 +39,20 @@ public sealed partial class NativeVideoPlayer : IDisposable
     }
 
     /// <summary>
-    /// True when the file is H.264 beyond the GPU hardware decode limit, which Media Foundation cannot
-    /// play in reasonable time. Reads only the container header; false when the file can't be probed.
+    /// Whether Windows has a Media Foundation decoder (built in, hardware or a Microsoft Store extension)
+    /// for the input <paramref name="subtype"/>. Only enumerates registrations; nothing is loaded. Null when
+    /// it can't be determined (no Glide.Native, Media Foundation unavailable). Never throws.
     /// </summary>
-    public static bool ExceedsHardwareDecodeLimit(string path)
+    public static bool? HasDecoder(Guid subtype, bool audio)
     {
-        if (!OperatingSystem.IsWindows() || string.IsNullOrWhiteSpace(path)) return false;
+        if (!OperatingSystem.IsWindows() || subtype == Guid.Empty) return null;
         try
         {
-            return GlideVideoExceedsHardwareDecodeLimitW(path, out var exceeds) >= 0 && exceeds != 0;
+            return GlideVideoHasDecoder(in subtype, audio ? 1 : 0, out var available) >= 0 ? available != 0 : null;
         }
-        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException)
         {
-            return false;
+            return null;
         }
     }
 
@@ -80,7 +76,7 @@ public sealed partial class NativeVideoPlayer : IDisposable
         {
             if (_handle == IntPtr.Zero || GlideVideoGetInfo(_handle, out var n) < 0) return new VideoPlaybackInfo { };
             return new VideoPlaybackInfo((VideoPlaybackState)n.State, n.Width, n.Height, n.Playing != 0, n.Ended != 0,
-                n.Muted != 0, n.Loop != 0, n.Error, n.Duration, n.Position, n.Volume, n.Backend == 2 ? VideoBackend.Ffmpeg : VideoBackend.MediaFoundation);
+                n.Muted != 0, n.Loop != 0, n.Error, n.Duration, n.Position, n.Volume);
         }
     }
 
@@ -123,8 +119,8 @@ public sealed partial class NativeVideoPlayer : IDisposable
     [LibraryImport("Glide.Native", EntryPoint = "GlideVideoOpenExW", StringMarshalling = StringMarshalling.Utf16)]
     private static partial int GlideVideoOpenExW(string path, int backend, out IntPtr handle);
 
-    [LibraryImport("Glide.Native", EntryPoint = "GlideVideoExceedsHardwareDecodeLimitW", StringMarshalling = StringMarshalling.Utf16)]
-    private static partial int GlideVideoExceedsHardwareDecodeLimitW(string path, out int exceeds);
+    [LibraryImport("Glide.Native", EntryPoint = "GlideVideoHasDecoder")]
+    private static partial int GlideVideoHasDecoder(in Guid subtype, int isAudio, out int available);
 
     [LibraryImport("Glide.Native", EntryPoint = "GlideVideoClose")]
     private static partial void GlideVideoClose(IntPtr handle);

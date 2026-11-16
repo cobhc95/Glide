@@ -121,5 +121,9 @@ public enum GlideCommand
     /// <summary>Tab tooltip text one size smaller. Appended (5.0.3).</summary>
     TabToolTipSmaller,
     /// <summary>Opens the status-bar button customizer (show / hide / reorder groups). Appended (5.0.3).</summary>
-    CustomizeStatusBar
+    CustomizeStatusBar,
+    /// <summary>Settings > Back up and restore: Export (save a .glidebackup file). Appended (5.0.4).</summary>
+    ExportGlideBackup,
+    /// <summary>Settings > Back up and restore: Import (choose a .glidebackup file, then what to import). Appended (5.0.4).</summary>
+    ImportGlideBackup
 }

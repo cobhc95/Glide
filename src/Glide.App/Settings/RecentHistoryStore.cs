@@ -74,6 +74,44 @@ public static class RecentHistoryStore
         ScheduleFlush();
     }
 
+    /// <summary>Back up and restore: every remembered entry (newest first), after the history has been loaded from disk.</summary>
+    internal static async Task<IReadOnlyList<Entry>> SnapshotForBackupAsync()
+    {
+        await InitializeAsync().ConfigureAwait(false);
+        lock (Gate) return Items.OrderByDescending(x => x.LastOpenedUtc).ToArray();
+    }
+
+    /// <summary>
+    /// Back up and restore: replaces the whole history with <paramref name="entries"/> (already validated by the importer) and
+    /// writes it now (temp file + replace). The in-memory list is replaced too, so a later save can never write the old list
+    /// back. Throws when the file could not be written.
+    /// </summary>
+    internal static async Task ReplaceAllAsync(IReadOnlyList<Entry> entries)
+    {
+        ArgumentNullException.ThrowIfNull(entries);
+        await InitializeAsync().ConfigureAwait(false);
+        Task? maintenance;
+        lock (Gate) maintenance = _maintenanceTask;
+        // Let the start-up "drop missing files" pass finish first: it must not run over the imported list afterwards.
+        if (maintenance is not null) await maintenance.ConfigureAwait(false);
+        CancellationTokenSource? pending;
+        lock (Gate)
+        {
+            Items.Clear();
+            var merged = new Dictionary<string, Entry>(StringComparer.OrdinalIgnoreCase);
+            foreach (var item in entries) MergeNewest(merged, item);
+            Items.AddRange(merged.Values.OrderByDescending(x => x.LastOpenedUtc).Take(32));
+            pending = _debounce;
+            _debounce = null;
+            _lastPersistenceError = null;
+        }
+        pending?.Cancel();
+        await PersistAsync().ConfigureAwait(false);
+        Exception? failure;
+        lock (Gate) failure = _lastPersistenceError;
+        if (failure is not null) throw new IOException("The recent files list could not be saved: " + failure.Message, failure);
+    }
+
     /// <summary>Waits for initialization and lazy maintenance, then persists the latest state.</summary>
     public static async Task FlushAsync()
     {

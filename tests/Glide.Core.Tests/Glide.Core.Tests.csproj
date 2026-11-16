@@ -17,5 +17,7 @@
   <ItemGroup>
     <None Include="Fixtures\overlay-video.mp4" CopyToOutputDirectory="PreserveNewest" />
     <None Include="Fixtures\overlay-video-vp9.webm" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="Fixtures\Codecs\*" Exclude="Fixtures\Codecs\*.py" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="Fixtures\Pdn\*" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

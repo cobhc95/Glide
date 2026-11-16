@@ -59,7 +59,7 @@ public static class ResetBackup
             foreach (var name in copied) info.AppendLine("  " + name);
             info.AppendLine();
             info.AppendLine("To restore: close Glide, then copy these files back into the settings folder above.");
-            info.AppendLine("Windows registry entries, caches and the downloaded video codec pack are not part of the backup.");
+            info.AppendLine("Windows registry entries and caches are not part of the backup.");
             fs.WriteAllTextAtomic(Path.Combine(folder, "backup-info.txt"), info.ToString());
             return new ResetBackupResult(true, folder, copied, null);
         }

@@ -12,7 +12,8 @@ $providers = @()
 Get-ChildItem $CodecDirectory -Filter '*.glidecodec.json' -File | Sort-Object Name | ForEach-Object {
     $manifestPath = $_.FullName
     $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
-    $dllPath = [System.IO.Path]::ChangeExtension($manifestPath, '.dll')
+    # name.glidecodec.json pairs with name.dll (ChangeExtension would yield name.glidecodec.dll).
+    $dllPath = $manifestPath.Substring(0, $manifestPath.Length - '.glidecodec.json'.Length) + '.dll'
     if (-not (Test-Path $dllPath)) { throw "Codec manifest has no matching DLL: $manifestPath" }
     $hash = (Get-FileHash $dllPath -Algorithm SHA256).Hash.ToLowerInvariant()
     if ([string]::IsNullOrWhiteSpace([string]$manifest.sha256) -or $hash -ne ([string]$manifest.sha256).ToLowerInvariant()) {

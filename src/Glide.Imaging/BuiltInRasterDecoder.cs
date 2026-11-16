@@ -3,9 +3,6 @@ using System.Buffers.Binary;
 using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
-using Avalonia;
-using Avalonia.Media.Imaging;
-using Avalonia.Platform;
 using Glide.Core;
 
 namespace Glide.Imaging;
@@ -15,8 +12,11 @@ namespace Glide.Imaging;
 /// nor the Windows WIC bridge can be relied on to handle. Every entry point is total: malformed,
 /// truncated or hostile input returns <c>false</c> (with a null bitmap) and never throws. Output is
 /// straight (non-premultiplied) BGRA8 with alpha 255 unless the source carries its own alpha.
+/// It is also the single dispatch point for the larger bundled managed decoders (camera RAW previews,
+/// OpenEXR, DICOM/NIfTI/FITS/PFM, ORA/KRA/PDN/XCF and GPU textures) which live in their own files and
+/// are only touched when a file of that family is opened.
 /// </summary>
-public static class BuiltInRasterDecoder
+public static partial class BuiltInRasterDecoder
 {
     private const int MaxDimension = DecodeMemoryGuard.MaxDimension;
     private const long MaxTotalPixels = DecodeMemoryGuard.MaxTotalPixels; // 512 MP, ~2.05 GB uncompressed at 32bpp
@@ -37,33 +37,29 @@ public static class BuiltInRasterDecoder
     public static bool CanDecode(string? path)
         => !string.IsNullOrWhiteSpace(path) && IsSupportedExtension(ImageFormatRegistry.GetLongestExtension(path));
 
-    /// <summary>Decodes the first frame/page at full resolution.</summary>
-    public static bool TryDecode(string path, out Bitmap? bitmap)
-    {
-        bitmap = null;
-        if (!TryDecodeToBuffer(path, out var image)) return false;
-        return TryCreateBitmap(image, out bitmap);
-    }
-
     /// <summary>
-    /// Decodes and, when the source is larger than <paramref name="maxLongestSide"/>, box-downsamples
-    /// to fit. The side is clamped to [1, 32768].
+    /// Decodes to straight BGRA and, when the source is larger than <paramref name="maxLongestSide"/>,
+    /// box-downsamples to fit (the side is clamped to [1, 32768]). This is the whole pixel pipeline behind
+    /// <c>TryDecodeBounded</c>; the Explorer thumbnail codec library (glidemanaged.dll) calls it directly so
+    /// thumbnails and the viewer share one decoder.
     /// </summary>
-    public static bool TryDecodeBounded(string path, int maxLongestSide, out Bitmap? bitmap)
+    internal static bool TryDecodeBoundedPixels(string path, int maxLongestSide, out DecodedImage image)
     {
-        bitmap = null;
         maxLongestSide = Math.Clamp(maxLongestSide, MinBoundedSide, MaxBoundedSide);
-        if (!TryDecodeToBuffer(path, out var image)) return false;
+        if (!TryDecodeToBuffer(path, maxLongestSide, out image)) return false;
 
         var longest = Math.Max(image.Width, image.Height);
-        if (longest <= maxLongestSide) return TryCreateBitmap(image, out bitmap);
+        if (longest <= maxLongestSide) return true;
 
         var scale = (double)maxLongestSide / longest;
         var targetWidth = Math.Max(1, (int)Math.Round(image.Width * scale));
         var targetHeight = Math.Max(1, (int)Math.Round(image.Height * scale));
-        var scaled = BoxDownsample(image, targetWidth, targetHeight);
-        return TryCreateBitmap(scaled, out bitmap);
+        image = BoxDownsample(image, targetWidth, targetHeight);
+        return true;
     }
+
+    /// <summary>Decodes the first frame/page at full resolution (pixels only).</summary>
+    internal static bool TryDecodeFullPixels(string path, out DecodedImage image) => TryDecodeToBuffer(path, 0, out image);
 
     /// <summary>Reads just enough of the file to report the first frame's stored dimensions.</summary>
     public static bool TryProbeDimensions(string path, out ImageDimensions dimensions)
@@ -74,6 +70,7 @@ public static class BuiltInRasterDecoder
         {
             var extension = ImageFormatRegistry.GetLongestExtension(path);
             if (!IsSupportedExtension(extension)) return false;
+            if (UsesFileAccess(extension)) return TryProbeFile(path, extension, out dimensions);
 
             using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete,
                 4096, FileOptions.SequentialScan);
@@ -114,13 +111,77 @@ public static class BuiltInRasterDecoder
         ".xbm" => true,
         ".xpm" => true,
         ".sgi" or ".rgb" or ".rgba" or ".bw" => true,
-        _ => false,
+        ".hdr.gz" => true,
+        ".exr" => true,
+        ".dcm" or ".dicom" or ".ima" => true,
+        ".nii" or ".nii.gz" => true,
+        ".fits" or ".fit" or ".fts" or ".fts.gz" => true,
+        ".pfm" => true,
+        ".ora" or ".kra" or ".pdn" or ".xcf" => true,
+        ".ktx" or ".ktx2" or ".pvr" or ".astc" => true,
+        ".dds" => true, // uncompressed only; block-compressed DDS returns false and continues to WIC
+        _ => RawPreviewDecoder.IsRawExtension(extension),
     };
 
-    private static bool TryDecodeToBuffer(string path, out DecodedImage image)
+    /// <summary>
+    /// Families that read the file themselves (random access / streaming / ZIP directory) instead of
+    /// loading the whole file: camera RAW (only the chosen preview is read), NIfTI (only one slice is
+    /// read or decompressed) and ZIP-based ORA/KRA.
+    /// </summary>
+    private static bool UsesFileAccess(string extension)
+        => extension is ".nii" or ".nii.gz" or ".ora" or ".kra" || RawPreviewDecoder.IsRawExtension(extension);
+
+    private static bool TryDecodeFile(string path, string extension, int maxLongestSide, out DecodedImage image)
+    {
+        image = default;
+        try
+        {
+            if (extension is ".nii" or ".nii.gz") return NiftiDecoder.TryDecodeFile(path, out image);
+            if (extension is ".ora" or ".kra") return ZipLayeredDecoder.TryDecodeFile(path, maxLongestSide, out image);
+            return RawPreviewDecoder.TryDecode(path, maxLongestSide, out image);
+        }
+        catch
+        {
+            image = default;
+            return false;
+        }
+    }
+
+    private static bool TryProbeFile(string path, string extension, out ImageDimensions dimensions)
+    {
+        dimensions = default;
+        try
+        {
+            if (extension is ".nii" or ".nii.gz") return NiftiDecoder.TryProbeFile(path, out dimensions);
+            if (extension is ".ora" or ".kra") return ZipLayeredDecoder.TryProbeFile(path, out dimensions);
+            return RawPreviewDecoder.TryProbe(path, out dimensions);
+        }
+        catch
+        {
+            dimensions = default;
+            return false;
+        }
+    }
+
+    /// <summary>Tests: decodes to the straight BGRA buffer the bitmap would be built from.</summary>
+    internal static bool TryDecodePixelsForTests(string path, int maxLongestSide, out int width, out int height, out byte[] bgra)
+    {
+        width = height = 0;
+        bgra = Array.Empty<byte>();
+        if (!TryDecodeToBuffer(path, maxLongestSide, out var image)) return false;
+        width = image.Width;
+        height = image.Height;
+        bgra = image.Bgra;
+        return true;
+    }
+
+    private static bool TryDecodeToBuffer(string path, int maxLongestSide, out DecodedImage image)
     {
         image = default;
         if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return false;
+        var fileExtension = ImageFormatRegistry.GetLongestExtension(path);
+        if (IsSupportedExtension(fileExtension) && UsesFileAccess(fileExtension))
+            return TryDecodeFile(path, fileExtension, maxLongestSide, out image);
         try
         {
             // Fix (TOCTOU + LOH): single FileStream open, Length checked once on the open handle,
@@ -147,10 +208,11 @@ public static class BuiltInRasterDecoder
                 // These decoders always build the full frame (a bounded request is a full decode plus a
                 // box downsample), and the output array plus the bitmap copy briefly hold it twice.
                 // Refuse a frame that would not fit the memory available now instead of risking OOM.
-                if (TryProbeBuffer(rented.AsSpan(0, count), extension, out var declared) && declared.IsValid &&
+                // Paint.NET checks memory itself and falls back to its embedded thumbnail instead.
+                if (extension != ".pdn" && TryProbeBuffer(rented.AsSpan(0, count), extension, out var declared) && declared.IsValid &&
                     !DecodeMemoryGuard.FitsAvailableMemory(DecodeMemoryGuard.EstimatedFrameBytes(declared) * 2, DecodeMemoryGuard.GetSnapshot()))
                     return false;
-                return TryDecodeBuffer(rented.AsSpan(0, count), extension, out image);
+                return TryDecodeBuffer(rented.AsSpan(0, count), extension, maxLongestSide, out image);
             }
             finally
             {
@@ -164,7 +226,7 @@ public static class BuiltInRasterDecoder
         }
     }
 
-    private static bool TryDecodeBuffer(ReadOnlySpan<byte> data, string extension, out DecodedImage image)
+    private static bool TryDecodeBuffer(ReadOnlySpan<byte> data, string extension, int maxLongestSide, out DecodedImage image)
     {
         image = default;
         try
@@ -181,6 +243,15 @@ public static class BuiltInRasterDecoder
                 ".xbm" => TryDecodeXbm(data, out image),
                 ".xpm" => TryDecodeXpm(data, out image),
                 ".sgi" or ".rgb" or ".rgba" or ".bw" => TryDecodeSgi(data, out image),
+                ".hdr.gz" => TryDecodeHdrGz(data, out image),
+                ".exr" => ExrDecoder.TryDecode(data, out image),
+                ".dcm" or ".dicom" or ".ima" => DicomDecoder.TryDecode(data, maxLongestSide, out image),
+                ".fits" or ".fit" or ".fts" or ".fts.gz" => FitsDecoder.TryDecode(data, out image),
+                ".pfm" => PfmDecoder.TryDecode(data, out image),
+                ".pdn" => PdnDecoder.TryDecode(data, maxLongestSide, out image),
+                ".xcf" => XcfDecoder.TryDecode(data, out image),
+                ".ktx" or ".ktx2" or ".pvr" or ".astc" => TextureDecoders.TryDecode(data, extension, out image),
+                ".dds" => TryDecodeDds(data, out image),
                 _ => false,
             };
         }
@@ -208,6 +279,15 @@ public static class BuiltInRasterDecoder
                 ".xbm" => TryProbeXbm(data, out dimensions),
                 ".xpm" => TryProbeXpm(data, out dimensions),
                 ".sgi" or ".rgb" or ".rgba" or ".bw" => TryProbeSgi(data, out dimensions),
+                ".hdr.gz" => TryProbeHdrGz(data, out dimensions),
+                ".exr" => ExrDecoder.TryProbe(data, out dimensions),
+                ".dcm" or ".dicom" or ".ima" => DicomDecoder.TryProbe(data, out dimensions),
+                ".fits" or ".fit" or ".fts" or ".fts.gz" => FitsDecoder.TryProbe(data, out dimensions),
+                ".pfm" => PfmDecoder.TryProbe(data, out dimensions),
+                ".pdn" => PdnDecoder.TryProbe(data, out dimensions),
+                ".xcf" => XcfDecoder.TryProbe(data, out dimensions),
+                ".ktx" or ".ktx2" or ".pvr" or ".astc" => TextureDecoders.TryProbe(data, extension, out dimensions),
+                ".dds" => TryProbeDds(data, out dimensions),
                 _ => false,
             };
         }
@@ -222,7 +302,7 @@ public static class BuiltInRasterDecoder
     // Bitmap / buffer plumbing
     // ---------------------------------------------------------------------------------------------
 
-    private readonly struct DecodedImage
+    internal readonly struct DecodedImage
     {
         public readonly int Width;
         public readonly int Height;
@@ -236,82 +316,50 @@ public static class BuiltInRasterDecoder
         }
     }
 
-    private static unsafe bool TryCreateBitmap(DecodedImage image, out Bitmap? bitmap)
-    {
-        bitmap = null;
-        if (image.Bgra is null || image.Width <= 0 || image.Height <= 0) return false;
-        int rowBytes;
-        try { rowBytes = checked(image.Width * 4); }
-        catch { return false; }
-        if (image.Bgra.Length < (long)rowBytes * image.Height) return false;
-
-        WriteableBitmap? candidate = null;
-        try
-        {
-            candidate = new WriteableBitmap(new PixelSize(image.Width, image.Height), new Vector(96, 96),
-                PixelFormat.Bgra8888, AlphaFormat.Unpremul);
-            using (var frame = candidate.Lock())
-            {
-                if (frame.RowBytes < rowBytes) return false;
-                fixed (byte* source = image.Bgra)
-                {
-                    for (var y = 0; y < image.Height; y++)
-                    {
-                        var src = source + (long)y * rowBytes;
-                        var dst = (byte*)frame.Address + (long)y * frame.RowBytes;
-                        Buffer.MemoryCopy(src, dst, frame.RowBytes, rowBytes);
-                    }
-                }
-            }
-            bitmap = candidate;
-            candidate = null;
-            return true;
-        }
-        catch
-        {
-            return false;
-        }
-        finally
-        {
-            candidate?.Dispose();
-        }
-    }
-
     private static DecodedImage BoxDownsample(DecodedImage source, int targetWidth, int targetHeight)
     {
         var output = new byte[checked(targetWidth * targetHeight * 4)];
-        for (var ty = 0; ty < targetHeight; ty++)
+        var bgra = source.Bgra;
+        int sourceWidth = source.Width, sourceHeight = source.Height;
+        // Column spans depend only on tx: compute them once instead of per output pixel.
+        var spanX0 = new int[targetWidth];
+        var spanX1 = new int[targetWidth];
+        for (var tx = 0; tx < targetWidth; tx++)
         {
-            var y0 = (int)((long)ty * source.Height / targetHeight);
-            var y1 = Math.Max(y0 + 1, (int)((long)(ty + 1) * source.Height / targetHeight));
-            for (var tx = 0; tx < targetWidth; tx++)
-            {
-                var x0 = (int)((long)tx * source.Width / targetWidth);
-                var x1 = Math.Max(x0 + 1, (int)((long)(tx + 1) * source.Width / targetWidth));
-
-                long b = 0, g = 0, r = 0, a = 0;
-                var count = 0;
-                for (var y = y0; y < y1; y++)
-                {
-                    var row = y * source.Width;
-                    for (var x = x0; x < x1; x++)
-                    {
-                        var i = (row + x) * 4;
-                        b += source.Bgra[i];
-                        g += source.Bgra[i + 1];
-                        r += source.Bgra[i + 2];
-                        a += source.Bgra[i + 3];
-                        count++;
-                    }
-                }
-
-                var o = (ty * targetWidth + tx) * 4;
-                output[o] = (byte)(b / count);
-                output[o + 1] = (byte)(g / count);
-                output[o + 2] = (byte)(r / count);
-                output[o + 3] = (byte)(a / count);
-            }
+            spanX0[tx] = (int)((long)tx * sourceWidth / targetWidth);
+            spanX1[tx] = Math.Max(spanX0[tx] + 1, (int)((long)(tx + 1) * sourceWidth / targetWidth));
         }
+        // Output rows are independent; bands produce exactly the serial result.
+        ManagedCodecSupport.ForBands(targetHeight, (long)sourceWidth * Math.Max(1, sourceHeight / targetHeight), (start, end) =>
+        {
+            for (var ty = start; ty < end; ty++)
+            {
+                var y0 = (int)((long)ty * sourceHeight / targetHeight);
+                var y1 = Math.Max(y0 + 1, (int)((long)(ty + 1) * sourceHeight / targetHeight));
+                for (var tx = 0; tx < targetWidth; tx++)
+                {
+                    int x0 = spanX0[tx], x1 = spanX1[tx];
+                    long b = 0, g = 0, r = 0, a = 0;
+                    for (var y = y0; y < y1; y++)
+                    {
+                        var i = ((long)y * sourceWidth + x0) * 4;
+                        for (var x = x0; x < x1; x++, i += 4)
+                        {
+                            b += bgra[i];
+                            g += bgra[i + 1];
+                            r += bgra[i + 2];
+                            a += bgra[i + 3];
+                        }
+                    }
+                    var count = (long)(y1 - y0) * (x1 - x0);
+                    var o = ((long)ty * targetWidth + tx) * 4;
+                    output[o] = (byte)(b / count);
+                    output[o + 1] = (byte)(g / count);
+                    output[o + 2] = (byte)(r / count);
+                    output[o + 3] = (byte)(a / count);
+                }
+            }
+        });
         return new DecodedImage(targetWidth, targetHeight, output);
     }
 
@@ -392,7 +440,8 @@ public static class BuiltInRasterDecoder
                 var header = data[offset++];
                 var count = (header & 0x7F) + 1;
                 if (produced + count > total) count = total - produced;
-                if ((header & 0x80) != 0)
+                // Bit 7 set = run-length packet (one pixel repeated); clear = raw packet of `count` pixels.
+                if ((header & 0x80) == 0)
                 {
                     for (var i = 0; i < count; i++)
                     {
@@ -547,7 +596,13 @@ public static class BuiltInRasterDecoder
         int samplesPerRow;
         int requiredBytesPerLine;
 
-        if (bpp is 1 or 2 or 4)
+        if (bpp == 1 && numPlanes is >= 2 and <= 4)
+        {
+            // EGA-style planar: `numPlanes` 1-bit planes per scanline, index = plane bits (header palette).
+            samplesPerRow = checked(bytesPerLine * numPlanes);
+            requiredBytesPerLine = (width + 7) / 8;
+        }
+        else if (bpp is 1 or 2 or 4)
         {
             if (numPlanes != 1) return false;
             samplesPerRow = bytesPerLine;
@@ -592,7 +647,7 @@ public static class BuiltInRasterDecoder
 
         var palette16 = new uint[16];
         for (var i = 0; i < 16; i++)
-            palette16[i] = Pack(data[16 + i * 3], data[17 + i * 3], data[18 + i * 3], 255);
+            palette16[i] = Pack(data[18 + i * 3], data[17 + i * 3], data[16 + i * 3], 255); // palette entries are R,G,B
 
         uint[]? palette256 = null;
         if (bpp == 8 && numPlanes == 1 && data.Length >= 769 && data[data.Length - 769] == 0x0C)
@@ -600,14 +655,24 @@ public static class BuiltInRasterDecoder
             palette256 = new uint[256];
             var start = data.Length - 768;
             for (var i = 0; i < 256; i++)
-                palette256[i] = Pack(data[start + i * 3], data[start + i * 3 + 1], data[start + i * 3 + 2], 255);
+                palette256[i] = Pack(data[start + i * 3 + 2], data[start + i * 3 + 1], data[start + i * 3], 255);
         }
 
         var output = new byte[checked(width * height * 4)];
         for (var y = 0; y < height; y++)
         {
             var rowBase = y * samplesPerRow;
-            if (bpp is 1 or 2 or 4)
+            if (bpp == 1 && numPlanes > 1)
+            {
+                for (var x = 0; x < width; x++)
+                {
+                    var index = 0;
+                    for (var plane = 0; plane < numPlanes; plane++)
+                        index |= ((raw[rowBase + plane * bytesPerLine + (x >> 3)] >> (7 - (x & 7))) & 1) << plane;
+                    WritePacked(output, y * width + x, palette16[index]);
+                }
+            }
+            else if (bpp is 1 or 2 or 4)
             {
                 var mask = (1 << bpp) - 1;
                 for (var x = 0; x < width; x++)
@@ -647,8 +712,8 @@ public static class BuiltInRasterDecoder
                 for (var x = 0; x < width; x++)
                 {
                     var o = rowBase + x * stride;
-                    if (bpp == 24) WritePacked(output, y * width + x, Pack(raw[o], raw[o + 1], raw[o + 2], 255));
-                    else WritePacked(output, y * width + x, Pack(raw[o], raw[o + 1], raw[o + 2], raw[o + 3]));
+                    if (bpp == 24) WritePacked(output, y * width + x, Pack(raw[o + 2], raw[o + 1], raw[o], 255));
+                    else WritePacked(output, y * width + x, Pack(raw[o + 2], raw[o + 1], raw[o], raw[o + 3]));
                 }
             }
         }
@@ -1263,6 +1328,20 @@ public static class BuiltInRasterDecoder
         return true;
     }
 
+    private static bool TryDecodeHdrGz(ReadOnlySpan<byte> data, out DecodedImage image)
+    {
+        image = default;
+        return ManagedCodecSupport.TryGunzip(data, MaxDecodedBytes, out var inflated) && TryDecodeHdr(inflated, out image);
+    }
+
+    private static bool TryProbeHdrGz(ReadOnlySpan<byte> data, out ImageDimensions dimensions)
+    {
+        dimensions = default;
+        var prefix = new byte[64 * 1024];
+        var produced = ManagedCodecSupport.Inflate(data, prefix, ManagedCodecSupport.Wrapper.Gzip);
+        return produced > 0 && TryProbeHdr(prefix.AsSpan(0, produced), out dimensions);
+    }
+
     private static void WriteRgbe(byte[] output, int pixel, byte er, byte eg, byte eb, byte ee)
     {
         var o = pixel * 4;
@@ -1312,7 +1391,7 @@ public static class BuiltInRasterDecoder
             {
                 var value = data[position + y * rowBytes + (x >> 3)];
                 var bit = (value >> (7 - (x & 7))) & 1;
-                var v = bit == 1 ? (byte)0 : (byte)255;
+                var v = bit == 1 ? (byte)255 : (byte)0; // WBMP type 0: 1 = white, 0 = black (WAP WBMP spec; as libgd and ImageMagick)
                 var o = (y * width + x) * 4;
                 output[o] = v; output[o + 1] = v; output[o + 2] = v; output[o + 3] = 255;
             }
@@ -1442,10 +1521,13 @@ public static class BuiltInRasterDecoder
         for (var i = 0; i < colors; i++)
         {
             var line = strings[1 + i];
-            var tokens = line.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
-            if (tokens.Length == 0) return false;
-            var key = tokens[0];
+            // The pixel key is the first `charsPerPixel` characters verbatim: it may itself be a space.
+            if (line.Length < charsPerPixel) return false;
+            var key = line.Substring(0, charsPerPixel);
+            var tokens = line.Substring(charsPerPixel).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+            // Prefer the colour visual ("c"), then grey ("g"/"g4") and mono ("m").
             var colorIndex = Array.FindIndex(tokens, t => t == "c");
+            if (colorIndex < 0) colorIndex = Array.FindIndex(tokens, t => t is "g" or "g4" or "m");
             if (colorIndex < 0 || colorIndex + 1 >= tokens.Length) return false;
             map[key] = ParseXpmColor(tokens[colorIndex + 1]);
         }
@@ -1580,8 +1662,10 @@ public static class BuiltInRasterDecoder
         var rows = new byte[zsize][];
         for (var z = 0; z < zsize; z++) rows[z] = new byte[width * bpc];
 
+        // SGI stores scanlines bottom-to-top: file row `y` is output row `height - 1 - y`.
         for (var y = 0; y < height; y++)
         {
+            var outputRow = height - 1 - y;
             for (var z = 0; z < zsize; z++)
             {
                 if (storage == 0)
@@ -1598,7 +1682,7 @@ public static class BuiltInRasterDecoder
 
             for (var x = 0; x < width; x++)
             {
-                var o = (y * width + x) * 4;
+                var o = (outputRow * width + x) * 4;
                 if (zsize == 1)
                 {
                     var v = SampleAt(rows[0], x, bpc);
@@ -1732,7 +1816,7 @@ public static class BuiltInRasterDecoder
         if (position + 2 > data.Length) return false;
         var compression = ReadU16BigEndian(data, position);
         position += 2;
-        if (compression > 1) return false;
+        if (compression > 3) return false;
 
         int width = header.Width, height = header.Height, depth = header.Depth;
         var rowBytes = (int)(((long)width * depth + 7) / 8);
@@ -1741,10 +1825,21 @@ public static class BuiltInRasterDecoder
         var tableStart = position;
         long cursor = compression == 1 ? tableStart + (long)header.Channels * height * countSize : tableStart;
         if (cursor > data.Length) return false;
+        byte[]? inflated = null;
+        if (compression >= 2)
+        {
+            // ZIP (2) / ZIP with prediction (3): one zlib stream holds every channel's rows. Deflate
+            // cannot expand more than ~1032:1, so a tiny stream claiming a huge canvas is refused before
+            // anything is allocated.
+            var total = (long)needed * height * rowBytes;
+            if (total <= 0 || total > int.MaxValue || data.Length - cursor < total / 1032) return false;
+            if (!ManagedCodecSupport.TryInflateExact(data[(int)cursor..], (int)total, ManagedCodecSupport.Wrapper.Zlib, out inflated)) return false;
+            if (compression == 3 && !PsdUndoPrediction(inflated, width, needed * height, depth)) return false;
+        }
         // Security: confirm the file really holds the pixel data before allocating the planes and the
         // output (several GB at the 512 MP cap). A tiny file declaring a huge canvas used to allocate
         // them first and only then discover that the data was missing.
-        if (!PsdHasPixelData(data, header, compression, needed, rowBytes, tableStart, cursor)) return false;
+        else if (!PsdHasPixelData(data, header, compression, needed, rowBytes, tableStart, cursor)) return false;
         var planes = new byte[needed][];
         for (var c = 0; c < needed; c++) planes[c] = new byte[pixelCount];
         var row = new byte[rowBytes];
@@ -1754,7 +1849,11 @@ public static class BuiltInRasterDecoder
             for (var y = 0; y < height; y++)
             {
                 ReadOnlySpan<byte> rowData;
-                if (compression == 0)
+                if (inflated is not null)
+                {
+                    rowData = inflated.AsSpan((int)(((long)c * height + y) * rowBytes), rowBytes);
+                }
+                else if (compression == 0)
                 {
                     if (cursor + rowBytes > data.Length) return false;
                     rowData = data.Slice((int)cursor, rowBytes);
@@ -1838,6 +1937,46 @@ public static class BuiltInRasterDecoder
                 if (length < minimumRowBytes) return false;
                 total += length;
                 if (total > data.Length - dataStart) return false;
+            }
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// Reverses Photoshop's ZIP-with-prediction filter in place: per-row horizontal deltas on 8-bit
+    /// bytes or 16-bit big-endian words; 32-bit rows are byte-delta coded and stored as four byte planes.
+    /// </summary>
+    internal static bool PsdUndoPrediction(byte[] buffer, int width, long rows, int depth)
+    {
+        if (depth is not (8 or 16 or 32)) return false;
+        var rowBytes = width * (depth / 8);
+        var plane = depth == 32 ? new byte[rowBytes] : null;
+        for (long r = 0; r < rows; r++)
+        {
+            var row = buffer.AsSpan((int)(r * rowBytes), rowBytes);
+            switch (depth)
+            {
+                case 8:
+                    for (var x = 1; x < width; x++) row[x] += row[x - 1];
+                    break;
+                case 16:
+                    for (var x = 1; x < width; x++)
+                    {
+                        var value = (ushort)(BinaryPrimitives.ReadUInt16BigEndian(row[(x * 2)..]) + BinaryPrimitives.ReadUInt16BigEndian(row[((x - 1) * 2)..]));
+                        BinaryPrimitives.WriteUInt16BigEndian(row[(x * 2)..], value);
+                    }
+                    break;
+                default:
+                    for (var i = 1; i < rowBytes; i++) row[i] += row[i - 1];
+                    row.CopyTo(plane);
+                    for (var x = 0; x < width; x++)
+                    {
+                        row[x * 4] = plane![x];
+                        row[x * 4 + 1] = plane[width + x];
+                        row[x * 4 + 2] = plane[2 * width + x];
+                        row[x * 4 + 3] = plane[3 * width + x];
+                    }
+                    break;
             }
         }
         return true;

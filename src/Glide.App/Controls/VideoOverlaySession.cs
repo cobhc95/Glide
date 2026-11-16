@@ -66,36 +66,32 @@ internal sealed class VideoOverlaySession : IDisposable
     }
 
     /// <summary>
-    /// Opens and waits for the first metadata. Windows' Media Foundation (hardware decode) is tried
-    /// first; if it can't play the file, FFmpeg is used, after offering to download it when it isn't
-    /// on this PC yet. Returns null (with a reason) only when neither can.
+    /// Opens and waits for the first metadata. Glide plays videos only with the codecs installed in Windows (Media
+    /// Foundation, hardware decode where available). Returns null with a reason code when Windows can't play the file;
+    /// <see cref="VideoPlaybackDiagnoser"/> then tells the user which codec is missing.
     /// </summary>
-    /// <summary>Asks the user to download the decoder pack; true once it is installed.</summary>
-    public static Func<CancellationToken, Task<bool>>? DecoderPackRequested { get; set; }
-
-    internal const string DecoderPackDeclined = "decoder_pack_declined";
-
     public static async Task<(VideoOverlaySession? Session, string? Failure)> OpenAsync(
         string path, VideoOverlayOptions options, CancellationToken cancellationToken)
     {
-        // Media Foundation can't hardware-decode these files and would stall for its full timeout first.
-        var beyondHardware = await Task.Run(() => NativeVideoPlayer.ExceedsHardwareDecodeLimit(path), cancellationToken).ConfigureAwait(true);
-        NativeVideoPlayer? player = null;
-        VideoPlaybackInfo info = default;
-        string? failure = "hardware_decode_limit";
-        if (!beyondHardware) (player, info, failure) = await TryOpenBackendAsync(path, VideoBackend.MediaFoundation, options, cancellationToken).ConfigureAwait(true);
-        if (player is null)
+        var player = await Task.Run(() => NativeVideoPlayer.TryOpen(path, out _), cancellationToken).ConfigureAwait(true);
+        if (player is null) return (null, "open_failed");
+        VideoPlaybackInfo info;
+        try
         {
-            // The first activation in a process re-hashes the downloaded pack: keep it off the UI thread.
-            if (!await VideoDecoderPack.TryActivateAsync().ConfigureAwait(true))
-            {
-                if (DecoderPackRequested is not { } request) return (null, failure);
-                if (!await request(cancellationToken).ConfigureAwait(true) || !await VideoDecoderPack.TryActivateAsync().ConfigureAwait(true))
-                    return (null, DecoderPackDeclined);
-            }
-            var fallback = await TryOpenBackendAsync(path, VideoBackend.Ffmpeg, options, cancellationToken).ConfigureAwait(true);
-            if (fallback.Player is null) return (null, failure);
-            (player, info) = (fallback.Player, fallback.Info);
+            player.SetMuted(options.Muted);
+            player.SetVolume(options.Volume);
+            player.SetLoop(options.Loop);
+            info = await player.WaitForReadyAsync(TimeSpan.FromSeconds(10), cancellationToken).ConfigureAwait(true);
+        }
+        catch
+        {
+            player.Dispose();
+            throw;
+        }
+        if (info.State != VideoPlaybackState.Ready || info.Width <= 0 || info.Height <= 0)
+        {
+            player.Dispose();
+            return (null, info.Error != 0 ? $"codec_unavailable_0x{info.Error:X8}" : "not_ready");
         }
         try
         {
@@ -105,28 +101,6 @@ internal sealed class VideoOverlaySession : IDisposable
             var session = new VideoOverlaySession(path, player, player.GetInfo(), width, height) { AutoPlayNext = options.AutoPlayNext };
             session._pump.Start();
             return (session, null);
-        }
-        catch
-        {
-            player.Dispose();
-            throw;
-        }
-    }
-
-    private static async Task<(NativeVideoPlayer? Player, VideoPlaybackInfo Info, string? Failure)> TryOpenBackendAsync(
-        string path, VideoBackend backend, VideoOverlayOptions options, CancellationToken cancellationToken)
-    {
-        var player = await Task.Run(() => NativeVideoPlayer.TryOpen(path, out _, backend), cancellationToken).ConfigureAwait(true);
-        if (player is null) return (null, default, "open_failed");
-        try
-        {
-            player.SetMuted(options.Muted);
-            player.SetVolume(options.Volume);
-            player.SetLoop(options.Loop);
-            var info = await player.WaitForReadyAsync(TimeSpan.FromSeconds(10), cancellationToken).ConfigureAwait(true);
-            if (info.State == VideoPlaybackState.Ready && info.Width > 0 && info.Height > 0) return (player, info, null);
-            player.Dispose();
-            return (null, info, info.Error != 0 ? $"codec_unavailable_0x{info.Error:X8}" : "not_ready");
         }
         catch
         {

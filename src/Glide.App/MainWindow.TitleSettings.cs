@@ -278,6 +278,7 @@ public partial class MainWindow
             };
             _overlays?.SetModalSuppressed(true);
             _openSettingsWindow = window;
+            AttachSettingsOpenedHook(window);
             try
             {
                 await ShowOwnedDialogAsync(window);
@@ -354,12 +355,18 @@ public partial class MainWindow
         // restyles the overlay alone instead of re-applying every setting, so dragging a value never lags.
         if (!commit && OnlyTextOverlayStyleDiffers(_settings, state))
         {
-            _settings = state.CloneState();
+            var restyled = state.CloneState();
+            SettingsDefaults.KeepRuntimeOwnedValues(restyled, _settings);
+            _settings = restyled;
             ApplyPictureCounterVisuals();
             return;
         }
         var previousTabToolTipSize = _settings.TabToolTipTextSize;
-        _settings = state.CloneState();
+        var incoming = state.CloneState();
+        // The main window's own geometry, overlay placements and schema version are live values Settings never edits;
+        // its snapshot (or a loaded profile) must not replace them (an unset snapshot would forget the window position).
+        SettingsDefaults.KeepRuntimeOwnedValues(incoming, _settings);
+        _settings = incoming;
         // The Settings window works on a snapshot taken when it opened; the update checker's memory is not part of it.
         UpdateService.Current?.ApplyTo(_settings);
         UpdateService.Current?.SettingsChanged(_settings);

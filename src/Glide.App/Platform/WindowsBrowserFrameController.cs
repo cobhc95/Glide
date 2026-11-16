@@ -67,14 +67,6 @@ internal sealed class WindowsBrowserFrameController : IDisposable
     private const int IdcArrow = 32512;
 
     private const int HtClient = 1;
-    private const int HtLeft = 10;
-    private const int HtRight = 11;
-    private const int HtTop = 12;
-    private const int HtTopLeft = 13;
-    private const int HtTopRight = 14;
-    private const int HtBottom = 15;
-    private const int HtBottomLeft = 16;
-    private const int HtBottomRight = 17;
     private const int HtMinButton = 8;
     private const int HtMaxButton = 9;
     private const int HtClose = 20;
@@ -100,6 +92,7 @@ internal sealed class WindowsBrowserFrameController : IDisposable
     private readonly WndProc _wndProc;
     private readonly IntPtr _previousWndProc;
     private readonly Func<PixelPoint, bool>? _selectionHitTest;
+    private readonly Func<int, int, bool> _interactiveAt;
     private readonly Func<PixelPoint, bool>? _imageHitTest;
     private readonly Action? _minimizeAction;
     private readonly Action? _maximizeAction;
@@ -138,6 +131,7 @@ internal sealed class WindowsBrowserFrameController : IDisposable
         _zoomInCursor = GlideCreateZoomCursor(0);
         _zoomOutCursor = GlideCreateZoomCursor(1);
         _wndProc = WindowProc;
+        _interactiveAt = IsInteractiveClientAt;
 
         // Keep the standard capabilities advertised on the HWND even though the caption pixels are
         // client-drawn. Windows 11 uses these capabilities together with HTMAXBUTTON for Snap Layouts.
@@ -392,37 +386,30 @@ internal sealed class WindowsBrowserFrameController : IDisposable
             {
                 var x = GetSignedLowWord(lParam);
                 var y = GetSignedHighWord(lParam);
-                var resize = HitTestResizeBorder(x, y);
-                if (resize != HtClient) return new IntPtr(resize);
+                if (!TryBuildHitTestInput(out var input)) break;
 
-                // In fullscreen the absolute top-right physical pixels are owned natively rather than
-                // relying only on Avalonia layout. This makes a muscle-memory throw to the monitor
-                // corner deterministic across DPI, auto-hide chrome timing and compositor/layout races.
-                // The tiny Avalonia fallback target remains as a second line of defence.
-                if (_window.WindowState == WindowState.FullScreen)
+                // In fullscreen the absolute top-right physical pixels are owned natively rather than relying only on
+                // Avalonia layout (corner close across DPI / auto-hide timing). Prefer the actual cursor position over
+                // the packed LPARAM there: robust on mixed/negative-coordinate multi-monitor desktops.
+                if (input.Mode == FrameWindowMode.FullScreen && GetCursorPos(out var fullscreenCursor))
                 {
-                    // Prefer the actual cursor position over WM_NCHITTEST's packed LPARAM. This is
-                    // robust on mixed/negative-coordinate multi-monitor desktops as well as high DPI.
-                    var closeX = x;
-                    var closeY = y;
-                    if (GetCursorPos(out var fullscreenCursor))
-                    {
-                        closeX = fullscreenCursor.X;
-                        closeY = fullscreenCursor.Y;
-                    }
-                    if (IsFullscreenCornerCloseHit(closeX, closeY)) return new IntPtr(HtClose);
-                    return new IntPtr(HtClient);
+                    x = fullscreenCursor.X;
+                    y = fullscreenCursor.Y;
                 }
 
-                // The configurable title-action strip (Home, navigation, settings, etc.) is always
-                // ordinary client UI. Protect it explicitly before caption hit-testing. This prevents
-                // a stale/custom-frame non-client classification from turning a Home click into HTCLOSE.
-                if (_protectedClientChrome is not null && ContainsScreenPoint(_protectedClientChrome, x, y))
-                    return new IntPtr(HtClient);
-
-                if (ContainsScreenPoint(_close, x, y)) return new IntPtr(HtClose);
-                if (ContainsScreenPoint(_maximize, x, y)) return new IntPtr(HtMaxButton);
-                if (ContainsScreenPoint(_minimize, x, y)) return new IntPtr(HtMinButton);
+                var decision = BrowserFrameHitTestPolicy.Decide(input, x, y, _interactiveAt);
+                if (decision.Code != BrowserFrameHitTestPolicy.Defer)
+                {
+                    TraceTopEdgeHitTest(input, x, y, decision.Code, decision.Reason);
+                    return new IntPtr(decision.Code);
+                }
+                if (LiveDiagnosticTrace.IsEnabled && BrowserFrameHitTestPolicy.IsInTopBand(input, y))
+                {
+                    // Record what the previous procedure (Avalonia -> DefWindowProc) answered for the top band.
+                    var deferred = CallWindowProcW(_previousWndProc, hwnd, message, wParam, lParam);
+                    TraceTopEdgeHitTest(input, x, y, (int)deferred.ToInt64(), decision.Reason);
+                    return deferred;
+                }
                 break;
             }
 
@@ -536,59 +523,83 @@ internal sealed class WindowsBrowserFrameController : IDisposable
             SwpNoZOrder | SwpNoActivate);
     }
 
-    private bool IsFullscreenCornerCloseHit(int screenX, int screenY)
+    /// <summary>Gathers the native inputs of the WM_NCHITTEST decision (<see cref="BrowserFrameHitTestPolicy"/>).</summary>
+    private bool TryBuildHitTestInput(out FrameHitTestInput input)
     {
+        input = default;
         if (!GetWindowRect(_hwnd, out var rect)) return false;
-        var scale = Math.Max(1.0, _window.RenderScaling);
-        var width = Math.Max(46, (int)Math.Ceiling(46 * scale));
-        var height = Math.Max(44, (int)Math.Ceiling(44 * scale));
-        return screenX >= rect.Right - width && screenX < rect.Right &&
-               screenY >= rect.Top && screenY < rect.Top + height;
-    }
-
-    private int HitTestResizeBorder(int screenX, int screenY)
-    {
-        if (_window.WindowState == WindowState.FullScreen || IsZoomed(_hwnd)) return HtClient;
-        if (!GetWindowRect(_hwnd, out var rect)) return HtClient;
-
-        // Firefox/Chromium deliberately keep the outermost edge available to resize even when
-        // tab/title content paints to the top. One physical pixel above caption buttons wins.
-        const int topPriorityPixels = 1;
-        var scale = Math.Max(1.0, _window.RenderScaling);
-        var edge = Math.Max(5, (int)Math.Round(6 * scale));
-        var corner = Math.Max(12, (int)Math.Round(16 * scale));
-
-        var onLeft = screenX >= rect.Left && screenX < rect.Left + edge;
-        var onRight = screenX < rect.Right && screenX >= rect.Right - edge;
-        var onTop = screenY >= rect.Top && screenY < rect.Top + edge;
-        var onBottom = screenY < rect.Bottom && screenY >= rect.Bottom - edge;
-
-        if (screenY >= rect.Top && screenY < rect.Top + topPriorityPixels)
+        var window = new PixelRect(rect.Left, rect.Top, Math.Max(0, rect.Right - rect.Left), Math.Max(0, rect.Bottom - rect.Top));
+        var scale = _window.RenderScaling;
+        if (_window.WindowState == WindowState.FullScreen)
         {
-            if (screenX < rect.Left + corner) return HtTopLeft;
-            if (screenX >= rect.Right - corner) return HtTopRight;
-            return HtTop;
+            input = new FrameHitTestInput(FrameWindowMode.FullScreen, window, rect.Top, scale);
+            return true;
         }
-        if (onTop && onLeft) return HtTopLeft;
-        if (onTop && onRight) return HtTopRight;
-        if (onBottom && onLeft) return HtBottomLeft;
-        if (onBottom && onRight) return HtBottomRight;
-        if (onLeft) return HtLeft;
-        if (onRight) return HtRight;
-        if (onTop) return HtTop;
-        if (onBottom) return HtBottom;
-        return HtClient;
+        var zoomed = IsZoomed(_hwnd);
+        var monitorTop = rect.Top;
+        if (zoomed)
+        {
+            // Only a maximized HWND can sit partly above its monitor; the monitor query is skipped otherwise.
+            var monitor = MonitorFromWindow(_hwnd, MonitorDefaultToNearest);
+            var info = new NativeMonitorInfo { cbSize = (uint)Marshal.SizeOf<NativeMonitorInfo>() };
+            if (monitor != IntPtr.Zero && GetMonitorInfoW(monitor, ref info)) monitorTop = info.rcMonitor.Top;
+        }
+        input = new FrameHitTestInput(
+            zoomed ? FrameWindowMode.Maximized : FrameWindowMode.Normal,
+            window, monitorTop, scale,
+            ScreenRectOf(_protectedClientChrome), ScreenRectOf(_close), ScreenRectOf(_maximize), ScreenRectOf(_minimize));
+        return true;
     }
 
-    private bool ContainsScreenPoint(Control control, int screenX, int screenY)
+    private PixelRect? ScreenRectOf(Control? control)
     {
-        if (!control.IsVisible || control.Bounds.Width <= 0 || control.Bounds.Height <= 0) return false;
-        var origin = control.PointToScreen(new Point(0, 0));
-        var scale = Math.Max(0.1, _window.RenderScaling);
-        var width = (int)Math.Ceiling(control.Bounds.Width * scale);
-        var height = (int)Math.Ceiling(control.Bounds.Height * scale);
-        return screenX >= origin.X && screenX < origin.X + width &&
-               screenY >= origin.Y && screenY < origin.Y + height;
+        if (control is null || !control.IsVisible || control.Bounds.Width <= 0 || control.Bounds.Height <= 0) return null;
+        return BrowserFrameHitTestPolicy.ScreenRect(control.PointToScreen(new Point(0, 0)), control.Bounds.Size, _window.RenderScaling);
+    }
+
+    private int _lastTracedHit = -1;
+    private int _lastTracedY = int.MinValue;
+    private string? _lastTracedReason;
+
+    /// <summary>
+    /// Opt-in trace of top-edge hit testing: one line whenever the answer, the rule or the row changes (never per
+    /// identical mouse move), so a hover that flickers between client and non-client shows up as alternating lines.
+    /// </summary>
+    private void TraceTopEdgeHitTest(in FrameHitTestInput input, int x, int y, int hit, string reason)
+    {
+        if (!LiveDiagnosticTrace.IsEnabled || !BrowserFrameHitTestPolicy.IsInTopBand(input, y)) return;
+        if (hit == _lastTracedHit && y == _lastTracedY && ReferenceEquals(reason, _lastTracedReason)) return;
+        _lastTracedHit = hit;
+        _lastTracedY = y;
+        _lastTracedReason = reason;
+        LiveDiagnosticTrace.Write("win32", "nchittest_top", new
+        {
+            x,
+            y,
+            rowFromTop = y - input.Window.Y,
+            hit,
+            reason,
+            mode = input.Mode.ToString(),
+            window = $"{input.Window.X},{input.Window.Y},{input.Window.Right},{input.Window.Bottom}",
+            monitorTop = input.MonitorTop,
+            scaling = input.Scaling
+        });
+    }
+
+    private bool IsInteractiveClientAt(int screenX, int screenY)
+    {
+        try
+        {
+            var client = _window.PointToClient(new PixelPoint(screenX, screenY));
+            for (var current = Avalonia.Input.InputExtensions.InputHitTest(_window, client) as Visual; current is not null; current = Avalonia.VisualTree.VisualExtensions.GetVisualParent(current))
+            {
+                if (current is Button) return true;
+                if (current is StyledElement styled && (styled.Classes.Contains("glideTab") || styled.Classes.Contains("tabHit"))) return true;
+                if (ReferenceEquals(current, _window)) break;
+            }
+        }
+        catch { /* hit testing is best effort; fall back to the normal resize band */ }
+        return false;
     }
 
     private void DispatchSystemButton(int hit)

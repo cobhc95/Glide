@@ -10,4 +10,5 @@ internal sealed record OverlayLayoutDocument(int version, OverlayState[] overlay
 [JsonSerializable(typeof(OverlayLayoutDocument))]
 [JsonSerializable(typeof(OverlayState[]))]
 [JsonSerializable(typeof(Glide.Core.Updates.GitHubReleaseDto))]
+[JsonSerializable(typeof(Glide.Core.Data.GlideBackupManifest))]
 internal sealed partial class CoreJsonContext : JsonSerializerContext;

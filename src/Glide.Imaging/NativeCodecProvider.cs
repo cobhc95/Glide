@@ -5,7 +5,7 @@ using System.Text.Json;
 namespace Glide.Imaging;
 
 /// <summary>
-/// Decoder-only native provider implementation. The module is intentionally kept loaded for the
+/// Native provider implementation (decoders, plus the optional ABI v2 encode extension). The module is intentionally kept loaded for the
 /// lifetime of the process: native buffers and callbacks can never outlive an unloaded module.
 /// Provider contexts are destroyed during Dispose; unloading is left to process teardown.
 /// </summary>
@@ -22,6 +22,7 @@ internal sealed class NativeCodecProvider : ICodecSurfaceProvider, IDisposable
     private readonly JsonDelegate? _frames;
     private readonly SurfaceDecodeDelegate? _previewSurface;
     private readonly SurfaceDecodeDelegate? _fullSurface;
+    private EncodeSurfaceDelegate? _encode;
     private int _disposed;
 
     public CodecProviderInfo Info { get; }
@@ -81,6 +82,10 @@ internal sealed class NativeCodecProvider : ICodecSurfaceProvider, IDisposable
             var instance = create();
             if (instance == 0) { reason = "Provider context creation failed."; return false; }
             provider = new NativeCodecProvider(module, instance, actual, destroy, probe, free, preview, full, metadata, frames, previewSurface, fullSurface);
+            // ABI v2 encode extension: optional, behind its own capability bit (older hosts ignore both).
+            if (actual.AbiVersion == CodecProviderAbi.CurrentVersion && (native.Capabilities & CodecProviderAbi.SupportsEncode) != 0 &&
+                NativeLibrary.TryGetExport(module, "GlideCodecProvider_EncodeSurface", out var encodeExport) && encodeExport != 0)
+                provider._encode = Marshal.GetDelegateForFunctionPointer<EncodeSurfaceDelegate>(encodeExport);
             reason = actual.AbiVersion == CodecProviderAbi.CurrentVersion
                 ? "Verified native ABI v2 direct-surface provider, manifest identity, capabilities, and SHA-256-selected artifact."
                 : "Verified legacy native ABI v1 provider, manifest identity, capabilities, and SHA-256-selected artifact.";
@@ -224,6 +229,42 @@ internal sealed class NativeCodecProvider : ICodecSurfaceProvider, IDisposable
         }, token).ConfigureAwait(false);
     }
 
+    /// <summary>True when the provider exports the encode extension and accepts <paramref name="format"/> ("jp2", "j2k", "webp").</summary>
+    public bool CanEncode(string format)
+    {
+        if (_encode is null || Volatile.Read(ref _disposed) != 0) return false;
+        using var name = Utf8(format);
+        try { return _encode(_instance, 0, 0, name.Pointer, 0f) == 1; }
+        catch (Exception ex) when (ex is SEHException or AccessViolationException) { return false; }
+    }
+
+    /// <summary>Writes straight-alpha BGRA8 (tightly packed) to <paramref name="path"/>; quality &gt;= 1 is lossless.</summary>
+    public bool Encode(string path, byte[] straightBgra, int width, int height, string format, float quality)
+    {
+        ThrowIfDisposed();
+        if (_encode is null || width <= 0 || height <= 0 || straightBgra.Length < (long)width * height * 4) return false;
+        using var utf8 = Utf8(path);
+        using var name = Utf8(format);
+        var handle = GCHandle.Alloc(straightBgra, GCHandleType.Pinned);
+        try
+        {
+            var surface = new NativeSurface
+            {
+                Data = handle.AddrOfPinnedObject(), Size = (nuint)straightBgra.Length, Width = (uint)width, Height = (uint)height,
+                Stride = (uint)(width * 4), PixelFormat = 1, AlphaMode = 2 // BGRA8, straight alpha
+            };
+            var surfacePointer = Marshal.AllocHGlobal(Marshal.SizeOf<NativeSurface>());
+            try
+            {
+                Marshal.StructureToPtr(surface, surfacePointer, false);
+                return _encode(_instance, utf8.Pointer, surfacePointer, name.Pointer, quality) == 1;
+            }
+            finally { Marshal.FreeHGlobal(surfacePointer); }
+        }
+        catch (Exception ex) when (ex is SEHException or AccessViolationException) { return false; }
+        finally { handle.Free(); }
+    }
+
     private void ThrowIfDisposed() { if (Volatile.Read(ref _disposed) != 0) throw new ObjectDisposedException(nameof(NativeCodecProvider)); }
     public void Dispose()
     {
@@ -293,6 +334,7 @@ internal sealed class NativeCodecProvider : ICodecSurfaceProvider, IDisposable
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate int SurfaceDecodeDelegate(nint instance, nint path, uint longestSide, out NativeSurface result);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate int JsonDelegate(nint instance, nint path, out NativeBuffer result);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate void FreeBufferDelegate(nint data, nuint size);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate int EncodeSurfaceDelegate(nint instance, nint path, nint surface, nint format, float quality);
 
     private readonly struct Utf8Buffer : IDisposable
     {

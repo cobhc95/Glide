@@ -2,18 +2,23 @@ namespace Glide.Core.Reset;
 
 /// <summary>The folders and facts the planner needs; the app fills it from the real machine, tests from scratch folders.</summary>
 /// <param name="SettingsDirectory">Where glide.settings.json lives (portable: beside Glide.exe, installed: %LOCALAPPDATA%\Glide, tests: GLIDE_SETTINGS_DIRECTORY).</param>
-/// <param name="LocalGlideDirectory">%LOCALAPPDATA%\Glide (FFmpeg pack, startup timing log).</param>
+/// <param name="LocalGlideDirectory">%LOCALAPPDATA%\Glide (startup timing log, leftovers of older versions).</param>
 /// <param name="TempDirectory">The temp folder Glide's diagnostics write into.</param>
 /// <param name="InstallDirectory">The folder Glide.exe runs from; never touched.</param>
 /// <param name="ImageExtensions">Every extension Glide registers (ImageFormatRegistry.Extensions).</param>
 /// <param name="SettingsSchemaVersion">Schema stamped into a settings file created by the startup reset; null = never create one.</param>
+/// <param name="DefaultSettingsJson">
+/// A default settings object as glide.settings.json stores it (the app serialises its default settings). "All settings" writes
+/// these defaults for every option; null = the options are removed instead (they still load as defaults).
+/// </param>
 public sealed record ResetEnvironment(
     string SettingsDirectory,
     string LocalGlideDirectory,
     string TempDirectory,
     string InstallDirectory,
     IReadOnlyList<string> ImageExtensions,
-    int? SettingsSchemaVersion = null);
+    int? SettingsSchemaVersion = null,
+    string? DefaultSettingsJson = null);
 
 /// <summary>One concrete thing to remove or change.</summary>
 public abstract record ResetTarget
@@ -58,6 +63,17 @@ public sealed record JsonPropertiesTarget(
 {
     public override string Describe() =>
         $"{Path} ({string.Join(", ", RemoveProperties.Select(x => "remove " + x).Concat(SetBooleans.Select(x => $"{x.Key} = {(x.Value ? "true" : "false")}")))})";
+}
+
+/// <summary>
+/// Puts every option of glide.settings.json back to its default (<see cref="AllSettingsReset"/>) and leaves
+/// <see cref="ResetCatalog.AllSettingsKeptProperties"/> (schema version, hotkeys and gestures, window positions, remembered
+/// folders, startup switches...) exactly as they are. A file that is not valid JSON cannot be repaired and is deleted.
+/// </summary>
+public sealed record SettingsFileResetTarget(string Path, string? DefaultSettingsJson) : ResetTarget
+{
+    public override string Describe() =>
+        $"{Path} (every option back to its default; keeps hotkeys, mouse gestures, window sizes and positions, remembered folders and startup entries)";
 }
 
 /// <summary>A registry key (relative to HKEY_CURRENT_USER) with everything below it.</summary>

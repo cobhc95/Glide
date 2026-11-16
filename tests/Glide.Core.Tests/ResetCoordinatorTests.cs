@@ -178,7 +178,10 @@ public sealed class ResetCoordinatorTests
         Assert.Equal(0, exit);
         Assert.Equal([4242], processes.Waited);
         Assert.False(File.Exists(Path.Combine(s.Settings, "glide.history.json")));
-        Assert.False(File.Exists(Path.Combine(s.Settings, "glide.settings.json")));
+        // All settings resets the options in the file (ThemeChoice gone) and keeps the schema version.
+        var settings = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(Path.Combine(s.Settings, "glide.settings.json")))!.AsObject();
+        Assert.False(settings.ContainsKey("ThemeChoice"));
+        Assert.Equal(7, (int?)settings["SettingsSchemaVersion"]);
         Assert.True(File.Exists(Path.Combine(s.Settings, "glide.profiles.json")));
         var started = Assert.Single(processes.Started);
         Assert.Equal("C:\\scratch\\Glide.exe", started.Exe);

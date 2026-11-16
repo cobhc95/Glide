@@ -29,12 +29,25 @@ public static class CodecProviderInventory
             info = new CodecProviderInfo(root.GetProperty("abiVersion").GetUInt32(), root.GetProperty("structSize").GetUInt32(), root.GetProperty("id").GetString() ?? "", root.GetProperty("version").GetString() ?? "", root.GetProperty("license").GetString() ?? "", extensions,
                 root.GetProperty("preview").GetBoolean(), root.GetProperty("full").GetBoolean(), root.GetProperty("metadata").GetBoolean(), root.GetProperty("frames").GetBoolean());
             if (!CodecProviderAbi.IsSafe(info)) { reason = "Manifest ABI/version/size/license/capability validation failed."; return false; }
-            dllPath = Path.ChangeExtension(manifestPath, ".dll");
+            dllPath = DllPathForManifest(manifestPath);
             if (!File.Exists(dllPath)) { reason = "Provider DLL matching the manifest is missing."; return false; }
             reason = "Manifest metadata is structurally valid; DLL hash/load remains deferred.";
             return true;
         }
         catch (Exception ex) { reason = "Malformed provider manifest: " + ex.Message; return false; }
+    }
+
+    /// <summary>
+    /// Pairs <c>name.glidecodec.json</c> with <c>name.dll</c> (the inverse of
+    /// <c>Path.ChangeExtension(dll, ".glidecodec.json")</c>). A plain ChangeExtension on the manifest
+    /// would only strip ".json" and look for <c>name.glidecodec.dll</c>, so no provider could ever match.
+    /// </summary>
+    internal static string DllPathForManifest(string manifestPath)
+    {
+        const string suffix = ".glidecodec.json";
+        return manifestPath.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)
+            ? manifestPath[..^suffix.Length] + ".dll"
+            : Path.ChangeExtension(manifestPath, ".dll");
     }
 
     public static bool TryReadManifest(string dllPath, string sha256, out CodecProviderInfo info, out string reason)

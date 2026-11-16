@@ -14,10 +14,15 @@
 //      the first frame with decoder-native reduction (IWICBitmapSourceTransform, e.g. JPEG DCT
 //      scaling); GIFs are composited on their logical screen.
 //   4. Compact native decoders for the simple formats WIC does not cover.
+//   Glide's codec libraries (CodecProviders.cpp) slot in around these: glidecodecs.dll (AVIF/HEIF/JPEG XL/
+//   JPEG 2000) and glidemanaged.dll (camera RAW, EXR, DICOM/NIfTI/FITS/PFM, ORA/KRA/PDN/XCF, GPU textures)
+//   are tried before WIC for their suffixes; glidemanaged.dll is also the fallback for PSD/PSB documents
+//   the compact decoder cannot read (ZIP-compressed image data).
 //   Every resample uses the preset's WIC interpolation mode on premultiplied BGRA, so transparent
 //   pixels never bleed dark fringes into the thumbnail.
 
 #include "ThumbnailCore.h"
+#include "CodecProviders.h"
 
 #include <windows.h>
 #include <wincodec.h>
@@ -1569,14 +1574,22 @@ namespace glide::thumb
             {
                 while (position < size && (data[position] == ' ' || data[position] == '\t')) ++position;
                 if (position >= size) return false;
+                // Each axis is "<sign><axis letter> <count>": skip the sign, the letter and the blanks before
+                // the digits (reading digits straight after the sign used to reject every standard file).
+                auto skipAxis = [&]()
+                {
+                    ++position;                                                     // sign
+                    if (position < size && (data[position] == 'Y' || data[position] == 'X')) ++position;
+                    while (position < size && (data[position] == ' ' || data[position] == '\t')) ++position;
+                };
                 heightSign = data[position] == '-' ? -1 : 1;
-                ++position;
+                skipAxis();
                 while (position < size && data[position] >= '0' && data[position] <= '9')
                     height = height * 10 + (data[position++] - '0');
                 while (position < size && data[position] == ' ') ++position;
                 if (position >= size) return false;
                 widthSign = data[position] == '-' ? -1 : 1;
-                ++position;
+                skipAxis();
                 while (position < size && data[position] >= '0' && data[position] <= '9')
                     width = width * 10 + (data[position++] - '0');
                 if (position < size && data[position] == '\n') ++position;
@@ -1681,7 +1694,7 @@ namespace glide::thumb
                     const std::uint8_t b = r.U8();
                     for (int bit = 7; bit >= 0 && x < width; --bit, ++x)
                     {
-                        const std::uint8_t value = (b >> bit) & 1 ? 0 : 255; // 1 = black
+                        const std::uint8_t value = (b >> bit) & 1 ? 255 : 0; // WBMP type 0: 1 = white, 0 = black
                         SetPixel(out, x, y, value, value, value);
                     }
                 }
@@ -2346,6 +2359,36 @@ namespace glide::thumb
             return ok;
         }
 
+        /// Decodes through one of Glide's codec libraries (lazily loaded, hash-pinned; see CodecProviders.h).
+        bool DecodeWithProvider(providers::Kind kind, Source& source, const std::wstring& extension, const Edges& edges,
+                                const QualityProfile& profile, std::uint64_t started, DecodeResult& result)
+        {
+            std::size_t size = 0;
+            const std::uint8_t* data = source.All(size);
+            if (!data || size == 0) return false;
+            Image decoded;
+            std::uint32_t width = 0, height = 0;
+            if (!providers::Decode(kind, data, size, extension, edges.decode, decoded, width, height)) return false;
+            // JPEG 2000 previews stop at the nearest wavelet resolution level, which can exceed the bound.
+            std::uint32_t targetWidth = 0, targetHeight = 0;
+            FitWithin(decoded.width, decoded.height, edges.decode, targetWidth, targetHeight);
+            if (targetWidth != decoded.width || targetHeight != decoded.height)
+            {
+                IWICImagingFactory* factory = CreateFactory();
+                const bool resized = ResampleImage(factory, decoded, targetWidth, targetHeight, profile.interpolation);
+                if (factory) factory->Release();
+                if (!resized) return false;
+            }
+            result.image = std::move(decoded);
+            result.ok = result.image.Valid();
+            result.decoder = kind == providers::Kind::Bundled ? "glidecodecs" : "glidemanaged";
+            result.sourceWidth = width;
+            result.sourceHeight = height;
+            result.decodeMicros = NowMicros() - started;
+            result.bytesRead = source.BytesRead();
+            return result.ok;
+        }
+
         bool LooksLikeSvg(const std::uint8_t* head, std::size_t size)
         {
             // Skip a UTF-8 BOM and leading whitespace before the signature check.
@@ -2374,6 +2417,14 @@ namespace glide::thumb
             {
                 std::size_t size = 0;
                 const std::uint8_t* data = source.All(size);
+                // SVGZ: inflated through glidemanaged.dll (Windows has no public inflate API), capped at 64 MiB.
+                std::vector<std::uint8_t> inflated;
+                if (data && size >= 2 && data[0] == 0x1F && data[1] == 0x8B &&
+                    providers::Gunzip(data, size, 64u << 20, inflated) && !inflated.empty())
+                {
+                    data = inflated.data();
+                    size = inflated.size();
+                }
                 if (data && size > 0 && RenderSvg(data, size, std::min(edges.output, edges.decode), result.image))
                 {
                     result.image.premultiplied = true;
@@ -2409,9 +2460,24 @@ namespace glide::thumb
                 }
             }
 
+            // 3. Glide's codec libraries, ahead of WIC: a clean Windows has no AVIF/HEIF/JPEG XL/JPEG 2000
+            //    WIC codec (the in-box "Photo Thumbnail Provider" then fails and Explorer shows a blank page),
+            //    and the WIC TIFF decoder would happily show a TIFF-based RAW file's tiny IFD0 strip. PSD-family
+            //    files keep the native compact decoder first (step 6 falls back to the managed library).
+            if (!extensionValue.empty())
+            {
+                const bool bundled = providers::IsCandidate(providers::Kind::Bundled, extensionValue);
+                const bool managed = !bundled && providers::IsCandidate(providers::Kind::Managed, extensionValue) &&
+                                     !IsCompactRasterExtension(extensionValue.c_str());
+                if ((bundled || managed) &&
+                    DecodeWithProvider(bundled ? providers::Kind::Bundled : providers::Kind::Managed,
+                                       source, extensionValue, edges, profile, started, result))
+                    return result;
+            }
+
             IWICImagingFactory* factory = CreateFactory();
 
-            // 3. Windows Imaging Component (covers JPEG/PNG/BMP/GIF/TIFF/ICO/DDS/JPEG-XR and any
+            // 4. Windows Imaging Component (covers JPEG/PNG/BMP/GIF/TIFF/ICO/DDS/JPEG-XR and any
             //    installed HEIF/AVIF/JXL/RAW codec), decoded from the stream on demand.
             if (factory)
             {
@@ -2429,7 +2495,7 @@ namespace glide::thumb
                 }
             }
 
-            // 4. Compact native decoders for the simple formats WIC does not cover.
+            // 5. Compact native decoders for the simple formats WIC does not cover.
             if (IsCompactRasterExtension(extensionValue.c_str()) || extensionValue.empty())
             {
                 std::size_t size = 0;
@@ -2452,10 +2518,109 @@ namespace glide::thumb
             }
 
             if (factory) factory->Release();
+
+            // 6. PSD/PSB/PDD the compact decoder could not read (ZIP-compressed image data).
+            if (!result.ok && IsCompactRasterExtension(extensionValue.c_str()) &&
+                providers::IsCandidate(providers::Kind::Managed, extensionValue))
+            {
+                DecodeResult managed;
+                if (DecodeWithProvider(providers::Kind::Managed, source, extensionValue, edges, profile, started, managed))
+                    return managed;
+            }
             result.bytesRead = source.BytesRead();
             return result;
         }
     } // namespace
+
+    int __cdecl DecodeEncodedForHost(const std::uint8_t* data, std::size_t size, std::uint32_t maxLongestSide,
+                                     int probeOnly, HostImage* out)
+    {
+        if (!out) return 0;
+        *out = HostImage{};
+        if (!data || size == 0 || size > MaxSourceBytes || size > std::numeric_limits<DWORD>::max()) return 0;
+        // glidemanaged.dll may call back from one of its worker threads; make sure COM is usable there.
+        const HRESULT initialized = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+        int status = 0;
+        try
+        {
+            IWICImagingFactory* factory = CreateFactory();
+            if (factory)
+            {
+                {
+                    Com<IWICStream> stream;
+                    Com<IWICBitmapDecoder> decoder;
+                    Com<IWICBitmapFrameDecode> frame;
+                    UINT width = 0, height = 0;
+                    if (SUCCEEDED(factory->CreateStream(stream.put())) && stream &&
+                        SUCCEEDED(stream->InitializeFromMemory(const_cast<BYTE*>(data), static_cast<DWORD>(size))) &&
+                        SUCCEEDED(factory->CreateDecoderFromStream(stream.p, nullptr, WICDecodeMetadataCacheOnDemand, decoder.put())) && decoder &&
+                        SUCCEEDED(decoder->GetFrame(0, frame.put())) && frame &&
+                        SUCCEEDED(frame->GetSize(&width, &height)) &&
+                        width > 0 && height > 0 && width <= MaxDimension && height <= MaxDimension &&
+                        static_cast<std::uint64_t>(width) * height <= MaxPixels)
+                    {
+                        const std::uint16_t orientation = ReadOrientation(frame.p);
+                        std::uint32_t targetWidth = width, targetHeight = height;
+                        if (maxLongestSide > 0) FitWithin(width, height, maxLongestSide, targetWidth, targetHeight);
+                        if (probeOnly)
+                        {
+                            out->width = width;
+                            out->height = height;
+                            out->orientation = orientation;
+                            status = 1;
+                        }
+                        else
+                        {
+                            Image image;
+                            bool reduced = false;
+                            if (DecodeFrameReduced(factory, frame.p, width, height, targetWidth, targetHeight,
+                                                   WICBitmapInterpolationModeFant, image, reduced) && image.Valid())
+                            {
+                                const std::size_t bytes = image.pixels.size();
+                                auto* pixels = static_cast<std::uint8_t*>(std::malloc(bytes));
+                                if (pixels)
+                                {
+                                    // Premultiplied (WIC pipeline) -> straight, as the managed decoders expect.
+                                    for (std::size_t i = 0; i < bytes; i += 4)
+                                    {
+                                        const unsigned alpha = image.pixels[i + 3];
+                                        for (int c = 0; c < 3; ++c)
+                                        {
+                                            const unsigned value = image.pixels[i + c];
+                                            pixels[i + c] = alpha == 255 ? static_cast<std::uint8_t>(value)
+                                                          : alpha == 0 ? 0
+                                                          : static_cast<std::uint8_t>(std::min(255u, (value * 255 + alpha / 2) / alpha));
+                                        }
+                                        pixels[i + 3] = static_cast<std::uint8_t>(alpha);
+                                    }
+                                    out->width = image.width;
+                                    out->height = image.height;
+                                    out->orientation = orientation;
+                                    out->data = pixels;
+                                    out->size = bytes;
+                                    status = 1;
+                                }
+                            }
+                        }
+                    }
+                }
+                factory->Release();
+            }
+        }
+        catch (...)
+        {
+            if (out->data) std::free(out->data);
+            *out = HostImage{};
+            status = 0;
+        }
+        if (SUCCEEDED(initialized)) CoUninitialize();
+        return status;
+    }
+
+    void __cdecl FreeEncodedForHost(void* data)
+    {
+        std::free(data);
+    }
 
     bool IsCompactRasterExtension(const wchar_t* extension)
     {

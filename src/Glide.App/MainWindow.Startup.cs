@@ -52,6 +52,7 @@ public partial class MainWindow
             }
         }
         BeginDeferredRecentHistoryInitialization();
+        ScheduleLegacyVideoDecoderCleanup();
         if (_pendingExternalReceiver)
             Dispatcher.UIThread.Post(() => _ = EnsurePendingExternalReceiverFallbackAsync(), DispatcherPriority.Background);
         Dispatcher.UIThread.Post(() =>
@@ -101,7 +102,6 @@ public partial class MainWindow
         overlays.OpenFileLocationRequested = path => ExplorerShell.Reveal(path, directory: false);
         overlays.OpenInNewTabRequested = path => Dispatcher.UIThread.Post(async () => await OpenAsImageTabAsync(path, openInNewTab: true));
         overlays.OpenWithRequested = path => WindowsOpenWith.Show(path);
-        VideoOverlaySession.DecoderPackRequested ??= RequestVideoDecoderPackAsync;
         overlays.VideoUnavailable += (path, reason) => Dispatcher.UIThread.Post(async () => await ShowVideoUnavailableAsync(path, reason));
         ApplyOverlaySettingsToManager(overlays);
         _overlays = overlays;
@@ -298,6 +298,29 @@ public partial class MainWindow
             if (_windowLifetimeCts.IsCancellationRequested) return;
             AdoptStartupSettingsIfReady(applyVisuals: true);
         }, DispatcherPriority.Background), TaskScheduler.Default);
+    }
+
+    private static int _legacyVideoDecoderCleanupScheduled;
+
+    /// <summary>
+    /// Once per process, well after startup: deletes the video decoder files Glide 4.6 to 5.0.3 could download into
+    /// %LOCALAPPDATA%\Glide. Glide no longer uses them (videos play only with the codecs installed in Windows).
+    /// </summary>
+    private void ScheduleLegacyVideoDecoderCleanup()
+    {
+        if (Interlocked.Exchange(ref _legacyVideoDecoderCleanupScheduled, 1) != 0) return;
+        var token = _windowLifetimeCts.Token;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(30), token).ConfigureAwait(false);
+                var local = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Glide");
+                var removed = Glide.Core.Reset.LegacyVideoDecoderCleanup.RemoveLeftovers(local);
+                if (removed > 0) _diagnostics.Write("startup", "legacy_video_decoder_removed", new { folders = removed });
+            }
+            catch (OperationCanceledException) { /* window closed first: the next start tries again */ }
+        }, CancellationToken.None);
     }
 
     private void BeginDeferredRecentHistoryInitialization()

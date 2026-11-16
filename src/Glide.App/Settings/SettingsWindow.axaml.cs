@@ -30,6 +30,8 @@ public partial class SettingsWindow : Window
     private readonly Action<GlideSettingsState, bool> _apply;
     private bool _previewDirty;
     private GlideSettingsState _committed;
+    // True after Restore defaults until the next commit: ReadControls then stages the control-less options at their defaults too.
+    private bool _restoreDefaultsStaged;
     private bool _loadingControls;
     private bool _closeWithoutRollback;
     private readonly Dictionary<string, StackPanel> _panels;
@@ -177,6 +179,7 @@ public partial class SettingsWindow : Window
         // Single-source the visible product version from assembly metadata (Directory.Build.props), so
         // the About/footer label can never drift behind the actual build again.
         AboutVersionText.Text = ProductVersionLabel();
+        ToolTip.SetTip(AboutVersionText, "Licensed under GPL-3.0-or-later");
         // Legacy Glide treats static Settings chrome/text as draggable window surface. Interactive
         // controls remain authoritative and must never start a native move loop.
         ReferenceRoot.AddHandler(InputElement.PointerPressedEvent, SettingsSurfacePointerPressed, RoutingStrategies.Tunnel, true);
@@ -198,8 +201,13 @@ public partial class SettingsWindow : Window
         foreach (var group in CategoryGroups) SearchCategoryCombo.Items.Add(new ComboBoxItem { Content = group.Title });
         SearchCategoryCombo.SelectedIndex = 0;
 
+        // Reset Glide and Back up and restore build their tick boxes from the shared data-category catalogue first, so the
+        // Settings-search map below can register them.
+        BuildResetSelector();
+        BuildBackupSelector();
         BuildSettingControlMap();
         InitializeResetCard();
+        InitializeBackupCard();
         Glide.Core.GlidePerformanceTrace.Mark("settings_control_map_ready");
         InitializeResponsiveLayout();
         // The card map must exist before BuildGestureMatrix moves the gesture secondary options out
@@ -435,6 +443,7 @@ public partial class SettingsWindow : Window
             SelectByText(CaptionFullscreenCloseCombo, s.CaptionFullscreenCloseAction);
             FullscreenStatusAlwaysCheck.IsChecked = s.FullscreenStatusAlwaysOn;
             FullscreenKeepTabBarOpenCheck.IsChecked = s.FullscreenKeepTabBarOpen;
+            FullscreenKeepTitleBarForExplorerCheck.IsChecked = s.FullscreenKeepTitleBarForExplorer;
             AlwaysOnTopCheck.IsChecked = s.AlwaysOnTop;
             SelectByText(AlwaysOnTopModeCombo, string.Equals(s.AlwaysOnTopMode, "Soft", StringComparison.OrdinalIgnoreCase) ? "Soft" : "Hard");
             AutoCenterWindowOnRestoreCheck.IsChecked = s.AutoCenterWindowOnRestore;
@@ -466,6 +475,7 @@ public partial class SettingsWindow : Window
             BackgroundDragCheck.IsChecked = s.BackgroundDragWindow;
             _workingGestures = (s.Gestures ?? GestureCatalog.CreateDefaultMap()).ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase);
             _workingCustomGestures = GestureCatalog.NormalizeCustomGestures(s.CustomGestures);
+            UpdateGestureDependentTips();
             _workingRecentGestureActions = (s.GestureRecentActions ?? new()).ToList();
             RefreshGesturePanel();
 
@@ -610,7 +620,11 @@ public partial class SettingsWindow : Window
 
     private GlideSettingsState ReadControls()
     {
-        var state = _committed.CloneState();
+        // After Restore defaults the values without a control (legacy options, the side tab panel width...) are staged at
+        // their defaults too; the kept non-option values still come from the committed state.
+        // After a staged backup import the values without a control come from that import (until the next commit).
+        var baseline = _backupStagedBase ?? _committed;
+        var state = _restoreDefaultsStaged ? SettingsDefaults.RestoreAllSettings(baseline) : baseline.CloneState();
         state.RecentHistoryEnabled = RecentHistoryCheck.IsChecked == true;
         state.SearchShowRelatedResults = SearchShowRelatedCheck.IsChecked == true;
         state.HistorySize = (int)(HistorySizeBox.Value ?? 8);
@@ -672,6 +686,7 @@ public partial class SettingsWindow : Window
         state.FullscreenXClosesApp = string.Equals(state.CaptionFullscreenCloseAction, "Close Glide", StringComparison.OrdinalIgnoreCase);
         state.FullscreenStatusAlwaysOn = FullscreenStatusAlwaysCheck.IsChecked == true;
         state.FullscreenKeepTabBarOpen = FullscreenKeepTabBarOpenCheck.IsChecked == true;
+        state.FullscreenKeepTitleBarForExplorer = FullscreenKeepTitleBarForExplorerCheck.IsChecked == true;
         state.AlwaysOnTop = AlwaysOnTopCheck.IsChecked == true;
         state.AlwaysOnTopMode = SelectedText(AlwaysOnTopModeCombo, "Soft");
         state.AutoCenterWindowOnRestore = AutoCenterWindowOnRestoreCheck.IsChecked == true;
@@ -844,8 +859,9 @@ public partial class SettingsWindow : Window
         // Subscribe from the authoritative setting->editor map so newly added editable settings cannot
         // silently bypass live preview or exact net-change tracking. Every setting has exactly one
         // editor (4.8.0 removed the mirrored status-bar checkboxes).
-        // The Reset Glide tick boxes only choose what a confirmation lists; they are not settings, so no preview pass.
-        foreach (var pair in _settingControls.Where(x => !x.Key.StartsWith("reset.", StringComparison.OrdinalIgnoreCase)).ToArray())
+        // The Reset Glide and Back up and restore tick boxes only choose what an action covers; they are not settings, so no preview pass.
+        foreach (var pair in _settingControls.Where(x => !x.Key.StartsWith("reset.", StringComparison.OrdinalIgnoreCase) &&
+                                                          !x.Key.StartsWith("backup.", StringComparison.OrdinalIgnoreCase)).ToArray())
             pair.Value.PropertyChanged += ValueControlChanged;
     }
 
@@ -2026,6 +2042,7 @@ public partial class SettingsWindow : Window
                 yield return B("Add", b => AddOpenWithClicked(b, new RoutedEventArgs()));
                 yield return B("Remove", b => RemoveOpenWithClicked(b, new RoutedEventArgs()));
                 break;
+            case "windows.defaultViewer": yield return B("Default apps...", b => MakeDefaultViewerClicked(b, new RoutedEventArgs())); break;
             case "general.openFileDefaultDirectory": yield return B("Browse...", b => BrowseOpenDefaultDirectoryClicked(b, new RoutedEventArgs())); break;
             case "general.newExplorerTabDefaultDirectory": yield return B("Browse...", b => BrowseNewExplorerDefaultDirectoryClicked(b, new RoutedEventArgs())); break;
             case "overlay.defaultDirectory": yield return B("Browse...", b => BrowseOverlayDefaultDirectoryClicked(b, new RoutedEventArgs())); break;
@@ -2054,6 +2071,9 @@ public partial class SettingsWindow : Window
             case "mouse.gestureMatrix": yield return B("Open", b => RevealSetting("mouse.gestureMatrix")); break;
             case "hotkeys.registry": yield return B("Open", b => RevealSetting("hotkeys.registry")); break;
             case "reset.card": yield return B("Open", b => RevealSetting("reset.card")); break;
+            case "backup.card": yield return B("Open", b => RevealSetting("backup.card")); break;
+            case "backup.export": yield return B("Export...", b => BackupExportClicked(b, new RoutedEventArgs())); break;
+            case "backup.import": yield return B("Import...", b => BackupImportClicked(b, new RoutedEventArgs())); break;
             case "developer.diagnostics":
                 yield return B("Run", b => RunDiagnosticsClicked(b, new RoutedEventArgs()));
                 yield return B("Export ZIP", b => ExportDiagnosticsClicked(b, new RoutedEventArgs()));
@@ -2122,7 +2142,7 @@ public partial class SettingsWindow : Window
         M("updates.checkDaily", UpdateCheckDailyCheck); M("updates.dontRemind", UpdateDontRemindCheck);
         M("general.startupAction", StartupActionCombo); M("general.startupCustomPath", StartupCustomPathBox); M("general.newTabAction", NewTabActionCombo); M("general.newTabCustomPath", NewTabCustomPathBox); M("titlebar.customize", CustomizeTitleBarButton); M("settings.alwaysExpand", SettingsAlwaysExpandSwitch); M("escape.resetRememberedClose", ResetEscChoiceButton);
         M("status.visible", StatusCheck); M("status.hoverWhenClosed", StatusHoverWhenClosedCheck); M("view.scrollbars", ShowScrollbarsCheck); M("window.fullPathTitle", FullPathTitleCheck); M("fullscreen.hideCursor", HideCursorFullscreenCheck); M("fullscreen.hideCursorDelay", FullscreenHideCursorDelayBox);
-        M("fullscreen.autoHideChrome", AutoHideFullscreenChromeCheck); M("fullscreen.keepTabBarOpen", FullscreenKeepTabBarOpenCheck); M("tabs.enabled", TabsCheck); M("window.showInExplorerTarget", ShowInExplorerTargetCombo); M("explorer.defaultView", ExplorerDefaultViewCombo); M("explorer.showHidden", ExplorerShowHiddenFilesCheck); M("explorer.onlyImages", ExplorerShowOnlyImagesCheck); M("tabs.showBackButton", TabBarBackButtonCheck); M("tabs.showForwardButton", TabBarForwardButtonCheck); M("fullscreen.statusAlways", FullscreenStatusAlwaysCheck);
+        M("fullscreen.autoHideChrome", AutoHideFullscreenChromeCheck); M("fullscreen.keepTabBarOpen", FullscreenKeepTabBarOpenCheck); M("fullscreen.keepTitleBarForExplorer", FullscreenKeepTitleBarForExplorerCheck); M("tabs.enabled", TabsCheck); M("window.showInExplorerTarget", ShowInExplorerTargetCombo); M("explorer.defaultView", ExplorerDefaultViewCombo); M("explorer.showHidden", ExplorerShowHiddenFilesCheck); M("explorer.onlyImages", ExplorerShowOnlyImagesCheck); M("tabs.showBackButton", TabBarBackButtonCheck); M("tabs.showForwardButton", TabBarForwardButtonCheck); M("fullscreen.statusAlways", FullscreenStatusAlwaysCheck);
         M("caption.windowedMinimize", CaptionWindowedMinimizeCombo); M("caption.windowedMaximize", CaptionWindowedMaximizeCombo); M("caption.windowedClose", CaptionWindowedCloseCombo);
         M("caption.fullscreenMinimize", CaptionFullscreenMinimizeCombo); M("caption.fullscreenMaximize", CaptionFullscreenMaximizeCombo); M("caption.fullscreenClose", CaptionFullscreenCloseCombo);
         M("windows.alwaysOnTop", AlwaysOnTopCheck); M("windows.alwaysOnTopMode", AlwaysOnTopModeCombo); M("fullscreen.exitBehavior", FullscreenExitBehaviorCombo); M("windows.sameImageBehavior", SameImageBehaviorCombo); M("window.centerOnDisplay", AutoCenterWindowOnRestoreCheck); M("view.defaultMode", DefaultViewCombo); M("view.animateGifs", AnimateGifsCheck); M("view.pointerZoom", PointerZoomCheck); M("view.keepZoom", PreserveZoomCheck);
@@ -2158,13 +2178,15 @@ public partial class SettingsWindow : Window
         M("overlay.pictureColor", PictureColorCombo); M("overlay.pictureShadow", PictureShadowCheck); M("overlay.defaultOpacity", OverlayOpacityBox); M("overlay.zoomStep", OverlayZoomStepBox);
         M("overlay.rememberFolder", OverlayRememberFolderCheck); M("overlay.scaleWithWindow", OverlayScaleWithWindowCheck); M("overlay.animationRegion", OverlayAnimationRegionCombo); M("overlay.animationSpeedDipsPerSecond", OverlayAnimationSpeedBox); M("overlay.animationTurnIntervalMs", OverlayAnimationTurnIntervalBox); M("overlay.animationTurnAngleDegrees", OverlayAnimationTurnAngleBox); M("overlay.animationPauseWhileInteracting", OverlayAnimationPauseCheck); M("overlay.animationAvoidOverlap", OverlayAnimationAvoidOverlapCheck); M("overlay.animationRefreshRateHz", OverlayAnimationRefreshRateCombo); M("overlay.defaultDirectory", OverlayDefaultDirectoryBox); M("profiles.defaultDirectory", ProfileDefaultDirectoryBox); M("overlay.persistSession", OverlayPersistSessionCheck); M("overlay.keyboardZoom", OverlayKeyboardZoomCheck); M("overlay.highlightSelected", OverlayHighlightCheck); M("overlay.rememberZoom", OverlayRememberZoomCheck);
         M("windows.externalOpenBehavior", ExternalOpenBehaviorCombo); M("windows.external1", External1Box); M("windows.external2", External2Box); M("windows.external3", External3Box);
+        M("windows.defaultViewer", MakeDefaultViewerButton);
         M("windows.explorerThumbnails", ExplorerThumbnailsCheck); M("windows.thumbnailMode", ThumbnailModeCombo); M("windows.thumbnailQuality", ThumbnailQualityCombo); M("windows.thumbnailMaxSource", ThumbnailMaxSourceCombo); M("windows.thumbnailPreferEmbedded", ThumbnailPreferEmbeddedCheck);
         M("hotkeys.preset", HotkeyPresetCombo); M("profiles.presets", PresetCombo);
         M("developer.statusGlobalScale", StatusGlobalScaleBox); M("developer.statusMaximizedBoost", StatusMaximizedBoostBox); M("developer.overlayAbsoluteCoordinates", OverlayAbsoluteCoordinatesCheck);
-        // Reset Glide card: one tick box per item (reset.card itself is anchored on the button bar, see SettingsWindow.Reset.cs).
-        M("reset.allSettings", ResetAllSettingsCheck); M("reset.hotkeysGestures", ResetHotkeysCheck); M("reset.profiles", ResetProfilesCheck); M("reset.windowPlacement", ResetWindowPlacementCheck);
-        M("reset.recentHistory", ResetRecentCheck); M("reset.lastSession", ResetSessionCheck); M("reset.caches", ResetCachesCheck); M("reset.codecPack", ResetCodecPackCheck);
-        M("reset.registry", ResetRegistryCheck); M("reset.startup", ResetStartupCheck);
+        // Reset Glide and Back up and restore: one tick box per data category, built in code from GlideDataCategoryCatalog by
+        // DataCategorySelector (BuildResetSelector / BuildBackupSelector), registered under each category's "reset.*" /
+        // "backup.*" id. The cards themselves (reset.card, backup.card, backup.export, backup.import) are anchored on the
+        // XAML hosts' SettingIds; tools/audit-settings-search.py checks both.
+        RegisterDataCategoryControls();
         // Advanced gesture matrix editors are built lazily (BuildGestureMatrix) to keep Settings
         // opening fast; that builder registers each slot editor here under "gesture.<slotId>".
         foreach (var slot in GestureCatalog.Slots)
@@ -2200,7 +2222,8 @@ public partial class SettingsWindow : Window
     {
         var next = ReadControls();
         var changes = GetNetChanges(next);
-        if (changes.Count == 0)
+        // A staged backup import can also change values that are never listed as changes (the saved User custom preset).
+        if (changes.Count == 0 && _backupStagedBase is null)
         {
             UpdateDirtyState(next);
             return;
@@ -2214,7 +2237,7 @@ public partial class SettingsWindow : Window
     {
         var next = ReadControls();
         var changes = GetNetChanges(next);
-        if (changes.Count > 0) CommitState(next);
+        if (changes.Count > 0 || _backupStagedBase is not null) CommitState(next);
         _closeWithoutRollback = true;
         Close();
     }
@@ -2246,6 +2269,8 @@ public partial class SettingsWindow : Window
             WindowsStartupRegistration.SetRunAtStartup(next.StartWithWindowsInBackground, out _);
         }
         _committed = next.CloneState();
+        _restoreDefaultsStaged = false;
+        _backupStagedBase = null;
         _apply(_committed.CloneState(), true);
         UpdateDirtyState(_committed);
     }
@@ -2329,12 +2354,21 @@ public partial class SettingsWindow : Window
         return accepted;
     }
 
-    private void RestoreDefaultsClicked(object? sender, RoutedEventArgs e)
+    private void RestoreDefaultsClicked(object? sender, RoutedEventArgs e) => RestoreDefaults();
+
+    /// <summary>
+    /// Stages every option at its default: exactly Reset Glide's "All settings" scope (the same <see cref="SettingsDefaults.RestoreAllSettings"/>
+    /// / AllSettingsReset). Hotkeys and mouse gestures (including staged edits), window sizes and positions, remembered folders,
+    /// the schema version, the Windows startup switches and saved presets are kept. Nothing is saved until Apply / OK.
+    /// </summary>
+    internal void RestoreDefaults()
     {
-        var defaults = new GlideSettingsState();
-        LoadControls(defaults);
-        _apply(defaults.CloneState(), false);
-        UpdateDirtyState(defaults);
+        var restored = SettingsDefaults.RestoreAllSettings(ReadControls());
+        _restoreDefaultsStaged = true;
+        LoadControls(restored);
+        var staged = ReadControls();
+        _apply(staged.CloneState(), false);
+        UpdateDirtyState(staged);
     }
 
     private void AddOpenWithClicked(object? sender, RoutedEventArgs e)
@@ -2351,6 +2385,13 @@ public partial class SettingsWindow : Window
         WindowsIntegrationStatusText.Text = message;
         DirtyText.Text = message;
         PageSubtitle.Text = message;
+    }
+
+    // Windows reserves the protected default-app choice for its own Settings page; open it on Glide.
+    private void MakeDefaultViewerClicked(object? sender, RoutedEventArgs e)
+    {
+        _ = WindowsFileAssociationRegistration.OpenDefaultAppsPage(out var message);
+        WindowsIntegrationStatusText.Text = message;
     }
 
     private async void BrowseExternalClicked(object? sender, RoutedEventArgs e)
@@ -2478,6 +2519,7 @@ public partial class SettingsWindow : Window
             NormalizeImportedState(imported);
             var launchTargetsKept = KeepLocalLaunchTargets(imported, current);
             var networkFoldersDropped = KeepLocalFolderPaths(imported, current);
+            _restoreDefaultsStaged = false;
             LoadControls(imported);
             _apply(imported.CloneState(), false);
             UpdateDirtyState(imported);

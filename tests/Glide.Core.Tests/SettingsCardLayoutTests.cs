@@ -122,7 +122,7 @@ public sealed class SettingsCardLayoutTests
         await WithWindow(new GlideSettingsState(), window =>
         {
             var cards = Cards(window);
-            Assert.Equal(40, cards.Count); // 40 = the 38 earlier cards + Reset Glide + Updates (5.0.1)
+            Assert.Equal(41, cards.Count); // 41 = the 38 earlier cards + Reset Glide + Updates (5.0.1) + Back up and restore (5.0.4)
             Assert.Equal(cards.Count, cards.Select(c => c.CardId).Distinct(StringComparer.Ordinal).Count());
             foreach (var card in cards)
             {
@@ -164,8 +164,14 @@ public sealed class SettingsCardLayoutTests
             Assert.True(gestures.Badge.IsVisible);
             Assert.Equal(1, gestures.ChangedCount);
 
+            // Restore defaults resets options only (Reset Glide's "All settings" scope): the option's badge clears, the
+            // gesture binding is kept (it belongs to "Hotkeys and mouse gestures").
             Call(window, "RestoreDefaultsClicked", null, new RoutedEventArgs());
-            AssertNoBadges("after Restore defaults");
+            Assert.False(overlay.Badge.IsVisible, "after Restore defaults the option is back to its default");
+            Assert.True(gestures.Badge.IsVisible, "Restore defaults must keep mouse gestures");
+            Assert.Equal(1, gestures.ChangedCount);
+            foreach (var card in Cards(window).Where(c => c.CardId != MachineDependentCard && c.CardId != "mouse-gestures"))
+                Assert.False(card.Badge.IsVisible, $"after Restore defaults: '{card.CardId}' shows a badge ({card.ChangedCount})");
         });
     }
 

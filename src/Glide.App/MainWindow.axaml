@@ -24,13 +24,15 @@
           <ScrollViewer x:Name="TabStripScroll" Grid.Column="1" HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Disabled">
             <StackPanel x:Name="TabStripHost" Orientation="Horizontal" Spacing="3" VerticalAlignment="Stretch">
               <StackPanel x:Name="TabStripPanel" Orientation="Horizontal" Spacing="3"/>
-              <Button x:Name="NewTabButton" Classes="tabPlus" Width="36" Height="36" Click="NewTabClicked" ToolTip.Tip="New tab (Ctrl+T)">
+              <!-- EdgeHitButton: the whole rectangle is the target (not the rounded background), so the top-row pixels of the
+                   maximized / fullscreen 44-DIP "+" click instead of falling through to the title bar. -->
+              <controls:EdgeHitButton x:Name="NewTabButton" Classes="tabPlus" Width="36" Height="36" Click="NewTabClicked" ToolTip.Tip="New tab">
                 <StackPanel Orientation="Horizontal" Spacing="7" VerticalAlignment="Center">
                   <controls:GlideIconView Kind="Plus" Width="14" Height="14" IconBrush="{DynamicResource BrushText}" StrokeWidth="1.8"/>
                   <!-- Shown only in the vertical tab pane, where the button spans the pane like a tab row. -->
                   <TextBlock x:Name="NewTabLabel" Text="New tab" FontSize="12.5" VerticalAlignment="Center" IsVisible="False"/>
                 </StackPanel>
-              </Button>
+              </controls:EdgeHitButton>
             </StackPanel>
           </ScrollViewer>
           <Button x:Name="TabOverflowRightButton" Grid.Column="2" Classes="tabOverflowArrow" Width="28" Height="36" IsVisible="False" Click="TabOverflowRightClicked" ToolTip.Tip="Show tabs to the right">
@@ -73,7 +75,7 @@
 
     <!-- A tiny always-hit-testable fullscreen corner target closes the last DPI/auto-hide race:
          moving the pointer to the absolute top-right pixel still executes the configured X action. -->
-    <Button x:Name="FullscreenCornerCloseHit" Classes="fullscreenCornerHit" Grid.Row="1" Width="12" Height="12" HorizontalAlignment="Right" VerticalAlignment="Top"
+    <controls:EdgeHitButton x:Name="FullscreenCornerCloseHit" Classes="fullscreenCornerHit" Grid.Row="1" Width="12" Height="12" HorizontalAlignment="Right" VerticalAlignment="Top"
             Background="Transparent" BorderThickness="0" Padding="0" Focusable="False" IsVisible="False" ZIndex="2000" Click="CaptionCloseClicked"/>
 
     <Grid x:Name="WorkspaceLayer" Grid.Row="1">
@@ -167,8 +169,8 @@
               <Border x:Name="InfoGroupBorder" Classes="statusGroup viewGroup"><StackPanel x:Name="InfoGroup" Orientation="Horizontal"><Button x:Name="StatusInfoButton" Classes="statusIcon legacyStatusIcon" Click="InfoClicked" ToolTip.Tip="Image information"><controls:GlideIconView Kind="Info" Classes="statusGlyph"/></Button></StackPanel></Border>
               <Border x:Name="OptionsGroupBorder" Classes="statusGroup viewGroup"><StackPanel x:Name="OptionsGroup" Orientation="Horizontal"><Button x:Name="StatusOptionsButton" Classes="statusIcon legacyStatusIcon" Click="SettingsClicked" ToolTip.Tip="Settings"><TextBlock Text="&#xE713;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="18" Classes="modernSettingsGlyph"/></Button></StackPanel></Border>
               <Border x:Name="SaveGroupBorder" Classes="statusGroup fileGroup"><StackPanel x:Name="SaveGroup" Orientation="Horizontal" Spacing="2">
-                <Button x:Name="StatusSaveButton" Classes="statusIcon legacyStatusIcon" Click="SaveImageClicked" IsEnabled="False" ToolTip.Tip="Save (Ctrl+S): write the current rotation/flip into the file. Does nothing until the picture has been edited."><controls:GlideIconView Kind="SaveFile" Classes="statusGlyph"/></Button>
-                <Button x:Name="StatusSaveAsButton" Classes="statusIcon legacyStatusIcon" Click="SaveImageAsClicked" ToolTip.Tip="Save as... (Ctrl+Alt+S): save a copy under a new name or format"><controls:GlideIconView Kind="SaveAs" Classes="statusGlyph"/></Button>
+                <Button x:Name="StatusSaveButton" Classes="statusIcon legacyStatusIcon" Click="SaveImageClicked" IsEnabled="False" ToolTip.Tip="Save: write the current rotation/flip into the file. Does nothing until the picture has been edited"><controls:GlideIconView Kind="SaveFile" Classes="statusGlyph"/></Button>
+                <Button x:Name="StatusSaveAsButton" Classes="statusIcon legacyStatusIcon" Click="SaveImageAsClicked" ToolTip.Tip="Save as...: save a copy under a new name or format"><controls:GlideIconView Kind="SaveAs" Classes="statusGlyph"/></Button>
               </StackPanel></Border>
               <Border x:Name="OverlayGroupBorder" Classes="statusGroup overlayGroup"><WrapPanel x:Name="OverlayGroup" Orientation="Horizontal">
                 <Button x:Name="OverlaySaveButton" Classes="statusIcon legacyStatusIcon" Click="OverlaySaveClicked" ToolTip.Tip="Save overlay layout"><controls:GlideIconView Kind="OverlaySave" Classes="statusGlyph"/></Button>

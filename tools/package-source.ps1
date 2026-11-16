@@ -16,10 +16,6 @@ Copy-Item $project $stagedProject -Recurse
 $auditEvidence = Join-Path $stagedProject 'audit_evidence'
 if (Test-Path $auditEvidence) { Remove-Item $auditEvidence -Recurse -Force }
 
-# The FFmpeg SDK is fetched (pinned + hash-verified) by tools\fetch-ffmpeg.ps1; never ship it as source.
-$ffmpegSdk = Join-Path $stagedProject 'native\third_party\ffmpeg'
-if (Test-Path $ffmpegSdk) { Remove-Item $ffmpegSdk -Recurse -Force }
-
 $codecDir = Join-Path $stagedProject 'codecs'
 $indexTool = Join-Path $stagedProject 'tools\generate-codec-index.ps1'
 if ((Test-Path $codecDir) -and (Test-Path $indexTool)) {

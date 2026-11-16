@@ -53,7 +53,7 @@ Check a signature with `Get-AuthenticodeSignature dist\Glide.exe` (Status should
 
 Not covered yet: the Inno Setup uninstaller (`unins000.exe`) is generated at install time and is signed
 only if the `.iss` file is given a `SignTool=` entry; add one (Inno Setup's `SignTool` directive) when
-you have a certificate. FFmpeg DLLs are third-party and are verified by pinned SHA-256 instead.
+you have a certificate.
 
 ## 3. Publishing
 

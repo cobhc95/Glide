@@ -14,16 +14,16 @@ public sealed class ResetPlannerTests
     private static IReadOnlyList<ResetTarget> Targets(ResetScratch s, ResetItemId id) => ResetPlanner.TargetsFor(s.Environment, id);
 
     [Fact]
-    public void Catalogue_has_the_ten_items_of_the_approved_mockup_in_three_groups()
+    public void Catalogue_has_the_nine_items_in_three_groups()
     {
-        Assert.Equal(10, ResetCatalog.Items.Count);
+        Assert.Equal(9, ResetCatalog.Items.Count);
         Assert.Equal(
             ["All settings", "Hotkeys and mouse gestures", "Saved profiles and presets", "Window sizes and positions",
-             "Recent files and Home list", "Last session", "Image and thumbnail caches", "Downloaded video codec pack",
+             "Recent files and Home list", "Last session", "Image and thumbnail caches",
              "Registry entries", "Startup and background entries"],
             ResetCatalog.Items.Select(x => x.Title).ToArray());
         Assert.Equal(4, ResetCatalog.Items.Count(x => x.Group == ResetGroup.Settings));
-        Assert.Equal(4, ResetCatalog.Items.Count(x => x.Group == ResetGroup.HistoryAndData));
+        Assert.Equal(3, ResetCatalog.Items.Count(x => x.Group == ResetGroup.HistoryAndData));
         Assert.Equal(2, ResetCatalog.Items.Count(x => x.Group == ResetGroup.WindowsIntegration));
         Assert.Equal("Settings", ResetCatalog.GroupTitle(ResetGroup.Settings));
         Assert.Equal("History and data", ResetCatalog.GroupTitle(ResetGroup.HistoryAndData));
@@ -51,11 +51,14 @@ public sealed class ResetPlannerTests
     }
 
     [Fact]
-    public void All_settings_removes_the_settings_file_its_cache_and_the_small_settings_files()
+    public void All_settings_resets_the_options_of_the_settings_file_and_removes_its_cache_and_the_small_settings_files()
     {
         using var s = new ResetScratch();
         var targets = Targets(s, ResetItemId.AllSettings);
-        Assert.Contains(new FileTarget(Path.Combine(s.Settings, "glide.settings.json")), targets);
+        // The settings file is edited (options back to defaults), never deleted: hotkeys, window positions, remembered
+        // folders and the schema version in it belong to other items or are not settings.
+        Assert.DoesNotContain(new FileTarget(Path.Combine(s.Settings, "glide.settings.json")), targets);
+        Assert.Contains(new SettingsFileResetTarget(Path.Combine(s.Settings, "glide.settings.json"), null), targets);
         Assert.Contains(new FileTarget(Path.Combine(s.Settings, "glide.launch.policy.json")), targets);
         Assert.Contains(new FileTarget(Path.Combine(s.Settings, "print.settings.json")), targets);
         Assert.Contains(new FileTarget(Path.Combine(s.Settings, "thumbnail.settings.json")), targets);
@@ -97,9 +100,9 @@ public sealed class ResetPlannerTests
         Assert.Contains(new FileTarget(Path.Combine(s.Settings, "overlay-layout.json.bak")), session);
         Assert.Contains(session, t => t is JsonPropertiesTarget j && j.RemoveProperties.Contains("LastOpenDirectory"));
 
-        Assert.Equal([new DirectoriesMatchingTarget(s.Local, "ffmpeg-*")], Targets(s, ResetItemId.CodecPack));
-
         var caches = Targets(s, ResetItemId.Caches);
+        // 5.0.4: the video decoder older versions downloaded is no longer used; Caches removes its leftover folders.
+        Assert.Contains(new DirectoriesMatchingTarget(s.Local, "ffmpeg-*"), caches);
         Assert.Contains(new DirectoryTarget(Path.Combine(s.Local, "Startup Diagnostics")), caches);
         Assert.Contains(new FileTarget(Path.Combine(s.Settings, "thumbnail.settings.json")), caches);
         Assert.Contains(new FileTarget(Path.Combine(s.Temp, "glide-diagnostic-transfer.jpg")), caches);
@@ -155,7 +158,7 @@ public sealed class ResetPlannerTests
         Assert.False(ResetPlanner.Plan(s.Environment, [ResetItemId.RegistryEntries]).NeedsRestart);
         Assert.False(ResetPlanner.Plan(s.Environment, [ResetItemId.Caches, ResetItemId.RegistryEntries]).NeedsRestart);
         foreach (var id in new[] { ResetItemId.AllSettings, ResetItemId.HotkeysAndGestures, ResetItemId.ProfilesAndPresets, ResetItemId.WindowPlacements,
-                     ResetItemId.RecentHistory, ResetItemId.LastSession, ResetItemId.CodecPack, ResetItemId.StartupEntries })
+                     ResetItemId.RecentHistory, ResetItemId.LastSession, ResetItemId.StartupEntries })
             Assert.True(ResetPlanner.Plan(s.Environment, [id]).NeedsRestart, id.ToString());
         Assert.Empty(ResetPlanner.Plan(s.Environment, []).Items);
     }
@@ -247,8 +250,9 @@ public sealed class ResetPlannerTests
         Assert.Contains($"\"{ResetCatalog.ThumbnailSettingsFileName}\"", Source("src/Glide.App/Platform/ThumbnailSettingsStore.cs"));
         Assert.Contains($"\"{ResetCatalog.OverlayLayoutFileName}\"", Source("src/Glide.App/MainWindow.Pickers.cs"));
         Assert.Contains($"\"{ResetCatalog.StartupDiagnosticsFolderName}\"", Source("src/Glide.App/MainWindow.Sessions.cs"));
-        Assert.Contains("\"ffmpeg-\"", Source("src/Glide.Imaging/VideoDecoderPack.cs"));
-        Assert.Contains("\"ffmpeg-download-\"", Source("src/Glide.Imaging/VideoDecoderPack.cs"));
+        // Glide 4.6 to 5.0.3 downloaded its video decoder into ffmpeg-<version> (ffmpeg-download-<guid> while downloading);
+        // the store is gone, so the leftover pattern is pinned here instead.
+        Assert.Equal("ffmpeg-*", LegacyVideoDecoderCleanup.FolderPattern);
         // The overlay layout is also kept as ".bak" by OverlayState.
         Assert.Contains(".bak", Source("src/Glide.Core/OverlayState.cs"));
     }

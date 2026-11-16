@@ -1,6 +1,6 @@
 # Glide Image Viewer
 
-> **Glide 5.0.2 is available:** download the [installer or portable archive](https://github.com/cobhc95/Glide/releases/tag/v5.0.2). 5.0.2 is a polish release on top of 5.0.1: the window now remembers its size and position correctly through maximise and full screen, and full screen switches without the reload flash. 5.0.1 was also a polish release: Glide is now built with .NET 10 LTS (about 10 % smaller exe), file moves, saves and renames are safer, and a daily update check tells you when a newer version exists (it only opens the release page, and one switch turns it off). 5.0.0 was the major release; see [What changed since 4.7.1](#what-changed-since-471).
+> **Glide 5.0.4 is available:** download the [installer or portable archive](https://github.com/cobhc95/Glide/releases/latest). Many more formats now open out of the box, HEIC, AVIF, JPEG XL and camera RAW among them, with Explorer thumbnails for every format Glide decodes and Save as writing about 30 formats. 5.0.4 also adds Back up and restore, and Glide is now licensed under GPL-3.0-or-later. See [What changed since 4.7.1](#what-changed-since-471).
 
 ## Fast. Multi-tabbed. Multi-window. Highly customizable.
 
@@ -14,11 +14,11 @@
 
 Windows x64 only. No .NET runtime is required. Get the files from the [latest release](https://github.com/cobhc95/Glide/releases/latest):
 
-* **`Glide.Setup.exe`**: the installer (requires administrator rights). Installs to Program Files by default, adds Glide to Windows' Open With menu and registers Explorer thumbnails.
-* **`Glide-5.0.2-Portable.zip`**: the portable build. Extract it anywhere and run `Glide.exe`; no installation or administrator rights are needed.
+* **`Glide.Setup.exe`**: the installer (requires administrator rights). Installs to Program Files by default, adds Glide to Windows' Open With menu, registers Explorer thumbnails and, with *Integrate with Windows* (on by default), opens Windows' Default apps page for Glide.
+* **`Glide-5.0.4-Portable.zip`**: the portable build. Extract it anywhere and run `Glide.exe`; no installation or administrator rights are needed.
 * **`Glide.Setup.sha256`**: the installer's checksum. To verify the download, run `certutil -hashfile Glide.Setup.exe SHA256` and compare the result with the value in this file.
 
-Upgrading from 5.0.0 or 4.x keeps your settings (older files are migrated once, and your own key bindings and customised title bar are kept). The installer closes Glide before upgrading.
+Upgrading from 5.0.x or 4.x keeps your settings (older files are migrated once, and your own key bindings and customised title bar are kept). The installer closes Glide before upgrading.
 
 ---
 
@@ -69,7 +69,7 @@ JPEG decoding itself is limited by the Windows codecs, so the very first frame o
 | Mouse gestures | ➖ a matrix of fixed slots plus separate mouse toggles; no custom gestures, no tab / title-bar / Explorer areas | ✅ one panel, 9 areas, up to 6 custom gestures per area, every row searchable |
 | Hotkeys and actions | 75 hotkey rows, 56 gesture actions | ✅ more than 260 actions in one registry behind keys, gestures, buttons and menus |
 | Settings as hotkeys or gestures | ❌ | ✅ 132 on/off and choice settings can be bound |
-| Settings window | 8 pages, each one long scrolling list; opens at 1040 x 760 | ✅ 8 pages, 40 collapsible cards, results that *Open* and highlight the setting; opens at 930 x 630 and remembers its size |
+| Settings window | 8 pages, each one long scrolling list; opens at 1040 x 760 | ✅ 8 pages, 41 collapsible cards, results that *Open* and highlight the setting; opens at 930 x 630 and remembers its size |
 | Searchable settings entries | 202 documented at 4.6.0 | ✅ 271 |
 | Window memory | ➖ main window and Settings | ✅ every window, including Print and the dialogs |
 | Status bar | one line in a wide window | ✅ info line stacked on its own row by default, auto-hide, reveal area equal to the bar, reserve-space option |
@@ -101,7 +101,7 @@ JPEG decoding itself is limited by the Windows codecs, so the very first frame o
 
 ### 🔐 Security in short
 
-SVG files can't fetch remote images · imported profiles can't change external programs or bring network folders · malformed GIFs and PSDs are bounded · 512 MP limit with a memory guard on every decode path · installer, single-instance connection and the optional FFmpeg decoder hardened · Glide no longer loads DLLs from an image's folder.
+SVG files can't fetch remote images · imported profiles can't change external programs or bring network folders · malformed GIFs and PSDs are bounded · 512 MP limit with a memory guard on every decode path · installer and single-instance connection hardened · videos play only with the codecs Windows already has · Glide no longer loads DLLs from an image's folder.
 
 ### 🙏 Thanks
 
@@ -182,7 +182,7 @@ Behind every key, gesture, button and menu there is one list of more than 260 ac
 
 ### Settings
 
-Settings is eight pages (General & startup, Appearance & viewing, Window & navigation, Mouse & keyboard, Performance, Slideshow & overlays, Tabs & status bar, Windows & developer) holding 40 collapsible cards. Cards start collapsed, open with a click or the keyboard, remember their state while the window is open and show an *N changed* badge when something differs from the default. Search covers titles, descriptions and aliases, says where each result lives (*Page > Card*) and *Open* switches to the page, opens the card, scrolls to the setting and highlights it; every setting is discoverable through search. The window opens at 930 x 630 (minimum 720 x 480), works at narrow widths, remembers its size, position and page scroll positions, and *Restore defaults* resets only what the window shows. At the end of Windows & developer, **Reset Glide** wipes exactly what you tick: settings, hotkeys and gestures, profiles, window positions, recent files, the last session, caches, the downloaded video pack and Glide's own per-user registry entries, after a confirmation that lists everything, with a settings backup to `Documents\Glide backups` ticked by default. It never touches the install folder, `HKEY_LOCAL_MACHINE`, your pictures or other programs. Settings can also be saved as named profiles and exported as JSON; imports keep this PC's external programs and drop network folders.
+Settings is eight pages (General & startup, Appearance & viewing, Window & navigation, Mouse & keyboard, Performance, Slideshow & overlays, Tabs & status bar, Windows & developer) holding 40 collapsible cards. Cards start collapsed, open with a click or the keyboard, remember their state while the window is open and show an *N changed* badge when something differs from the default. Search covers titles, descriptions and aliases, says where each result lives (*Page > Card*) and *Open* switches to the page, opens the card, scrolls to the setting and highlights it; every setting is discoverable through search. The window opens at 930 x 630 (minimum 720 x 480), works at narrow widths, remembers its size, position and page scroll positions, and *Restore defaults* resets only the options (the same as Reset Glide's *All settings*: hotkeys and gestures, window sizes and positions, remembered folders and startup entries are kept); the *Reset Glide* button next to it opens the Reset Glide card for everything else. At the end of Windows & developer, **Reset Glide** wipes exactly what you tick: settings, hotkeys and gestures, profiles, window positions, recent files, the last session, caches and Glide's own per-user registry entries, after a confirmation that lists everything, with a settings backup to `Documents\Glide backups` ticked by default. It never touches the install folder, `HKEY_LOCAL_MACHINE`, your pictures or other programs. Settings can also be saved as named profiles and exported as JSON; imports keep this PC's external programs and drop network folders. **Back up and restore** (Windows & developer, directly above Reset Glide) writes the items you tick to one `.glidebackup` file, which you can import on this or another PC after reviewing what it holds.
 
 ![Windows and developer settings: collapsed cards](docs/screenshots/5.0/settings-windows.png)
 ![The Reset Glide card at the end of the page](docs/screenshots/5.0/settings-reset-glide.png)
@@ -197,7 +197,7 @@ A slideshow with an interval in milliseconds, forward or backward order, shuffle
 
 ### Window-in-Window overlays
 
-Pin reference images, comparison art or videos above the picture as independent, transparent overlays with their own zoom, pan, opacity and rotation, add them with `Shift+O`, save and load whole layouts (`Ctrl+Shift+S` / `Ctrl+Shift+L`), and let them restore on the next launch. Overlays can drift around a region you draw, avoiding each other; videos play in an overlay with transport, volume, loop and next-video controls using the codecs Windows already has, and if Windows cannot play a video Glide offers to download an optional FFmpeg decoder, verified every time it loads. Overlay mode turns the whole app into a borderless transparent floating window. *Honest limit:* videos stay inside overlays; they never enter image navigation.
+Pin reference images, comparison art or videos above the picture as independent, transparent overlays with their own zoom, pan, opacity and rotation, add them with `Shift+O`, save and load whole layouts (`Ctrl+Shift+S` / `Ctrl+Shift+L`), and let them restore on the next launch. Overlays can drift around a region you draw, avoiding each other; videos play in an overlay with transport, volume, loop and next-video controls using only the codecs Windows already has; if one is missing, Glide tells you exactly which (for example *This video uses the VP9 codec, which isn't installed on this PC.*) and leaves installing it to you. Overlay mode turns the whole app into a borderless transparent floating window. *Honest limit:* videos stay inside overlays; they never enter image navigation.
 
 ![Overlay settings: animation](docs/screenshots/5.0/settings-overlay-animation.png)
 
@@ -215,13 +215,13 @@ See [docs/print-research.md](docs/print-research.md) for the reference-behaviour
 
 ### Explorer thumbnails and Windows integration
 
-A small native provider draws real thumbnails in Windows Explorer for every format Glide can open (it runs in Explorer's isolated thumbnail host and never loads .NET or Glide's UI). The *Fast*, *Balanced* and *High* quality presets, *Maximum source decode size* and *Prefer embedded previews* now genuinely change how thumbnails are made (apply them, then *Refresh thumbnails* for ones Windows already cached), and rotated photos, small camera previews and GIFs come out right. Glide registers itself in Open With for every supported format (per machine by the installer, per user for portable copies) without taking over your default apps; removing it from Open With sticks. Three external programs (Photoshop, GIMP, Paint.NET ...) sit on `Shift+1` / `2` / `3` and in an Explorer tab they open the image you selected. See [docs/explorer-thumbnails.md](docs/explorer-thumbnails.md).
+A small native provider draws real thumbnails in Windows Explorer for every format Glide decodes (it runs in Explorer's isolated thumbnail host and never loads Glide's UI; the newer formats are drawn by two small hash-checked native decoder libraries in the `codecs` folder). The *Fast*, *Balanced* and *High* quality presets, *Maximum source decode size* and *Prefer embedded previews* now genuinely change how thumbnails are made (apply them, then *Refresh thumbnails* for ones Windows already cached), and rotated photos, small camera previews and GIFs come out right. Glide registers itself in Open With for every supported format (per machine by the installer, per user for portable copies). Since 5.0.4 it becomes the default viewer for file types no other app owns; for types another app owns, Setup and the Settings button *Make Glide the default viewer…* open Windows' Default apps page for Glide, and Glide never writes Windows' protected default-app choice. Removing it from Open With sticks. Three external programs (Photoshop, GIMP, Paint.NET ...) sit on `Shift+1` / `2` / `3` and in an Explorer tab they open the image you selected. See [docs/explorer-thumbnails.md](docs/explorer-thumbnails.md).
 
 ![Windows integration and Explorer thumbnails](docs/screenshots/5.0/settings-explorer-thumbnails.png)
 
 ### Format support
 
-Glide recognises and routes 196 filename extensions. The protected fast path covers JPEG, PNG, BMP, GIF, TIFF, WebP and ICO; built-in decoders cover SVG / SVGZ (rendered at exactly the resolution needed) and the legacy raster family TGA, PCX, PNM / PAM, QOI, Radiance HDR, WBMP, XBM, XPM and SGI with no codec install; Photoshop PSD, PSB and PDD show their stored flattened image with transparency. Everything else goes through Windows WIC, a genuine Windows Shell preview or a verified optional codec provider, and when nothing can decode a file Glide names the suffix instead of failing silently. *Honest limits:* a PSD saved without Maximize Compatibility can show an out-of-date composite; Save As writes JPEG, PNG, BMP or TIFF only and does not carry EXIF over. See [docs/format-coverage.md](docs/format-coverage.md).
+Glide recognises and routes 196 filename extensions, and since 5.0.4 about 112 of them decode on a clean Windows install with nothing else installed. The protected fast path covers JPEG, PNG, BMP, GIF, TIFF, WebP and ICO; built-in decoders cover SVG / SVGZ (rendered at exactly the resolution needed), the legacy raster family TGA, PCX, PNM / PAM / PFM, QOI, Radiance HDR, WBMP, XBM, XPM and SGI, camera RAW (the full-size preview embedded in 40 RAW formats), OpenEXR, DICOM, NIfTI, FITS, OpenRaster, Krita, GIMP XCF, Paint.NET (full layered decode) and GPU textures (KTX, KTX2, PVR, ASTC); Photoshop PSD, PSB and PDD show their stored flattened composite, including ZIP-compressed files (layers are not re-composited). A bundled 4.9 MB codec module adds AVIF, HEIC / HEIF, JPEG XL and JPEG 2000 (and writes JPEG 2000 and WebP), loaded only when one of those files is opened or saved. Everything else goes through Windows WIC, a genuine Windows Shell preview or a verified optional codec provider, and when nothing can decode a file Glide names the suffix instead of failing silently. *Honest limits:* a PSD saved without Maximize Compatibility can show an out-of-date composite. **Save As** (5.0.4) writes about 30 formats: JPEG, PNG, WebP, GIF, BMP, TIFF, JPEG XR, JPEG 2000, QOI, TGA, ICO, DDS, KTX, OpenEXR, Radiance HDR, PFM, PSD / PSB, OpenRaster, SGI, PNM / PAM, XPM, XBM and WBMP, plus HEIC, AVIF and JPEG XL when a Windows codec extension with an encoder is installed; the list shows only what this PC can write, keeps the file name's extension in step with the chosen type, and carries EXIF / XMP / colour profile over (Orientation reset) for JPEG, PNG, WebP, TIFF and JPEG XR. Not written: Krita, animation, RAW, vector. See [docs/format-coverage.md](docs/format-coverage.md).
 
 ### Performance and multi-threading
 
@@ -232,7 +232,7 @@ Glide is built around a staged pipeline: a decoder-scaled first frame as soon as
 
 ### Security hardening
 
-5.0.1 adds the fixes of an external code audit: a cross-drive folder move removes only the originals Glide copied and verified (anything that arrived or changed during the move stays and is reported), a multipage or animated image can't be overwritten in place with a single frame, and the optional FFmpeg decoder is rehashed against its pinned fingerprints before it is loaded instead of trusting a stamp file. A full security review shaped 5.0.0. SVG files can no longer make Glide contact other computers (linked web, network-share and relative images are dropped before rendering, so your IP address and Windows credentials are never sent); imported profiles keep your external programs and drop network folders and are refused above 16 MB; malformed GIFs, PSDs and very large images are bounded on every decode path; the single-instance hand-off is private to your Windows user; the installer no longer trusts a per-user registry value, starts Glide without administrator rights and locks down custom install folders; Glide no longer loads libraries from the folder of the image being opened; pasting into the Explorer tab ignores relative paths; and both native components are built with Control Flow Guard, CET and extra compiler checks. The audit found nothing in the native decoders' size checks, the IPC parser, file associations or metadata parsing.
+5.0.1 adds the fixes of an external code audit: a cross-drive folder move removes only the originals Glide copied and verified (anything that arrived or changed during the move stays and is reported), a multipage or animated image can't be overwritten in place with a single frame. A full security review shaped 5.0.0. SVG files can no longer make Glide contact other computers (linked web, network-share and relative images are dropped before rendering, so your IP address and Windows credentials are never sent); imported profiles keep your external programs and drop network folders and are refused above 16 MB; malformed GIFs, PSDs and very large images are bounded on every decode path; the single-instance hand-off is private to your Windows user; the installer no longer trusts a per-user registry value, starts Glide without administrator rights and locks down custom install folders; Glide no longer loads libraries from the folder of the image being opened; pasting into the Explorer tab ignores relative paths; and both native components are built with Control Flow Guard, CET and extra compiler checks. The audit found nothing in the native decoders' size checks, the IPC parser, file associations or metadata parsing.
 
 ### Update check
 
@@ -240,11 +240,11 @@ Once a day (about 20 seconds after Glide starts, and again every 24 hours while 
 
 ### Accessibility and privacy
 
-Glide has no telemetry. Its only network requests are the once-a-day update check described above (one small request to GitHub for the latest release, off with one switch in Settings > General & startup > Updates; Glide never downloads or installs the update itself) and the optional, confirmed download of the FFmpeg video decoder. Diagnostic exports and traces happen only when you ask for them in Settings > Windows & developer (a normal install writes nothing to your Downloads folder; local crash logs are written only if Glide crashes). Everything works from the keyboard, with rebindable shortcuts, a *Tab key button navigation* option, and themes with your own accent, glow and background colours.
+Glide has no telemetry. Its only network requests are the once-a-day update check described above (one small request to GitHub for the latest release, off with one switch in Settings > General & startup > Updates; Glide never downloads or installs the update itself). Glide downloads no codecs: videos play with what Windows has. Diagnostic exports and traces happen only when you ask for them in Settings > Windows & developer (a normal install writes nothing to your Downloads folder; local crash logs are written only if Glide crashes). Everything works from the keyboard, with rebindable shortcuts, a *Tab key button navigation* option, and themes with your own accent, glow and background colours.
 
 ### Quality of life
 
-Live folder refresh adds, removes and renames images in navigation as files arrive (partial downloads are ignored until they finish); next / previous use Explorer's natural order with six sort choices and can continue into sibling and parent folders; `Ctrl+S` saves in place after a confirmation and `Ctrl+Alt+S` converts to JPEG, PNG, BMP or TIFF through a temporary file, so a failed save can never damage the original; Save, rename and delete (to the Recycle Bin) are a keystroke away; the *Escape and Tab keys* card (Settings > Mouse & keyboard) decides what Escape does; and the Home list, closed-tab history and window positions are kept the way you want.
+Live folder refresh adds, removes and renames images in navigation as files arrive (partial downloads are ignored until they finish); next / previous use Explorer's natural order with six sort choices and can continue into sibling and parent folders; `Ctrl+S` saves in place after a confirmation (layered, HDR, icon and texture files open Save as instead) and `Ctrl+Alt+S` is Save as, which converts to any of about 30 formats this PC can write through a temporary file, so a failed save can never damage the original; Save, rename and delete (to the Recycle Bin) are a keystroke away; the *Escape and Tab keys* card (Settings > Mouse & keyboard) decides what Escape does; and the Home list, closed-tab history and window positions are kept the way you want.
 
 ![Folders and sorting settings](docs/screenshots/5.0/settings-folders.png)
 
@@ -299,7 +299,9 @@ Glide recognizes and routes **196 filename extensions**:
 
 **Protected core fast-path suffixes:** .jpg, .jpeg, .jpe, .png, .bmp, .gif, .tif, .tiff, .webp, .ico
 
-**Bundled built-in decoder suffixes (no optional codec required):** .svg, .svgz, .tga, .targa, .icb, .vda, .vst, .pcx, .pnm, .ppm, .pgm, .pbm, .pam, .qoi, .hdr, .rgbe, .wbmp, .xbm, .xpm, .sgi, .rgb, .rgba, .bw
+**Bundled built-in decoder suffixes (no optional codec required):** .svg, .svgz, .tga, .targa, .icb, .vda, .vst, .pcx, .pnm, .ppm, .pgm, .pbm, .pam, .pfm, .qoi, .hdr, .rgbe, .hdr.gz, .wbmp, .xbm, .xpm, .sgi, .rgb, .rgba, .bw, .psd, .psb, .pdd, .exr, .dcm, .dicom, .ima, .nii, .nii.gz, .fits, .fit, .fts, .fts.gz, .ora, .kra, .xcf, .pdn, .ktx, .ktx2, .pvr, .astc, and camera RAW .dng, .cr2, .cr3, .crw, .nef, .nrw, .arw, .srf, .sr2, .raf, .orf, .ori, .rw2, .rwl, .pef, .ptx, .3fr, .fff, .iiq, .cap, .eip, .mef, .mos, .mrw, .x3f, .erf, .kdc, .dcr, .k25, .bay, .srw, .rwz, .gpr, .mdc, .raw, .dcs, .drf, .dsc, .r2d, .rw1
+
+**Bundled codec module (codecs\glidecodecs.dll):** .avif, .avifs, .heic, .heif, .heics, .heifs, .hif, .jxl, .jp2, .j2k, .j2c, .jpc, .jpx, .jpf, .jpm, .mj2
 
 Whether a recognised suffix actually opens depends on the route (built-in decoder, Windows WIC, Windows Shell preview or an optional codec provider); see [docs/format-coverage.md](docs/format-coverage.md) for the full route map and a comparison with IrfanView.
 
@@ -311,7 +313,7 @@ Windows x64. No .NET runtime is required (the app is self-contained and NativeAO
 
 ## Building from source
 
-On Windows, run `build.cmd` (or `build.cmd fast --no-pause`). Release builds produce `Glide-<version>-Portable.zip`, `dist-installer\Glide Setup.exe`, `Glide-<version>.exe` for direct testing and the compact `Glide-Zero-Context-Handover.zip`; on GitHub the installer is published as `Glide.Setup.exe` together with `Glide.Setup.sha256` and the portable archive (for 5.0.1: `Glide-5.0.2-Portable.zip`). Building needs the .NET 10 SDK (x64) and the Visual Studio 2022/2026 C++ tools (see [docs/NET10-MIGRATION-PLAN.md](docs/NET10-MIGRATION-PLAN.md)). Scripts live in `tools/`; the performance benchmark harness is `tools/perf`. Three test projects cover Core, Input and Explorer; settings and actions have static audits (`python tools/audit-settings-search.py`, `python tools/audit-action-registry.py`).
+On Windows, run `build.cmd` (or `build.cmd fast --no-pause`). Release builds produce `Glide-<version>-Portable.zip`, `dist-installer\Glide Setup.exe` and the compact `Glide-Zero-Context-Handover.zip`; on GitHub the installer is published as `Glide.Setup.exe` together with `Glide.Setup.sha256` and the portable archive (for 5.0.4: `Glide-5.0.4-Portable.zip`). Building needs the .NET 10 SDK (x64) and the Visual Studio 2022/2026 C++ tools (see [docs/NET10-MIGRATION-PLAN.md](docs/NET10-MIGRATION-PLAN.md)). Scripts live in `tools/`; the performance benchmark harness is `tools/perf`. Three test projects cover Core, Input and Explorer; settings and actions have static audits (`python tools/audit-settings-search.py`, `python tools/audit-action-registry.py`).
 
 ## Documentation
 
@@ -331,8 +333,12 @@ On Windows, run `build.cmd` (or `build.cmd fast --no-pause`). Release builds pro
 ## Earlier releases
 
 * **4.7.1 / 4.7.0:** animated GIFs, a *Fit to window* mode (key `4`), tabs with Ctrl+Tab in recent order, a simpler Home page, status bar position and a corner expand button, right button + wheel, Speed Boost tray icon choices, and the Always on top menu.
-* **4.6.0:** video overlays (Windows codecs first, optional FFmpeg), Settings reorganised from 14 categories into eight, an adaptive status bar and grouped menus, image sort order and Explorer-style natural sorting.
+* **4.6.0:** video overlays (Windows codecs first, optional FFmpeg, removed again in 5.0.4), Settings reorganised from 14 categories into eight, an adaptive status bar and grouped menus, image sort order and Explorer-style natural sorting.
 * **4.5.0:** Photoshop PSD / PSB / PDD files open and get thumbnails. **4.4.0:** live folder refresh, Save and Save As, and an Explorer thumbnail security fix.
 * **4.3 and 4.2:** Windows Explorer thumbnails, taskbar and maximize fixes, native SVG and legacy raster decoders, a defined route for every recognised extension, automatic Open With, and complete image printing.
 
 See the [changelog](CHANGELOG.md) and the [release notes](docs/releases/) for everything.
+
+## License
+
+Glide is free software, licensed under the [GNU General Public License v3.0 or later](LICENSE) (GPL-3.0-or-later). The complete source code is available in the GitHub repository at https://github.com/cobhc95/Glide. Bundled third-party components keep their own licences; see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md). An [additional permission under GPLv3 section 7](licenses/GLIDE-ADDITIONAL-PERMISSION.txt) allows combining Glide with the Ms-PL-licensed SVG libraries it uses. Contributions are welcome under the terms in [CONTRIBUTING.md](CONTRIBUTING.md).

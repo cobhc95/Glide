@@ -28,8 +28,8 @@ public sealed class SettingsCatalogTests
     [Fact]
     public void Glide_catalog_has_248_current_and_no_future_entries()
     {
-        Assert.Equal(278, SettingsCatalog.All.Count);
-        Assert.Equal(278, SettingsCatalog.All.Count(x => x.FuturePhase is null));
+        Assert.Equal(288, SettingsCatalog.All.Count);
+        Assert.Equal(288, SettingsCatalog.All.Count(x => x.FuturePhase is null));
         Assert.Empty(SettingsCatalog.All.Where(x => x.FuturePhase is not null));
         Assert.Contains(SettingsCatalog.All, x => x.Id == "performance.speedBoost" && x.FuturePhase is null && (bool)x.DefaultValue);
         Assert.Contains(SettingsCatalog.All, x => x.Id == "performance.startWithWindowsInBackground" && x.FuturePhase is null && !(bool)x.DefaultValue);
@@ -153,7 +153,7 @@ public sealed class SettingEffectRegistryTests
         {
             "developer.diagnostics", "escape.resetRememberedClose", "hotkeys.registry",
             "mouse.gestureMatrix", "profiles.export", "profiles.import", "profiles.presets",
-            "titlebar.customize", "windows.fileAssociations"
+            "titlebar.customize", "windows.fileAssociations", "windows.defaultViewer"
         };
 
         Assert.All(dynamicIds, id =>

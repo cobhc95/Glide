@@ -163,6 +163,30 @@ for element in tree.iter():
             continue
         placements.setdefault(setting_id, []).append(hosts[0])
 
+# Data-category tick boxes (5.0.4). Reset Glide and Back up and restore share one data-driven list: their tick boxes are
+# built in code by DataCategorySelector from GlideDataCategoryCatalog (no XAML per tick box) and registered in the
+# search map by RegisterDataCategoryControls. Each card has one empty XAML host; every "reset.*" / "backup.*" id the
+# catalogue names is placed in the card that hosts that host.
+category_catalog = (root / "src/Glide.Core/Data/GlideDataCategoryCatalog.cs").read_text(encoding="utf-8")
+backup_code = (root / "src/Glide.App/Settings/SettingsWindow.Backup.cs").read_text(encoding="utf-8")
+category_rows = re.findall(r'^\s*"(reset\.[A-Za-z]+)",\s*(?:true|false)(?:,\s*"(backup\.[A-Za-z]+)")?', category_catalog, re.M)
+dynamic_hosts = {"ResetCategoryHost": [r for r, _ in category_rows], "BackupCategoryHost": [b for _, b in category_rows if b]}
+# 9 since 5.0.4: the "Downloaded video codec pack" category was folded into "Image and thumbnail caches".
+if len(category_rows) < 9:
+    card_problems.append(f"GlideDataCategoryCatalog: expected at least 9 categories, parsed {len(category_rows)}")
+if "_settingControls[id] = selector.Checks[category.Id]" not in backup_code:
+    card_problems.append("RegisterDataCategoryControls no longer registers the data-category tick boxes for Settings search")
+for host_name, host_ids in dynamic_hosts.items():
+    host = by_name.get(host_name)
+    hosts = hosting_cards(host) if host is not None else []
+    if len(hosts) != 1:
+        card_problems.append(f"{host_name} must be inside exactly one card")
+        continue
+    for setting_id in host_ids:
+        if setting_id not in ids:
+            card_problems.append(f"data category tick box {setting_id} has no SettingsCatalog entry")
+        placements.setdefault(setting_id, []).append(hosts[0])
+
 static_ids = sorted(i for i in ids if not i.startswith("gesture.") and i not in outside_cards)
 for setting_id in static_ids:
     hosts = placements.get(setting_id, [])

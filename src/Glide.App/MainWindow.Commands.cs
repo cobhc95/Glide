@@ -21,6 +21,7 @@ using Glide.Core.Commands;
 using Glide.Core.Settings;
 using Glide.Core.Workspace;
 using Glide.Imaging;
+using Glide.Imaging.Encoders;
 
 namespace Glide.App;
 
@@ -822,6 +823,9 @@ public partial class MainWindow
         actions[GlideCommand.BackOrPrevious] = BackOrPreviousAsync;
         // 5.0.1 update checker: "Check for updates now" (MainWindow.Updates.cs).
         actions[GlideCommand.CheckForUpdates] = CheckForUpdatesNowAsync;
+        // 5.0.4 Back up and restore (MainWindow.Backup.cs): Settings at the card, then its Export / Import flow.
+        actions[GlideCommand.ExportGlideBackup] = () => OpenBackupFromCommandAsync(import: false);
+        actions[GlideCommand.ImportGlideBackup] = () => OpenBackupFromCommandAsync(import: true);
         MainWindowCommandDispatcher.AssertComplete(actions.Keys);
         return new MainWindowCommandDispatcher(actions);
     }
@@ -887,6 +891,7 @@ public partial class MainWindow
             ToolTip.SetTip(button, $"{label} ({ShortcutForTitleButton(definition)})");
             ToolTip.SetShowDelay(button, 650);
         }
+        if (_homeSurface is not null) UpdateHomeHintTexts(_homeSurface);
         if (_homeSurface is not null) Tip(_homeSurface.OptionsButton, "Settings", GlideCommand.Settings);
         Tip(StatusZoomOutButton, "Zoom out", GlideCommand.ZoomOut);
         Tip(StatusZoomInButton, "Zoom in", GlideCommand.ZoomIn);
@@ -897,6 +902,8 @@ public partial class MainWindow
         Tip(SlideshowButton, _slideshow?.IsActive != true ? "Start slideshow" : _slideshow.IsRunning ? "Pause slideshow" : "Resume slideshow", GlideCommand.StartPauseSlideshow);
         Tip(SlideshowStopButton, "Stop slideshow session", GlideCommand.StopSlideshow);
         Tip(StatusInfoButton, "Image information", GlideCommand.ToggleImageInfo);
+        Tip(StatusSaveButton, "Save: write the current rotation/flip into the file. Does nothing until the picture has been edited", GlideCommand.SaveImage);
+        Tip(StatusSaveAsButton, "Save as...: save a copy under a new name or format", GlideCommand.SaveImageAs);
         Tip(StatusOptionsButton, "Settings", GlideCommand.Settings);
         Tip(StatusFirstButton, "First image", GlideCommand.FirstImage);
         Tip(StatusPreviousButton, "Previous image", GlideCommand.PreviousImage);
@@ -913,8 +920,15 @@ public partial class MainWindow
             Tip(_browserSurface.ForwardButton, "Forward", GlideCommand.NavigateForward);
             ToolTip.SetShowOnDisabled(_browserSurface.BackButton, true);
             ToolTip.SetShowOnDisabled(_browserSurface.ForwardButton, true);
-            Tip(_browserSurface.UpButton, "Up one folder", GlideCommand.BrowserUp);
+            // Up one folder is bindable, and its fixed registry key (Alt+Up) always works: show whichever applies.
+            var upKeys = HotkeyCatalog.ShortcutsForCommand(GlideCommand.BrowserUp, _settings.Hotkeys);
+            if (upKeys.Count == 0 && BindingHints.FixedShortcut("fixed.explorer.up") is { } fixedUp) upKeys = [fixedUp];
+            ToolTip.SetTip(_browserSurface.UpButton, BindingHints.WithShortcuts("Up one folder", upKeys));
+            ToolTip.SetShowDelay(_browserSurface.UpButton, 650);
             Tip(_browserSurface.RefreshButton, "Refresh", GlideCommand.RefreshFolder);
+            // Ctrl+F is a fixed registry shortcut: read it from there instead of typing it a second time.
+            _browserSurface.FilterBox.Watermark = BindingHints.FixedShortcut("fixed.explorer.filter") is { } filterKeys
+                ? $"Filter this folder ({filterKeys})" : "Filter this folder";
         }
     }
 
@@ -941,22 +955,12 @@ public partial class MainWindow
         var stem = string.IsNullOrWhiteSpace(_currentPath) ? "glide-selection" : Path.GetFileNameWithoutExtension(_currentPath) + "-selection";
         try
         {
-            var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
-            {
-                Title = "Export selected region",
-                SuggestedFileName = stem + ".png",
-                DefaultExtension = "png",
-                ShowOverwritePrompt = true,
-                FileTypeChoices = new[]
-                {
-                    new FilePickerFileType("PNG image") { Patterns = new[] { "*.png" } },
-                    new FilePickerFileType("JPEG image") { Patterns = new[] { "*.jpg", "*.jpeg" } },
-                    new FilePickerFileType("Bitmap image") { Patterns = new[] { "*.bmp" } }
-                }
-            });
-            if (file is null) return;
-            var destination = file.TryGetLocalPath();
-            if (string.IsNullOrWhiteSpace(destination)) return;
+            var choices = await WritableSaveFormatsAsync();
+            // A crop defaults to PNG (lossless), as before; every writable type is offered.
+            var defaultFormat = choices.Contains(SaveFormatCatalog.Png) ? SaveFormatCatalog.Png : choices[0];
+            var picked = await PickSaveDestinationAsync("Export selected region", null, defaultFormat, stem, null, choices);
+            if (picked is null) return;
+            var (destination, format, _) = picked.Value;
             // Exporting over the multi-frame original itself would keep only one cropped frame of it.
             if (_currentPath is { } original && ImageSavePolicy.IsSameFile(original, destination))
             {
@@ -968,16 +972,65 @@ public partial class MainWindow
                     return;
                 }
             }
-            await ImageSelectionExportService.ExportAsync(bitmap, selection, destination);
-            _diagnostics.Write("selection", "exported", new { path = destination, selection.Width, selection.Height });
+            await ImageSelectionExportService.ExportAsync(bitmap, selection, destination, format: format, sourcePath: _currentPath);
+            _diagnostics.Write("selection", "exported", new { path = destination, format = format.Id, selection.Width, selection.Height });
         }
         catch (Exception ex)
         {
             _diagnostics.Write("selection", "export_failed", new { error = ex.Message });
+            if (ex is ImageSaveRefusedException or NotSupportedException)
+                await ConfirmAsync("Export selected region", ex.Message, "OK", showCancel: false);
         }
     }
 
-    private const float SaveJpegQuality = 0.92f;
+    /// <summary>Lossy formats (JPEG, WebP, HEIC, AVIF, JPEG XL, JPEG XR) all use Glide's JPEG save quality.</summary>
+    private const float SaveJpegQuality = ImageEncodeOptions.DefaultQuality;
+
+    private static IReadOnlyList<SaveFormat>? _writableSaveFormats;
+
+    /// <summary>
+    /// The formats this PC can write, probed once per process on first use (off the UI thread: the probe asks WIC
+    /// for HEIC/AVIF/JPEG XL encoders and may load the bundled codec provider for JPEG 2000/WebP).
+    /// </summary>
+    private static async Task<IReadOnlyList<SaveFormat>> WritableSaveFormatsAsync()
+        => _writableSaveFormats ??= await Task.Run(SaveFormatAvailability.Writable);
+
+    /// <summary>
+    /// Shows the system Save dialog with every writable type, the default type preselected and a suggested name
+    /// whose extension matches it. The returned path's extension always matches the returned format: a typed
+    /// extension of a writable type selects that type, otherwise the selected type's extension is appended.
+    /// </summary>
+    private async Task<(string Path, SaveFormat Format, bool NameCompleted)?> PickSaveDestinationAsync(string title, string? sourcePath, SaveFormat defaultFormat,
+        string? stem, IStorageFolder? start, IReadOnlyList<SaveFormat> choices)
+    {
+        var types = choices.Select(f => new FilePickerFileType(f.DialogLabel) { Patterns = f.Patterns }).ToArray();
+        var defaultIndex = Math.Max(0, IndexOf(choices, defaultFormat));
+        var result = await StorageProvider.SaveFilePickerWithResultAsync(new FilePickerSaveOptions
+        {
+            Title = title,
+            SuggestedFileName = SaveAsDialogPolicy.SuggestedFileName(sourcePath, defaultFormat, stem),
+            SuggestedStartLocation = start,
+            DefaultExtension = SaveAsDialogPolicy.ExtensionFor(defaultFormat, sourcePath).TrimStart('.'),
+            ShowOverwritePrompt = true,
+            FileTypeChoices = types,
+            // The type list and the suggested name must agree (5.0.4 fix: the name said .png while the type said JPEG).
+            SuggestedFileType = types[defaultIndex]
+        });
+        var picked = result.File?.TryGetLocalPath();
+        if (string.IsNullOrWhiteSpace(picked)) return null;
+        var selected = result.SelectedFileType is { } type
+            ? SaveAsDialogPolicy.FromDialogLabel(type.Name, choices) ?? (Array.IndexOf(types, type) is var i and >= 0 ? choices[i] : null)
+            : null;
+        var resolved = SaveAsDialogPolicy.ResolveDestination(picked, selected, choices, sourcePath);
+        _diagnostics.Write("file", "save_destination_resolved", new { picked, selected = selected?.Id, resolved = resolved.Path, format = resolved.Format.Id });
+        return (resolved.Path, resolved.Format, !string.Equals(resolved.Path, picked, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static int IndexOf(IReadOnlyList<SaveFormat> formats, SaveFormat format)
+    {
+        for (var i = 0; i < formats.Count; i++) if (formats[i] == format) return i;
+        return -1;
+    }
 
     private void SaveImageClicked(object? sender, RoutedEventArgs e) => _ = SaveCurrentImageAsync();
 
@@ -1001,8 +1054,10 @@ public partial class MainWindow
         if (string.IsNullOrWhiteSpace(path)) return;
         // Nothing edited: Save does nothing (unlike Save As, which always writes a copy).
         if (!CanSaveCurrentImage()) return;
-        // Formats the WIC bridge cannot write (WebP, GIF, HEIC, ...) fall through to Save As.
-        if (!ImageSavePolicy.CanSaveInPlace(path, NativeImageEncoder.CanEncode)) { await SaveCurrentImageAsAsync(); return; }
+        // Formats Glide cannot write on this PC, or must not rewrite in place (layered PSD/ORA, HDR/EXR/PFM precision,
+        // multi-size icons, mipmapped textures), fall through to Save As.
+        var inPlace = await Task.Run(() => SaveFormatAvailability.InPlaceFormat(path));
+        if (inPlace is null) { await SaveCurrentImageAsAsync(); return; }
         // Glide writes one frame: a multipage TIFF (or any multi-frame file) must never be overwritten in place.
         var frames = await Task.Run(() => File.Exists(path) ? ImageFrameProbe.CountFrames(path) : 0);
         if (frames == 0) return;
@@ -1013,7 +1068,7 @@ public partial class MainWindow
                 await SaveCurrentImageAsAsync();
             return;
         }
-        await SaveCurrentImageToAsync(path, confirmOverwrite: true, knownSourceFrames: frames);
+        await SaveCurrentImageToAsync(path, confirmOverwrite: true, knownSourceFrames: frames, format: inPlace);
     }
 
     private async Task SaveCurrentImageAsAsync()
@@ -1022,30 +1077,17 @@ public partial class MainWindow
         if (string.IsNullOrWhiteSpace(path) || Viewport.Bitmap is null) return;
         try
         {
-            var srcExt = Path.GetExtension(path).ToLowerInvariant();
-            var defaultExt = NativeImageEncoder.CanEncode(srcExt) ? srcExt.TrimStart('.') : "png";
+            var choices = await WritableSaveFormatsAsync();
+            // Default type: the source's own format when this PC can write it, otherwise PNG (lossless).
+            var defaultFormat = SaveAsDialogPolicy.DefaultFormat(path, choices);
             var folder = Path.GetDirectoryName(path);
             var start = folder is null ? null : await StorageProvider.TryGetFolderFromPathAsync(folder);
-            var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
-            {
-                Title = "Save image as",
-                SuggestedFileName = Path.GetFileNameWithoutExtension(path) + "." + defaultExt,
-                SuggestedStartLocation = start,
-                DefaultExtension = defaultExt,
-                ShowOverwritePrompt = true,
-                FileTypeChoices = new[]
-                {
-                    new FilePickerFileType("JPEG image") { Patterns = new[] { "*.jpg", "*.jpeg" } },
-                    new FilePickerFileType("PNG image") { Patterns = new[] { "*.png" } },
-                    new FilePickerFileType("Bitmap image") { Patterns = new[] { "*.bmp" } },
-                    new FilePickerFileType("TIFF image") { Patterns = new[] { "*.tif", "*.tiff" } }
-                }
-            });
-            var destination = file?.TryGetLocalPath();
-            if (string.IsNullOrWhiteSpace(destination)) return;
-            destination = ImageSavePolicy.EnsureExtension(destination, "." + defaultExt);
-            // The system picker already confirmed overwrite (ShowOverwritePrompt).
-            await SaveCurrentImageToAsync(destination, confirmOverwrite: false);
+            var picked = await PickSaveDestinationAsync("Save image as", path, defaultFormat, null, start, choices);
+            if (picked is null) return;
+            var (destination, format, completed) = picked.Value;
+            // The system picker already confirmed overwrite (ShowOverwritePrompt) for the name it returned; a name
+            // Glide completed with the type's extension has not been confirmed yet.
+            await SaveCurrentImageToAsync(destination, confirmOverwrite: completed, format: format);
         }
         catch (Exception ex)
         {
@@ -1053,7 +1095,7 @@ public partial class MainWindow
         }
     }
 
-    private async Task SaveCurrentImageToAsync(string destination, bool confirmOverwrite, int? knownSourceFrames = null)
+    private async Task SaveCurrentImageToAsync(string destination, bool confirmOverwrite, int? knownSourceFrames = null, SaveFormat? format = null)
     {
         var source = _currentPath;
         if (string.IsNullOrWhiteSpace(source)) return;
@@ -1081,7 +1123,9 @@ public partial class MainWindow
         if (confirmOverwrite && destinationExists &&
             !await ConfirmAsync("Save image", $"Overwrite \"{Path.GetFileName(destination)}\"?" +
                 (transform.IsIdentity ? "" : " The current rotation/flip will be applied to the file.") +
-                " Embedded metadata (EXIF) is not preserved.", "Overwrite"))
+                ((format ?? SaveFormatCatalog.FromPath(destination))?.PreservesMetadata == true
+                    ? " Embedded metadata (EXIF, XMP, colour profile) is kept."
+                    : " Embedded metadata (EXIF) is not preserved."), "Overwrite"))
             return;
         Bitmap? full = null;
         try
@@ -1092,8 +1136,8 @@ public partial class MainWindow
                 await using var stream = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 64 * 1024, FileOptions.SequentialScan);
                 return await _decoderBackend.DecodeFullAsync(stream, source);
             });
-            await ImageSaveService.SaveAsync(full, transform, destination, SaveJpegQuality, sourcePath: source);
-            _diagnostics.Write("file", "saved", new { source, destination, transform.QuarterTurns, transform.FlipHorizontal, transform.FlipVertical });
+            await ImageSaveService.SaveAsync(full, transform, destination, SaveJpegQuality, sourcePath: source, format: format);
+            _diagnostics.Write("file", "saved", new { source, destination, format = format?.Id, transform.QuarterTurns, transform.FlipHorizontal, transform.FlipVertical });
             if (string.Equals(Path.GetFullPath(destination), Path.GetFullPath(source), StringComparison.OrdinalIgnoreCase))
             {
                 // Edits are now baked in; reload so the view no longer re-applies them.

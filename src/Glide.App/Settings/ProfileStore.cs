@@ -85,6 +85,37 @@ public static class ProfileStore
         SaveDocument(document);
     }
 
+    /// <summary>Back up and restore: the saved profiles as the file stores them (the default profile added when there is none).</summary>
+    internal static ProfileDocument ReadDocumentForBackup() => LoadDocument();
+
+    /// <summary>The schema glide.profiles.json is written with (a backup import refuses newer ones).</summary>
+    internal const int CurrentSchema = SchemaVersion;
+
+    /// <summary>
+    /// Back up and restore: replaces glide.profiles.json with <paramref name="document"/> (already validated and sanitised by
+    /// the importer). Written through a uniquely named temporary file and a replace, so a crash leaves the old or the new file;
+    /// unlike the store's own saves a failure is thrown, so the import can report it.
+    /// </summary>
+    internal static void ImportDocument(ProfileDocument document)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        document.Schema = SchemaVersion;
+        document.Slots = null;
+        EnsureDefault(document);
+        var path = Path.Combine(SettingsStore.GetSettingsDirectory(), FileName);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var temp = path + "." + Environment.ProcessId + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            File.WriteAllText(temp, JsonSerializer.Serialize(document, AppJsonContext.Default.ProfileDocument));
+            File.Move(temp, path, true);
+        }
+        finally
+        {
+            try { if (File.Exists(temp)) File.Delete(temp); } catch { /* best-effort temp cleanup */ }
+        }
+    }
+
     private static ProfileDocument LoadDocument()
     {
         if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("profile_read_start");

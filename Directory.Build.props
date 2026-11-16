@@ -3,7 +3,7 @@
     <!-- 5.0.1: .NET 10 LTS (.NET 8 support ended 2026-11-10). One TFM for every project, including the
          tests and tools\perf\Glide.PerfBench. See docs\NET10-MIGRATION-PLAN.md. -->
     <TargetFramework>net10.0</TargetFramework>
-    <Version>5.0.3</Version>
+    <Version>5.0.4</Version>
     <AssemblyVersion>$(Version).0</AssemblyVersion>
     <FileVersion>$(Version).0</FileVersion>
     <InformationalVersion>$(Version)</InformationalVersion>
@@ -62,10 +62,13 @@
       <Visible>false</Visible>
     </None>
   </ItemGroup>
-  <!-- Dev runs and tests load FFmpeg from <output>\ffmpeg. Releases exclude it: users download it only if Windows can't play a video. -->
-  <ItemGroup Condition="Exists('$(MSBuildThisFileDirectory)native\third_party\ffmpeg\bin') And '$(PublishAot)' != 'true'">
-    <None Include="$(MSBuildThisFileDirectory)native\third_party\ffmpeg\bin\avutil-*.dll;$(MSBuildThisFileDirectory)native\third_party\ffmpeg\bin\swresample-*.dll;$(MSBuildThisFileDirectory)native\third_party\ffmpeg\bin\swscale-*.dll;$(MSBuildThisFileDirectory)native\third_party\ffmpeg\bin\avcodec-*.dll;$(MSBuildThisFileDirectory)native\third_party\ffmpeg\bin\avformat-*.dll">
-      <Link>ffmpeg\%(Filename)%(Extension)</Link>
+  <!-- Bundled optional codec provider (codecs\glidecodecs.dll + manifest + generated index, built by
+       tools\build-codecs.ps1). Dev runs and tests load it from <output>\codecs exactly as a release does
+       from <app>\codecs; it is still only hashed/loaded when an AVIF/HEIC/JXL/JPEG 2000 file is opened.
+       Releases receive it through build.cmd's codecs -> dist\codecs copy, so publish is excluded here. -->
+  <ItemGroup Condition="Exists('$(MSBuildThisFileDirectory)codecs\codecs.index.json') And '$(PublishAot)' != 'true'">
+    <None Include="$(MSBuildThisFileDirectory)codecs\*.dll;$(MSBuildThisFileDirectory)codecs\*.glidecodec.json;$(MSBuildThisFileDirectory)codecs\codecs.index.json">
+      <Link>codecs\%(Filename)%(Extension)</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <Visible>false</Visible>
     </None>

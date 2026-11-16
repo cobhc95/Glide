@@ -123,7 +123,9 @@ public sealed class ResetCardUiTests : IDisposable
                 var panel = Named<StackPanel>(window, "WindowsPanel");
                 var cards = panel.Children.OfType<SettingsCard>().ToList();
                 Assert.Equal("windows-reset", cards[^1].CardId);
-                Assert.Equal("windows-diagnostics", cards[^2].CardId);
+                // 5.0.4: Back up and restore sits directly above Reset Glide, after Diagnostics.
+                Assert.Equal("windows-backup", cards[^2].CardId);
+                Assert.Equal("windows-diagnostics", cards[^3].CardId);
                 var card = cards[^1];
                 Assert.Equal("Reset Glide", card.Title);
                 Assert.Equal("Choose what to wipe and start fresh", card.Subtitle);
@@ -168,9 +170,9 @@ public sealed class ResetCardUiTests : IDisposable
                 Assert.True(go.IsEnabled);
 
                 Click(Named<Button>(window, "ResetSelectAllButton"));
-                Assert.Equal("10 selected", count.Text);
-                Assert.Equal("Reset 10 selected...", go.Content);
-                Assert.Equal(10, window.SelectedResetItems().Count);
+                Assert.Equal("9 selected", count.Text);
+                Assert.Equal("Reset 9 selected...", go.Content);
+                Assert.Equal(9, window.SelectedResetItems().Count);
 
                 Click(Named<Button>(window, "ResetClearButton"));
                 Assert.Equal("Nothing selected", count.Text);
@@ -466,7 +468,7 @@ public sealed class ResetCardUiTests : IDisposable
     [InlineData("regedit", "Remove Glide's registry entries")]
     [InlineData("recent", "Clear recent files and Home list")]
     [InlineData("cache", "Clear image and thumbnail caches")]
-    [InlineData("ffmpeg", "Remove downloaded video codec pack")]
+    [InlineData("video decoder", "Clear image and thumbnail caches")]
     [InlineData("start with windows", "Remove startup and background entries")]
     [InlineData("lost window", "Forget window sizes and positions")]
     public async Task Settings_search_finds_the_card_and_each_item(string query, string expectedLabel)

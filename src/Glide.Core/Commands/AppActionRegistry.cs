@@ -324,6 +324,23 @@ public static class AppActionRegistry
             Description = "Asks GitHub whether a newer version of Glide exists (one small request, no personal data) and shows the answer: in Settings > Updates when Settings is open, otherwise as the update prompt or a short message. Nothing is downloaded or installed."
         },
 
+        // 5.0.4 Back up and restore (Settings > Windows & developer): open that card and start its Export / Import flow. Both
+        // open dialogs (save / open file, then the import choice and confirmation), so they are hotkey / menu only, never
+        // gestures; import replaces data, so it is marked destructive too.
+        Cmd("app.exportBackup", "Export Glide backup…", "Application", GlideCommand.ExportGlideBackup, [],
+            ["backup", "back up", "export", "save settings", "transfer", "migrate", "move to new pc", "new computer", "settings file", "profile", "glidebackup"]) with
+        {
+            Inputs = NoGesture,
+            Description = "Opens Settings > Windows & developer > Back up and restore and saves the ticked items (settings, hotkeys, profiles, window positions, recent files, last session) to one .glidebackup file."
+        },
+        Cmd("app.importBackup", "Import Glide backup…", "Application", GlideCommand.ImportGlideBackup, [],
+            ["backup", "back up", "restore", "import", "load settings", "transfer", "migrate", "move to new pc", "new computer", "settings file", "profile", "glidebackup"]) with
+        {
+            Inputs = NoGesture,
+            Destructive = true,
+            Description = "Opens Settings > Windows & developer > Back up and restore and imports a .glidebackup file: you choose what to import and confirm first."
+        },
+
         // Same operation as folder.exploreParent (both run the title-bar Show in Explorer action). Kept as its own
         // entry for the legacy gesture id "showInExplorer", the title-bar button file.locate and menu wording.
         new("file.showInExplorer", "Show in Explorer (select current image)", "File", GlideCommand.OpenContainingFolder)

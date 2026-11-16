@@ -517,6 +517,39 @@ public sealed class ShellThumbnailProviderTests : IDisposable
             Marshal.ThrowExceptionForHR(getClassObject(ref clsid, ref iid, out var factory));
             _factory = (IClassFactory)Marshal.GetObjectForIUnknown(factory);
             Marshal.Release(factory);
+
+            // Codec libraries (glidecodecs.dll / glidemanaged.dll) load from the repository's codecs folder - the
+            // files whose SHA-256 a fresh provider build pins - instead of "<provider folder>\codecs".
+            if (NativeLibrary.TryGetExport(_module, "GlideThumbnailSetCodecDirectory", out var setDirectory))
+            {
+                var codecs = Path.Combine(FindRepositoryRoot(), "codecs");
+                var pointer = Marshal.StringToHGlobalUni(codecs);
+                try { Marshal.GetDelegateForFunctionPointer<SetCodecDirectoryFn>(setDirectory)(pointer); }
+                finally { Marshal.FreeHGlobal(pointer); }
+            }
+        }
+
+        /// <summary>True when the provider was built with the codec-library bridge.</summary>
+        public bool HasCodecBridge => HasExport("GlideThumbnailCodecState");
+
+        /// <summary>1 loaded and verified, 0 not attempted, negative refused (-1 no pin, -2 missing, -3 hash mismatch, -4 load, -5 ABI).</summary>
+        public int CodecState(int kind)
+            => Marshal.GetDelegateForFunctionPointer<CodecStateFn>(NativeLibrary.GetExport(_module, "GlideThumbnailCodecState"))(kind);
+
+        /// <summary>The SHA-256 the provider pinned for codec library <paramref name="kind"/> (0 glidecodecs, 1 glidemanaged).</summary>
+        public string CodecPin(int kind)
+        {
+            var buffer = new byte[80];
+            var length = Marshal.GetDelegateForFunctionPointer<CodecPinFn>(NativeLibrary.GetExport(_module, "GlideThumbnailCodecPin"))(kind, buffer, buffer.Length);
+            return Encoding.ASCII.GetString(buffer, 0, Math.Max(0, length));
+        }
+
+        /// <summary>Like <see cref="Render"/>, but returns null when the provider declines the file (Explorer would show its icon).</summary>
+        public Rendered? TryRender(string path, int edge, int quality = 1)
+        {
+            try { return Render(path, edge, quality); }
+            catch (COMException) { return null; }
+            catch (Xunit.Sdk.XunitException) { return null; }
         }
 
         public void ClearOverrides() => _setOverrides(-1, 0, 1);
@@ -577,6 +610,9 @@ public sealed class ShellThumbnailProviderTests : IDisposable
         [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate void SetOverridesFn(int quality, uint maxSource, int preferEmbedded);
         [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate int GetDiagnosticsFn(ref RawDiagnostics diagnostics);
         [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate int DescribeQualityFn(int quality, [Out] int[] values, int count);
+        [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate void SetCodecDirectoryFn(IntPtr directory);
+        [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate int CodecStateFn(int kind);
+        [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate int CodecPinFn(int kind, [Out] byte[] buffer, int length);
         [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate int DllGetClassObjectFn(ref Guid clsid, ref Guid iid, out IntPtr factory);
 
         [StructLayout(LayoutKind.Sequential)]

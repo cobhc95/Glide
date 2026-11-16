@@ -49,7 +49,7 @@ No administrator rights are required for the app itself. Since 5.0.1 every proje
 publish needs `%ProgramFiles(x86)%\Microsoft Visual Studio\Installer` (vswhere) on PATH; `build.cmd` adds it,
 and any other script or agent job that publishes must do the same. The released exe is self-contained, so
 users need no .NET runtime. `Glide.App.csproj` sets `<CETCompat>false</CETCompat>` (the .NET 10 AOT default
-is on; Glide loads third-party shell extensions, codecs and FFmpeg in-process): enabling CET needs a manual
+is on; Glide loads third-party shell extensions and Windows codecs in-process): enabling CET needs a manual
 interop test pass on a CET-capable PC first. See `docs/NET10-MIGRATION-PLAN.md`.
 
 ## Permanent invariants (do not regress)
@@ -179,7 +179,11 @@ Forward keys added to saved shortcut maps unless a key is taken; schema 10: *Exp
   (`KeepLocalLaunchTargets`, `KeepLocalFolderPaths`). Final settings audit: 210 editors, 216 settings in
   40 cards on 8 pages, 54 generated gesture rows; the settings catalogue has 271 entries (the stacked-info option and, since 5.0.1,
   the two update options are among them).
-- **Update checker (5.0.1)**: the only network use besides the optional FFmpeg download. `Glide.Core/Updates` holds the pure,
+- **Video playback (5.0.4)**: overlays play videos only with the codecs installed in Windows (Media Foundation); Glide ships and
+  downloads no decoder. When Windows can't play a file, `VideoContainerProbe` (Glide.Imaging) reads the container's track list
+  (bounded, never throws) and `VideoPlaybackDiagnoser` asks Windows per codec (`GlideVideoHasDecoder`, MFTEnumEx) and names only
+  what is missing. `LegacyVideoDecoderCleanup` deletes folders the old optional FFmpeg pack left in %LOCALAPPDATA%\Glide.
+- **Update checker (5.0.1)**: Glide's only network use. `Glide.Core/Updates` holds the pure,
   tested logic (`UpdateVersion` comparison, `UpdateReleaseParser` over a source-generated DTO, `UpdateUrlPolicy` for the release
   address and redirect hosts, `UpdateSchedule` for the 24 h / 6 h back-off / 20 h prompt rules with a clock seam, `UpdateChecker`
   with one process-wide gate, `UpdateStatusText`). `Glide.App/Updates` holds `GitHubUpdateFeed` (the only HTTP code: HTTPS GET of

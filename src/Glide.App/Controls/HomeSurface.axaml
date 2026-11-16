@@ -8,7 +8,7 @@
           <Grid Margin="31,24,18,18" RowDefinitions="Auto,Auto,Auto">
             <StackPanel>
               <TextBlock x:Name="HomeHeadingText" Text="Glide" FontSize="24" FontWeight="SemiBold"/>
-              <TextBlock x:Name="HomeSubtitleText" Text="Open an image with Ctrl+O or drop one here, or pick up where you left off below."
+              <TextBlock x:Name="HomeSubtitleText" Text="Open an image or drop one here, or pick up where you left off below."
                          Foreground="{DynamicResource BrushMuted}" FontSize="12" Margin="0,5,0,0" TextWrapping="Wrap"/>
             </StackPanel>
 
@@ -48,7 +48,7 @@
           <!-- Same two layouts as the viewer's status bar (HomeSurface.ApplyStackedStatusLayout): the info text on its own top line with the
                collapse / close buttons at its right and the buttons on the row below (default), or everything on a single line. -->
           <Grid x:Name="HomeStatusLayoutGrid" ColumnDefinitions="Auto,*,Auto" RowDefinitions="*" Margin="16,8,8,8" ColumnSpacing="8" RowSpacing="0">
-            <TextBlock x:Name="HomeStatusText" Text="Glide  •  Drop an image here or Ctrl+O" FontSize="12.5" Foreground="{DynamicResource BrushMuted}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+            <TextBlock x:Name="HomeStatusText" Text="Glide  •  Drop an image here" FontSize="12.5" Foreground="{DynamicResource BrushMuted}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
             <StackPanel x:Name="HomeStatusControlsPanel" Grid.Column="1" Orientation="Horizontal" Spacing="4">
               <Button Classes="statusIcon legacyStatusIcon" IsEnabled="False" ToolTip.Tip="Zoom out"><controls:GlideIconView Kind="ZoomOut" Classes="statusGlyph"/></Button>
               <Button Classes="statusIcon legacyStatusIcon" IsEnabled="False" ToolTip.Tip="Zoom in"><controls:GlideIconView Kind="ZoomIn" Classes="statusGlyph"/></Button>

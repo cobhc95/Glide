@@ -117,7 +117,9 @@ internal static class ResetServicesFactory
         TempDirectory: Path.GetTempPath(),
         InstallDirectory: AppContext.BaseDirectory,
         ImageExtensions: ImageFormatRegistry.Extensions,
-        SettingsSchemaVersion: SettingsStore.CurrentSettingsSchema);
+        SettingsSchemaVersion: SettingsStore.CurrentSettingsSchema,
+        // "All settings" writes these defaults for every option (the same reset as Settings' Restore defaults button).
+        DefaultSettingsJson: SettingsDefaults.DefaultSettingsJson());
 
     public static ResetServices Create(string settingsDirectory) => new()
     {

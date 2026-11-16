@@ -362,7 +362,7 @@ public sealed class UpdateStateAndGuardTests
     }
 
     [Fact]
-    public void The_only_http_client_code_in_the_app_is_the_update_feed_and_the_existing_video_pack_download()
+    public void The_only_http_client_code_in_the_app_is_the_update_feed()
     {
         var root = Path.Combine(SourceText.RepoRoot, "src");
         var users = Directory.EnumerateFiles(root, "*.cs", SearchOption.AllDirectories)
@@ -370,6 +370,7 @@ public sealed class UpdateStateAndGuardTests
             .Where(f => Regex.IsMatch(File.ReadAllText(f), @"\bnew HttpClient\b|\bSocketsHttpHandler\b|\bHttpClientHandler\b|\bWebClient\b"))
             .Select(Path.GetFileName)
             .OrderBy(n => n, StringComparer.Ordinal).ToArray();
-        Assert.Equal(new[] { "GitHubUpdateFeed.cs", "VideoDecoderPack.cs" }, users);
+        // 5.0.4: the optional video decoder download is gone; Glide plays videos only with the codecs installed in Windows.
+        Assert.Equal(new[] { "GitHubUpdateFeed.cs" }, users);
     }
 }

@@ -1,0 +1,27 @@
+Paint.NET sample documents and their flattened reference PNGs in this folder come from the pypdn
+project test data (https://github.com/addisonElliott/pypdn, tests/data), used under the MIT License:
+
+  pdn4-additive-opacity.pdn/.png  <- Untitled3.pdn / flattenOpacityTest.png (Paint.NET 4.0.21)
+  pdn3510-two-layers.pdn/.png     <- oldPDN3510.pdn / oldPDN3510.png (Paint.NET 3.5.10)
+
+MIT License
+
+Copyright (c) 2018 Addison Elliott
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

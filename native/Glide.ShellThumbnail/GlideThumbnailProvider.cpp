@@ -6,6 +6,7 @@
 // never lets an exception escape a COM boundary.
 
 #include "ThumbnailCore.h"
+#include "CodecProviders.h"
 
 #include <windows.h>
 #include <thumbcache.h>
@@ -465,4 +466,29 @@ extern "C" int __stdcall GlideThumbnailDescribeQuality(int quality, std::int32_t
     values[4] = profile.webpBypassFiltering ? 1 : 0;
     values[5] = profile.webpNoFancyUpsampling ? 1 : 0;
     return 6;
+}
+
+/// Tests: load the codec libraries from `directory` instead of "<this DLL>\codecs" (nullptr = default).
+/// Only affects this process, and only before a library is first loaded; the build-time pins still apply.
+extern "C" void __stdcall GlideThumbnailSetCodecDirectory(const wchar_t* directory)
+{
+    glide::thumb::providers::SetCodecDirectoryForTests(directory);
+}
+
+/// Copies the SHA-256 pinned for codec library `kind` (0 glidecodecs.dll, 1 glidemanaged.dll) and returns its
+/// length (0 when the library was absent at build time, so its formats get no thumbnails from it).
+extern "C" int __stdcall GlideThumbnailCodecPin(int kind, char* buffer, int length)
+{
+    if (kind < 0 || kind > 1 || !buffer || length < 65) return 0;
+    const char* pin = glide::thumb::providers::PinnedHash(static_cast<glide::thumb::providers::Kind>(kind));
+    strncpy_s(buffer, static_cast<std::size_t>(length), pin, _TRUNCATE);
+    return static_cast<int>(strlen(buffer));
+}
+
+/// Load state of codec library `kind`: 1 loaded and verified, 0 not attempted, negative = refused
+/// (-1 no pin, -2 missing, -3 hash mismatch, -4 load failed, -5 ABI rejected).
+extern "C" int __stdcall GlideThumbnailCodecState(int kind)
+{
+    if (kind < 0 || kind > 1) return 0;
+    return glide::thumb::providers::LoadState(static_cast<glide::thumb::providers::Kind>(kind));
 }

@@ -153,6 +153,7 @@ public partial class SettingsWindow
             var launchTargetsKept = KeepLocalLaunchTargets(state, current);
             var networkFoldersDropped = KeepLocalFolderPaths(state, current);
             ProfileStore.Replace(id, importedName, state);
+            _restoreDefaultsStaged = false;
             LoadControls(state);
             _apply(state.CloneState(), false);
             UpdateDirtyState(state);

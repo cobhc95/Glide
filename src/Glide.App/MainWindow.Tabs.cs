@@ -50,7 +50,6 @@ public partial class MainWindow
             // vertical tabs use the full panel width; the panel scrolls instead of compressing tabs.
             preferred = SideTabPaneWidth - 14;
         }
-        var tabMouseHint = TabMouseHint();
         if (_tabMruCycleSnapshot is null) TouchTabMru();
 
         var edgeHitTabs = !sideTabs && WindowState is WindowState.Maximized or WindowState.FullScreen;
@@ -165,7 +164,10 @@ public partial class MainWindow
             grid.Children.Add(close);
             container.Child = grid;
             container.ContextMenu = BuildTabContextMenu(tab);
-            ToolTip.SetTip(container, BuildTabToolTip(tab, fullPath, tabMouseHint));
+            var tabToolTip = BuildTabToolTip(tab, fullPath, out var tabHintText);
+            ToolTip.SetTip(container, tabToolTip);
+            // The mouse hint is recomputed every time the tooltip opens, so changing a tab gesture never leaves it stale.
+            container.AddHandler(ToolTip.ToolTipOpeningEvent, (_, _) => tabHintText.Text = TabMouseHint());
             ToolTip.SetShowDelay(container, 650);
             ToolTip.SetTip(close, "Close tab");
             ToolTip.SetShowDelay(close, 650);
@@ -198,7 +200,7 @@ public partial class MainWindow
     /// Tab tooltip: "Name: file" in larger semibold text, then "Path: folder" (the folder
     /// that contains it) when one is available, then the mouse hint, both a notch smaller.
     /// </summary>
-    private Control BuildTabToolTip(TabState tab, string? fullPath, string mouseHint)
+    private Control BuildTabToolTip(TabState tab, string? fullPath, out TextBlock hintText)
     {
         var (nameSize, detailSize) = TabToolTipFontSizes(_settings.TabToolTipTextSize);
         var (name, folder) = TabToolTipLines(tab.Title, fullPath);
@@ -207,7 +209,8 @@ public partial class MainWindow
             panel.Children.Add(new TextBlock { Text = "Name: " + name, FontSize = nameSize, FontWeight = FontWeight.SemiBold, TextWrapping = TextWrapping.Wrap });
         if (!string.IsNullOrWhiteSpace(folder))
             panel.Children.Add(new TextBlock { Text = "Path: " + folder, FontSize = detailSize, TextWrapping = TextWrapping.Wrap });
-        panel.Children.Add(new TextBlock { Text = mouseHint, FontSize = detailSize, Opacity = 0.78, TextWrapping = TextWrapping.Wrap });
+        hintText = new TextBlock { Text = TabMouseHint(), FontSize = detailSize, Opacity = 0.78, TextWrapping = TextWrapping.Wrap };
+        panel.Children.Add(hintText);
         return panel;
     }
 
@@ -263,19 +266,8 @@ public partial class MainWindow
         }, DispatcherPriority.Loaded);
     }
 
-    /// <summary>Tab tooltip hint that reflects which mouse actions are actually enabled.</summary>
-    private string TabMouseHint()
-    {
-        var closers = new List<string>();
-        static bool Closes(string action) => action is GestureCatalog.Default or GestureCatalog.CloseTab;
-        if (Closes(_inputRouter.ResolveGesture("tabs.middleClick", _settings.Gestures))) closers.Add("middle-click");
-        if (Closes(_inputRouter.ResolveGesture("tabs.doubleClick", _settings.Gestures))) closers.Add("double-click");
-        var parts = new List<string> { "Drag to reorder" };
-        if (closers.Count > 0) parts.Add($"{string.Join(" or ", closers)} to close");
-        parts.Add("right-click for tab actions");
-        var text = string.Join(" • ", parts);
-        return char.ToUpperInvariant(text[0]) + text[1..] + ".";
-    }
+    /// <summary>Tab tooltip hint that reflects which mouse actions are actually enabled (live settings, custom gestures included).</summary>
+    private string TabMouseHint() => BindingHints.TabMouseHint("Drag to reorder", _settings.Gestures, _settings.CustomGestures);
 
     // ---- Ctrl+Tab most-recently-used cycling ---------------------------------------------------
     private readonly List<Guid> _tabMru = new();
@@ -1524,75 +1516,25 @@ public partial class MainWindow
         }
     }
 
-    private static readonly SemaphoreSlim DecoderPackGate = new(1, 1);
-    private static bool _decoderPackDeclinedThisRun;
-
-    /// <summary>Offers the optional decoder after Windows failed to play a video. Asks once per run.</summary>
-    private async Task<bool> RequestVideoDecoderPackAsync(CancellationToken cancellationToken)
-    {
-        await DecoderPackGate.WaitAsync(cancellationToken);
-        try
-        {
-            if (await VideoDecoderPack.TryActivateAsync()) return true;
-            if (_decoderPackDeclinedThisRun) return false;
-            var sizeMb = VideoDecoderPack.PackBytes / 1_000_000;
-            if (!await ConfirmAsync("Video decoder needed",
-                    $"Windows doesn't have a decoder for this video on this PC. Glide can download its optional video decoder (FFmpeg, {sizeMb} MB) from GitHub. You'll only need to do this once.",
-                    "Download"))
-            {
-                _decoderPackDeclinedThisRun = true;
-                return false;
-            }
-
-            using var cancel = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            var bar = new ProgressBar { Minimum = 0, Maximum = 1, Height = 8 };
-            var stop = new Button { Content = "Cancel", MinWidth = 90, HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right };
-            stop.Click += (_, _) => cancel.Cancel();
-            var progressWindow = new Window
-            {
-                Title = "Downloading video decoder", Icon = Icon, Width = 420, SizeToContent = SizeToContent.Height, CanResize = false,
-                WindowStartupLocation = WindowStartupLocation.CenterOwner, Topmost = Topmost,
-                Content = new StackPanel
-                {
-                    Margin = new Thickness(20), Spacing = 14,
-                    Children = { new TextBlock { Text = "Downloading the video decoder..." }, bar, stop }
-                }
-            };
-            PopupPlacementStore.Track(progressWindow, "decoder-download-progress");
-            progressWindow.Closing += (_, _) => cancel.Cancel();
-            _overlays?.SetModalSuppressed(true);
-            progressWindow.Show(this);
-            try
-            {
-                await VideoDecoderPack.InstallAsync(new Progress<double>(x => bar.Value = x), cancel.Token);
-                return true;
-            }
-            catch (OperationCanceledException) { return false; }
-            catch (Exception ex)
-            {
-                _diagnostics.Write("video", "decoder_pack_failed", new { error = ex.GetType().Name, ex.Message });
-                await ConfirmAsync("Download failed", "The video decoder couldn't be downloaded. Check your connection and try opening the video again.", "OK", showCancel: false);
-                return false;
-            }
-            finally
-            {
-                progressWindow.Close();
-                _overlays?.SetModalSuppressed(false);
-            }
-        }
-        finally { DecoderPackGate.Release(); }
-    }
-
+    /// <summary>
+    /// Windows couldn't play a video. Glide uses only the codecs installed in Windows, so it says exactly which one is
+    /// missing (read from the file's container and checked against Windows' decoders); finding it is up to the user.
+    /// </summary>
     private async Task ShowVideoUnavailableAsync(string path, string? reason)
     {
-        if (!IsVisible || reason == VideoOverlaySession.DecoderPackDeclined) return;
+        if (!IsVisible) return;
+        var diagnosis = await Task.Run(() => VideoPlaybackDiagnoser.Diagnose(path));
+        _diagnostics.Write("video", "unavailable_diagnosis", new
+        {
+            reason,
+            kind = diagnosis.Kind.ToString(),
+            missing = string.Join(",", diagnosis.MissingCodecs.Select(x => x.Id)),
+        });
+        if (!IsVisible) return;
         var dialog = CreateContentSizedDialog("Can't play this video", 380, 560);
         PopupPlacementStore.Track(dialog, "overlay-video-unavailable");
         var ok = new Button { Content = "OK", MinWidth = 90, IsDefault = true };
         ok.Click += (_, _) => dialog.Close();
-        var detail = reason is not null && reason.StartsWith("codec_unavailable", StringComparison.Ordinal)
-            ? "Windows doesn't have a decoder for this video's format on this PC. WebM (VP8/VP9), HEVC (H.265) and AV1 videos need the matching Microsoft Store extension: VP9 Video Extensions, HEVC Video Extensions or AV1 Video Extension."
-            : "Windows couldn't open this file as a video. It may be damaged or use an unsupported format.";
         dialog.Content = new StackPanel
         {
             Margin = new Thickness(20),
@@ -1601,7 +1543,7 @@ public partial class MainWindow
             {
                 new TextBlock { Text = "Can't play this video", FontSize = 19, FontWeight = FontWeight.SemiBold },
                 new TextBlock { Text = Path.GetFileName(path), TextWrapping = TextWrapping.Wrap, Opacity = .8 },
-                new TextBlock { Text = detail, TextWrapping = TextWrapping.Wrap },
+                new TextBlock { Text = diagnosis.Message, TextWrapping = TextWrapping.Wrap },
                 new StackPanel { Orientation = Avalonia.Layout.Orientation.Horizontal, HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right, Children = { ok } }
             }
         };

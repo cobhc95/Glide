@@ -35,7 +35,7 @@ public sealed class ResetExecutorTests
         """;
 
     [Fact]
-    public void All_settings_deletes_the_settings_files_and_leaves_everything_else_alone()
+    public void All_settings_resets_the_options_deletes_the_small_settings_files_and_leaves_everything_else_alone()
     {
         using var s = new ResetScratch();
         var settings = s.Write(s.Settings, "glide.settings.json", SettingsJson);
@@ -51,7 +51,14 @@ public sealed class ResetExecutorTests
         var report = Run(s, [ResetItemId.AllSettings]);
 
         Assert.True(report.AllSucceeded, report.Describe());
-        Assert.False(File.Exists(settings));
+        // Options only: without app defaults (this scratch environment has none) the option keys are removed so they load
+        // as defaults; everything that is not an option stays exactly as it was.
+        var root = JsonNode.Parse(File.ReadAllText(settings))!.AsObject();
+        foreach (var option in new[] { "ThemeChoice", "HistorySize", "RapidPreviewLongestSide" }) Assert.False(root.ContainsKey(option), option);
+        var original = JsonNode.Parse(SettingsJson)!.AsObject();
+        foreach (var kept in original.Select(x => x.Key).Where(AllSettingsReset.IsKept))
+            Assert.True(JsonNode.DeepEquals(original[kept], root[kept]), kept);
+        Assert.Equal(original.Count - 3, root.Count);
         Assert.False(File.Exists(policy));
         Assert.False(File.Exists(print));
         Assert.False(File.Exists(leftover));
@@ -94,7 +101,7 @@ public sealed class ResetExecutorTests
     }
 
     [Fact]
-    public void Profiles_history_session_and_codec_pack_items_remove_their_data()
+    public void Profiles_history_session_and_cache_items_remove_their_data_including_old_video_decoder_leftovers()
     {
         using var s = new ResetScratch();
         var file = s.Write(s.Settings, "glide.settings.json", SettingsJson);
@@ -107,7 +114,7 @@ public sealed class ResetExecutorTests
         var partial = s.Write(s.Local, @"ffmpeg-download-abc\pack.zip");
         var unrelated = s.Write(s.Local, @"crash.log");
 
-        var report = Run(s, [ResetItemId.ProfilesAndPresets, ResetItemId.RecentHistory, ResetItemId.LastSession, ResetItemId.CodecPack]);
+        var report = Run(s, [ResetItemId.ProfilesAndPresets, ResetItemId.RecentHistory, ResetItemId.LastSession, ResetItemId.Caches]);
 
         Assert.True(report.AllSucceeded, report.Describe());
         foreach (var gone in new[] { profiles, history, session, layout, layoutBak, pack, partial }) Assert.False(File.Exists(gone), gone);
@@ -163,7 +170,7 @@ public sealed class ResetExecutorTests
     }
 
     [Fact]
-    public void Startup_item_after_all_settings_writes_a_minimal_file_with_the_schema_and_both_switches_off()
+    public void Startup_item_after_all_settings_switches_both_off_and_keeps_the_schema()
     {
         using var s = new ResetScratch();
         s.Write(s.Settings, "glide.settings.json", SettingsJson);
@@ -172,7 +179,7 @@ public sealed class ResetExecutorTests
 
         Assert.True(report.AllSucceeded, report.Describe());
         var root = JsonNode.Parse(File.ReadAllText(Path.Combine(s.Settings, "glide.settings.json")))!.AsObject();
-        Assert.Equal(3, root.Count);
+        Assert.False(root.ContainsKey("ThemeChoice"));
         Assert.Equal(7, (int?)root["SettingsSchemaVersion"]);
         Assert.False((bool)root["SpeedBoostEnabled"]!);
         Assert.False((bool)root["StartWithWindowsInBackground"]!);
@@ -400,7 +407,7 @@ public sealed class ResetExecutorTests
         Directory.CreateDirectory(installInsideLocal);
         s.Write(installInsideLocal, "Glide.exe");
         var env = s.Environment with { InstallDirectory = installInsideLocal };
-        var plan = ResetPlanner.Plan(env, [ResetItemId.CodecPack]);
+        var plan = ResetPlanner.Plan(env, [ResetItemId.Caches]);
 
         var report = ResetExecutor.Execute(plan, PhysicalResetFileSystem.Instance, new FakeRegistry());
 

@@ -26,6 +26,12 @@ public static class LiveDiagnosticTrace
 
     public static string? Path => Volatile.Read(ref _path);
 
+    /// <summary>
+    /// True once the owner process opted in (--diagnostic-trace or GLIDE_DIAGNOSTIC_TRACE=1). Hot paths such as
+    /// WM_NCHITTEST check this before building a payload so the disabled trace costs one volatile read.
+    /// </summary>
+    public static bool IsEnabled => Volatile.Read(ref _initialized) != 0;
+
     public static void Initialize(string version)
     {
         if (Interlocked.Exchange(ref _initialized, 1) != 0) return;

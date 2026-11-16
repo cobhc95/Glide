@@ -210,7 +210,8 @@
             <controls:SettingsCard CardId="window-fullscreen" Title="Fullscreen" Subtitle="Title and tab bar, cursor hiding and what happens on exit" Icon="Fullscreen" IsExpanded="False">
               <StackPanel Classes="settingsCardBody" Spacing="10">
                 <CheckBox x:Name="AutoHideFullscreenChromeCheck" Content="Auto-hide fullscreen title/tab bar"/>
-                <CheckBox x:Name="FullscreenKeepTabBarOpenCheck" Content="Keep title/tab bar open in fullscreen (resizes image below it)" ToolTip.Tip="Can also be toggled by right-clicking the tab/title bar while fullscreen."/>
+                <CheckBox x:Name="FullscreenKeepTabBarOpenCheck" Content="Keep title/tab bar open in fullscreen (resizes image below it)"/>
+                <CheckBox x:Name="FullscreenKeepTitleBarForExplorerCheck" Content="Keep title bar visible in full screen while Explorer is active" ToolTip.Tip="With an Explorer tab selected, the title/tab bar stays shown in fullscreen and the Explorer navigation row (Back, Forward, Up, address bar, filter) sits on its own line beneath it. Image and Welcome tabs keep the normal auto-hide."/>
                 <CheckBox x:Name="HideCursorFullscreenCheck" Content="Hide cursor when idle in fullscreen"/>
                 <Grid ColumnDefinitions="260,150,*" Margin="6,0,0,0"><TextBlock Text="Fullscreen cursor hide delay (seconds)" VerticalAlignment="Center"/><NumericUpDown x:Name="FullscreenHideCursorDelayBox" Grid.Column="1" Minimum="1" Maximum="30"/></Grid>
                 <Grid ColumnDefinitions="260,250,*" Margin="6,0,0,0"><TextBlock Text="Behavior after exiting fullscreen" VerticalAlignment="Center"/><ComboBox x:Name="FullscreenExitBehaviorCombo" Grid.Column="1" Width="240"><ComboBoxItem Content="Restore size and location"/><ComboBoxItem Content="Maximized"/><ComboBoxItem Content="Minimized"/></ComboBox></Grid>
@@ -589,8 +590,9 @@
           <StackPanel x:Name="WindowsPanel" IsVisible="False" Spacing="0">
             <controls:SettingsCard CardId="windows-explorer-open" Title="Opening images from Explorer" Subtitle="Open With registration and what happens when you open an image" Icon="OpenWith" IsExpanded="False">
               <StackPanel Classes="settingsCardBody" Spacing="10">
-                <TextBlock Text="Register Glide in Windows Open With without changing your Windows default-app choice. Registration is per-user and does not require administrator privileges." Classes="phaseNote"/>
+                <TextBlock Text="Register Glide in Windows Open With; formats no other app opens get Glide as their default, and another app's default is never changed. Registration is per-user and does not require administrator privileges." Classes="phaseNote"/>
                 <WrapPanel ItemSpacing="12" LineSpacing="8" controls:SettingsCard.SettingIds="windows.fileAssociations"><Button x:Name="AddOpenWithButton" Classes="secondaryAction" Content="Add Glide to Open With" Click="AddOpenWithClicked" MinWidth="220"/><Button x:Name="RemoveOpenWithButton" Classes="secondaryAction" Content="Remove Glide Open With entries" Click="RemoveOpenWithClicked" MinWidth="240"/></WrapPanel>
+                <Button x:Name="MakeDefaultViewerButton" Classes="secondaryAction" Content="Make Glide the default viewer…" Click="MakeDefaultViewerClicked" MinWidth="240" HorizontalAlignment="Left" ToolTip.Tip="Opens Windows' Default apps page for Glide. Press &quot;Set default&quot; there to open every supported image format with Glide."/>
                 <TextBlock x:Name="WindowsIntegrationStatusText" Text="" Classes="phaseNote" TextWrapping="Wrap"/>
                 <CheckBox x:Name="ReuseSingleInstanceCheck" Content="Reuse one Glide instance for Explorer image launches" ToolTip.Tip="Enabled by default. Explorer launches are handed to the running Glide before a second UI starts."/>
                 <Grid ColumnDefinitions="260,250,*" Margin="6,0,0,0"><TextBlock Text="Opening an image from Explorer" VerticalAlignment="Center"/><ComboBox x:Name="ExternalOpenBehaviorCombo" Grid.Column="1" Width="240"><ComboBoxItem Content="Open in new tab"/><ComboBoxItem Content="Open new window"/><ComboBoxItem Content="Overwrite existing tab"/></ComboBox></Grid>
@@ -636,35 +638,19 @@
                 <CheckBox x:Name="StartupDiagnosticsCheck" Content="Write lightweight startup timing JSONL"/>
             </StackPanel>
           </controls:SettingsCard>
+            <!-- Back up and restore and Reset Glide share one data-driven tick-box list (DataCategorySelector, built from
+                 GlideDataCategoryCatalog in SettingsWindow.Backup.cs / SettingsWindow.Reset.cs): the hosts below stay empty here. -->
+            <controls:SettingsCard CardId="windows-backup" Title="Back up and restore" Subtitle="Export or import Glide's settings and data" Icon="SaveAs" IsExpanded="False">
+              <StackPanel Classes="settingsCardBody" Spacing="0">
+                <StackPanel x:Name="BackupCategoryHost" controls:SettingsCard.SettingIds="backup.card,backup.export,backup.import"/>
+                <TextBlock x:Name="BackupNoteText" Classes="phaseNote" TextWrapping="Wrap" Margin="0,10,0,0"
+                           Text="Saves one .glidebackup file you can import on this or another PC. Not included: caches, registry and Windows startup entries (they belong to this PC or are rebuilt), and external programs."/>
+                <TextBlock x:Name="BackupResultText" Classes="phaseNote" IsVisible="False" TextWrapping="Wrap" Margin="0,6,0,0"/>
+            </StackPanel>
+          </controls:SettingsCard>
             <controls:SettingsCard CardId="windows-reset" Title="Reset Glide" Subtitle="Choose what to wipe and start fresh" Icon="Reset" IconBrush="#E5645A" IsExpanded="False">
               <StackPanel Classes="settingsCardBody" Spacing="0">
-                <Grid ColumnDefinitions="Auto,*" ColumnSpacing="8"><TextBlock Classes="resetGroupLabel" Text="SETTINGS"/><Border Grid.Column="1" Classes="resetGroupRule"/></Grid>
-                <UniformGrid Columns="2" RowSpacing="2" ColumnSpacing="8" Margin="0,4,0,0">
-                  <CheckBox x:Name="ResetAllSettingsCheck" Classes="resetItem" Tag="reset.allSettings"/>
-                  <CheckBox x:Name="ResetHotkeysCheck" Classes="resetItem" Tag="reset.hotkeysGestures"/>
-                  <CheckBox x:Name="ResetProfilesCheck" Classes="resetItem" Tag="reset.profiles"/>
-                  <CheckBox x:Name="ResetWindowPlacementCheck" Classes="resetItem" Tag="reset.windowPlacement"/>
-                </UniformGrid>
-                <Grid ColumnDefinitions="Auto,*" ColumnSpacing="8" Margin="0,12,0,0"><TextBlock Classes="resetGroupLabel" Text="HISTORY AND DATA"/><Border Grid.Column="1" Classes="resetGroupRule"/></Grid>
-                <UniformGrid Columns="2" RowSpacing="2" ColumnSpacing="8" Margin="0,4,0,0">
-                  <CheckBox x:Name="ResetRecentCheck" Classes="resetItem" Tag="reset.recentHistory"/>
-                  <CheckBox x:Name="ResetSessionCheck" Classes="resetItem" Tag="reset.lastSession"/>
-                  <CheckBox x:Name="ResetCachesCheck" Classes="resetItem" Tag="reset.caches"/>
-                  <CheckBox x:Name="ResetCodecPackCheck" Classes="resetItem" Tag="reset.codecPack"/>
-                </UniformGrid>
-                <Grid ColumnDefinitions="Auto,*" ColumnSpacing="8" Margin="0,12,0,0"><TextBlock Classes="resetGroupLabel" Text="WINDOWS INTEGRATION"/><Border Grid.Column="1" Classes="resetGroupRule"/></Grid>
-                <UniformGrid Columns="2" RowSpacing="2" ColumnSpacing="8" Margin="0,4,0,0">
-                  <CheckBox x:Name="ResetRegistryCheck" Classes="resetItem" Tag="reset.registry"/>
-                  <CheckBox x:Name="ResetStartupCheck" Classes="resetItem" Tag="reset.startup"/>
-                </UniformGrid>
-                <Border Classes="resetBarRule" Margin="0,12,0,0" Padding="0,12,0,0">
-                  <Grid x:Name="ResetBar" ColumnDefinitions="Auto,Auto,Auto,*,Auto" ColumnSpacing="8" controls:SettingsCard.SettingIds="reset.card">
-                    <Button x:Name="ResetSelectAllButton" Classes="secondaryAction resetBar" Content="Select all" Click="ResetSelectAllClicked"/>
-                    <Button x:Name="ResetClearButton" Grid.Column="1" Classes="secondaryAction resetBar" Content="Clear" Click="ResetClearClicked"/>
-                    <TextBlock x:Name="ResetCountText" Grid.Column="2" Text="Nothing selected" Foreground="{DynamicResource BrushMuted}" FontSize="13" VerticalAlignment="Center" Margin="4,0,0,0"/>
-                    <Button x:Name="ResetGoButton" Grid.Column="4" Classes="dangerAction" Content="Reset selected..." IsEnabled="False" HorizontalAlignment="Right" Click="ResetGoClicked"/>
-                  </Grid>
-                </Border>
+                <StackPanel x:Name="ResetCategoryHost" controls:SettingsCard.SettingIds="reset.card"/>
                 <TextBlock x:Name="ResetResultText" Classes="phaseNote" IsVisible="False" TextWrapping="Wrap" Margin="0,10,0,0"/>
             </StackPanel>
           </controls:SettingsCard>
@@ -679,16 +665,26 @@
       <Border Grid.Row="2" Grid.ColumnSpan="2" Background="{DynamicResource BrushFooter}" BorderBrush="{DynamicResource BrushBorder}" BorderThickness="0,1,0,0">
         <Grid ColumnDefinitions="*,Auto" Margin="14,6,20,6">
           <!-- Footer (approved design): sidebar-wide, two rows.
-               Row 1: version left, "Always expand" + switch right. Row 2: full-width Restore defaults with reset icon. -->
+               Row 1: version left, "Always expand" + switch right. Row 2: two equal buttons: Restore defaults (options only,
+               the same scope as Reset Glide > All settings) and "Reset Glide" (opens the Reset Glide card for everything else). -->
           <Grid x:Name="SettingsFooterLeft" Width="196" HorizontalAlignment="Left" VerticalAlignment="Center" RowDefinitions="Auto,Auto" ColumnDefinitions="*,Auto" RowSpacing="6">
             <TextBlock x:Name="AboutVersionText" Text="Glide" Foreground="{DynamicResource BrushMuted}" FontSize="13" VerticalAlignment="Center"/>
             <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center" ToolTip.Tip="Open every Settings section expanded">
               <TextBlock Text="Always expand" FontSize="13" VerticalAlignment="Center"/>
               <ToggleButton x:Name="SettingsAlwaysExpandSwitch" Classes="footerSwitch" VerticalAlignment="Center" ToolTip.Tip="Open every Settings section expanded"/>
             </StackPanel>
-            <Button x:Name="RestoreDefaultsButton" Grid.Row="1" Grid.ColumnSpan="2" Classes="secondaryAction" Height="32" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Click="RestoreDefaultsClicked">
-              <StackPanel Orientation="Horizontal" Spacing="6"><TextBlock Text="&#x21BA;" VerticalAlignment="Center"/><TextBlock Text="Restore defaults" VerticalAlignment="Center"/></StackPanel>
-            </Button>
+            <Grid x:Name="FooterResetButtons" Grid.Row="1" Grid.ColumnSpan="2" ColumnDefinitions="*,*" ColumnSpacing="8">
+              <Button x:Name="RestoreDefaultsButton" Classes="secondaryAction footerPair" Click="RestoreDefaultsClicked"
+                      AutomationProperties.Name="Restore defaults"
+                      ToolTip.Tip="Restore defaults: put every option back to its default. Settings only: hotkeys, mouse gestures, window positions, history and other data are kept. Nothing is saved until Apply or OK.">
+                <StackPanel Orientation="Horizontal" Spacing="4"><TextBlock Text="&#x21BA;" VerticalAlignment="Center"/><TextBlock x:Name="RestoreDefaultsLabel" Text="Defaults" VerticalAlignment="Center"/></StackPanel>
+              </Button>
+              <Button x:Name="OpenResetGlideButton" Grid.Column="1" Classes="secondaryAction footerPair" Click="OpenResetGlideClicked"
+                      AutomationProperties.Name="Reset Glide: more reset options"
+                      ToolTip.Tip="More reset options: history, window positions, hotkeys, caches, Windows integration">
+                <StackPanel Orientation="Horizontal" Spacing="3"><TextBlock x:Name="OpenResetGlideLabel" Text="Reset Glide" Foreground="{DynamicResource BrushAccent}" VerticalAlignment="Center"/><TextBlock Text="&#x2192;" Foreground="{DynamicResource BrushAccent}" VerticalAlignment="Center"/></StackPanel>
+              </Button>
+            </Grid>
           </Grid>
           <StackPanel Grid.Column="1" VerticalAlignment="Center" Orientation="Horizontal" Spacing="10">
             <StackPanel x:Name="DirtySummaryHost" VerticalAlignment="Center" Margin="0,0,8,0" Spacing="1">

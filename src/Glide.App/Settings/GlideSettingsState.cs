@@ -175,6 +175,8 @@ public sealed record GlideSettingsState
     public bool ExplorerShowOnlyImages { get; set; } = true;
     public bool FullscreenStatusAlwaysOn { get; set; } = true;
     public bool FullscreenKeepTabBarOpen { get; set; }
+    /// <summary>Fullscreen with the Explorer tab selected keeps the title/tab bar docked above the Explorer navigation row. On by default; files without the key get true.</summary>
+    public bool FullscreenKeepTitleBarForExplorer { get; set; } = true;
     public bool AlwaysOnTop { get; set; }
     // Overlay mode owns an independent topmost preference; normal-window topmost must not leak into it.
     public bool OverlayAlwaysOnTop { get; set; }

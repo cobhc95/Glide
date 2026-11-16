@@ -230,9 +230,13 @@ public partial class MainWindow
         }
 
         var fullscreen = (state ?? WindowState) == WindowState.FullScreen;
-        if (fullscreen && _settings.FullscreenKeepTabBarOpen)
+        var fullscreenMode = CurrentFullscreenTitleBarMode();
+        _appliedFullscreenTitleBarMode = fullscreen ? fullscreenMode : null;
+        if (fullscreen && fullscreenMode == FullscreenTitleBarMode.Docked)
         {
-            // Pinned fullscreen chrome participates in layout: the image resizes below the 44-DIP row.
+            // Pinned fullscreen chrome participates in layout: the image resizes below the 44-DIP row. This is also
+            // the layout while the active view has its own navigation row at the top (Explorer tab), so that row sits
+            // on its own line beneath the bar instead of under an overlay (see FullscreenTitleBarPolicy).
             MainRoot.RowDefinitions[0].Height = new GridLength(44);
             Grid.SetRow(ChromeBorder, 0);
             ChromeBorder.ZIndex = 0;
@@ -245,7 +249,7 @@ public partial class MainWindow
             MainRoot.RowDefinitions[0].Height = new GridLength(0);
             Grid.SetRow(ChromeBorder, 1);
             ChromeBorder.ZIndex = 1000;
-            ChromeBorder.IsVisible = !_settings.AutoHideFullscreenChrome;
+            ChromeBorder.IsVisible = fullscreenMode != FullscreenTitleBarMode.AutoHide;
             FullscreenCornerCloseHit.IsVisible = true;
         }
         else if (TopTabsAutoHideActive)
@@ -266,6 +270,37 @@ public partial class MainWindow
             ChromeBorder.IsVisible = true;
             FullscreenCornerCloseHit.IsVisible = false;
         }
+    }
+
+    /// <summary>The fullscreen title-bar layout last applied by <see cref="ApplyChromeLayoutForWindowState"/> (null = not fullscreen).</summary>
+    private FullscreenTitleBarMode? _appliedFullscreenTitleBarMode;
+
+    /// <summary>
+    /// True while the active view shows an Explorer navigation row (Back / Forward / Up / address / filter) at its top:
+    /// today the selected tab is an Explorer tab, whose surface is the only one that can be visible in BrowserView
+    /// (an Explorer in a background tab is not shown). A future docked Explorer panel should OR its own visibility in here.
+    /// </summary>
+    private bool ExplorerNavigationRowVisibleInActiveView => BrowserView.IsVisible && _browserSurface is not null;
+
+    private FullscreenTitleBarMode CurrentFullscreenTitleBarMode() =>
+        FullscreenTitleBarPolicy.Resolve(_settings.FullscreenKeepTabBarOpen, _settings.AutoHideFullscreenChrome,
+            _settings.FullscreenKeepTitleBarForExplorer, ExplorerNavigationRowVisibleInActiveView);
+
+    /// <summary>
+    /// Called whenever the active surface changes (tab switch, Explorer opened/left): re-lays out the fullscreen title bar
+    /// only when its mode actually changes, in the same pass as the surface swap so there is no intermediate frame. A bar
+    /// that is unpinned while the pointer is on it (the user just clicked an image tab) stays revealed and then follows
+    /// the ordinary hover auto-hide, instead of vanishing under the cursor.
+    /// </summary>
+    private void SyncFullscreenTitleBarForActiveView()
+    {
+        if (_wholeAppOverlayMode || WindowState != WindowState.FullScreen) return;
+        var mode = CurrentFullscreenTitleBarMode();
+        if (mode == _appliedFullscreenTitleBarMode) return;
+        var keepRevealed = mode == FullscreenTitleBarMode.AutoHide && ChromeBorder.IsVisible && ChromeBorder.IsPointerOver;
+        ApplyChromeLayoutForWindowState();
+        if (keepRevealed) ChromeBorder.IsVisible = true;
+        _diagnostics.Write("chrome", "fullscreen_titlebar_mode", new { mode = mode.ToString(), explorer = ExplorerNavigationRowVisibleInActiveView });
     }
 
     private void UpdateIntegratedTitleBarInset()
@@ -749,13 +784,16 @@ public partial class MainWindow
     {
         if (_wholeAppOverlayMode) return;
         var windowedTopAutoHide = WindowState != WindowState.FullScreen && TopTabsAutoHideActive;
-        if (!windowedTopAutoHide && (WindowState != WindowState.FullScreen || !_settings.AutoHideFullscreenChrome || _settings.FullscreenKeepTabBarOpen)) return;
+        if (!windowedTopAutoHide && (WindowState != WindowState.FullScreen || CurrentFullscreenTitleBarMode() != FullscreenTitleBarMode.AutoHide)) return;
         if (windowedTopAutoHide && _tabDrag.IsActive) return;
 
         // Hidden fullscreen chrome has no hit-test surface, so use a narrow hot edge to reveal it.
         // Once revealed, keep it visible while the pointer is inside its actual height, then hide it
         // immediately after leaving. The status surface is independent and remains available.
-        var revealEdge = Math.Max(14, 18 / Math.Max(1.0, RenderScaling));
+        // With an Explorer navigation row at the top (Explorer setting off) only the very top edge reveals,
+        // so the row's own controls stay clickable.
+        var revealEdge = FullscreenTitleBarPolicy.RevealEdgeFor(RenderScaling,
+            !windowedTopAutoHide && ExplorerNavigationRowVisibleInActiveView);
         var chromeHeight = Math.Max(44, ChromeBorder.Bounds.Height);
         if (!ChromeBorder.IsVisible)
         {

@@ -16,6 +16,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Glide.Input", "src\Glide.In
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Glide.Input.Tests", "tests\Glide.Input.Tests\Glide.Input.Tests.csproj", "{B6A98D50-9BA6-4E04-B3E4-08021C38EC07}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Glide.ThumbnailCodecs", "src\Glide.ThumbnailCodecs\Glide.ThumbnailCodecs.csproj", "{B6A98D50-9BA6-4E04-B3E4-08021C38EC08}"
+EndProject
 Global
   GlobalSection(SolutionConfigurationPlatforms) = preSolution
     Debug|Any CPU = Debug|Any CPU
@@ -50,5 +52,9 @@ Global
     {B6A98D50-9BA6-4E04-B3E4-08021C38EC07}.Debug|Any CPU.Build.0 = Debug|Any CPU
     {B6A98D50-9BA6-4E04-B3E4-08021C38EC07}.Release|Any CPU.ActiveCfg = Release|Any CPU
     {B6A98D50-9BA6-4E04-B3E4-08021C38EC07}.Release|Any CPU.Build.0 = Release|Any CPU
+    {B6A98D50-9BA6-4E04-B3E4-08021C38EC08}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+    {B6A98D50-9BA6-4E04-B3E4-08021C38EC08}.Debug|Any CPU.Build.0 = Debug|Any CPU
+    {B6A98D50-9BA6-4E04-B3E4-08021C38EC08}.Release|Any CPU.ActiveCfg = Release|Any CPU
+    {B6A98D50-9BA6-4E04-B3E4-08021C38EC08}.Release|Any CPU.Build.0 = Release|Any CPU
   EndGlobalSection
 EndGlobal

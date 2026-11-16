@@ -29,9 +29,6 @@ Glide Setup.exe
 # Generated lazy codec routing index (shipped inside the published app, not source)
 codecs/codecs.index.json
 
-# Fetched by tools/fetch-ffmpeg.ps1 (pinned + hash-verified); never committed
-native/third_party/ffmpeg/
-
 # Build symbols, test results and local editor state (never committed)
 *.pdb
 TestResults/
@@ -41,3 +38,6 @@ coverage/
 # Local-only working notes (feedback-round queues, design mockups): never committed or packaged
 docs/QUEUE-*.md
 docs/mockups/
+
+# Codec libraries are rebuilt by build.cmd (tools/build-codecs.ps1 and the Glide.ThumbnailCodecs publish)
+codecs/*.dll

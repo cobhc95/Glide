@@ -49,24 +49,61 @@ internal static class WindowsThumbnailRegistration
         ".psd", ".psb", ".pdd"
     };
 
+    /// <summary>
+    /// Windows' in-box "Photo Thumbnail Provider". It renders through whichever WIC codec is installed, so for
+    /// HEIC/HEIF/AVIF/JPEG XL/camera RAW it only works once the optional Store codec is present; on a clean PC
+    /// (and on LTSC/Server, which have no Store) it fails and Explorer shows a blank page icon. Glide's provider
+    /// decodes those formats itself (codecs\glidecodecs.dll / codecs\glidemanaged.dll), so in Recommended mode it
+    /// takes over from this handler - but never from a third-party handler.
+    /// </summary>
+    public const string WindowsPhotoThumbnailProvider = "{C7657C4A-9F68-40fa-A4DF-96BC08EB3551}";
+
     public static string ProviderDllPath => Path.Combine(AppContext.BaseDirectory, ProviderDllName);
     public static bool ProviderDllPresent => File.Exists(ProviderDllPath);
 
     /// <summary>Resolves the extension set for a mode from the authoritative Glide format registry.</summary>
     public static IReadOnlyList<string> ExtensionsFor(ThumbnailProviderMode mode, IEnumerable<string>? custom = null)
+        => ResolveExtensions(mode, ImageFormatRegistry.Extensions, ReadRegisteredHandler,
+            BundledCodecLibraries.AvailableExtensions(Path.Combine(Path.GetDirectoryName(ProviderDllPath) ?? AppContext.BaseDirectory,
+                BundledCodecLibraries.FolderName)),
+            custom);
+
+    /// <summary>
+    /// Pure policy behind <see cref="ExtensionsFor"/> (unit-tested over a fake handler table; never touches the
+    /// registry). <paramref name="existingHandler"/> returns the CLSID currently registered as an extension's
+    /// thumbnail handler (or null); <paramref name="codecLibraryFormats"/> are the formats the provider decodes
+    /// through a codec library that is actually installed. Recommended claims an extension when it has no
+    /// handler, when Glide is already its handler, when Glide decodes it natively, or when it is a codec-library
+    /// format whose only handler is Windows' codec-dependent Photo Thumbnail Provider.
+    /// </summary>
+    internal static IReadOnlyList<string> ResolveExtensions(ThumbnailProviderMode mode, IEnumerable<string> all,
+        Func<string, string?> existingHandler, IEnumerable<string> codecLibraryFormats, IEnumerable<string>? custom = null)
     {
-        var all = ImageFormatRegistry.Extensions;
+        var codecFormats = new HashSet<string>(codecLibraryFormats, StringComparer.OrdinalIgnoreCase);
+        bool Foreign(string extension)
+        {
+            var handler = existingHandler(extension);
+            return handler is not null && !handler.Equals(ProviderClsid, StringComparison.OrdinalIgnoreCase);
+        }
+        bool CodecDependentPlatformHandler(string extension)
+            => codecFormats.Contains(extension) &&
+               string.Equals(existingHandler(extension), WindowsPhotoThumbnailProvider, StringComparison.OrdinalIgnoreCase);
+
         return mode switch
         {
-            ThumbnailProviderMode.All => all.ToArray(),
+            ThumbnailProviderMode.All => all.Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
             ThumbnailProviderMode.Custom => (custom ?? Array.Empty<string>())
                 .Where(ImageFormatRegistry.IsSupported)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray(),
-            ThumbnailProviderMode.UnsupportedOnly => all.Where(extension => !HasForeignHandler(extension)).ToArray(),
-            _ => all.Where(extension => !HasForeignHandler(extension) || GlideNativeFormats.Contains(extension)).ToArray(),
+            ThumbnailProviderMode.UnsupportedOnly => all.Where(extension => !Foreign(extension)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
+            _ => all.Where(extension => !Foreign(extension) || GlideNativeFormats.Contains(extension) || CodecDependentPlatformHandler(extension))
+                .Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
         };
     }
+
+    /// <summary>Formats Glide's provider decodes natively (compact decoders, libwebp, Direct2D SVG).</summary>
+    internal static IReadOnlyCollection<string> NativeProviderFormats => GlideNativeFormats;
 
     /// <summary>True when another application already registers a thumbnail handler for the extension.</summary>
     public static bool HasForeignHandler(string extension)
@@ -166,7 +203,12 @@ internal static class WindowsThumbnailRegistration
                 foreach (var extension in list)
                 {
                     using var key = hive.CreateSubKey($@"Software\Classes\{extension}\ShellEx\{ThumbnailHandlerGuid}", writable: true);
-                    key?.SetValue(string.Empty, ProviderClsid, RegistryValueKind.String);
+                    if (key is null) continue;
+                    // Taking over a handler in the same hive (machine-wide: Windows' Photo Thumbnail Provider in
+                    // HKLM) remembers it, so unregistering/uninstalling puts it back instead of leaving none.
+                    if (PreviousHandlerToRemember(key.GetValue(string.Empty) as string) is { } previous)
+                        key.SetValue(PreviousHandlerValue, previous, RegistryValueKind.String);
+                    key.SetValue(string.Empty, ProviderClsid, RegistryValueKind.String);
                 }
             }
             else
@@ -176,7 +218,13 @@ internal static class WindowsThumbnailRegistration
                 {
                     using var key = hive.OpenSubKey($@"Software\Classes\{extension}\ShellEx\{ThumbnailHandlerGuid}", writable: true);
                     if (key?.GetValue(string.Empty) is string value && value.Equals(ProviderClsid, StringComparison.OrdinalIgnoreCase))
-                        key.DeleteValue(string.Empty, throwOnMissingValue: false);
+                    {
+                        if (key.GetValue(PreviousHandlerValue) is string previous && IsClsid(previous))
+                            key.SetValue(string.Empty, previous, RegistryValueKind.String);
+                        else
+                            key.DeleteValue(string.Empty, throwOnMissingValue: false);
+                    }
+                    key?.DeleteValue(PreviousHandlerValue, throwOnMissingValue: false);
                 }
             }
 
@@ -192,6 +240,22 @@ internal static class WindowsThumbnailRegistration
             return false;
         }
     }
+
+    /// <summary>Named value next to the handler default that remembers the handler Glide replaced in that hive.</summary>
+    private const string PreviousHandlerValue = "GlidePreviousHandler";
+
+    /// <summary>
+    /// Pure: which handler to remember when Glide takes over <paramref name="current"/>: another handler is
+    /// remembered; when Glide is already the handler, nothing changes, so re-registering never forgets (or
+    /// overwrites) the original it remembered the first time.
+    /// </summary>
+    internal static string? PreviousHandlerToRemember(string? current)
+    {
+        if (current is null || !IsClsid(current) || current.Equals(ProviderClsid, StringComparison.OrdinalIgnoreCase)) return null;
+        return current;
+    }
+
+    private static bool IsClsid(string value) => Guid.TryParse(value, out _) && value.Trim().StartsWith('{');
 
     private static string? ReadRegisteredHandler(string extension)
         => ReadHandler(Registry.CurrentUser, extension) ?? ReadHandler(Registry.LocalMachine, extension);

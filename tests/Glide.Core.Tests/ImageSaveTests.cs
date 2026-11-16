@@ -67,10 +67,23 @@ public sealed class ImageSaveTests : IDisposable
     [InlineData(".tiff", true)]
     [InlineData(".webp", false)]
     [InlineData(".gif", false)]
-    public void FormatSupport(string ext, bool supported)
+    public void LegacyWicFormatIds(string ext, bool supported)
     {
+        // The original PNG/JPEG/BMP/TIFF ids (kept for the compatibility exports); 5.0.4's full list is SaveFormatCatalog.
         Assert.Equal(supported, NativeImageEncoder.CanEncode(ext));
         Assert.Equal(supported, ImageSavePolicy.CanSaveInPlace("x" + ext, NativeImageEncoder.CanEncode));
+    }
+
+    [Theory]
+    [InlineData(".gif")]
+    [InlineData(".webp")]
+    [InlineData(".jxr")]
+    [InlineData(".qoi")]
+    [InlineData(".jp2")]
+    public void FivePointZeroFour_formats_are_writable(string ext)
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        Assert.True(Glide.Imaging.Encoders.SaveFormatAvailability.IsWritable(SaveFormatCatalog.FromExtension(ext)!));
     }
 
     [Fact]
@@ -110,7 +123,7 @@ public sealed class ImageSaveTests : IDisposable
         ImageSaveService.EncodeAndReplace(px, 2, 2, default, dest, 0.9f);
         Assert.Equal(0x89, File.ReadAllBytes(dest)[0]);
 
-        var keep = Path.Combine(_dir, "keep.webp");
+        var keep = Path.Combine(_dir, "keep.xyz");
         File.WriteAllBytes(keep, [9, 9, 9]);
         Assert.ThrowsAny<Exception>(() => ImageSaveService.EncodeAndReplace(px, 2, 2, default, keep, 0.9f));
         Assert.Equal(new byte[] { 9, 9, 9 }, File.ReadAllBytes(keep));

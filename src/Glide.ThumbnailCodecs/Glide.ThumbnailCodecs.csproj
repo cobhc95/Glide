@@ -1,0 +1,76 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    glidemanaged.dll: the Explorer thumbnail codec library. A NativeAOT shared library (no .NET install
+    needed, no Avalonia, no Skia) that compiles Glide's bundled managed decoders - camera RAW previews,
+    OpenEXR, DICOM/NIfTI/FITS/PFM, ORA/KRA/PDN/XCF, KTX/KTX2/PVR/ASTC, ZIP-compressed PSD/PSB and .hdr.gz -
+    from src/Glide.Imaging (linked source, not a copy) and exports the optional-codec ABI v2
+    (native/Glide.CodecProvider.ABI.h) so native/Glide.ShellThumbnail loads it exactly like glidecodecs.dll:
+    lazily, SHA-256-pinned, from <install>\codecs only.
+
+    Embedded JPEG/PNG sub-images (RAW previews, ORA/KRA layers, PDN thumbnails, DICOM JPEG frames) are
+    decoded by the host through WIC (ManagedCodecSupport.Host.cs); the viewer keeps its Skia path
+    (src/Glide.Imaging/ManagedCodecSupport.Skia.cs), so the app's pixels are unchanged.
+
+    Built by build.cmd:  dotnet publish src\Glide.ThumbnailCodecs -c Release -r win-x64 -o <dir>
+    then copied to codecs\glidemanaged.dll (dist\codecs in releases). The app does not route decodes
+    through it (it has no .glidecodec.json manifest, so codecs.index.json never lists it).
+  -->
+  <PropertyGroup>
+    <AssemblyName>glidemanaged</AssemblyName>
+    <RootNamespace>Glide.ThumbnailCodecs</RootNamespace>
+    <OutputType>Library</OutputType>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <IsAotCompatible>true</IsAotCompatible>
+    <PublishAot>true</PublishAot>
+    <NativeLib>Shared</NativeLib>
+    <SelfContained>true</SelfContained>
+    <PublishReadyToRun>false</PublishReadyToRun>
+    <PublishReadyToRunComposite>false</PublishReadyToRunComposite>
+    <!-- Size: this DLL runs inside Explorer's thumbnail host and ships in every install. -->
+    <OptimizationPreference>Size</OptimizationPreference>
+    <IlcOptimizationPreference>Size</IlcOptimizationPreference>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <UseSystemResourceKeys>true</UseSystemResourceKeys>
+    <StackTraceSupport>false</StackTraceSupport>
+    <EventSourceSupport>false</EventSourceSupport>
+    <MetricsSupport>false</MetricsSupport>
+    <DebuggerSupport>false</DebuggerSupport>
+    <HttpActivityPropagationSupport>false</HttpActivityPropagationSupport>
+    <EnableUnsafeBinaryFormatterSerialization>false</EnableUnsafeBinaryFormatterSerialization>
+    <!-- No background GC thread inside Explorer's thumbnail host. -->
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
+    <ServerGarbageCollector>false</ServerGarbageCollector>
+    <!-- ORA/KRA stack XML never resolves external entities; without this the trimmer keeps HttpClient
+         (XmlUrlResolver), which alone is ~1.5 MB of the DLL. -->
+    <XmlResolverIsNetworkingEnabledByDefault>false</XmlResolverIsNetworkingEnabledByDefault>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <!-- Linked Glide.Imaging sources keep their own analyzer baseline; do not re-report them here. -->
+    <NoWarn>$(NoWarn);CA1305;CA1307;CA1309;CA1310;CA1822;CA1859;CA1860;CA1861;CA1865;CA1866;CA2101;IDE0005</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Hard ceiling for the managed heap inside the thumbnail host (the export also refuses frames over
+         the thumbnail pixel cap before decoding). -->
+    <RuntimeHostConfigurationOption Include="System.GC.HeapHardLimit" Value="0x80000000" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Directory.Build.props links the app's native DLLs and codecs into every output; not this one. -->
+    <None Remove="@(None)" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="..\Glide.Core\ImageFormatRegistry.cs" Link="Core\ImageFormatRegistry.cs" />
+    <Compile Include="..\Glide.Imaging\ImageDimensions.cs" Link="Imaging\ImageDimensions.cs" />
+    <Compile Include="..\Glide.Imaging\DecodeMemoryGuard.cs" Link="Imaging\DecodeMemoryGuard.cs" />
+    <Compile Include="..\Glide.Imaging\ManagedCodecSupport.cs" Link="Imaging\ManagedCodecSupport.cs" />
+    <Compile Include="..\Glide.Imaging\BuiltInRasterDecoder.cs" Link="Imaging\BuiltInRasterDecoder.cs" />
+    <Compile Include="..\Glide.Imaging\BuiltInRasterDecoder.Dds.cs" Link="Imaging\BuiltInRasterDecoder.Dds.cs" />
+    <Compile Include="..\Glide.Imaging\RawPreviewDecoder.cs" Link="Imaging\RawPreviewDecoder.cs" />
+    <Compile Include="..\Glide.Imaging\ExrDecoder.cs" Link="Imaging\ExrDecoder.cs" />
+    <Compile Include="..\Glide.Imaging\ExrPiz.cs" Link="Imaging\ExrPiz.cs" />
+    <Compile Include="..\Glide.Imaging\ScientificDecoders.cs" Link="Imaging\ScientificDecoders.cs" />
+    <Compile Include="..\Glide.Imaging\LayeredEditorDecoders.cs" Link="Imaging\LayeredEditorDecoders.cs" />
+    <Compile Include="..\Glide.Imaging\PdnDecoder.cs" Link="Imaging\PdnDecoder.cs" />
+    <Compile Include="..\Glide.Imaging\TextureDecoders.cs" Link="Imaging\TextureDecoders.cs" />
+    <Compile Include="..\Glide.Imaging\TextureBlockDecoders.cs" Link="Imaging\TextureBlockDecoders.cs" />
+    <Compile Include="..\Glide.Imaging\AstcDecoder.cs" Link="Imaging\AstcDecoder.cs" />
+  </ItemGroup>
+</Project>

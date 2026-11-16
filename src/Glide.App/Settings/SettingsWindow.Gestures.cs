@@ -450,8 +450,19 @@ public partial class SettingsWindow
                 picker.SetAction(ResolveWorkingGesture(picker.Id));
     }
 
+    /// <summary>
+    /// Tooltips of other settings that mention a mouse gesture ("right-click the tab/title bar") follow the gesture rows
+    /// being edited: the hint is dropped while that gesture no longer opens the menu.
+    /// </summary>
+    private void UpdateGestureDependentTips()
+    {
+        var menuOnRightClick = BindingHints.GestureRuns("titleBar.rightClick", GestureCatalog.ContextMenu, _workingGestures, _workingCustomGestures, defaultRunsAction: true);
+        ToolTip.SetTip(FullscreenKeepTabBarOpenCheck, menuOnRightClick ? "Can also be toggled by right-clicking the tab/title bar while fullscreen." : null);
+    }
+
     private void PreviewGestures()
     {
+        UpdateGestureDependentTips();
         if (_loadingControls) return;
         var preview = ReadControls();
         _apply(preview, false);

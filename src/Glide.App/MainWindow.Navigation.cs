@@ -1366,6 +1366,7 @@ public partial class MainWindow
         WarmOpenTransitionHost.IsVisible = false;
         BrowserView.IsVisible = false;
         ImageView.IsVisible = true;
+        SyncFullscreenTitleBarForActiveView();
         ApplyStatusVisibility();
     }
 
@@ -1377,6 +1378,7 @@ public partial class MainWindow
         ImageView.IsVisible = false;
         BrowserView.IsVisible = false;
         WarmOpenTransitionHost.IsVisible = true;
+        SyncFullscreenTitleBarForActiveView();
         ApplyStatusVisibility();
     }
 
@@ -1460,14 +1462,10 @@ public partial class MainWindow
         WarmOpenTransitionHost.IsVisible = false;
         ImageView.IsVisible = false;
         BrowserView.IsVisible = false;
+        SyncFullscreenTitleBarForActiveView();
         var recentLanding = string.Equals(_settings.HomePageMode, "Recent pictures page", StringComparison.OrdinalIgnoreCase);
         home.HeadingText.Text = recentLanding ? "Recent pictures" : "Glide";
-        home.SubtitleText.Text = recentLanding
-            ? "Jump straight back into recently opened images."
-            : "Open an image with Ctrl+O or drop one here, or pick up where you left off below.";
-        // A custom startup/new-tab path that could not be opened says so here, without a dialog.
-        if (_workspace.Active is { } activeHome && _tabNotices.TryGetValue(activeHome.Id, out var homeNotice))
-            home.SubtitleText.Text = homeNotice + "  Opened the Welcome page instead.";
+        UpdateHomeHintTexts(home);
         ApplyWelcomeLayout();
         Title = recentLanding ? AppVersion.RecentTitle : AppVersion.HomeTitle;
         RefreshRecentHistoryHome();
@@ -1533,6 +1531,29 @@ public partial class MainWindow
         return browser;
     }
 
+    /// <summary>The Open file key as shown in Home hints: the live binding (a modified key preferred), null when unbound.</summary>
+    private string? OpenFileKeyHint()
+    {
+        var keys = HotkeyCatalog.ShortcutsForAction("file.open", _settings.Hotkeys);
+        return keys.FirstOrDefault(k => k.Contains('+')) ?? keys.FirstOrDefault();
+    }
+
+    /// <summary>Welcome-page subtitle and status line; the Open file key comes from the live hotkey map (omitted when unbound).</summary>
+    private void UpdateHomeHintTexts(HomeSurface home)
+    {
+        var recentLanding = string.Equals(_settings.HomePageMode, "Recent pictures page", StringComparison.OrdinalIgnoreCase);
+        var openKey = OpenFileKeyHint();
+        home.SubtitleText.Text = recentLanding
+            ? "Jump straight back into recently opened images."
+            : openKey is null
+                ? "Open an image or drop one here, or pick up where you left off below."
+                : $"Open an image with {openKey} or drop one here, or pick up where you left off below.";
+        // A custom startup/new-tab path that could not be opened says so here, without a dialog.
+        if (_workspace.Active is { } activeHome && _tabNotices.TryGetValue(activeHome.Id, out var homeNotice))
+            home.SubtitleText.Text = homeNotice + "  Opened the Welcome page instead.";
+        home.StatusText.Text = openKey is null ? "Glide  •  Drop an image here" : $"Glide  •  Drop an image here or {openKey}";
+    }
+
     private ScrollViewer BrowserScrollViewer => EnsureBrowserSurface().ScrollViewer;
     private ItemsRepeater BrowserRepeater => EnsureBrowserSurface().Repeater;
     private Grid NativeExplorerHostSurface => EnsureBrowserSurface().NativeHostSurface;
@@ -1548,6 +1569,8 @@ public partial class MainWindow
         WarmOpenTransitionHost.IsVisible = false;
         ImageView.IsVisible = false;
         BrowserView.IsVisible = true;
+        // Fullscreen: the Explorer navigation row must not sit under the overlaid title bar.
+        SyncFullscreenTitleBarForActiveView();
         // Glide owns its production Explorer surface here. The legacy IExplorerBrowser host remains
         // dormant diagnostic code only; there is no production entry point to it. The managed surface
         // is authoritative because it can follow Glide theme/resizing consistently across Windows/DPI.

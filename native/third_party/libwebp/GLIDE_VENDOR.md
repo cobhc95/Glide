@@ -1,4 +1,4 @@
-# Vendored libwebp (decode-only)
+# Vendored libwebp
 
 This directory is a trimmed copy of **libwebp 1.5.0**, used by
 `Glide.ShellThumbnail.dll` to decode WebP images without depending on the optional
@@ -12,9 +12,14 @@ Windows "Webp Image Extensions" WIC codec.
   other build systems. None of these are referenced when the encoder/command-line options
   are disabled (see `native/Glide.ShellThumbnail/CMakeLists.txt`).
 
-Only the decode path is built (`webpdecoder` target). The encoder, demuxer, muxer and all
-command-line tools are disabled, so the provider links a small, self-contained decoder and
-adds no runtime dependency.
+Two consumers build from this tree:
+
+- `Glide.ShellThumbnail.dll` builds only the decode path (`webpdecoder` target). The encoder,
+  demuxer, muxer and all command-line tools are disabled, so the thumbnail provider links a small,
+  self-contained decoder and adds no runtime dependency.
+- `codecs\glidecodecs.dll` (5.0.4, `native/Glide.Codecs/CMakeLists.txt`) links the full `webp`
+  library statically for Save as WebP; only the encoder entry points are referenced, so the linker
+  drops the decoder. Its licence texts are in `codecs\glidecodecs.NOTICE.txt`.
 
 To update: replace this directory with the same subset from a newer upstream tag, then run
 `build.cmd` and confirm the Explorer thumbnail provider still links and passes the build.

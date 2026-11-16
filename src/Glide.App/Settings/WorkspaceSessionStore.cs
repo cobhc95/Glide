@@ -110,6 +110,62 @@ public static class WorkspaceSessionStore
     }
 
     /// <summary>
+    /// True after Back up and restore imported a last session in this process: the imported file must survive until the next
+    /// start, so this process stops writing its own session (autosave and close) from then on.
+    /// </summary>
+    internal static bool ImportedSessionPending => Volatile.Read(ref _importedSessionPending) != 0;
+    private static int _importedSessionPending;
+
+    /// <summary>Tests: forget an imported session.</summary>
+    internal static void ResetImportedSessionForTests() => Volatile.Write(ref _importedSessionPending, 0);
+
+    /// <summary>The schema glide.workspace-session.json is written with (a backup import refuses newer ones).</summary>
+    internal const int CurrentSchema = SchemaVersion;
+
+    /// <summary>Back up and restore: the stored last session (null when there is none or it is unreadable).</summary>
+    internal static SessionDocument? ReadDocumentForBackup()
+    {
+        try
+        {
+            var path = SessionPath;
+            if (!File.Exists(path)) return null;
+            var doc = JsonSerializer.Deserialize(File.ReadAllText(path), AppJsonContext.Default.SessionDocument);
+            return doc is { Schema: SchemaVersion } ? doc : null;
+        }
+        catch { return null; }
+    }
+
+    /// <summary>
+    /// Back up and restore: writes an imported (validated) session as the last session, atomically, and keeps this process
+    /// from overwriting it (see <see cref="ImportedSessionPending"/>). It opens on the next start when the startup action is
+    /// "Open last session". Throws when the file could not be written.
+    /// </summary>
+    internal static void WriteImported(SessionDocument document)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        document.Schema = SchemaVersion;
+        var json = JsonSerializer.Serialize(document, AppJsonContext.Default.SessionDocument);
+        lock (WriteLock)
+        {
+            var path = SessionPath;
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            var temp = path + "." + Environment.ProcessId + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            try
+            {
+                File.WriteAllText(temp, json);
+                File.Move(temp, path, true);
+                Volatile.Write(ref _importedSessionPending, 1);
+                _lastWrittenPath = path;
+                _lastWrittenJson = json;
+            }
+            finally
+            {
+                try { if (File.Exists(temp)) File.Delete(temp); } catch { /* best-effort temp cleanup */ }
+            }
+        }
+    }
+
+    /// <summary>
     /// Atomic write: a temp file in the same folder, then a rename over the session file, so a crash
     /// mid-write leaves either the previous or the new file, never a truncated one. Skips a write that
     /// would not change the file and a snapshot that a newer one has already replaced.
@@ -118,6 +174,8 @@ public static class WorkspaceSessionStore
     {
         lock (WriteLock)
         {
+            // An imported last session waits for the next start; this process must not replace it.
+            if (ImportedSessionPending) return;
             if (snapshot.Sequence < _lastWrittenSequence) return;
             if (string.Equals(_lastWrittenPath, snapshot.Path, StringComparison.OrdinalIgnoreCase) &&
                 string.Equals(_lastWrittenJson, snapshot.Json, StringComparison.Ordinal) && File.Exists(snapshot.Path))

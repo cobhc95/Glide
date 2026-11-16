@@ -7,3 +7,6 @@ EXPORTS
     GlideThumbnailGetLastDiagnostics
     GlideThumbnailDescribeQuality
     GlideThumbnailMaxEdge
+    GlideThumbnailSetCodecDirectory
+    GlideThumbnailCodecPin
+    GlideThumbnailCodecState

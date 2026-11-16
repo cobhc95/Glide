@@ -98,12 +98,10 @@ public sealed class VideoOverlayControlsTests
             """{"Id":"11111111-1111-1111-1111-111111111111","Path":"a.mp4","X":0,"Y":0,"Width":200,"Height":100}""")!.VideoAutoPlayNext);
     }
 
-    [Theory]
-    [InlineData(VideoBackend.MediaFoundation, "overlay-video.mp4")]
-    [InlineData(VideoBackend.Ffmpeg, "overlay-video-vp9.webm")]
-    public async Task Without_loop_both_backends_report_the_end_that_triggers_auto_play_next(VideoBackend backend, string fixture)
+    [Fact]
+    public async Task Without_loop_the_player_reports_the_end_that_triggers_auto_play_next()
     {
-        using var player = NativeVideoPlayer.TryOpen(Path.Combine(AppContext.BaseDirectory, "Fixtures", fixture), out _, backend);
+        using var player = NativeVideoPlayer.TryOpen(Path.Combine(AppContext.BaseDirectory, "Fixtures", "overlay-video.mp4"), out _);
         Assert.NotNull(player);
         player!.SetMuted(true);
         player.SetLoop(false);
@@ -116,12 +114,10 @@ public sealed class VideoOverlayControlsTests
         Assert.False(info.Loop);
     }
 
-    [Theory]
-    [InlineData(VideoBackend.MediaFoundation, "overlay-video.mp4")]
-    [InlineData(VideoBackend.Ffmpeg, "overlay-video-vp9.webm")]
-    public async Task Volume_is_applied_and_reported_by_both_backends(VideoBackend backend, string fixture)
+    [Fact]
+    public async Task Volume_is_applied_and_reported()
     {
-        using var player = NativeVideoPlayer.TryOpen(Path.Combine(AppContext.BaseDirectory, "Fixtures", fixture), out _, backend);
+        using var player = NativeVideoPlayer.TryOpen(Path.Combine(AppContext.BaseDirectory, "Fixtures", "overlay-video.mp4"), out _);
         Assert.NotNull(player);
         player!.SetMuted(true);
         await player.WaitForReadyAsync(TimeSpan.FromSeconds(10), CancellationToken.None);

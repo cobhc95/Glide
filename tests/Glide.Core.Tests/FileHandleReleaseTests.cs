@@ -76,12 +76,8 @@ public sealed class FileHandleReleaseTests
     {
         var root = FindRepositoryRoot();
         var offenders = new List<string>();
-        // Not user images: the downloaded FFmpeg DLLs are verified against pinned hashes and then held open
-        // without write/delete sharing on purpose, so they cannot be swapped between the check and the load.
-        var deliberate = new[] { Path.Combine("src", "Glide.Imaging", "VideoDecoderPack.cs") };
         foreach (var file in Directory.EnumerateFiles(Path.Combine(root, "src"), "*.cs", SearchOption.AllDirectories))
         {
-            if (deliberate.Contains(Path.GetRelativePath(root, file), StringComparer.OrdinalIgnoreCase)) continue;
             var text = File.ReadAllText(file);
             // Bare FileShare.ReadWrite (no Delete) and File.OpenRead deny rename/delete by another process.
             if (text.Contains("FileShare.ReadWrite,", StringComparison.Ordinal) ||

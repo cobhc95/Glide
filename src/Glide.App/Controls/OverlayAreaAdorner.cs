@@ -12,7 +12,11 @@ namespace Glide.App.Controls;
 /// </summary>
 internal sealed class OverlayAreaAdorner : Control
 {
-    private const string DrawHint = "Drag to draw the area this overlay can move in  ·  Esc to cancel";
+    /// <summary>The cancel key comes from the registry's fixed shortcut (looked up when the hint is drawn, not at startup).</summary>
+    private static string DrawHint =>
+        Glide.Core.Commands.BindingHints.FixedShortcut("fixed.overlay.areaCancel") is { } cancelKey
+            ? $"Drag to draw the area this overlay can move in  ·  {cancelKey} to cancel"
+            : "Drag to draw the area this overlay can move in";
     private Rect? _area;
     private bool _drawing;
     private Color _accent = Color.FromRgb(0x36, 0xB8, 0xF4);

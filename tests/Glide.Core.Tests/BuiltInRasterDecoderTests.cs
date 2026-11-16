@@ -89,7 +89,8 @@ public sealed class BuiltInRasterDecoderTests : IDisposable
     {
         var path = Temp(Wbmp2x1(), ".wbmp");
         AssertDimensions(path, 2, 1);
-        AssertBgra(path, new byte[] { 0, 0, 0, 255, 255, 255, 255, 255 });
+        // 0x80: the first pixel's bit is set. WBMP type 0 defines 1 = white, 0 = black (fixed in 5.0.4; was inverted).
+        AssertBgra(path, new byte[] { 255, 255, 255, 255, 0, 0, 0, 255 });
     }
 
     // -- X11 ---------------------------------------------------------------------------------
@@ -118,13 +119,69 @@ public sealed class BuiltInRasterDecoderTests : IDisposable
         var path = Temp(Sgi2x2(), ".sgi");
         Assert.True(BuiltInRasterDecoder.CanDecode(path));
         AssertDimensions(path, 2, 2);
+        // File row 0 is the BOTTOM row (SGI stores scanlines bottom-to-top).
         AssertBgra(path, new byte[]
         {
-            0, 0, 255, 255,       // red
-            0, 255, 0, 255,       // green
-            255, 0, 0, 255,       // blue
-            0, 0, 0, 255,         // black
+            255, 0, 0, 255,       // top-left: blue (file row 1)
+            0, 0, 0, 255,         // top-right: black
+            0, 0, 255, 255,       // bottom-left: red (file row 0)
+            0, 255, 0, 255,       // bottom-right: green
         });
+    }
+
+    // -- Real-world regressions found by decoding public sample files (fixtures here are synthetic) --------
+
+    [Fact]
+    public void Rle_tga_run_packets_repeat_one_pixel_and_raw_packets_copy_pixels()
+    {
+        // Packet header bit 7 set = run-length (repeat); clear = raw. 24-bit, 5x1, top-left origin.
+        var data = new byte[18 + 1 + 3 + 1 + 6];
+        data[2] = 10; data[12] = 5; data[14] = 1; data[16] = 24; data[17] = 0x20;
+        var p = 18;
+        data[p++] = 0x82; Write(data, ref p, 0, 0, 255);                          // run of 3 red
+        data[p++] = 0x01; Write(data, ref p, 0, 255, 0); Write(data, ref p, 255, 0, 0); // raw: green, blue
+        var path = Temp(data, ".tga");
+        AssertBgra(path, new byte[]
+        {
+            0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255, 255,
+            0, 255, 0, 255,
+            255, 0, 0, 255,
+        });
+    }
+
+    [Fact]
+    public void Rle_tga_grey_alpha_16bit_decodes()
+    {
+        // Type 11 (RLE grey), 16 bpp = grey + alpha: one run of 2 pixels (grey 100, alpha 50).
+        var data = new byte[18 + 1 + 2];
+        data[2] = 11; data[12] = 2; data[14] = 1; data[16] = 16; data[17] = 0x28;
+        data[18] = 0x81; data[19] = 100; data[20] = 50;
+        AssertBgra(Temp(data, ".tga"), new byte[] { 100, 100, 100, 50, 100, 100, 100, 50 });
+    }
+
+    [Fact]
+    public void Xpm_pixel_key_may_be_a_space()
+    {
+        var xpm = "/* XPM */\nstatic char * k[] = {\n\"2 1 2 1\",\n\"  c #FF0000\",\n\"a c #00FF00\",\n\" a\"\n};\n"u8.ToArray();
+        AssertBgra(Temp(xpm, ".xpm"), new byte[] { 0, 0, 255, 255, 0, 255, 0, 255 });
+    }
+
+    [Fact]
+    public void Pcx_four_planar_one_bit_planes_use_the_header_palette()
+    {
+        var data = new byte[128 + 4 * 2];
+        data[0] = 0x0A; data[1] = 5; data[2] = 0; data[3] = 1; data[8] = 7; data[10] = 0; // 8x1, raw, 1 bit per plane
+        data[16 + 3] = 255;                                    // palette index 1 = red
+        data[16 + 6 + 1] = 255;                                // palette index 2 = green
+        data[65] = 4; data[66] = 2;                            // four planes, 2 bytes per plane line
+        data[128 + 0] = 0b1000_0000;                           // plane 0: pixel 0 -> index bit 0
+        data[128 + 2 + 0] = 0b0100_0000;                       // plane 1: pixel 1 -> index bit 1
+        var path = Temp(data, ".pcx");
+        Assert.True(BuiltInRasterDecoder.TryDecodePixelsForTests(path, 0, out var w, out var h, out var bgra));
+        Assert.Equal((8, 1), (w, h));
+        Assert.Equal(new byte[] { 0, 0, 255, 255 }, bgra[..4]);   // red
+        Assert.Equal(new byte[] { 0, 255, 0, 255 }, bgra[4..8]);  // green
+        Assert.Equal(new byte[] { 0, 0, 0, 255 }, bgra[8..12]);   // index 0 = black
     }
 
     // -- Bounded / defensive ----------------------------------------------------------------
