@@ -1,7 +1,14 @@
 namespace Glide.App.Settings;
 
-/// <summary>One human-readable net change between the committed and the staged settings.</summary>
-internal sealed record SettingChange(string Name, string Before, string After);
+/// <summary>
+/// One human-readable net change between the committed and the staged settings. <see cref="Name"/> is the stable,
+/// property-derived name; <see cref="Label"/> is what the unsaved-changes dialog shows (the SettingsCatalog label in
+/// sentence case where the setting is catalogued).
+/// </summary>
+internal sealed record SettingChange(string Name, string Before, string After)
+{
+    public string Label { get; init; } = Name;
+}
 
 /// <summary>
 /// Computes the net, human-readable differences between two <see cref="GlideSettingsState"/> snapshots
@@ -28,7 +35,7 @@ internal static class SettingsChangeSet
             var before = property.GetValue(committed);
             var after = property.GetValue(current);
             if (SettingValuesEqual(before, after)) continue;
-            changes.Add(new SettingChange(HumanizeSettingName(property.Name), FormatSettingValue(before), FormatSettingValue(after)));
+            changes.Add(new SettingChange(HumanizeSettingName(property.Name), FormatSettingValue(before), FormatSettingValue(after)) { Label = DisplayLabel(property.Name) });
         }
 
         if (!DictionaryOfListsEqual(committed.Hotkeys, current.Hotkeys))
@@ -78,6 +85,74 @@ internal static class SettingsChangeSet
         foreach (var pair in a)
             if (!b.TryGetValue(pair.Key, out var value) || !string.Equals(pair.Value, value, StringComparison.OrdinalIgnoreCase)) return false;
         return true;
+    }
+
+    private static readonly Lazy<Dictionary<string, string>> CatalogLabelsByProperty = new(BuildCatalogLabels);
+
+    /// <summary>
+    /// The label the unsaved-changes dialog shows for <paramref name="propertyName"/>: the SettingsCatalog label when the
+    /// property belongs to a catalogued setting (found through its <see cref="SettingAccessors"/> entry, or a catalogue label
+    /// that reads the same as the property name), else the property name split into words, in sentence case either way.
+    /// </summary>
+    internal static string DisplayLabel(string propertyName)
+    {
+        if (CatalogLabelsByProperty.Value.TryGetValue(propertyName, out var label)) return SentenceCase(label);
+        var humanized = HumanizeSettingName(propertyName);
+        var match = Glide.Core.Settings.SettingsCatalog.All.FirstOrDefault(s => string.Equals(s.Label, humanized, StringComparison.OrdinalIgnoreCase));
+        return SentenceCase(match?.Label ?? humanized);
+    }
+
+    /// <summary>
+    /// "Status Bar Size" → "Status bar size". The first word keeps its capital; later words are lowercased unless they
+    /// are acronyms or names with more than one capital ("HDR", "WebP", "GIF"), which stay as written.
+    /// </summary>
+    internal static string SentenceCase(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return text;
+        var words = text.Split(' ');
+        for (var i = 0; i < words.Length; i++)
+        {
+            var word = words[i];
+            if (word.Length == 0) continue;
+            if (i == 0) { words[i] = char.ToUpperInvariant(word[0]) + word[1..]; continue; }
+            if (word.Count(char.IsUpper) > 1 || word.Any(char.IsDigit) || word == "Windows" || word == "Explorer" || word == "Glide") continue;
+            words[i] = word.ToLowerInvariant();
+        }
+        return string.Join(' ', words);
+    }
+
+    /// <summary>
+    /// Maps state property names to catalogue labels by probing each accessor once: flip its value on a fresh state and
+    /// see which property changed. No hand-kept table to drift.
+    /// </summary>
+    private static Dictionary<string, string> BuildCatalogLabels()
+    {
+        var map = new Dictionary<string, string>(StringComparer.Ordinal);
+        var labels = Glide.Core.Settings.SettingsCatalog.All.GroupBy(s => s.Id, StringComparer.OrdinalIgnoreCase).ToDictionary(g => g.Key, g => g.First().Label, StringComparer.OrdinalIgnoreCase);
+        var properties = typeof(GlideSettingsState).GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance)
+            .Where(p => p.CanRead && p.GetIndexParameters().Length == 0).ToArray();
+        foreach (var (id, accessor) in SettingAccessors.All)
+        {
+            if (!labels.TryGetValue(id, out var label)) continue;
+            try
+            {
+                var baseline = new GlideSettingsState();
+                var probe = baseline.CloneState();
+                if (accessor.GetBool is { } getBool && accessor.SetBool is { } setBool) setBool(probe, !getBool(probe));
+                else if (accessor.GetText is { } getText && accessor.SetText is { } setText) setText(probe, getText(probe) + "\u0001probe");
+                else continue;
+                foreach (var property in properties)
+                {
+                    if (map.ContainsKey(property.Name)) continue;
+                    if (!SettingValuesEqual(property.GetValue(baseline), property.GetValue(probe))) { map[property.Name] = label; break; }
+                }
+            }
+            catch
+            {
+                // An accessor that rejects the probe value just keeps the property-name label.
+            }
+        }
+        return map;
     }
 
     private static string HumanizeSettingName(string name)

@@ -46,29 +46,24 @@ public static class BindingHints
         null => slotId
     };
 
-    /// <summary>"a", "a or b", "a, b or c".</summary>
-    public static string JoinOr(IReadOnlyList<string> items) => items.Count switch
-    {
-        0 => string.Empty,
-        1 => items[0],
-        _ => string.Join(", ", items.Take(items.Count - 1)) + " or " + items[^1]
-    };
-
     /// <summary>
-    /// Mouse hint of a tab's tooltip. Only mentions closing by middle-click / double-click while those slots (or a custom
-    /// gesture) really close the tab, and the right-click menu while that slot still opens it. <paramref name="fixedPart"/> is the
-    /// non-configurable lead ("Drag to reorder"); the rest is lower case.
+    /// One-line mouse hint of a tab's tooltip (5.0.6 hover card): "Drag to move · Middle-click to close · Right-click for
+    /// more". The close part names the first input that really closes the tab (middle-click, else double-click; a custom
+    /// gesture on the same input counts) and is left out when neither does; the right-click part only while that slot
+    /// still opens the menu.
     /// </summary>
-    public static string TabMouseHint(string fixedPart, IReadOnlyDictionary<string, string>? bindings, IReadOnlyList<CustomGesture>? customGestures)
+    public static string TabMouseHint(IReadOnlyDictionary<string, string>? bindings, IReadOnlyList<CustomGesture>? customGestures)
     {
-        var closers = new List<string>();
-        foreach (var slot in new[] { "tabs.middleClick", "tabs.doubleClick" })
-            if (GestureRuns(slot, GestureCatalog.CloseTab, bindings, customGestures, defaultRunsAction: true))
-                closers.Add(InputPhrase(slot));
-        var parts = new List<string> { fixedPart };
-        if (closers.Count > 0) parts.Add($"{JoinOr(closers)} to close");
+        var parts = new List<string> { "Drag to move" };
+        var closer = new[] { "tabs.middleClick", "tabs.doubleClick" }
+            .FirstOrDefault(slot => GestureRuns(slot, GestureCatalog.CloseTab, bindings, customGestures, defaultRunsAction: true));
+        if (closer is not null)
+        {
+            var phrase = InputPhrase(closer);
+            parts.Add($"{char.ToUpperInvariant(phrase[0])}{phrase[1..]} to close");
+        }
         if (GestureRuns("tabs.rightClick", GestureCatalog.ContextMenu, bindings, customGestures, defaultRunsAction: true))
-            parts.Add("right-click for tab actions");
-        return string.Join(" • ", parts) + ".";
+            parts.Add("Right-click for more");
+        return string.Join(" · ", parts);
     }
 }

@@ -3,7 +3,7 @@
     <!-- 5.0.1: .NET 10 LTS (.NET 8 support ended 2026-11-10). One TFM for every project, including the
          tests and tools\perf\Glide.PerfBench. See docs\NET10-MIGRATION-PLAN.md. -->
     <TargetFramework>net10.0</TargetFramework>
-    <Version>5.0.5</Version>
+    <Version>5.0.6</Version>
     <AssemblyVersion>$(Version).0</AssemblyVersion>
     <FileVersion>$(Version).0</FileVersion>
     <InformationalVersion>$(Version)</InformationalVersion>

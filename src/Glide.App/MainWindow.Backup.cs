@@ -1,6 +1,5 @@
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Interactivity;
 using Glide.App.Settings;
 
 namespace Glide.App;
@@ -12,29 +11,11 @@ namespace Glide.App;
 /// </summary>
 public partial class MainWindow : IGlideBackupLiveTarget
 {
-    /// <summary>Run once on the next Settings window this main window opens (the backup commands open Settings first).</summary>
-    private Action<SettingsWindow>? _settingsOpenedHook;
-
     /// <summary>"Export Glide backup..." / "Import Glide backup...": Settings at the Back up and restore card, then its flow.</summary>
     private Task OpenBackupFromCommandAsync(bool import)
     {
-        if (_openSettingsWindow is { } open)
-        {
-            open.Activate();
-            open.StartBackupFromCommand(import);
-            return Task.CompletedTask;
-        }
-        _settingsOpenedHook = window => window.StartBackupFromCommand(import);
-        SettingsClicked(this, new RoutedEventArgs());
+        OpenSettingsThen(window => window.StartBackupFromCommand(import));
         return Task.CompletedTask;
-    }
-
-    /// <summary>Hands the pending command hook to a Settings window that is about to open (SettingsClicked).</summary>
-    private void AttachSettingsOpenedHook(SettingsWindow window)
-    {
-        if (_settingsOpenedHook is not { } hook) return;
-        _settingsOpenedHook = null;
-        window.Opened += (_, _) => hook(window);
     }
 
     IReadOnlyList<string> IGlideBackupLiveTarget.ApplyImportedWindowPlacements(GlideSettingsState imported)

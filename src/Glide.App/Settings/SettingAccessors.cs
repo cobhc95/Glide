@@ -29,6 +29,7 @@ internal static class SettingAccessors
         ["navigation.siblingFolders"] = Bool(s => s.ContinueSiblingFolders, (s, v) => s.ContinueSiblingFolders = v),
         ["navigation.hierarchicalFolders"] = Bool(s => s.HierarchicalFolderTraversal, (s, v) => s.HierarchicalFolderTraversal = v),
         ["navigation.confirmHierarchicalBoundary"] = Bool(s => s.ConfirmHierarchicalFolderTraversal, (s, v) => s.ConfirmHierarchicalFolderTraversal = v),
+        ["navigation.skipHint"] = Bool(s => s.NavigationSkipHint, (s, v) => s.NavigationSkipHint = v),
         ["navigation.rateLimitIndicator"] = Bool(s => s.NavigationRateLimitShowIndicator, (s, v) => s.NavigationRateLimitShowIndicator = v),
         ["navigation.rateLimitWindowed"] = Bool(s => s.NavigationRateLimitWindowed, (s, v) => s.NavigationRateLimitWindowed = v),
         ["navigation.rateLimitFullscreen"] = Bool(s => s.NavigationRateLimitFullscreen, (s, v) => s.NavigationRateLimitFullscreen = v),
@@ -108,6 +109,8 @@ internal static class SettingAccessors
         ["tabs.closeEmptyAfterDetach"] = Bool(s => s.CloseEmptyWindowAfterDetach, (s, v) => s.CloseEmptyWindowAfterDetach = v),
         ["tabs.detachedHome"] = Bool(s => s.DetachedWindowHomeTab, (s, v) => s.DetachedWindowHomeTab = v),
         ["explorer.showHidden"] = Bool(s => s.ExplorerShowHiddenFiles, (s, v) => s.ExplorerShowHiddenFiles = v),
+        ["explorer.keepSelectionInView"] = Bool(s => s.ExplorerKeepSelectionInView, (s, v) => s.ExplorerKeepSelectionInView = v),
+        ["explorer.clickToRename"] = Bool(s => s.ExplorerClickToRename, (s, v) => s.ExplorerClickToRename = v),
         ["explorer.onlyImages"] = Bool(s => s.ExplorerShowOnlyImages, (s, v) => s.ExplorerShowOnlyImages = v),
         ["tabs.confirmCloseMultiple"] = Bool(s => s.ConfirmCloseMultipleTabs, (s, v) => s.ConfirmCloseMultipleTabs = v),
         ["folderNav.showCounter"] = Bool(s => s.ShowFolderCounter, (s, v) => s.ShowFolderCounter = v),
@@ -178,6 +181,13 @@ internal static class SettingAccessors
         ["overlay.picturePosition"] = Text(s => s.PictureCounterPosition, (s, v) => s.PictureCounterPosition = v),
         ["overlay.pictureColor"] = Text(s => s.PictureCounterColor, (s, v) => s.PictureCounterColor = v),
         ["overlay.animationRegion"] = Text(s => s.OverlayAnimationRegion, (s, v) => s.OverlayAnimationRegion = v),
+        ["tabs.newTabPosition"] = Text(s => s.NewTabPosition, (s, v) => s.NewTabPosition = v),
+        ["tabs.switchToNewTabs"] = Bool(s => s.SwitchToNewTabs, (s, v) => s.SwitchToNewTabs = v),
+        ["tabs.newTabModifiers"] = Bool(s => s.NewTabModifiers, (s, v) => s.NewTabModifiers = v),
+        ["tabs.afterCloseActivate"] = Text(s => s.AfterTabCloseActivate, (s, v) => s.AfterTabCloseActivate = v),
+        ["tabs.hoverPreview"] = Bool(s => s.TabHoverPreviews, (s, v) => s.TabHoverPreviews = v),
+        ["tabs.animateGifPreviews"] = Bool(s => s.AnimateGifPreviews, (s, v) => s.AnimateGifPreviews = v),
+        ["overlay.pictureBorder"] = Bool(s => s.PictureCounterBorder, (s, v) => s.PictureCounterBorder = v),
     };
 
     public static Accessor? Find(string settingId) => All.TryGetValue(settingId, out var accessor) ? accessor : null;
@@ -213,6 +223,12 @@ internal static class SettingAccessors
                 break;
             case "navigation.sortOrder":
                 state.NavigationSortOrder = Glide.Core.ImageSortOrder.NormalizeDisplayName(state.NavigationSortOrder);
+                break;
+            case "tabs.newTabPosition":
+                state.NewTabPosition = Glide.Core.Workspace.NewTabPositions.Normalize(state.NewTabPosition);
+                break;
+            case "tabs.afterCloseActivate":
+                state.AfterTabCloseActivate = Glide.Core.Workspace.TabCloseActivation.Normalize(state.AfterTabCloseActivate);
                 break;
             case "tabs.confirmCloseMultiple":
                 if (state.ConfirmCloseMultipleTabs) state.RememberedMultiTabCloseChoice = "Ask";

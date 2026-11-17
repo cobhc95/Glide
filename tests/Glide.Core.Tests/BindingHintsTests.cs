@@ -13,43 +13,42 @@ public sealed class BindingHintsTests
     }
 
     [Fact]
-    public void Default_tab_hint_mentions_both_close_gestures_and_the_menu()
+    public void Default_tab_hint_is_one_short_line_with_the_close_gesture_and_the_menu()
     {
-        var hint = BindingHints.TabMouseHint("Drag to reorder", Gestures(), null);
-        Assert.Equal("Drag to reorder • middle-click or double-click to close • right-click for tab actions.", hint);
+        var hint = BindingHints.TabMouseHint(Gestures(), null);
+        Assert.Equal("Drag to move · Middle-click to close · Right-click for more", hint);
     }
 
     [Fact]
-    public void Tab_hint_drops_a_disabled_double_click()
+    public void Tab_hint_names_double_click_when_middle_click_does_not_close()
     {
-        var hint = BindingHints.TabMouseHint("Drag to reorder", Gestures(("tabs.doubleClick", GestureCatalog.Nothing)), null);
-        Assert.DoesNotContain("double-click", hint);
-        Assert.Contains("middle-click to close", hint);
+        var hint = BindingHints.TabMouseHint(Gestures(("tabs.middleClick", GestureCatalog.DuplicateTab)), null);
+        Assert.DoesNotContain("Middle-click", hint);
+        Assert.Contains("Double-click to close", hint);
     }
 
     [Fact]
     public void Tab_hint_has_no_close_text_when_both_gestures_do_nothing_or_do_something_else()
     {
-        var hint = BindingHints.TabMouseHint("Drag to reorder", Gestures(("tabs.doubleClick", GestureCatalog.Nothing), ("tabs.middleClick", GestureCatalog.DuplicateTab)), null);
+        var hint = BindingHints.TabMouseHint(Gestures(("tabs.doubleClick", GestureCatalog.Nothing), ("tabs.middleClick", GestureCatalog.DuplicateTab)), null);
         Assert.DoesNotContain("close", hint);
-        Assert.DoesNotContain("middle-click", hint);
+        Assert.DoesNotContain("click to", hint);
     }
 
     [Fact]
     public void Tab_hint_follows_an_explicit_close_binding_and_a_disabled_menu()
     {
-        var hint = BindingHints.TabMouseHint("Drag to reorder", Gestures(("tabs.doubleClick", GestureCatalog.CloseTab), ("tabs.rightClick", GestureCatalog.Nothing)), null);
-        Assert.Contains("double-click", hint);
-        Assert.DoesNotContain("right-click", hint);
+        var hint = BindingHints.TabMouseHint(Gestures(("tabs.middleClick", GestureCatalog.Nothing), ("tabs.doubleClick", GestureCatalog.CloseTab), ("tabs.rightClick", GestureCatalog.Nothing)), null);
+        Assert.Equal("Drag to move · Double-click to close", hint);
     }
 
     [Fact]
     public void Tab_hint_sees_custom_gestures_on_the_same_input()
     {
         var custom = new List<CustomGesture> { new() { Area = GestureAreas.Tabs, Input = GestureInputs.MiddleClick, Action = GestureCatalog.Nothing } };
-        var hint = BindingHints.TabMouseHint("Drag to reorder", Gestures(), custom);
-        Assert.DoesNotContain("middle-click", hint);
-        Assert.Contains("double-click to close", hint);
+        var hint = BindingHints.TabMouseHint(Gestures(), custom);
+        Assert.DoesNotContain("Middle-click", hint);
+        Assert.Contains("Double-click to close", hint);
     }
 
     [Fact]
@@ -78,10 +77,4 @@ public sealed class BindingHintsTests
         Assert.Null(BindingHints.FixedShortcut("file.open"));
         Assert.Null(BindingHints.FixedShortcut("nope"));
     }
-
-    [Theory]
-    [InlineData(new[] { "a" }, "a")]
-    [InlineData(new[] { "a", "b" }, "a or b")]
-    [InlineData(new[] { "a", "b", "c" }, "a, b or c")]
-    public void JoinOr_reads_naturally(string[] items, string expected) => Assert.Equal(expected, BindingHints.JoinOr(items));
 }

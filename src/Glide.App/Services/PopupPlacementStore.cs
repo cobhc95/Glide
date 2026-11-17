@@ -3,9 +3,9 @@ using Avalonia.Controls;
 namespace Glide.App.Services;
 
 /// <summary>
-/// Older entry point kept for the many dialog call sites: forwards to <see cref="WindowPlacementService.Track"/>, which
-/// restores the dialog's remembered placement (size and position for resizable dialogs, position only for fixed-size
-/// ones) and saves it when it closes. With nothing saved a dialog opens centred on its owner, as before.
+/// Older entry point kept for the many dialog call sites: forwards to <see cref="WindowPlacementService.Track"/>.
+/// Resizable dialogs remember their size and position; fixed-size and content-sized dialogs always open centred on
+/// their owner and remember nothing (<see cref="DialogPlacement"/>).
 /// </summary>
 internal static class PopupPlacementStore
 {

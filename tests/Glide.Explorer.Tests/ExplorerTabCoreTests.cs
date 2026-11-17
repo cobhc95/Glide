@@ -181,6 +181,83 @@ public sealed class ExplorerTabCoreTests
         });
     }
 
+    /// <summary>
+    /// Hands-on report (5.0.6, older than it): Ctrl+A, then a plain click on one thumbnail left all of them selected
+    /// ("40 items selected") and Ctrl+C copied them all. As in Windows File Explorer the press keeps the selection (so
+    /// the whole selection can still be dragged) and the release reduces it to the clicked item.
+    /// </summary>
+    [Fact]
+    public async Task Plain_click_on_an_item_inside_a_multi_selection_selects_only_it_on_release()
+    {
+        await ExplorerHarness.Run(h =>
+        {
+            h.FocusList();
+            h.Key(Key.A, RawInputModifiers.Control);
+            Assert.Equal(6, h.SelectionSet.Count);
+            Assert.StartsWith("6 items selected", h.Surface.SelectionText.Text);
+
+            var point = h.TileCenter("b.png", -14);
+            h.Window.MouseMove(point);
+            h.Window.MouseDown(point, MouseButton.Left);
+            h.Pump();
+            Assert.Equal(6, h.SelectionSet.Count); // the press alone keeps the selection draggable
+            h.Window.MouseUp(point, MouseButton.Left);
+            h.Pump();
+            Assert.Equal(new[] { "b.png" }, h.SelectedNames);
+            Assert.StartsWith("1 item selected", h.Surface.SelectionText.Text);
+            Assert.Equal(h.Names.ToList().IndexOf("b.png"), h.CurrentIndex);
+
+            h.Key(Key.C, RawInputModifiers.Control);
+            Assert.Equal(new[] { Path.Combine(h.Root, "b.png") }, h.Clipboard.TryGet()!.Paths);
+
+            // The clicked item is the new anchor: Shift+click extends from it.
+            h.Click("Gamma", modifiers: RawInputModifiers.Shift);
+            Assert.Equal(new[] { "a.png", "b.png", "Gamma" }, h.SelectedNames);
+            return Task.CompletedTask;
+        });
+    }
+
+    [Fact]
+    public async Task Right_click_ctrl_click_shift_click_and_drag_inside_a_multi_selection_keep_their_behaviour()
+    {
+        await ExplorerHarness.Run(async h =>
+        {
+            h.FocusList();
+            // Right-click inside the selection (5.0.6): keeps it and moves the focus to the clicked item.
+            h.Key(Key.A, RawInputModifiers.Control);
+            h.Click("a.png", MouseButton.Right);
+            Assert.Equal(6, h.SelectionSet.Count);
+            Assert.Equal(h.Names.ToList().IndexOf("a.png"), h.CurrentIndex);
+            Assert.NotNull(h.ActiveMenu);
+            h.Call("CloseActiveOwnedMenu", new object?[] { null });
+            h.Pump();
+
+            // Ctrl+click toggles the clicked item out of the selection.
+            h.Key(Key.A, RawInputModifiers.Control);
+            h.Click("b.png", modifiers: RawInputModifiers.Control);
+            Assert.Equal(new[] { "a.png", "Alpha", "Beta", "c.png", "Gamma" }, h.SelectedNames);
+
+            // Shift+click selects the range from the anchor.
+            h.Click("Beta");
+            h.Click("a.png", modifiers: RawInputModifiers.Shift);
+            Assert.Equal(new[] { "a.png", "Beta", "Gamma" }, h.SelectedNames);
+
+            // Dragging an item of the selection drags the whole selection, and the release that ends the drag
+            // does not reduce it.
+            h.Key(Key.A, RawInputModifiers.Control);
+            var from = h.TileCenter("b.png", 14);
+            h.Window.MouseMove(from);
+            h.Window.MouseDown(from, MouseButton.Left);
+            h.Window.MouseMove(new Point(from.X + 30, from.Y + 20), RawInputModifiers.LeftMouseButton);
+            h.Pump();
+            Assert.Equal(6, h.SelectionSet.Count);
+            h.Window.MouseUp(new Point(from.X + 30, from.Y + 20), MouseButton.Left);
+            h.Pump();
+            Assert.Equal(6, h.SelectionSet.Count);
+            await Task.CompletedTask;
+        });
+    }
+
     [Fact]
     public async Task Ctrl_arrow_moves_focus_only_and_ctrl_space_toggles()
     {
@@ -509,10 +586,24 @@ public sealed class ExplorerTabCoreTests
     }
 
     [Fact]
-    public async Task Middle_click_opens_an_image_in_a_new_background_tab_by_default()
+    public async Task Middle_click_opens_an_image_in_a_new_foreground_tab_by_default()
     {
         await ExplorerHarness.Run(async h =>
         {
+            var explorerId = h.Workspace.Active!.Id;
+            h.Click("b.png", MouseButton.Middle);
+            await h.WaitUntil(() => h.Workspace.Active is ImageTabState, "switched to the new image tab"); // 5.0.6: foreground by default
+            Assert.Contains(h.Workspace.Tabs, t => t.Id == explorerId && t is BrowserTabState);
+            Assert.Equal(Path.Combine(h.Root, "b.png"), h.Workspace.Tabs.OfType<ImageTabState>().Single().Path);
+        });
+    }
+
+    [Fact]
+    public async Task Middle_click_opens_an_image_in_a_new_background_tab_when_foreground_is_off()
+    {
+        await ExplorerHarness.Run(async h =>
+        {
+            h.Settings.SwitchToNewTabs = false;
             var explorerId = h.Workspace.Active!.Id;
             h.Click("b.png", MouseButton.Middle);
             await h.WaitUntil(() => h.Workspace.Tabs.OfType<ImageTabState>().Any(), "new image tab");
@@ -530,7 +621,8 @@ public sealed class ExplorerTabCoreTests
             h.Settings.Gestures["explorer.doubleClick"] = GestureCatalog.OpenInNewTab;
             h.Settings.Gestures["explorer.middleClick"] = GestureCatalog.OpenInCurrentTab;
             var explorerId = h.Workspace.Active!.Id;
-            // Double-click now opens in a NEW tab: the new image tab is added (and activated by OpenAsImageTabAsync).
+            // Double-click now opens in a NEW tab: the new image tab is added (placed and activated as "New tabs open at" /
+            // "Open new tabs in the foreground" say: by default next to the Explorer tab, in front).
             h.DoubleClick("a.png");
             await h.WaitUntil(() => h.Workspace.Tabs.OfType<ImageTabState>().Any(), "new tab for double-click");
             Assert.Contains(h.Workspace.Tabs, t => t.Id == explorerId && t is BrowserTabState); // the Explorer tab still exists
@@ -557,12 +649,44 @@ public sealed class ExplorerTabCoreTests
     {
         await ExplorerHarness.Run(async h =>
         {
+            h.Settings.SwitchToNewTabs = false; // background, explicitly (the default is foreground since 5.0.6)
             var explorerId = h.Workspace.Active!.Id;
             h.Click("Gamma", MouseButton.Middle);
             await h.WaitUntil(() => h.Workspace.Tabs.OfType<BrowserTabState>().Count() == 2, "new explorer tab");
             Assert.Equal(explorerId, h.Workspace.Active!.Id);
             Assert.Equal(h.Root, h.CurrentFolder);
             Assert.Equal(Path.Combine(h.Root, "Gamma"), h.Workspace.Tabs.OfType<BrowserTabState>().Last().Folder);
+        });
+    }
+
+    [Fact]
+    public async Task Sorting_keeps_the_scroll_position_unless_keep_selection_in_view_is_on()
+    {
+        await ExplorerHarness.Run(async h =>
+        {
+            var folder = Path.Combine(h.Root, "SortScroll");
+            Directory.CreateDirectory(folder);
+            var png = ExplorerHarness.Png(8, 8, 5, 5, 5);
+            for (var i = 0; i < 200; i++) File.WriteAllBytes(Path.Combine(folder, $"p{i:D3}.png"), png);
+            await h.NavigateAsync(folder);
+            h.Call("SelectBrowserIndex", 0, false, false, true); // p000 selected, at the top
+            h.Pump();
+            h.Surface.ScrollViewer.Offset = new Vector(0, 300);
+            h.Pump();
+            var before = h.Surface.ScrollViewer.Offset.Y;
+            Assert.True(before > 0);
+
+            // Off (default): descending puts p000 last, but the list stays where it was.
+            Assert.False(h.Settings.ExplorerKeepSelectionInView);
+            h.Call("SetExplorerSort", ExplorerSortKey.Name, false);
+            await h.SettleAsync();
+            Assert.True(Math.Abs(h.Surface.ScrollViewer.Offset.Y - before) < 3, $"scroll kept: {before} -> {h.Surface.ScrollViewer.Offset.Y}");
+
+            // On: sorting scrolls to the selected item (p000 is now first after ascending).
+            h.Settings.ExplorerKeepSelectionInView = true;
+            h.Call("SetExplorerSort", ExplorerSortKey.Name, true);
+            await h.SettleAsync();
+            await h.WaitUntil(() => h.Surface.ScrollViewer.Offset.Y < 3, "scrolled to the selected item");
         });
     }
 

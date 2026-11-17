@@ -4,14 +4,36 @@ namespace Glide.App.Explorer;
 
 internal enum ExplorerSortKey { Name, Modified, Type, Size }
 
+/// <summary>The sort fields in menu order with their labels: the Sort by menu, the toolbar Sort button and the Details headers.</summary>
+internal static class ExplorerSortFields
+{
+    public static readonly (ExplorerSortKey Key, string Label)[] All =
+    {
+        (ExplorerSortKey.Name, "Name"), (ExplorerSortKey.Modified, "Date modified"), (ExplorerSortKey.Type, "Type"), (ExplorerSortKey.Size, "Size")
+    };
+
+    public static string Label(ExplorerSortKey key) => All.First(f => f.Key == key).Label;
+
+    /// <summary>The Sort button's tooltip: "Sort: Date modified, descending, folders first. Click to change."</summary>
+    public static string Describe(ExplorerSortKey key, bool ascending, bool foldersFirst) =>
+        $"Sort: {Label(key)}, {(ascending ? "ascending" : "descending")}{(foldersFirst ? ", folders first" : "")}. Click to change.";
+}
+
 /// <summary>The six Explorer-tab views. Index order is the order of the view combo box.</summary>
 internal static class ExplorerViewModes
 {
     public const int ExtraLarge = 0, Large = 1, Medium = 2, Small = 3, List = 4, Details = 5;
 
+    /// <summary>Stored names (the "Explorer default view" setting value and saved profiles). Never shown in the toolbar.</summary>
     public static readonly string[] Names =
     {
         "Extra large thumbnails", "Large thumbnails", "Medium thumbnails", "Small thumbnails", "List", "Details"
+    };
+
+    /// <summary>Display labels (view box, View menu), short enough for the closed view box. Same order as <see cref="Names"/>.</summary>
+    public static readonly string[] Labels =
+    {
+        "Thumbnails (XL)", "Thumbnails (L)", "Thumbnails (M)", "Thumbnails (S)", "List", "Details"
     };
 
     public static int IndexOf(string? name)

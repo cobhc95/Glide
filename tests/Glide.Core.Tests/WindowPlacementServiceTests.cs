@@ -139,7 +139,7 @@ public sealed class WindowPlacementServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task Fixed_size_dialogs_remember_only_their_position()
+    public async Task Fixed_size_dialogs_remember_nothing_and_always_open_centred_on_their_owner()
     {
         await AvaloniaHeadlessFixture.RunOnUIThreadAsync(() =>
         {
@@ -156,16 +156,12 @@ public sealed class WindowPlacementServiceTests : IDisposable
             first.Position = new PixelPoint(500, 300);
             Settle(first);
             first.Close();
-            var saved = WindowPlacementService.Get("confirm")!;
-            Assert.Equal((500, 300), (saved.X, saved.Y));
-            Assert.False(saved.HasSize);
+            Assert.Null(WindowPlacementService.Get("confirm")); // a dialog's position is never saved
 
             var again = Dialog();
             Assert.Equal(470, again.Width);                  // size still comes from the dialog itself
             Assert.Equal(SizeToContent.Height, again.SizeToContent);
-            Assert.Equal(WindowStartupLocation.Manual, again.WindowStartupLocation);
-            again.Show();
-            Assert.Equal(new PixelPoint(500, 300), again.Position);
+            Assert.Equal(WindowStartupLocation.CenterOwner, again.WindowStartupLocation);
             again.Close();
 
             // A resizable dialog defaults to size and position.

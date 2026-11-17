@@ -66,12 +66,12 @@ public partial class SettingsWindow : Window
     private static readonly CategoryGroup[] CategoryGroups =
     {
         new("General", "General & startup", "What opens at launch and in new tabs, history, updates and saved profiles"),
-        new("Appearance", "Appearance & viewing", "Theme and colours, zoom and fit, image display and the text overlay"),
-        new("Interface", "Window & navigation", "Window and fullscreen behaviour, title-bar buttons, and moving through images and folders"),
-        new("Mouse", "Mouse & keyboard", "Mouse gestures, keyboard shortcuts, and the Escape and Tab keys"),
         new("Performance", "Performance", "Image quality while browsing, prefetch, fast-browsing previews and memory"),
-        new("Slideshow", "Slideshow & overlays", "Slideshow playback, Window-in-Window overlays and Overlay mode"),
+        new("Appearance", "Appearance & viewing", "Theme and colours, zoom and fit, image display and the text overlay"),
+        new("Interface", "Window & navigation", "Window and fullscreen behaviour, title-bar buttons, moving through images and folders, and the Explorer tab"),
         new("Tabs", "Tabs & status bar", "How tabs behave and look, and everything about the status bar"),
+        new("Mouse", "Mouse & keyboard", "Mouse gestures, keyboard shortcuts, and the Escape and Tab keys"),
+        new("Slideshow", "Slideshow & overlays", "Slideshow playback, Window-in-Window overlays and Overlay mode"),
         new("Windows", "Windows & developer", "Opening from Explorer, background start, Explorer thumbnails, external programs and diagnostics")
     };
 
@@ -176,6 +176,8 @@ public partial class SettingsWindow : Window
         Glide.Core.GlidePerformanceTrace.Mark("settings_ctor_start");
         InitializeComponent();
         WireDirtySummaryPopup();
+        ApplyTextOverlayHelp();
+        PopulateExplorerDefaultViewCombo();
         Glide.Core.GlidePerformanceTrace.Mark("settings_xaml_ready");
         // Single-source the visible product version from assembly metadata (Directory.Build.props), so
         // the About/footer label can never drift behind the actual build again.
@@ -187,12 +189,12 @@ public partial class SettingsWindow : Window
         _panels = new Dictionary<string, StackPanel>(StringComparer.OrdinalIgnoreCase)
         {
             ["General"] = GeneralPanel,
+            ["Performance"] = PerformancePanel,
             ["Appearance"] = AppearancePanel,
             ["Interface"] = InterfacePanel,
             ["Tabs"] = TabsPanel,
             ["Mouse"] = MousePanel,
             ["Slideshow"] = SlideshowPanel,
-            ["Performance"] = PerformancePanel,
             ["Windows"] = WindowsPanel
         };
 
@@ -306,6 +308,31 @@ public partial class SettingsWindow : Window
         Closed += (_, _) => { _hotkeyCaptureFlashTimer.Stop(); _searchDebounceTimer.Stop(); _previewDebounceTimer?.Stop(); _previewDisposed = true; _searchRenderVersion++; Updates = null; };
     }
 
+    /// <summary>Text overlay template help (the line under the template box and its tooltip). Kept in a C# verbatim string
+    /// rather than a XAML attribute (5.0.6): the attribute held a raw line break where the two characters backslash-n belonged,
+    /// and XML attribute normalisation turned it into a space, so the help read "Line break: &lt;br&gt; or ." .</summary>
+    internal const string TextOverlayTemplateHelp =
+        @"Tokens: {index}, {total}, {file}, {filename}, {stem}, {extension}, {format}, {folder}, {folderpath}, {path}, {width}, {height}, {dimensions}, {megapixels}, {filesize}, {filesizebytes}, {zoom}. " +
+        @"Line break: <br> or \n. Example: {stem}  •  {dimensions}  •  {filesize}  •  {index}/{total}. To frame all the lines in one box, turn on Text overlay border below.";
+
+    internal const string TextOverlayTemplateTip =
+        @"Combine tokens freely. See the token list directly below. Type <br> or \n to start a new line. Turn on Text overlay border to put every line in one box.";
+
+    private void ApplyTextOverlayHelp()
+    {
+        PictureTemplateHelpText.Text = TextOverlayTemplateHelp;
+        ToolTip.SetTip(PictureTemplateBox, TextOverlayTemplateTip);
+    }
+
+    /// <summary>Explorer default view shows the Explorer tab's own view labels ("Thumbnails (L)"...); each item keeps the
+    /// stored name in its Tag, so saved settings and profiles are unchanged.</summary>
+    private void PopulateExplorerDefaultViewCombo()
+    {
+        ExplorerDefaultViewCombo.Items.Clear();
+        for (var i = 0; i < Glide.App.Explorer.ExplorerViewModes.Labels.Length; i++)
+            ExplorerDefaultViewCombo.Items.Add(new ComboBoxItem { Content = Glide.App.Explorer.ExplorerViewModes.Labels[i], Tag = Glide.App.Explorer.ExplorerViewModes.Names[i] });
+    }
+
     private void SettingsSurfacePointerPressed(object? sender, PointerPressedEventArgs e)
     {
         // Clicking static Settings chrome/content should release the search focus ring. Controls that
@@ -394,6 +421,7 @@ public partial class SettingsWindow : Window
             NavigationRateLimitMsBox.Value = Math.Clamp(s.NavigationRateLimitMs, 0, 600000);
             SelectByText(NavigationRateLimitInputCombo, string.IsNullOrWhiteSpace(s.NavigationRateLimitInput) ? "Both" : s.NavigationRateLimitInput);
             NavigationRateLimitIndicatorCheck.IsChecked = s.NavigationRateLimitShowIndicator;
+            NavigationSkipHintCheck.IsChecked = s.NavigationSkipHint;
             SelectByText(NavigationRateLimitIndicatorPositionCombo, string.IsNullOrWhiteSpace(s.NavigationRateLimitIndicatorPosition) ? "Top left" : s.NavigationRateLimitIndicatorPosition);
             NavigationRateLimitWindowedCheck.IsChecked = s.NavigationRateLimitWindowed;
             NavigationRateLimitFullscreenCheck.IsChecked = s.NavigationRateLimitFullscreen;
@@ -553,15 +581,23 @@ public partial class SettingsWindow : Window
             CloseEmptyAfterDetachCheck.IsChecked = s.CloseEmptyWindowAfterDetach;
             DetachedHomeTabCheck.IsChecked = s.DetachedWindowHomeTab;
             SelectByText(TabCycleOrderCombo, string.Equals(s.TabCycleOrder, "Most recently used", StringComparison.OrdinalIgnoreCase) ? "Most recently used" : "Tab order");
+            SelectByText(AfterTabCloseActivateCombo, Glide.Core.Workspace.TabCloseActivation.Normalize(s.AfterTabCloseActivate));
+            SelectByText(NewTabPositionCombo, Glide.Core.Workspace.NewTabPositions.Normalize(s.NewTabPosition));
+            SwitchToNewTabsCheck.IsChecked = s.SwitchToNewTabs;
+            NewTabModifiersCheck.IsChecked = s.NewTabModifiers;
+            TabHoverPreviewsCheck.IsChecked = s.TabHoverPreviews;
+            AnimateGifPreviewsCheck.IsChecked = s.AnimateGifPreviews;
             SelectByText(TabToolTipTextSizeCombo, s.TabToolTipTextSize is "Small" or "Large" ? s.TabToolTipTextSize : "Medium");
             SelectByText(TabPositionCombo, s.TabStripPosition == "Side" ? "Side" : "Top");
             TabSideAutoHideCheck.IsChecked = s.TabSideAutoHide;
             TabTopAutoHideCheck.IsChecked = s.TabTopAutoHide;
-            SelectByText(ExplorerDefaultViewCombo, ExplorerDefaultViews.Normalize(s.ExplorerDefaultView));
+            ExplorerDefaultViewCombo.SelectedIndex = Glide.App.Explorer.ExplorerViewModes.IndexOf(ExplorerDefaultViews.Normalize(s.ExplorerDefaultView));
             SelectByText(ExplorerLocateOpensInCombo, Glide.Core.Navigation.ExplorerLocateTargets.Normalize(s.ExplorerLocateOpensIn));
             UpdateLocateDependentControls();
             SelectByText(ExplorerBackReturnsToImageCombo, Glide.Core.Navigation.ExplorerBackReturnModes.Normalize(s.ExplorerBackReturnsToImage));
             ExplorerShowHiddenFilesCheck.IsChecked = s.ExplorerShowHiddenFiles;
+            ExplorerKeepSelectionInViewCheck.IsChecked = s.ExplorerKeepSelectionInView;
+            ExplorerClickToRenameCheck.IsChecked = s.ExplorerClickToRename;
             ExplorerShowOnlyImagesCheck.IsChecked = s.ExplorerShowOnlyImages;
             ExplorerScrollSpeedBox.Value = (decimal)Glide.App.Explorer.ExplorerWheelScroll.ClampSpeed(s.ExplorerScrollSpeed);
             SelectByText(ExplorerScrollModeCombo, Glide.App.Explorer.ExplorerScrollModes.Normalize(s.ExplorerScrollMode));
@@ -594,6 +630,7 @@ public partial class SettingsWindow : Window
             SelectByText(PicturePositionCombo, s.PictureCounterPosition);
             SelectByText(PictureColorCombo, s.PictureCounterColor);
             PictureShadowCheck.IsChecked = s.PictureCounterShadow;
+            PictureBorderCheck.IsChecked = s.PictureCounterBorder;
             OverlayOpacityBox.Value = s.OverlayDefaultOpacity;
             OverlayZoomStepBox.Value = s.OverlayZoomStepPercent;
             OverlayRememberFolderCheck.IsChecked = s.OverlayRememberFolder;
@@ -629,10 +666,29 @@ public partial class SettingsWindow : Window
         {
             _loadingControls = false;
         }
+        // The switch's change handler is skipped while loading, so a load that turns Always expand on (the initial load,
+        // Restore defaults, a profile, a backup) applies it to the visible page here.
+        ApplyAlwaysExpand();
     }
+
+    /// <summary>
+    /// "Always expand" (footer switch): every card of the visible page is open. The one place it is applied: the initial
+    /// page (via LoadControls in the constructor), every page ShowCategory shows, and every later state load. Off leaves the
+    /// cards as they are (turning the switch off by hand collapses them: its IsCheckedChanged handler).
+    /// </summary>
+    private void ApplyAlwaysExpand()
+    {
+        if (SettingsAlwaysExpandSwitch?.IsChecked != true) return;
+        if (ActivePageCards().Any(c => !c.IsExpanded)) SetActivePageCardsExpanded(true);
+        else UpdateExpandCollapseButtons();
+    }
+
+    /// <summary>How many times every editor was read into a state (tests: typing must not do it per keystroke).</summary>
+    internal int ReadControlsCountForTests { get; private set; }
 
     private GlideSettingsState ReadControls()
     {
+        ReadControlsCountForTests++;
         // After Restore defaults the values without a control (legacy options, the side tab panel width...) are staged at
         // their defaults too; the kept non-option values still come from the committed state.
         // After a staged backup import the values without a control come from that import (until the next commit).
@@ -650,6 +706,7 @@ public partial class SettingsWindow : Window
         state.NavigationRateLimitMs = (int)(NavigationRateLimitMsBox.Value ?? 0);
         state.NavigationRateLimitInput = SelectedText(NavigationRateLimitInputCombo, "Both");
         state.NavigationRateLimitShowIndicator = NavigationRateLimitIndicatorCheck.IsChecked == true;
+        state.NavigationSkipHint = NavigationSkipHintCheck.IsChecked == true;
         state.NavigationRateLimitIndicatorPosition = SelectedText(NavigationRateLimitIndicatorPositionCombo, "Top left");
         state.NavigationRateLimitWindowed = NavigationRateLimitWindowedCheck.IsChecked == true;
         state.NavigationRateLimitFullscreen = NavigationRateLimitFullscreenCheck.IsChecked == true;
@@ -806,14 +863,22 @@ public partial class SettingsWindow : Window
         state.CloseEmptyWindowAfterDetach = CloseEmptyAfterDetachCheck.IsChecked == true;
         state.DetachedWindowHomeTab = DetachedHomeTabCheck.IsChecked == true;
         state.TabCycleOrder = SelectedText(TabCycleOrderCombo, "Tab order");
+        state.AfterTabCloseActivate = Glide.Core.Workspace.TabCloseActivation.Normalize(SelectedText(AfterTabCloseActivateCombo, Glide.Core.Workspace.TabCloseActivation.Default));
+        state.NewTabPosition = Glide.Core.Workspace.NewTabPositions.Normalize(SelectedText(NewTabPositionCombo, Glide.Core.Workspace.NewTabPositions.Default));
+        state.SwitchToNewTabs = SwitchToNewTabsCheck.IsChecked == true;
+        state.NewTabModifiers = NewTabModifiersCheck.IsChecked == true;
+        state.TabHoverPreviews = TabHoverPreviewsCheck.IsChecked == true;
+        state.AnimateGifPreviews = AnimateGifPreviewsCheck.IsChecked == true;
         state.TabToolTipTextSize = SelectedText(TabToolTipTextSizeCombo, "Medium");
         state.TabStripPosition = SelectedText(TabPositionCombo, "Top");
         state.TabSideAutoHide = TabSideAutoHideCheck.IsChecked == true;
         state.TabTopAutoHide = TabTopAutoHideCheck.IsChecked == true;
-        state.ExplorerDefaultView = ExplorerDefaultViews.Normalize(SelectedText(ExplorerDefaultViewCombo, ExplorerDefaultViews.Default));
+        state.ExplorerDefaultView = ExplorerDefaultViews.Normalize((ExplorerDefaultViewCombo.SelectedItem as ComboBoxItem)?.Tag as string);
         state.ExplorerLocateOpensIn = Glide.Core.Navigation.ExplorerLocateTargets.Normalize(SelectedText(ExplorerLocateOpensInCombo, Glide.Core.Navigation.ExplorerLocateTargets.Default));
         state.ExplorerBackReturnsToImage = Glide.Core.Navigation.ExplorerBackReturnModes.Normalize(SelectedText(ExplorerBackReturnsToImageCombo, Glide.Core.Navigation.ExplorerBackReturnModes.Default));
         state.ExplorerShowHiddenFiles = ExplorerShowHiddenFilesCheck.IsChecked == true;
+        state.ExplorerKeepSelectionInView = ExplorerKeepSelectionInViewCheck.IsChecked == true;
+        state.ExplorerClickToRename = ExplorerClickToRenameCheck.IsChecked == true;
         state.ExplorerShowOnlyImages = ExplorerShowOnlyImagesCheck.IsChecked == true;
         state.ExplorerScrollSpeed = Glide.App.Explorer.ExplorerWheelScroll.ClampSpeed((double)(ExplorerScrollSpeedBox.Value ?? 1m));
         state.ExplorerScrollMode = Glide.App.Explorer.ExplorerScrollModes.Normalize(SelectedText(ExplorerScrollModeCombo, Glide.App.Explorer.ExplorerScrollModes.Default));
@@ -845,6 +910,7 @@ public partial class SettingsWindow : Window
         state.PictureCounterPosition = SelectedText(PicturePositionCombo, "Top right");
         state.PictureCounterColor = SelectedText(PictureColorCombo, "White");
         state.PictureCounterShadow = PictureShadowCheck.IsChecked == true;
+        state.PictureCounterBorder = PictureBorderCheck.IsChecked == true;
         state.OverlayDefaultOpacity = (int)(OverlayOpacityBox.Value ?? 100);
         state.OverlayZoomStepPercent = (int)(OverlayZoomStepBox.Value ?? 10);
         state.OverlayRememberFolder = OverlayRememberFolderCheck.IsChecked == true;
@@ -914,9 +980,13 @@ public partial class SettingsWindow : Window
         // heavy; doing it inside the click made the control look unresponsive. Let the control repaint
         // first, and coalesce a burst of changes (spinner, typing) into one pass. Spinner and text edits arrive as a
         // rapid stream (holding an arrow, typing a template), so they are debounced: one pass once the burst settles.
-        if (sender is NumericUpDown or TextBox) ScheduleDebouncedLivePreview();
+        // The text overlay's size and opacity spinners are the exception: their preview only restyles the overlay
+        // (MainWindow.OnlyTextOverlayStyleDiffers, about a millisecond), so it shows on the next frame, not after the debounce.
+        if (sender is TextBox || (sender is NumericUpDown && !IsTextOverlayStyleSpinner(sender))) ScheduleDebouncedLivePreview();
         else ScheduleLivePreview();
     }
+
+    private bool IsTextOverlayStyleSpinner(object? sender) => ReferenceEquals(sender, PictureFontSizeBox) || ReferenceEquals(sender, PictureOpacityBox);
 
     internal static readonly TimeSpan LivePreviewDebounce = TimeSpan.FromMilliseconds(110);
     private DispatcherTimer? _previewDebounceTimer;
@@ -937,6 +1007,17 @@ public partial class SettingsWindow : Window
 
     private bool _previewScheduled;
     private bool _previewDisposed;
+
+    /// <summary>Tests: runs a debounced or posted live preview now instead of waiting for its timer.</summary>
+    internal void FlushPendingLivePreviewForTests()
+    {
+        if (_previewDebounceTimer?.IsEnabled == true)
+        {
+            _previewDebounceTimer.Stop();
+            _previewScheduled = true;
+        }
+        RunLivePreview();
+    }
 
     private void ScheduleLivePreview()
     {
@@ -1458,8 +1539,7 @@ public partial class SettingsWindow : Window
             if (!_gestureMatrixBuilt) { BuildGestureMatrix(); LoadGestureEditorsFromWorkingMap(); }
         }
         // "Always expand" (footer switch) opens every section of the page.
-        if (SettingsAlwaysExpandSwitch.IsChecked == true)
-            foreach (var card in ActivePageCards()) card.IsExpanded = true;
+        ApplyAlwaysExpand();
         if (aliasCard is not null)
         {
             aliasCard.IsExpanded = true;
@@ -1487,8 +1567,15 @@ public partial class SettingsWindow : Window
     /// <summary>Distance between the top of the page viewport and a revealed row.</summary>
     private const double RevealTopMargin = 72;
 
+    /// <summary>
+    /// The one reveal routine (search "Open", the page links, deep links, the Reset and Back up cards; posted by
+    /// ShowCategory). It lays the page out first: the page was hidden until now and the revealed card may have just
+    /// expanded, so without a layout pass the target has no current position and the scroll extent may still be the
+    /// search results' or the previous page's.
+    /// </summary>
     private void ScrollToReveal(Control target)
     {
+        ContentScroll.UpdateLayout();
         if (ContentScroll.Content is not Visual content) return;
         var point = target.TranslatePoint(new Point(0, 0), content);
         if (point is null) { target.BringIntoView(); return; }
@@ -1636,6 +1723,10 @@ public partial class SettingsWindow : Window
             _pendingSearchQuery = string.Empty;
             _hotkeySearchRows.Clear();
             SearchPanel.Children.Clear();
+            // TextChanged is raised after the text change, not inside it: when ShowCategory cleared the box (search "Open",
+            // a deep link), it arrives once that page is already shown and its reveal queued. Re-showing the page here would
+            // put it back at its remembered offset over the reveal (5.0.6: Open stayed at the top of the page).
+            if (!SearchPanel.IsVisible) return;
             // ShowCategory hides the search panel itself; it must still be visible on entry so the
             // search results' scroll offset is not remembered as the page's own offset.
             ShowCategory(_activeCategory, clearSearch: false, restoreScroll: true);
@@ -2273,13 +2364,13 @@ public partial class SettingsWindow : Window
     {
         void M(string id, Control control) => _settingControls[id] = control;
         M("general.recentHistory", RecentHistoryCheck); M("search.showRelatedResults", SearchShowRelatedCheck); M("general.historySize", HistorySizeBox); M("windows.rememberPlacement", RememberPlacementCheck); M("general.openFileDefaultDirectory", OpenFileDefaultDirectoryBox);
-        M("general.singleInstance", ReuseSingleInstanceCheck); M("navigation.siblingFolders", ContinueSiblingFoldersCheck); M("navigation.hierarchicalFolders", HierarchicalFolderTraversalCheck); M("navigation.confirmHierarchicalBoundary", ConfirmHierarchicalFolderTraversalCheck); M("navigation.hierarchicalPreviousEntry", HierarchicalPreviousFolderEntryCombo); M("navigation.rateLimitMs", NavigationRateLimitMsBox); M("navigation.rateLimitInput", NavigationRateLimitInputCombo); M("navigation.rateLimitIndicator", NavigationRateLimitIndicatorCheck); M("navigation.rateLimitIndicatorPosition", NavigationRateLimitIndicatorPositionCombo); M("navigation.rateLimitWindowed", NavigationRateLimitWindowedCheck); M("navigation.rateLimitFullscreen", NavigationRateLimitFullscreenCheck); M("navigation.rateLimitSlideshow", NavigationRateLimitSlideshowCheck); M("general.lastOpenLocation", RememberLastOpenCheck); M("general.newExplorerTabLastLocation", NewExplorerTabLastLocationCheck); M("general.newExplorerTabDefaultDirectory", NewExplorerTabDefaultDirectoryBox);
+        M("general.singleInstance", ReuseSingleInstanceCheck); M("navigation.siblingFolders", ContinueSiblingFoldersCheck); M("navigation.hierarchicalFolders", HierarchicalFolderTraversalCheck); M("navigation.confirmHierarchicalBoundary", ConfirmHierarchicalFolderTraversalCheck); M("navigation.hierarchicalPreviousEntry", HierarchicalPreviousFolderEntryCombo); M("navigation.rateLimitMs", NavigationRateLimitMsBox); M("navigation.rateLimitInput", NavigationRateLimitInputCombo); M("navigation.rateLimitIndicator", NavigationRateLimitIndicatorCheck); M("navigation.skipHint", NavigationSkipHintCheck); M("navigation.rateLimitIndicatorPosition", NavigationRateLimitIndicatorPositionCombo); M("navigation.rateLimitWindowed", NavigationRateLimitWindowedCheck); M("navigation.rateLimitFullscreen", NavigationRateLimitFullscreenCheck); M("navigation.rateLimitSlideshow", NavigationRateLimitSlideshowCheck); M("general.lastOpenLocation", RememberLastOpenCheck); M("general.newExplorerTabLastLocation", NewExplorerTabLastLocationCheck); M("general.newExplorerTabDefaultDirectory", NewExplorerTabDefaultDirectoryBox);
         M("appearance.theme", ThemeCombo); M("appearance.explorerTheme", ExplorerThemeCombo); M("appearance.accent", AccentCombo); M("appearance.glowColor", GlowCombo); M("appearance.background", MainBackgroundCombo); M("appearance.glowIntensity", GlowIntensityBox);
         M("general.showRecentOnHome", ShowRecentOnHomeCheck); M("general.confirmDiscardSettings", ConfirmDiscardSettingsCheck);
         M("updates.checkDaily", UpdateCheckDailyCheck); M("updates.dontRemind", UpdateDontRemindCheck);
         M("general.startupAction", StartupActionCombo); M("general.startupCustomPath", StartupCustomPathBox); M("general.newTabAction", NewTabActionCombo); M("general.newTabCustomPath", NewTabCustomPathBox); M("titlebar.customize", CustomizeTitleBarButton); M("settings.alwaysExpand", SettingsAlwaysExpandSwitch); M("escape.resetRememberedClose", ResetEscChoiceButton);
         M("status.visible", StatusCheck); M("status.hoverWhenClosed", StatusHoverWhenClosedCheck); M("view.scrollbars", ShowScrollbarsCheck); M("window.fullPathTitle", FullPathTitleCheck); M("fullscreen.hideCursor", HideCursorFullscreenCheck); M("fullscreen.hideCursorDelay", FullscreenHideCursorDelayBox);
-        M("fullscreen.autoHideChrome", AutoHideFullscreenChromeCheck); M("fullscreen.keepTabBarOpen", FullscreenKeepTabBarOpenCheck); M("fullscreen.keepTitleBarForExplorer", FullscreenKeepTitleBarForExplorerCheck); M("tabs.enabled", TabsCheck); M("window.showInExplorerTarget", ShowInExplorerTargetCombo); M("explorer.defaultView", ExplorerDefaultViewCombo); M("explorer.locateOpensIn", ExplorerLocateOpensInCombo); M("explorer.backReturnsToImage", ExplorerBackReturnsToImageCombo); M("explorer.showHidden", ExplorerShowHiddenFilesCheck); M("explorer.onlyImages", ExplorerShowOnlyImagesCheck); M("explorer.scrollSpeed", ExplorerScrollSpeedBox); M("explorer.scrollMode", ExplorerScrollModeCombo); M("explorer.scrollRows", ExplorerScrollRowsBox); M("explorer.scrollPixels", ExplorerScrollPixelsBox); M("explorer.altFileManagerPath", AlternativeFileManagerPathBox); M("explorer.altFileManagerArguments", AlternativeFileManagerArgumentsBox); M("tabs.showBackButton", TabBarBackButtonCheck); M("tabs.showForwardButton", TabBarForwardButtonCheck); M("fullscreen.statusAlways", FullscreenStatusAlwaysCheck);
+        M("fullscreen.autoHideChrome", AutoHideFullscreenChromeCheck); M("fullscreen.keepTabBarOpen", FullscreenKeepTabBarOpenCheck); M("fullscreen.keepTitleBarForExplorer", FullscreenKeepTitleBarForExplorerCheck); M("tabs.enabled", TabsCheck); M("window.showInExplorerTarget", ShowInExplorerTargetCombo); M("explorer.defaultView", ExplorerDefaultViewCombo); M("explorer.locateOpensIn", ExplorerLocateOpensInCombo); M("explorer.backReturnsToImage", ExplorerBackReturnsToImageCombo); M("explorer.showHidden", ExplorerShowHiddenFilesCheck); M("explorer.keepSelectionInView", ExplorerKeepSelectionInViewCheck); M("explorer.clickToRename", ExplorerClickToRenameCheck); M("explorer.onlyImages", ExplorerShowOnlyImagesCheck); M("explorer.scrollSpeed", ExplorerScrollSpeedBox); M("explorer.scrollMode", ExplorerScrollModeCombo); M("explorer.scrollRows", ExplorerScrollRowsBox); M("explorer.scrollPixels", ExplorerScrollPixelsBox); M("explorer.altFileManagerPath", AlternativeFileManagerPathBox); M("explorer.altFileManagerArguments", AlternativeFileManagerArgumentsBox); M("tabs.showBackButton", TabBarBackButtonCheck); M("tabs.showForwardButton", TabBarForwardButtonCheck); M("fullscreen.statusAlways", FullscreenStatusAlwaysCheck);
         M("caption.windowedMinimize", CaptionWindowedMinimizeCombo); M("caption.windowedMaximize", CaptionWindowedMaximizeCombo); M("caption.windowedClose", CaptionWindowedCloseCombo);
         M("caption.fullscreenMinimize", CaptionFullscreenMinimizeCombo); M("caption.fullscreenMaximize", CaptionFullscreenMaximizeCombo); M("caption.fullscreenClose", CaptionFullscreenCloseCombo);
         M("windows.alwaysOnTop", AlwaysOnTopCheck); M("windows.alwaysOnTopMode", AlwaysOnTopModeCombo); M("fullscreen.exitBehavior", FullscreenExitBehaviorCombo); M("windows.sameImageBehavior", SameImageBehaviorCombo); M("window.centerOnDisplay", AutoCenterWindowOnRestoreCheck); M("view.defaultMode", DefaultViewCombo); M("view.animateGifs", AnimateGifsCheck); M("view.pointerZoom", PointerZoomCheck); M("view.keepZoom", PreserveZoomCheck);
@@ -2307,12 +2398,13 @@ public partial class SettingsWindow : Window
         M("slideshow.direction", SlideshowDirectionCombo); M("slideshow.startFullscreen", SlideshowStartFullscreenCheck); M("slideshow.pauseInactive", SlideshowPauseInactiveCheck);
         M("tabs.minWidth", TabMinWidthBox); M("tabs.maxWidth", TabMaxWidthBox); M("tabs.overflowArrows", TabOverflowArrowsCheck); M("tabs.detach", TabDetachCheck); M("tabs.attach", TabAttachCheck); M("tabs.closedHistory", ClosedHistoryBox);
         M("tabs.closeEmptyAfterDetach", CloseEmptyAfterDetachCheck); M("tabs.detachedHome", DetachedHomeTabCheck); M("tabs.cycleOrder", TabCycleOrderCombo); M("tabs.tooltipTextSize", TabToolTipTextSizeCombo); M("tabs.position", TabPositionCombo); M("tabs.sideAutoHide", TabSideAutoHideCheck); M("tabs.topAutoHide", TabTopAutoHideCheck);
+        M("tabs.newTabPosition", NewTabPositionCombo); M("tabs.switchToNewTabs", SwitchToNewTabsCheck); M("tabs.newTabModifiers", NewTabModifiersCheck); M("tabs.afterCloseActivate", AfterTabCloseActivateCombo); M("tabs.hoverPreview", TabHoverPreviewsCheck); M("tabs.animateGifPreviews", AnimateGifPreviewsCheck);
         M("tabs.lastTabBehavior", LastTabBehaviorCombo); M("tabs.confirmCloseMultiple", ConfirmCloseMultipleTabsCheck); M("tabs.homePage", HomePageCombo); M("folderNav.group", FolderNavGroupCheck); M("folderNav.previous", FolderNavPreviousCheck);
         M("folderNav.showCounter", ShowFolderCounterCheck); M("folderNav.counterGrandparent", FolderCounterGrandparentCheck);
         M("folderNav.next", FolderNavNextCheck); M("folderNav.explore", FolderNavExploreCheck); M("folderNav.skipEmpty", FolderNavSkipEmptyCheck); M("folderNav.includeHidden", FolderNavIncludeHiddenCheck); M("folderNav.wrap", FolderNavWrapCheck); M("folderNav.openFirst", FolderNavFirstImageCheck); M("folderNav.order", FolderNavOrderCombo);
         M("overlay.pictureCounter", PictureCounterCheck); M("overlay.pictureTemplate", PictureTemplateBox); M("overlay.pictureFontSize", PictureFontSizeBox);
         M("overlay.pictureBold", PictureBoldCheck); M("overlay.pictureOpacity", PictureOpacityBox); M("overlay.picturePosition", PicturePositionCombo);
-        M("overlay.pictureColor", PictureColorCombo); M("overlay.pictureShadow", PictureShadowCheck); M("overlay.defaultOpacity", OverlayOpacityBox); M("overlay.zoomStep", OverlayZoomStepBox);
+        M("overlay.pictureColor", PictureColorCombo); M("overlay.pictureShadow", PictureShadowCheck); M("overlay.pictureBorder", PictureBorderCheck); M("overlay.defaultOpacity", OverlayOpacityBox); M("overlay.zoomStep", OverlayZoomStepBox);
         M("overlay.rememberFolder", OverlayRememberFolderCheck); M("overlay.scaleWithWindow", OverlayScaleWithWindowCheck); M("overlay.animationRegion", OverlayAnimationRegionCombo); M("overlay.animationSpeedDipsPerSecond", OverlayAnimationSpeedBox); M("overlay.animationTurnIntervalMs", OverlayAnimationTurnIntervalBox); M("overlay.animationTurnAngleDegrees", OverlayAnimationTurnAngleBox); M("overlay.animationPauseWhileInteracting", OverlayAnimationPauseCheck); M("overlay.animationAvoidOverlap", OverlayAnimationAvoidOverlapCheck); M("overlay.animationRefreshRateHz", OverlayAnimationRefreshRateCombo); M("overlay.defaultDirectory", OverlayDefaultDirectoryBox); M("profiles.defaultDirectory", ProfileDefaultDirectoryBox); M("overlay.persistSession", OverlayPersistSessionCheck); M("overlay.keyboardZoom", OverlayKeyboardZoomCheck); M("overlay.highlightSelected", OverlayHighlightCheck); M("overlay.rememberZoom", OverlayRememberZoomCheck);
         M("windows.externalOpenBehavior", ExternalOpenBehaviorCombo); M("windows.external1", External1Box); M("windows.external2", External2Box); M("windows.external3", External3Box);
         M("windows.defaultViewer", MakeDefaultViewerButton);
@@ -2380,7 +2472,7 @@ public partial class SettingsWindow : Window
         var changes = GetNetChanges();
         if (changes.Count > 0 && _committed.ConfirmDiscardSettingsChanges)
         {
-            var choice = await ConfirmUnsavedChangesAsync("Unsaved settings changes", "Settings has unapplied net changes:", changes);
+            var choice = await ConfirmUnsavedChangesAsync(changes);
             if (choice == UnsavedSettingsChoice.KeepEditing) return;
             if (choice == UnsavedSettingsChoice.Apply)
             {
@@ -2430,7 +2522,7 @@ public partial class SettingsWindow : Window
         e.Cancel = true;
         if (_committed.ConfirmDiscardSettingsChanges)
         {
-            var choice = await ConfirmUnsavedChangesAsync("Unsaved settings changes", "Settings has unapplied net changes:", changes);
+            var choice = await ConfirmUnsavedChangesAsync(changes);
             if (choice == UnsavedSettingsChoice.KeepEditing) return;
             if (choice == UnsavedSettingsChoice.Apply)
             {
@@ -2450,87 +2542,122 @@ public partial class SettingsWindow : Window
     internal Func<IReadOnlyList<SettingChange>, UnsavedSettingsChoice>? UnsavedChangesPromptForTests { get; set; }
 
     /// <summary>
-    /// Cancel / close with unapplied changes: Apply and Close, Discard Changes (closes and rolls the preview back) or
-    /// Keep Editing (the dialog stays open with every change intact). Escape and the dialog's own close button keep editing.
+    /// Cancel / close with unapplied changes: Apply and close, Discard (closes and rolls the preview back) or Keep editing
+    /// (the dialog stays open with every change intact). Escape and the dialog's own close button keep editing.
     /// </summary>
-    private async Task<UnsavedSettingsChoice> ConfirmUnsavedChangesAsync(string title, string intro, IReadOnlyList<SettingChange> changes)
+    private async Task<UnsavedSettingsChoice> ConfirmUnsavedChangesAsync(IReadOnlyList<SettingChange> changes)
     {
         if (UnsavedChangesPromptForTests is { } prompt) return prompt(changes);
-        var result = await ConfirmChangesCoreAsync(title, intro, changes, "Discard Changes", allowDontRemind: true, applyLabel: "Apply and Close", backLabel: "Keep Editing");
-        return result switch { 1 => UnsavedSettingsChoice.Discard, 2 => UnsavedSettingsChoice.Apply, _ => UnsavedSettingsChoice.KeepEditing };
-    }
-
-    private async Task<bool> ConfirmChangesAsync(string title, string intro, IReadOnlyList<SettingChange> changes, string confirmLabel, bool allowDontRemind = false) =>
-        await ConfirmChangesCoreAsync(title, intro, changes, confirmLabel, allowDontRemind) == 1;
-
-    /// <summary>0 = go back / keep editing, 1 = confirm (discard), 2 = apply (only when <paramref name="applyLabel"/> is given).</summary>
-    private async Task<int> ConfirmChangesCoreAsync(string title, string intro, IReadOnlyList<SettingChange> changes, string confirmLabel, bool allowDontRemind = false, string? applyLabel = null, string backLabel = "Go Back")
-    {
-        var list = new StackPanel { Spacing = 6 };
-        foreach (var change in changes)
-            list.Children.Add(new TextBlock { Text = $"• {change.Name}: {change.Before} → {change.After}", TextWrapping = TextWrapping.Wrap });
-
-        var dontRemind = new CheckBox
-        {
-            Content = "Don't remind me again",
-            IsVisible = allowDontRemind,
-            Margin = new Thickness(0, 2, 0, 0)
-        };
-        var confirm = new Button { Content = confirmLabel, MinWidth = 126 };
-        confirm.Classes.Add(applyLabel is null ? "primaryAction" : "secondaryAction");
-        var back = new Button { Content = backLabel, MinWidth = 100 };
-        back.Classes.Add("secondaryAction");
-        Button? apply = null;
-        if (applyLabel is not null)
-        {
-            apply = new Button { Content = applyLabel, MinWidth = 126 };
-            apply.Classes.Add("primaryAction");
-        }
-        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, HorizontalAlignment = HorizontalAlignment.Right };
-        buttons.Children.Add(back);
-        buttons.Children.Add(confirm);
-        if (apply is not null) buttons.Children.Add(apply);
-        var root = new StackPanel { Margin = new Thickness(22), Spacing = 14 };
-        var warningBrush = new SolidColorBrush(Color.Parse(Glide.App.ThemePalette.Warning));
-        var warningGlyph = new Border
-        {
-            Width = 34, Height = 30, CornerRadius = new CornerRadius(5),
-            BorderBrush = warningBrush, BorderThickness = new Thickness(2),
-            Background = new SolidColorBrush(Color.Parse(Glide.App.ThemePalette.WarningWash)),
-            Child = new TextBlock
-            {
-                Text = "!", Foreground = warningBrush, FontSize = 19, FontWeight = FontWeight.Bold,
-                HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center
-            }
-        };
-        var warningRow = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*"), ColumnSpacing = 12 };
-        warningRow.Children.Add(warningGlyph);
-        var warningText = new TextBlock { Text = intro, FontWeight = FontWeight.SemiBold, FontSize = 15, VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap };
-        Grid.SetColumn(warningText, 1);
-        warningRow.Children.Add(warningText);
-        root.Children.Add(warningRow);
-        root.Children.Add(new ScrollViewer { Content = list, MaxHeight = 330, VerticalScrollBarVisibility = ScrollBarVisibility.Auto });
-        root.Children.Add(dontRemind);
-        root.Children.Add(buttons);
-        var dialog = new Window
-        {
-            Title = title, Width = 560, MinWidth = 440, SizeToContent = SizeToContent.Height, MaxHeight = 600,
-            CanResize = true, WindowStartupLocation = WindowStartupLocation.CenterOwner, Content = root, Background = this.Background,
-            Topmost = Topmost
-        };
-        PopupPlacementStore.Track(dialog, "settings-discard-confirm");
-        confirm.Click += (_, _) => dialog.Close(1);
-        back.Click += (_, _) => dialog.Close(0);
-        if (apply is not null) apply.Click += (_, _) => dialog.Close(2);
+        var (dialog, dontRemind) = BuildUnsavedChangesDialog(changes);
         var result = await dialog.ShowDialog<int>(this);
-        var accepted = result == 1;
-        if (accepted && allowDontRemind && dontRemind.IsChecked == true)
+        if (result == 1 && dontRemind.IsChecked == true)
         {
             // Persist this one preference even though every other staged change is intentionally discarded.
             _committed.ConfirmDiscardSettingsChanges = false;
             _apply(_committed.CloneState(), true);
         }
-        return result;
+        return result switch { 1 => UnsavedSettingsChoice.Discard, 2 => UnsavedSettingsChoice.Apply, _ => UnsavedSettingsChoice.KeepEditing };
+    }
+
+    /// <summary>The unsaved-changes dialog's fixed size (DIPs); a long change list scrolls inside it.</summary>
+    internal const double UnsavedChangesDialogWidth = 420, UnsavedChangesDialogHeight = 300;
+    /// <summary>The change list's height cap: about five 12.5 px lines.</summary>
+    internal const double UnsavedChangesListMaxHeight = 112;
+
+    /// <summary>"1 setting not applied" / "N settings not applied".</summary>
+    internal static string UnsavedChangesHeading(int count) => count == 1 ? "1 setting not applied" : $"{count} settings not applied";
+
+    /// <summary>
+    /// Builds the "Unsaved settings changes" dialog (approved mockup docs/mockups/unsaved-changes-dialog-5.0.6.md): fixed
+    /// 420 × 300, no maximise, a "N settings not applied" heading, a bordered list capped at about five lines that scrolls
+    /// when longer ("Label: old → new" with the old value dimmed), "Don't remind me again" and Keep editing / Discard /
+    /// Apply and close. Results: 0 keep editing, 1 discard, 2 apply. It opens centred on Settings (placement service).
+    /// </summary>
+    internal (Window Dialog, CheckBox DontRemind) BuildUnsavedChangesDialog(IReadOnlyList<SettingChange> changes)
+    {
+        const double fontSize = 12.5;
+        var light = ActualThemeVariant == Avalonia.Styling.ThemeVariant.Light;
+        var dim = new SolidColorBrush(Color.Parse(light ? Glide.App.ThemePalette.MutedLight : "#9A9A9A"));
+
+        var list = new StackPanel { Name = "UnsavedChangesList" };
+        foreach (var change in changes)
+        {
+            var row = new TextBlock { FontSize = fontSize, LineHeight = fontSize * 1.75, TextWrapping = TextWrapping.Wrap };
+            row.Inlines!.Add(new Avalonia.Controls.Documents.Run(change.Label + ": "));
+            row.Inlines.Add(new Avalonia.Controls.Documents.Run(change.Before + " → ") { Foreground = dim });
+            row.Inlines.Add(new Avalonia.Controls.Documents.Run(change.After));
+            list.Children.Add(row);
+        }
+        var scroll = new ScrollViewer
+        {
+            Name = "UnsavedChangesScroll", Content = list, MaxHeight = UnsavedChangesListMaxHeight,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled
+        };
+        var listBox = new Border
+        {
+            Child = scroll, CornerRadius = new CornerRadius(6), BorderThickness = new Thickness(1), Padding = new Thickness(10, 4),
+            BorderBrush = new SolidColorBrush(Color.Parse(light ? "#22000000" : "#2EFFFFFF")),
+            Background = new SolidColorBrush(Color.Parse(light ? "#0D000000" : "#33000000")),
+            VerticalAlignment = VerticalAlignment.Top
+        };
+
+        var warningBrush = new SolidColorBrush(Color.Parse(Glide.App.ThemePalette.Warning));
+        var badge = new Border
+        {
+            Width = 22, Height = 22, CornerRadius = new CornerRadius(4),
+            BorderBrush = warningBrush, BorderThickness = new Thickness(1.5),
+            Background = new SolidColorBrush(Color.Parse(Glide.App.ThemePalette.WarningWash)),
+            Child = new TextBlock
+            {
+                Text = "!", Foreground = warningBrush, FontSize = 13, FontWeight = FontWeight.Bold,
+                HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center
+            }
+        };
+        var heading = new TextBlock
+        {
+            Name = "UnsavedChangesHeading", Text = UnsavedChangesHeading(changes.Count),
+            FontSize = 14, FontWeight = FontWeight.SemiBold, VerticalAlignment = VerticalAlignment.Center
+        };
+        var headingRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
+        headingRow.Children.Add(badge);
+        headingRow.Children.Add(heading);
+
+        var dontRemind = new CheckBox { Content = new TextBlock { Text = "Don't remind me again", FontSize = fontSize } };
+        Button MakeButton(string text, string cls)
+        {
+            var b = new Button { Content = text, FontSize = fontSize, Padding = new Thickness(12, 5), MinWidth = 0 };
+            b.Classes.Add(cls);
+            return b;
+        }
+        var keep = MakeButton("Keep editing", "secondaryAction");
+        var discard = MakeButton("Discard", "secondaryAction");
+        var apply = MakeButton("Apply and close", "primaryAction");
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, HorizontalAlignment = HorizontalAlignment.Right };
+        buttons.Children.Add(keep);
+        buttons.Children.Add(discard);
+        buttons.Children.Add(apply);
+
+        var root = new Grid { Margin = new Thickness(16, 14), RowDefinitions = new RowDefinitions("Auto,*,Auto,Auto"), RowSpacing = 10 };
+        root.Children.Add(headingRow);
+        Grid.SetRow(listBox, 1);
+        root.Children.Add(listBox);
+        Grid.SetRow(dontRemind, 2);
+        root.Children.Add(dontRemind);
+        Grid.SetRow(buttons, 3);
+        root.Children.Add(buttons);
+
+        var dialog = new Window
+        {
+            Title = "Unsaved settings changes",
+            Width = UnsavedChangesDialogWidth, Height = UnsavedChangesDialogHeight, CanResize = false,
+            SizeToContent = SizeToContent.Manual,
+            Content = root, Background = this.Background, Topmost = Topmost
+        };
+        PopupPlacementStore.Track(dialog, "settings-discard-confirm");
+        keep.Click += (_, _) => dialog.Close(0);
+        discard.Click += (_, _) => dialog.Close(1);
+        apply.Click += (_, _) => dialog.Close(2);
+        return (dialog, dontRemind);
     }
 
     private void RestoreDefaultsClicked(object? sender, RoutedEventArgs e) => RestoreDefaults();

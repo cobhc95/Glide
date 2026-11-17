@@ -282,6 +282,15 @@ public sealed class GlideIconView : Control
             case "Wheel":
                 // Mouse with a wheel and up/down arrows: wheel.
                 Box(7, 4, 10, 16); L(12, 7, 12, 11); Head(12, 2.5, 0, -1, 2); Head(12, 21.5, 0, 1, 2); break;
+            case "Cut":
+                // Scissors: two finger rings and crossing blades.
+                Circle(7, 17.5, 2.8); Circle(17, 17.5, 2.8); L(8.8, 15.3, 16.5, 4); L(15.2, 15.3, 7.5, 4); break;
+            case "Paste":
+                // Clipboard with its clip and two lines of text.
+                Box(5.5, 5, 13, 16); Box(9, 3, 6, 4); L(8.5, 12, 15.5, 12); L(8.5, 16, 13.5, 16); break;
+            case "Sort":
+                // Up arrow and down arrow side by side.
+                L(8, 5, 8, 19); Head(8, 4.5, 0, -1); L(16, 5, 16, 19); Head(16, 19.5, 0, 1); break;
             default:
                 Box(5, 5, 14, 14); break;
         }

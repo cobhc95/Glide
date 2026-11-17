@@ -320,14 +320,15 @@ public sealed class SettingsStoreRoundTripTests
     }
 
     [Fact]
-    public void Schema5_migrates_stock_unlimited_navigation_interval_to_eighty_ms()
+    public void Schema5_migrates_stock_unlimited_navigation_interval_to_the_stock_default()
     {
         WithIsolatedStore(() =>
         {
             var state = new GlideSettingsState { SettingsSchemaVersion = 4, NavigationRateLimitMs = 0 };
             File.WriteAllText(SettingsStore.GetSettingsPath(), JsonSerializer.Serialize(state));
             var loaded = SettingsStore.Load();
-            Assert.Equal(80, loaded.NavigationRateLimitMs);
+            // Schema 5 moved the historical stock 0 to the then-default 80 ms; schema 14 moves that untouched 80 to 120 ms.
+            Assert.Equal(120, loaded.NavigationRateLimitMs);
             Assert.Equal(SettingsStore.CurrentSettingsSchema, loaded.SettingsSchemaVersion);
         });
     }

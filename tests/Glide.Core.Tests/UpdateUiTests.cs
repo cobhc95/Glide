@@ -263,7 +263,7 @@ public sealed class UpdateUiTests : IDisposable
     }
 
     [Fact]
-    public async Task The_prompt_remembers_its_position_through_the_placement_service()
+    public async Task The_prompt_is_a_centred_dialog_in_the_placement_service()
     {
         await AvaloniaHeadlessFixture.RunOnUIThreadAsync(() =>
         {

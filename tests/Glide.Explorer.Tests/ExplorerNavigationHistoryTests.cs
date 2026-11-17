@@ -253,6 +253,7 @@ public sealed class ExplorerNavigationHistoryTests
         {
             var explorerTab = h.Workspace.Active!.Id;
             h.Settings.Gestures["explorer.doubleClick"] = "openInNewTab";
+            h.Settings.SwitchToNewTabs = true; // 5.0.6: new tabs follow "Open new tabs in the foreground" (on by default) on every route
             h.DoubleClick(ExplorerHarness.ImageA);
             await h.WaitUntil(() => h.Workspace.Active is ImageTabState, "image opened in a new tab");
             Assert.NotEqual(explorerTab, h.Workspace.Active!.Id);
@@ -272,6 +273,32 @@ public sealed class ExplorerNavigationHistoryTests
             h.Key(Key.Back);                                                   // no Back step: Backspace is Previous image
             await h.WaitUntil(() => string.Equals(Path.GetFileName(h.Get<string?>("_currentPath")), ExplorerHarness.ImageA, StringComparison.OrdinalIgnoreCase), "Backspace showed the previous image");
             Assert.IsType<ImageTabState>(h.Workspace.Active);
+            Assert.False(History(h).CanGoBack);
+        });
+    }
+
+    /// <summary>
+    /// The test above failed now and then in full runs (KeyNotFoundException on _tabHistories): a new image tab became
+    /// the active tab at once, but its history was only registered after the image had loaded (ActivateWorkspaceAsync
+    /// awaits LoadPathAsync first). Under load the test looked in between. The history must exist as soon as the tab is
+    /// active, before the image load is awaited.
+    /// </summary>
+    [Fact]
+    public async Task A_new_image_tab_has_its_history_as_soon_as_it_is_active_before_the_image_has_loaded()
+    {
+        await ExplorerHarness.Run(async h =>
+        {
+            h.Settings.SwitchToNewTabs = true;
+            var path = Path.Combine(h.Root, ExplorerHarness.ImageA);
+            // Only the synchronous part of opening runs here: the image load is still pending.
+            var opening = (Task)h.Call("OpenImageInNewTabAsync", path, KeyModifiers.None, "test")!;
+            Assert.IsType<ImageTabState>(h.Workspace.Active);
+            Assert.True(h.Get<Dictionary<Guid, NavigationHistory>>("_tabHistories").ContainsKey(h.Workspace.Active!.Id),
+                $"the new active tab has no history yet (open finished: {opening.IsCompleted})");
+            Assert.False(History(h).CanGoBack);
+            await opening;
+            await h.WaitUntil(() => string.Equals(h.Get<string?>("_currentPath"), path, StringComparison.OrdinalIgnoreCase), "image loaded");
+            Assert.Equal(1, History(h).Count);
             Assert.False(History(h).CanGoBack);
         });
     }

@@ -164,10 +164,26 @@ public partial class MainWindow
             grid.Children.Add(close);
             container.Child = grid;
             container.ContextMenu = BuildTabContextMenu(tab);
-            var tabToolTip = BuildTabToolTip(tab, fullPath, out var tabHintText);
-            ToolTip.SetTip(container, tabToolTip);
-            // The mouse hint is recomputed every time the tooltip opens, so changing a tab gesture never leaves it stale.
-            container.AddHandler(ToolTip.ToolTipOpeningEvent, (_, _) => tabHintText.Text = TabMouseHint());
+            var tabToolTip = BuildTabToolTip(tab, fullPath);
+            ToolTip.SetTip(container, tabToolTip.ToolTip);
+            // Side tabs: the tooltip opens beside the tab (above or below it would cover the neighbouring tabs). With hover
+            // previews a top tab's tooltip opens under the tab, like a browser's tab preview. ToolTipGuard keeps this placement.
+            if (sideTabs || _settings.TabHoverPreviews)
+            {
+                ToolTip.SetPlacement(container, sideTabs ? PlacementMode.Right : PlacementMode.Bottom);
+                ToolTipGuard.SetKeepsOwnPlacement(container, true);
+            }
+            // The mouse hint, details and preview are refreshed every time the tooltip opens, so none is ever stale; an
+            // animated GIF preview stops (and frees its frames) when it closes.
+            container.AddHandler(ToolTip.ToolTipOpeningEvent, (_, _) =>
+            {
+                tabToolTip.Hint.Text = TabMouseHint();
+                FillTabPreview(tab, tabToolTip);
+            });
+            container.PropertyChanged += (_, e) =>
+            {
+                if (e.Property == ToolTip.IsOpenProperty && e.NewValue is false) StopTabGifPreview(tabToolTip.Card.PictureHost);
+            };
             ToolTip.SetShowDelay(container, 650);
             ToolTip.SetTip(close, "Close tab");
             ToolTip.SetShowDelay(close, 650);
@@ -188,33 +204,47 @@ public partial class MainWindow
         _ => null
     };
 
-    /// <summary>Filename / path font sizes for the tab tooltip ("Tab tooltip text size").</summary>
+    /// <summary>Name / detail font sizes for the tab tooltip ("Tab tooltip text size"); the mouse hint is a notch smaller.</summary>
     internal static (double Name, double Detail) TabToolTipFontSizes(string? choice) => choice switch
     {
         "Small" => (12, 11),
         "Large" => (18, 14),
-        _ => (15, 12.5)
+        _ => (14, 12)
     };
 
     /// <summary>
-    /// Tab tooltip: "Name: file" in larger semibold text, then "Path: folder" (the folder
-    /// that contains it) when one is available, then the mouse hint, both a notch smaller.
+    /// Tab tooltip card (approved mockup docs/mockups/tab-hover-preview-5.0.6.md, laid out by TabHoverCard): the hover
+    /// preview slot (filled when it opens, MainWindow.TabPreview.cs) edge to edge on top, then the name in bold, the full
+    /// folder path dimmed (a picture's folder, or an Explorer tab's own folder), the details line (pixel and file size,
+    /// or an Explorer tab's item count; filled when it opens) and one faint line of mouse hints. The name and path are
+    /// never shortened: they wrap and the card grows taller. The tooltip has no padding so the preview reaches its edges.
     /// </summary>
-    private Control BuildTabToolTip(TabState tab, string? fullPath, out TextBlock hintText)
+    private TabToolTipParts BuildTabToolTip(TabState tab, string? fullPath)
     {
         var (nameSize, detailSize) = TabToolTipFontSizes(_settings.TabToolTipTextSize);
         var (name, folder) = TabToolTipLines(tab.Title, fullPath);
-        var panel = new StackPanel { Spacing = 3, MaxWidth = 640 };
+        if (tab is BrowserTabState && fullPath is not null) folder = fullPath;
+        var text = new StackPanel { Spacing = 2, Margin = new Thickness(10, 8) };
         if (!string.IsNullOrWhiteSpace(name))
-            panel.Children.Add(new TextBlock { Text = "Name: " + name, FontSize = nameSize, FontWeight = FontWeight.SemiBold, TextWrapping = TextWrapping.Wrap });
+            text.Children.Add(new TextBlock { Text = name, FontSize = nameSize, FontWeight = FontWeight.Bold, TextWrapping = TextWrapping.Wrap });
         if (!string.IsNullOrWhiteSpace(folder))
-            panel.Children.Add(new TextBlock { Text = "Path: " + folder, FontSize = detailSize, TextWrapping = TextWrapping.Wrap });
-        hintText = new TextBlock { Text = TabMouseHint(), FontSize = detailSize, Opacity = 0.78, TextWrapping = TextWrapping.Wrap };
-        panel.Children.Add(hintText);
-        return panel;
+            text.Children.Add(new TextBlock { Text = folder, FontSize = detailSize, Opacity = 0.7, TextWrapping = TextWrapping.Wrap });
+        var details = new TextBlock { FontSize = detailSize, Opacity = 0.7, TextWrapping = TextWrapping.Wrap, IsVisible = false };
+        text.Children.Add(details);
+        var hint = new TextBlock { Text = TabMouseHint(), FontSize = Math.Max(10, detailSize - 1), Opacity = 0.55, TextWrapping = TextWrapping.NoWrap, Margin = new Thickness(0, 3, 0, 0) };
+        text.Children.Add(hint);
+        var card = new TabHoverCard(CreateTabPreviewHost(), text, hint);
+        var toolTip = new ToolTip
+        {
+            Content = card,
+            Padding = new Thickness(0),
+            MaxWidth = double.PositiveInfinity,
+            CornerRadius = new CornerRadius(TabToolTipCornerRadius),
+        };
+        return new TabToolTipParts(toolTip, card, details, hint);
     }
 
-    /// <summary>The tooltip's Name and Path values: the item's own name and the folder that contains it.</summary>
+    /// <summary>The tooltip's name and folder lines: the item's own name and the folder that contains it.</summary>
     internal static (string? Name, string? Folder) TabToolTipLines(string? title, string? fullPath)
     {
         if (fullPath is null) return (string.IsNullOrWhiteSpace(title) ? null : title, null);
@@ -267,7 +297,7 @@ public partial class MainWindow
     }
 
     /// <summary>Tab tooltip hint that reflects which mouse actions are actually enabled (live settings, custom gestures included).</summary>
-    private string TabMouseHint() => BindingHints.TabMouseHint("Drag to reorder", _settings.Gestures, _settings.CustomGestures);
+    private string TabMouseHint() => BindingHints.TabMouseHint(_settings.Gestures, _settings.CustomGestures);
 
     // ---- Ctrl+Tab most-recently-used cycling ---------------------------------------------------
     private readonly List<Guid> _tabMru = new();
@@ -1040,7 +1070,7 @@ public partial class MainWindow
             _diagnostics.Write("tabs", "last_tab_close_refused", new { id, source });
             return;
         }
-        if (!_workspace.Close(id, ensureHome: false)) return;
+        if (!_workspace.Close(id, ensureHome: false, TabCloseActivationMode, RecentlyUsedTabs())) return;
         _diagnostics.Write("tabs", "closed", new { id, source, remaining = _workspace.Tabs.Count });
         if (_workspace.Tabs.Count == 0)
         {
@@ -1121,7 +1151,7 @@ public partial class MainWindow
             //   3. the last Explorer-tab location (when "use last location" is on);
             //   4. Pictures, then the user profile.
             // A custom path that is set but missing/unreadable falls back to 2-4 with a short message.
-            if (string.IsNullOrWhiteSpace(_settings.NewTabCustomPath)) return _workspace.AddBrowser(ResolveFreshExplorerFolder());
+            if (string.IsNullOrWhiteSpace(_settings.NewTabCustomPath)) return AddNewBrowserTab(ResolveFreshExplorerFolder());
             var custom = CustomLaunchTarget.Resolve(_settings.NewTabCustomPath, "New-tab custom");
             var customFolder = custom.Kind switch
             {
@@ -1129,8 +1159,8 @@ public partial class MainWindow
                 CustomLaunchKind.Image => Path.GetDirectoryName(custom.Path),
                 _ => null
             };
-            if (!string.IsNullOrEmpty(customFolder) && Directory.Exists(customFolder)) return _workspace.AddBrowser(customFolder);
-            var fallback = _workspace.AddBrowser(ResolveFreshExplorerFolder());
+            if (!string.IsNullOrEmpty(customFolder) && Directory.Exists(customFolder)) return AddNewBrowserTab(customFolder);
+            var fallback = AddNewBrowserTab(ResolveFreshExplorerFolder());
             if (custom.Notice is not null) _tabNotices[fallback.Id] = custom.Notice + "  Opened the usual start folder instead.";
             return fallback;
         }
@@ -1139,15 +1169,15 @@ public partial class MainWindow
             var target = CustomLaunchTarget.Resolve(_settings.NewTabCustomPath, "New-tab custom");
             switch (target.Kind)
             {
-                case CustomLaunchKind.Image: return _workspace.AddImage(target.Path);
-                case CustomLaunchKind.Folder: return _workspace.AddBrowser(target.Path);
+                case CustomLaunchKind.Image: return AddNewImageTab(target.Path);
+                case CustomLaunchKind.Folder: return AddNewBrowserTab(target.Path);
                 default:
-                    var home = _workspace.AddHome();
+                    var home = AddNewHomeTab();
                     if (target.Notice is not null) _tabNotices[home.Id] = target.Notice;
                     return home;
             }
         }
-        return _workspace.AddHome();
+        return AddNewHomeTab();
     }
 
     private string ResolveFreshExplorerFolder()
@@ -1196,7 +1226,7 @@ public partial class MainWindow
     private async Task OpenExplorerTabAsync(string? folder = null)
     {
         folder = !string.IsNullOrWhiteSpace(folder) && Directory.Exists(folder) ? folder : ResolveFreshExplorerFolder();
-        _workspace.AddBrowser(folder);
+        AddNewBrowserTab(folder);
         RebuildTabStrip();
         await ActivateWorkspaceAsync();
     }
@@ -1497,7 +1527,7 @@ public partial class MainWindow
 
     private async Task CycleTabAsync(int delta)
     {
-        if (!string.Equals(_settings.TabCycleOrder, "Most recently used", StringComparison.OrdinalIgnoreCase) || _workspace.Tabs.Count < 2)
+        if (!TabCycleOrders.IsMostRecentlyUsed(_settings.TabCycleOrder) || _workspace.Tabs.Count < 2)
         {
             if (_workspace.SelectRelative(delta)) await ActivateWorkspaceAsync();
             return;

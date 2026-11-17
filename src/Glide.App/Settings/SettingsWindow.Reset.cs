@@ -83,13 +83,6 @@ public partial class SettingsWindow
         ShowCategory(page, clearSearch: true, revealTarget: card);
         HighlightRevealedRow(card.Header);
         if (_resetSelector.FirstCheck is { } first) FocusRevealedEditor(first, card);
-        // Clearing a search raises the search box's TextChanged later, and that re-shows the page at its remembered
-        // offset. Reveal the card once more after that has run, so it always ends up in view.
-        Dispatcher.UIThread.Post(() =>
-        {
-            if (!string.Equals(_activeCategory, page, StringComparison.OrdinalIgnoreCase) || SearchPanel.IsVisible) return;
-            ScrollToReveal(card);
-        }, DispatcherPriority.Background);
     }
 
     private async void ResetGoClicked(object? sender, RoutedEventArgs e)

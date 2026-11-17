@@ -16,8 +16,9 @@ namespace Glide.App.Services;
 /// <item>Save: when the window closes (OK, Cancel, Escape or the close button) its normal (not maximized) geometry
 /// and maximized state are stored under the key and written to glide.settings.json ("WindowPlacements").</item>
 /// </list>
-/// Resizable windows (<see cref="WindowPlacementMode.SizeAndPosition"/>) remember size, position and maximized state;
-/// fixed-size and content-sized dialogs (<see cref="WindowPlacementMode.PositionOnly"/>) remember only where they were.
+/// Resizable windows (<see cref="WindowPlacementMode.SizeAndPosition"/>) remember size, position and maximized state.
+/// Fixed-size and content-sized dialogs (<see cref="WindowPlacementMode.PositionOnly"/>) remember nothing: they always
+/// open centred on their owner (<see cref="DialogPlacement"/>), and any position an older build saved for them is dropped.
 /// The live store is authoritative at runtime: the main window copies it into its settings on every full save
 /// (<see cref="ApplyTo"/>), so an older in-memory copy can never write back a stale placement.
 /// </summary>
@@ -88,6 +89,21 @@ public static class WindowPlacementService
         SettingsStore.SaveWindowPlacements(snapshot);
     }
 
+    /// <summary>Drops the remembered placement for <paramref name="key"/> (and writes the store) when there is one.</summary>
+    public static void Forget(string key)
+    {
+        if (string.IsNullOrWhiteSpace(key)) return;
+        Dictionary<string, WindowPlacementState> snapshot;
+        lock (Gate)
+        {
+            var store = EnsureLoaded();
+            if (!store.Remove(key)) return;
+            snapshot = GlideSettingsState.ClonePlacements(store);
+        }
+        if (PersistOverrideForTests is { } sink) { sink(snapshot); return; }
+        SettingsStore.SaveWindowPlacements(snapshot);
+    }
+
     /// <summary>
     /// Back up and restore: replaces the remembered placement of every window named in <paramref name="placements"/> (already
     /// validated against this PC's monitors by the importer) and writes the store. Windows not in the backup keep theirs.
@@ -140,6 +156,15 @@ public static class WindowPlacementService
             : WindowPlacementMode.PositionOnly);
         var tracker = new Tracker(window, key, resolvedMode);
         Tracked.AddOrUpdate(window, tracker);
+        if (resolvedMode == WindowPlacementMode.PositionOnly)
+        {
+            // Dialogs never remember a position: a restored one overrode the centring (5.0.6: "Unsaved settings changes"
+            // always opened at a saved 0,0, the screen's top-left). They always open centred on their owner, and a
+            // position an older build saved for them is dropped.
+            Forget(key);
+            DialogPlacement.CenterOnOwner(window);
+            return;
+        }
         tracker.Restore();
         tracker.Hook();
     }

@@ -286,8 +286,12 @@ public partial class MainWindow
             if (_suppressedHeldNavigationDirection != 0 && _suppressedHeldNavigationDirection != direction)
                 _suppressedHeldNavigationDirection = 0;
             NotifyActionRouted(action, "hotkey");
+            var acceptedBefore = _acceptedKeyboardNavigations;
             if (!_heldNavigationKeyIsDown || _heldNavigationDirection != direction)
                 StartHeldNavigation(direction);
+            // The first step of a fresh press runs synchronously inside StartHeldNavigation; auto-repeat key-downs while
+            // the key is held start nothing. Either way the sticky-key detector hears about this key-down.
+            NoteNavigationKeyDown(e.Key, acceptedBefore);
             e.Handled = true;
             return;
         }
@@ -296,7 +300,10 @@ public partial class MainWindow
         {
             e.Handled = true;
             NotifyActionRouted(action, "hotkey");
-            await NavigateKeyboardAsync(command == GlideCommand.NextImage ? 1 : -1);
+            var acceptedBefore = _acceptedKeyboardNavigations;
+            var navigation = NavigateKeyboardAsync(command == GlideCommand.NextImage ? 1 : -1);
+            NoteNavigationKeyDown(e.Key, acceptedBefore);
+            await navigation;
             return;
         }
 
@@ -315,6 +322,7 @@ public partial class MainWindow
 
     private void OnKeyUp(object? sender, KeyEventArgs e)
     {
+        NoteNavigationKeyUp(e.Key);
         if (e.Key == Key.Home) _homeKeyDown = false;
         if (e.Key == Key.Space) _slideshowSpaceDown = false;
         if ((e.Key == Key.Right && _suppressedHeldNavigationDirection > 0) ||
@@ -335,6 +343,7 @@ public partial class MainWindow
     {
         direction = Math.Sign(direction);
         if (direction == 0 || _navigationBoundaryPromptActive) return;
+        NoteWheelNavigationForSkipDetector();
 
         var now = Stopwatch.GetTimestamp();
         // One isolated notch is intentionally identical to clicking Previous/Next. Only a sustained
@@ -805,7 +814,7 @@ public partial class MainWindow
         actions[GlideCommand.ClearOverlays] = () => Event(OverlayClearClicked);
         actions[GlideCommand.CloseStatusBar] = () => Event(CloseStatusClicked);
         actions[GlideCommand.NewExplorerTab] = () => OpenExplorerTabAsync(_currentPath is { } current && File.Exists(current) ? Path.GetDirectoryName(current) : null);
-        actions[GlideCommand.NewHomeTab] = async () => { _workspace.AddHome(); RebuildTabStrip(); await ActivateWorkspaceAsync(); };
+        actions[GlideCommand.NewHomeTab] = async () => { AddNewHomeTab(); RebuildTabStrip(); await ActivateWorkspaceAsync(); };
         actions[GlideCommand.OpenFirstImageInFolder] = () => _workspace.Active is BrowserTabState browserTab ? OpenFirstImageInFolderAsync(browserTab.Folder) : Task.CompletedTask;
         actions[GlideCommand.ToggleOverlayMode] = () => { if (_wholeAppOverlayMode) ExitWholeAppOverlayMode(); else EnterWholeAppOverlayMode(); return Task.CompletedTask; };
         actions[GlideCommand.CustomizeTitleBar] = ShowTitleBarCustomizerAsync;
@@ -859,21 +868,20 @@ public partial class MainWindow
     }
 
     /// <summary>Shortcut text of a registry action for menus and tooltips ("Unassigned" when it has none).</summary>
-    private string ShortcutForAction(string actionId)
-    {
-        var shortcuts = HotkeyCatalog.ShortcutsForAction(actionId, _settings.Hotkeys);
-        return shortcuts.Count == 0 ? "Unassigned" : string.Join(" / ", shortcuts);
-    }
+    private string ShortcutForAction(string actionId) => ShortcutText(HotkeyCatalog.ShortcutsForAction(actionId, _settings.Hotkeys));
+
+    /// <summary>"<paramref name="text"/> (O / Ctrl+O)" with a registry action's live keys, or just the text when it has none.</summary>
+    private string WithActionShortcuts(string text, string actionId) =>
+        BindingHints.WithShortcuts(text, HotkeyCatalog.ShortcutsForAction(actionId, _settings.Hotkeys));
+
+    private static string ShortcutText(IReadOnlyList<string> shortcuts) =>
+        shortcuts.Count == 0 ? "Unassigned" : string.Join(" / ", shortcuts);
 
     /// <summary>Title-bar button tooltip shortcut: an alias button (Show in Explorer) reads its target action's live keys.</summary>
     private string ShortcutForTitleButton(TitleBarButtonDefinition definition) =>
         AppActionRegistry.Find(definition.ActionId)?.AliasOf is not null ? ShortcutForAction(definition.ActionId) : ShortcutFor(definition.Command);
 
-    private string ShortcutFor(GlideCommand command)
-    {
-        var shortcuts = HotkeyCatalog.ShortcutsForCommand(command, _settings.Hotkeys);
-        return shortcuts.Count == 0 ? "Unassigned" : string.Join(" / ", shortcuts);
-    }
+    private string ShortcutFor(GlideCommand command) => ShortcutText(HotkeyCatalog.ShortcutsForCommand(command, _settings.Hotkeys));
 
     private void RefreshDynamicTooltips()
     {
@@ -886,10 +894,7 @@ public partial class MainWindow
         foreach (var (id, button) in _titleBarButtons)
         {
             if (TitleBarButtonCatalog.Find(id) is not { } definition) continue;
-            var label = id == "window.transparency"
-                ? $"Window transparency: {(int)Math.Round(_sessionOpacity * 100)}%"
-                : TitleActionLabel(id, definition);
-            ToolTip.SetTip(button, $"{label} ({ShortcutForTitleButton(definition)})");
+            ToolTip.SetTip(button, TitleActionTip(id, definition));
             ToolTip.SetShowDelay(button, 650);
         }
         if (_homeSurface is not null) UpdateHomeHintTexts(_homeSurface);
@@ -927,10 +932,7 @@ public partial class MainWindow
             ToolTip.SetTip(_browserSurface.UpButton, BindingHints.WithShortcuts("Up one folder", upKeys));
             ToolTip.SetShowDelay(_browserSurface.UpButton, 650);
             Tip(_browserSurface.RefreshButton, "Refresh", GlideCommand.RefreshFolder);
-            // Show in File Explorer: the action's live keys; the button's context menu lists the other targets.
-            var windowsKeys = HotkeyCatalog.ShortcutsForAction("explorer.showInWindows", _settings.Hotkeys);
-            ToolTip.SetTip(_browserSurface.WindowsExplorerButton,
-                BindingHints.WithShortcuts("Show in Windows File Explorer, with the selected item selected", windowsKeys));
+            ToolTip.SetTip(_browserSurface.WindowsExplorerButton, ExplorerRevealButtonTip());
             // Ctrl+F is a fixed registry shortcut: read it from there instead of typing it a second time.
             _browserSurface.FilterBox.Watermark = BindingHints.FixedShortcut("fixed.explorer.filter") is { } filterKeys
                 ? $"Filter this folder ({filterKeys})" : "Filter this folder";

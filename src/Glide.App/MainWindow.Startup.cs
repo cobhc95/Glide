@@ -100,7 +100,8 @@ public partial class MainWindow
             else { _overlayContextTopmostScope?.Dispose(); _overlayContextTopmostScope = null; }
         };
         overlays.OpenFileLocationRequested = path => ExplorerShell.Reveal(path, directory: false);
-        overlays.OpenInNewTabRequested = path => Dispatcher.UIThread.Post(async () => await OpenAsImageTabAsync(path, openInNewTab: true));
+        // Read the held keys now, while the menu item is being clicked (Shift / Alt flip the new-tab settings).
+        overlays.OpenInNewTabRequested = path => { var held = ModifierKeyState.Current(); Dispatcher.UIThread.Post(async () => await OpenImageInNewTabAsync(path, held, "overlay_menu")); };
         overlays.OpenWithRequested = path => WindowsOpenWith.Show(path);
         overlays.VideoUnavailable += (path, reason) => Dispatcher.UIThread.Post(async () => await ShowVideoUnavailableAsync(path, reason));
         ApplyOverlaySettingsToManager(overlays);

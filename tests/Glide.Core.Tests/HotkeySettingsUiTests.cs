@@ -539,7 +539,8 @@ public sealed class HotkeySettingsUiTests
     {
         var guard = ReadSource("src", "Glide.App", "Services", "ToolTipGuard.cs");
         // Tunnel + handledEventsToo so the tooltip is gone before the list / scroll viewer consumes the tick.
-        Assert.Contains("InputElement.PointerWheelChangedEvent.AddClassHandler<Control>((control, _) => CloseOpenToolTips(control)", guard, StringComparison.Ordinal);
+        Assert.Contains("InputElement.PointerWheelChangedEvent.AddClassHandler<Control>((control, _) =>", guard, StringComparison.Ordinal);
+        Assert.Contains("CloseOpenToolTips(control);", guard, StringComparison.Ordinal);
         Assert.Contains("Avalonia.Interactivity.RoutingStrategies.Tunnel, handledEventsToo: true", guard, StringComparison.Ordinal);
         Assert.Contains("ToolTip.SetIsOpen(control, false)", guard, StringComparison.Ordinal);
         var app = ReadSource("src", "Glide.App", "App.axaml.cs");

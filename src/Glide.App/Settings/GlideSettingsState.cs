@@ -28,8 +28,9 @@ public sealed record GlideSettingsState
     // When Previous crosses into a parent/grandparent branch, choose which image opens.
     // "First image" is the user-facing default; "Last image" preserves strict reversal semantics.
     public string HierarchicalPreviousFolderEntry { get; set; } = "First image";
-    // Optional navigation-rate limiter. 0 ms means unlimited.
-    public int NavigationRateLimitMs { get; set; } = 80;
+    // Optional navigation-rate limiter. 0 ms means unlimited. 120 ms since 5.0.6 (was 80): laptop keyboards often bounce,
+    // so one press could skip several pictures; schema 14 moves an untouched 80 to 120 once.
+    public int NavigationRateLimitMs { get; set; } = 120;
     // Mouse only, Keyboard only, or Both.
     public string NavigationRateLimitInput { get; set; } = "Both";
     public bool NavigationRateLimitShowIndicator { get; set; } = true;
@@ -37,6 +38,9 @@ public sealed record GlideSettingsState
     public bool NavigationRateLimitWindowed { get; set; } = true;
     public bool NavigationRateLimitFullscreen { get; set; } = true;
     public bool NavigationRateLimitSlideshow { get; set; } = true;
+    // navigation.skipHint (5.0.6): show the "Skipping several pictures at once?" toast when a key press seems to skip
+    // pictures (a sticky or bouncing next / previous key). The toast's "Don't remind me again" turns it off.
+    public bool NavigationSkipHint { get; set; } = true;
     public bool RememberLastOpenLocation { get; set; } = true;
     // New Explorer tabs have their own navigation-memory scope. Default = last Explorer-tab folder.
     public bool NewExplorerTabsUseLastLocation { get; set; } = true;
@@ -172,6 +176,10 @@ public sealed record GlideSettingsState
     // Explorer tab (4.8.0) view and filter preferences.
     public string ExplorerDefaultView { get; set; } = "Large thumbnails";
     public bool ExplorerShowHiddenFiles { get; set; }
+    // 5.0.6: off = changing the sort keeps the scroll position; on = the view scrolls to the selected item.
+    public bool ExplorerKeepSelectionInView { get; set; }
+    // 5.0.6: click the name of the single selected item (slowly, not a double-click) to rename it, as in Windows Explorer.
+    public bool ExplorerClickToRename { get; set; } = true;
     public bool ExplorerShowOnlyImages { get; set; } = true;
     // Explorer wheel speed multiplier (0.25 - 4). One notch scrolls 1 / 2 / 3 rows by view; this scales it.
     public double ExplorerScrollSpeed { get; set; } = 1.0;
@@ -385,6 +393,17 @@ public sealed record GlideSettingsState
     public string TabCycleOrder { get; set; } = "Tab order";
     // "Open home page", "Keep last tab open", or "Close program". Applies when the user closes the final ordinary tab.
     public string LastTabCloseBehavior { get; set; } = "Open home page";
+    // 5.0.6: tabs opened "in a new tab" from inside Glide (Glide.Core.Workspace.NewTabPolicy). SwitchToNewTabs is
+    // "Open new tabs in the foreground"; with NewTabModifiers on (off by default) Shift / Alt flip them per open.
+    public string NewTabPosition { get; set; } = Glide.Core.Workspace.NewTabPositions.Default;
+    public bool SwitchToNewTabs { get; set; } = true; // on by default since 5.0.6 (schema 13 migration in SettingsStore)
+    public bool NewTabModifiers { get; set; }
+    // 5.0.6: which tab becomes active after the active tab is closed (Glide.Core.Workspace.TabCloseActivation).
+    public string AfterTabCloseActivate { get; set; } = Glide.Core.Workspace.TabCloseActivation.Default;
+    // 5.0.6: hovering a background tab shows a small preview of its picture / folder in the tab tooltip.
+    public bool TabHoverPreviews { get; set; } = true;
+    // 5.0.6: an animated GIF tab's hover preview plays while the tooltip is open (Services/TabGifPreview). Off by default.
+    public bool AnimateGifPreviews { get; set; }
     // "Welcome page" or "Recent pictures page". Legacy Browser page values are migrated to Welcome.
     public string HomePageMode { get; set; } = "Welcome page";
     public bool ShowFolderCounter { get; set; }
@@ -410,6 +429,8 @@ public sealed record GlideSettingsState
     public string PictureCounterPosition { get; set; } = "Top right";
     public string PictureCounterColor { get; set; } = "White";
     public bool PictureCounterShadow { get; set; } = true;
+    /// <summary>Encloses every line of the text overlay in one box styled like the Image information panel (5.0.6).</summary>
+    public bool PictureCounterBorder { get; set; }
 
     // Window in Window image overlays
     public int OverlayDefaultOpacity { get; set; } = 100;
@@ -528,11 +549,19 @@ public sealed record GlideSettingsState
         var rightPlacements = right.WindowPlacements;
         var ignoredPlacements = new Dictionary<string, WindowPlacementState>(StringComparer.OrdinalIgnoreCase);
         left.WindowPlacements = ignoredPlacements; right.WindowPlacements = ignoredPlacements;
+        // The main window rebuilds this runtime-owned store on every applied preview (SettingsDefaults.KeepRuntimeOwnedValues),
+        // so it must compare by value: by reference every later text overlay preview looked like an unrelated change and
+        // re-applied every setting (5.0.6).
+        var leftOverlayPlacements = left.OverlayWindowPlacements;
+        var rightOverlayPlacements = right.OverlayWindowPlacements;
+        var ignoredOverlayPlacements = new Dictionary<string, OverlayWindowPlacementState>(StringComparer.OrdinalIgnoreCase);
+        left.OverlayWindowPlacements = ignoredOverlayPlacements; right.OverlayWindowPlacements = ignoredOverlayPlacements;
         // The update checker's memory (last check time...) is bookkeeping, not a setting: it never makes two states "different".
         var noUpdateMemory = new Glide.Core.Updates.UpdateCheckState();
         left.WriteUpdateState(noUpdateMemory); right.WriteUpdateState(noUpdateMemory);
         if (!Equals(left, right)) return false;
         if (!WindowPlacementsEqual(leftPlacements, rightPlacements)) return false;
+        if (!OverlayWindowPlacementsEqual(leftOverlayPlacements, rightOverlayPlacements)) return false;
         if (!CustomGesturesEqual(leftCustom, rightCustom)) return false;
         if (!CustomHotkeyPresetsEqual(leftPresets, rightPresets)) return false;
         if (!leftRecent.SequenceEqual(rightRecent, StringComparer.OrdinalIgnoreCase)) return false;
@@ -565,6 +594,17 @@ public sealed record GlideSettingsState
             var other = b.FirstOrDefault(x => string.Equals(x.Key, kv.Key, StringComparison.OrdinalIgnoreCase)).Value;
             if (other is null || kv.Value is null || !kv.Value.SameGeometry(other)) return false;
         }
+        return true;
+    }
+
+    /// <summary>Same keys (case-insensitive) with equal records.</summary>
+    internal static bool OverlayWindowPlacementsEqual(Dictionary<string, OverlayWindowPlacementState>? a, Dictionary<string, OverlayWindowPlacementState>? b)
+    {
+        a ??= new(); b ??= new();
+        if (a.Count != b.Count) return false;
+        var lookup = new Dictionary<string, OverlayWindowPlacementState>(b, StringComparer.OrdinalIgnoreCase);
+        foreach (var kv in a)
+            if (!lookup.TryGetValue(kv.Key, out var other) || !Equals(kv.Value, other)) return false;
         return true;
     }
 
@@ -698,10 +738,10 @@ public static class ShowInExplorerTargets
     public static bool IsWindowsExplorer(string? value) => Normalize(value) == WindowsExplorer;
 }
 
-/// <summary>Explorer tab view choices (Settings combo item texts, in menu order).</summary>
+/// <summary>Stored values of the "Explorer default view" setting, in view-box order (the Settings combo shows the Explorer tab's labels).</summary>
 public static class ExplorerDefaultViews
 {
-    public static readonly string[] All = ["Extra large thumbnails", "Large thumbnails", "Medium thumbnails", "Small thumbnails", "List", "Details"];
+    public static readonly string[] All = Glide.App.Explorer.ExplorerViewModes.Names;
     public const string Default = "Large thumbnails";
 
     /// <summary>Maps a saved value to a current choice; 5.0.3 renamed "... icons" to "... thumbnails".</summary>

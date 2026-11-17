@@ -26,6 +26,23 @@ public partial class MainWindow
     private string TitleActionLabel(string id, TitleBarButtonDefinition definition) =>
         id == "file.locate" ? TitleBarButtonCatalog.LocateLabel(_settings.ShowInExplorerTarget) : definition.Label;
 
+    /// <summary>
+    /// Tooltip of a title-bar button: its label with its keys. The locate button adds a second line naming what its
+    /// right-click menu offers (the other Show in targets, the alternative file manager or setting one up).
+    /// </summary>
+    private string TitleActionTip(string id, TitleBarButtonDefinition definition)
+    {
+        var label = id == "window.transparency"
+            ? $"Window transparency: {(int)Math.Round(_sessionOpacity * 100)}%"
+            : TitleActionLabel(id, definition);
+        var tip = $"{label} ({ShortcutForTitleButton(definition)})";
+        if (id != "file.locate") return tip;
+        var alternative = AlternativeFileManagerDisplayName(_settings.AlternativeFileManagerPath) is { } name
+            ? "Show in " + name
+            : AlternativeFileManagerSetUpLabel + " (set up)";
+        return $"{tip}\nRight-click for more: other Show in targets, {alternative}";
+    }
+
     /// <summary>The image the locate command applies to: the active image tab's file, never a stale path.</summary>
     private string? CurrentLocatePath()
     {
@@ -80,6 +97,10 @@ public partial class MainWindow
         return (null, null);
     }
 
+    /// <summary>The image tab a locate jump starts from, for Back to return to (CrossTabHistory); null from any other tab.</summary>
+    private CrossTabLink? ActiveImageOrigin() =>
+        _workspace.Active is ImageTabState fromImage ? new CrossTabLink(fromImage.Id, NavigationEntryKind.Image, LiveImagePath(fromImage)) : null;
+
     /// <summary>
     /// Same tab: the active tab becomes the Explorer view of the folder with the file selected, as an ordinary push onto
     /// the tab's own history (Back returns to the image in this tab, Forward to the folder). An Explorer tab just navigates.
@@ -131,9 +152,7 @@ public partial class MainWindow
     /// </summary>
     private async Task ShowPathInNewWindowAsync(string? path)
     {
-        CrossTabLink? origin = _workspace.Active is ImageTabState fromImage
-            ? new CrossTabLink(fromImage.Id, NavigationEntryKind.Image, LiveImagePath(fromImage))
-            : null;
+        var origin = ActiveImageOrigin();
         var (file, folder) = ResolveLocateTarget(path);
         if (string.IsNullOrWhiteSpace(folder) || !Directory.Exists(folder)) { file = null; folder = ResolveFreshExplorerFolder(); }
         var tab = new BrowserTabState(Guid.NewGuid(), folder) { View = new BrowserTabViewState(file, 0) };
@@ -182,21 +201,8 @@ public partial class MainWindow
     private async Task ShowPathInExplorerTabCoreAsync(string? path, bool alwaysNewTab)
     {
         // Back from the Explorer tab returns to this image (CrossTabHistory): remember where the jump came from.
-        CrossTabLink? origin = _workspace.Active is ImageTabState fromImage
-            ? new CrossTabLink(fromImage.Id, NavigationEntryKind.Image, LiveImagePath(fromImage))
-            : null;
-        string? file = null;
-        string? folder = null;
-        if (!string.IsNullOrWhiteSpace(path))
-        {
-            try
-            {
-                var full = Path.GetFullPath(path);
-                if (File.Exists(full)) { file = full; folder = Path.GetDirectoryName(full); }
-                else if (Directory.Exists(full)) folder = full;
-            }
-            catch { /* unusable path: file and folder stay null and the caller reports it */ }
-        }
+        var origin = ActiveImageOrigin();
+        var (file, folder) = ResolveLocateTarget(path);
         if (string.IsNullOrWhiteSpace(folder) || !Directory.Exists(folder))
         {
             file = null;
@@ -238,7 +244,7 @@ public partial class MainWindow
     private MenuItem BuildShowInExplorerTargetMenuItem(string text, string target, string icon)
     {
         var selected = string.Equals(ShowInExplorerTargets.Normalize(_settings.ShowInExplorerTarget), target, StringComparison.Ordinal);
-        var item = Glide.App.Services.MenuActions.Tag(new MenuItem { Header = selected ? $"{text}  ✓" : text, Icon = MenuIcon(icon) }, "setting.window.showInExplorerTarget");
+        var item = MenuActions.Tag(new MenuItem { Header = selected ? $"{text}  ✓" : text, Icon = MenuIcon(icon) }, "setting.window.showInExplorerTarget");
         item.Click += (_, _) => SetShowInExplorerTarget(target);
         return item;
     }

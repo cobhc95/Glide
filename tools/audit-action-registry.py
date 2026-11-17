@@ -78,10 +78,19 @@ X = "{http://schemas.microsoft.com/winfx/2006/xaml}"
 tree = ET.parse(app / "Settings/SettingsWindow.axaml")
 combos = {e.get(X + "Name"): [i.get("Content") for i in e.iter(A + "ComboBoxItem") if i.get("Content") is not None]
           for e in tree.iter(A + "ComboBox")}
+# Combo boxes filled in code: they show display labels while each item's Tag holds the stored value, so their option
+# list (the stored values) cannot equal XAML items. The C# test named here checks labels, order and stored values.
+#  - ExplorerDefaultViewCombo (5.0.6): shows ExplorerViewModes.Labels ("Thumbnails (L)"...) over ExplorerViewModes.Names;
+#    Release506Tests.Explorer_default_view_shows_the_explorer_tab_labels_and_keeps_the_stored_names.
+code_populated = {"ExplorerDefaultViewCombo"}
 for setting_id, options in choices.items():
     control = mapping.get(setting_id)
     if control is None:
         problems.append(f"Choices names {setting_id}, which has no Settings editor")
+        continue
+    if control in code_populated:
+        if f"{control}.Items.Add(" not in settings_code:
+            problems.append(f"{setting_id}: {control} is listed as filled in code, but SettingsWindow no longer fills it")
         continue
     xaml_items = combos.get(control)
     if xaml_items is None:

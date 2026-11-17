@@ -73,7 +73,9 @@ public sealed class Glide23FeatureContractTests
     public void TabTooltipContractIsSimplified()
     {
         var source = Source("src/Glide.App/MainWindow.axaml.cs");
-        Assert.Contains("Drag to reorder", source, StringComparison.Ordinal);
+        // 5.0.6 hover card: one short hint line built from the live bindings (BindingHints.TabMouseHint).
+        Assert.Contains("BindingHints.TabMouseHint(", source, StringComparison.Ordinal);
+        Assert.StartsWith("Drag to move", Glide.Core.Commands.BindingHints.TabMouseHint(Glide.Core.Commands.GestureCatalog.CreateDefaultMap(), null), StringComparison.Ordinal);
         Assert.DoesNotContain("next/previous hotkey", source, StringComparison.OrdinalIgnoreCase);
     }
 

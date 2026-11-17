@@ -26,6 +26,9 @@ public partial class MainWindow
     private ExplorerEntry? _explorerDragCandidate;
     private Point _explorerDragOrigin;
     private bool _explorerDragging;
+    // A plain press on an item of a multi-selection keeps the selection (it may become a drag); the release then
+    // reduces the selection to that item, as in Windows File Explorer. Cleared when a drag starts.
+    private ExplorerEntry? _explorerSelectOnRelease;
     private string _explorerTypeAhead = "";
     private long _explorerTypeAheadTick;
 
@@ -47,6 +50,7 @@ public partial class MainWindow
         browser.AddHandler(InputElement.TextInputEvent, ExplorerSurfaceTextInput, RoutingStrategies.Bubble, false);
         DragDrop.SetAllowDrop(scroll, true);
         AttachExplorerDropTarget(scroll, () => (_workspace.Active as BrowserTabState)?.Folder, null);
+        WireExplorerClickRenameCancellation(browser);
     }
 
     private void SetExplorerListFocus(bool focused)
@@ -70,6 +74,13 @@ public partial class MainWindow
         return null;
     }
 
+    /// <summary>
+    /// The control a context menu opens on: the item's tile, or the list for the background. Never the element under the
+    /// pointer, whose inherited properties (a caption's centred TextAlignment) the menu would take over.
+    /// </summary>
+    private Control ExplorerMenuAnchor(ExplorerEntry? entry) =>
+        (entry is not null ? ExplorerTileFor(ExplorerIndexOf(entry)) : null) ?? (Control?)_browserSurface?.ScrollViewer ?? this;
+
     private static bool ExplorerSourceIsScrollBar(object? source)
     {
         for (var visual = source as Visual; visual is not null; visual = visual.GetVisualParent())
@@ -83,6 +94,9 @@ public partial class MainWindow
         if (_browserSurface is not { } surface || ExplorerSourceIsScrollBar(e.Source)) return;
         var properties = e.GetCurrentPoint(surface.ScrollViewer).Properties;
         var entry = ExplorerEntryAt(e.Source);
+        _explorerSelectOnRelease = null;
+        // Any press cancels a pending click-to-rename; a plain left press on the name may arm a new one (below).
+        CancelExplorerClickRename();
         CommitOrCancelExplorerRename(commit: true);
         if (properties.IsMiddleButtonPressed)
         {
@@ -99,10 +113,12 @@ public partial class MainWindow
         if (properties.IsRightButtonPressed)
         {
             // The menu itself opens on release (like Explorer). Right-clicking an unselected item
-            // selects it first; right-clicking empty space clears the selection.
+            // selects it first; right-clicking empty space clears the selection. Right-clicking inside a
+            // multi-selection keeps it and makes the clicked item the focused one (its Properties target).
             if (entry is not null && !_browserSelection.Contains(entry.Path))
                 SelectBrowserIndex(ExplorerIndexOf(entry), extend: false, toggle: false, bringIntoView: false);
-            else if (entry is null) ClearBrowserSelection();
+            else if (entry is not null) { _browserCurrentIndex = ExplorerIndexOf(entry); UpdateRealizedBrowserSelection(); }
+            else ClearBrowserSelection();
             e.Handled = true;
             return;
         }
@@ -120,6 +136,9 @@ public partial class MainWindow
         }
         var index = ExplorerIndexOf(entry);
         if (index < 0) return;
+        // Click-to-rename (Windows' slow double-click): decided against the selection as it was before this press.
+        var wasSoleSelected = _browserSelection.Count == 1 && _browserSelection.Contains(entry.Path);
+        NoteExplorerItemLeftPress(entry, e, wasSoleSelected);
         // A plain double-click opens (default action); with Ctrl/Shift/Alt held it only opens when a custom gesture
         // is configured for that modifier, so rapid Ctrl+clicks keep toggling the selection.
         // (Odd counts - a rapid third click - only select, so click-click-click-click is two opens, not a chain.)
@@ -131,11 +150,13 @@ public partial class MainWindow
             await OpenBrowserEntryAsync(entry.Path, alternate: false, e.KeyModifiers);
             return;
         }
-        // Pressing an already selected item (without modifiers) keeps the multi-selection so it can be dragged.
+        // Pressing an already selected item (without modifiers) keeps the multi-selection so it can be dragged; a release
+        // without a drag selects just that item (ExplorerPointerReleased).
         if (!(ctrl || shift) && _browserSelection.Contains(entry.Path) && _browserSelection.Count > 1)
         {
             _browserCurrentIndex = index;
             UpdateRealizedBrowserSelection();
+            _explorerSelectOnRelease = entry;
         }
         else SelectBrowserIndex(index, extend: shift, toggle: ctrl, bringIntoView: false);
         _explorerDragCandidate = entry;
@@ -158,6 +179,8 @@ public partial class MainWindow
             if (Math.Abs(now.X - _explorerDragOrigin.X) + Math.Abs(now.Y - _explorerDragOrigin.Y) < ExplorerDragThreshold) return;
             _explorerDragging = true;
             _explorerDragCandidate = null;
+            _explorerSelectOnRelease = null;
+            NoteExplorerDragStarted();
             _ = StartExplorerDragAsync(candidate, e);
         }
     }
@@ -168,10 +191,18 @@ public partial class MainWindow
         var wasRubber = _explorerRubberActive;
         EndExplorerRubberBand();
         _explorerDragCandidate = null;
+        NoteExplorerPointerReleased(e);
+        if (_explorerSelectOnRelease is { } clicked)
+        {
+            _explorerSelectOnRelease = null;
+            var index = e.InitialPressMouseButton == MouseButton.Left ? ExplorerIndexOf(clicked) : -1;
+            if (index >= 0) SelectBrowserIndex(index, extend: false, toggle: false, bringIntoView: false);
+        }
         if (e.InitialPressMouseButton == MouseButton.Right && !ExplorerSourceIsScrollBar(e.Source))
         {
             e.Handled = true;
-            ShowExplorerContextMenu(ExplorerEntryAt(e.Source), e.Source as Control ?? surface);
+            var entry = ExplorerEntryAt(e.Source);
+            ShowExplorerContextMenu(entry, ExplorerMenuAnchor(entry));
             return;
         }
         if (wasRubber) e.Handled = true;
@@ -221,6 +252,8 @@ public partial class MainWindow
     private async void ExplorerSurfaceKeyDown(object? sender, KeyEventArgs e)
     {
         if (_browserSurface is not { } surface || _workspace.Active is not BrowserTabState browser) return;
+        // A key press cancels a pending click-to-rename.
+        CancelExplorerClickRename();
         var ctrl = e.KeyModifiers.HasFlag(KeyModifiers.Control);
         var shift = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
         var alt = e.KeyModifiers.HasFlag(KeyModifiers.Alt);

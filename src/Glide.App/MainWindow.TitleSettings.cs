@@ -161,10 +161,7 @@ public partial class MainWindow
         foreach (var (id, button) in _titleBarButtons)
         {
             if (TitleBarButtonCatalog.Find(id) is not { } definition) continue;
-            var label = id == "window.transparency"
-                ? $"Window transparency: {(int)Math.Round(_sessionOpacity * 100)}%"
-                : TitleActionLabel(id, definition);
-            ToolTip.SetTip(button, $"{label} ({ShortcutForTitleButton(definition)})");
+            ToolTip.SetTip(button, TitleActionTip(id, definition));
             ToolTip.SetShowDelay(button, 650);
         }
     }
@@ -297,6 +294,41 @@ public partial class MainWindow
         }
     }
 
+    /// <summary>Run once on the next Settings window this main window opens (see <see cref="OpenSettingsThen"/>).</summary>
+    private Action<SettingsWindow>? _settingsOpenedHook;
+
+    /// <summary>
+    /// The one path for commands that open Settings to do something there (reveal a setting, start a backup flow):
+    /// runs <paramref name="action"/> on the Settings window that is already open (activating it), or on a new one once
+    /// it has opened.
+    /// </summary>
+    private void OpenSettingsThen(Action<SettingsWindow> action)
+    {
+        if (_openSettingsWindow is { } open)
+        {
+            open.Activate();
+            action(open);
+            return;
+        }
+        _settingsOpenedHook = action;
+        SettingsClicked(this, new RoutedEventArgs());
+    }
+
+    /// <summary>Hands the pending command hook to a Settings window that is about to open (SettingsClicked).</summary>
+    private void AttachSettingsOpenedHook(SettingsWindow window)
+    {
+        if (_settingsOpenedHook is not { } hook) return;
+        _settingsOpenedHook = null;
+        window.Opened += (_, _) => hook(window);
+    }
+
+    /// <summary>Opens Settings (or the open Settings window) at <paramref name="settingId"/>: page, expanded card, scroll, focus, highlight.</summary>
+    internal void OpenSettingsAtSetting(string settingId)
+    {
+        _diagnostics.Write("settings", "open_at_setting", new { settingId });
+        OpenSettingsThen(window => window.RevealSettingFromCommand(settingId));
+    }
+
     /// <summary>Remembers where the user left the Settings window (size, position, maximized) for its next opening.</summary>
     private void SaveSettingsWindowPlacement(SettingsWindowPlacement placement)
     {
@@ -398,17 +430,17 @@ public partial class MainWindow
 
     internal static bool OnlyTextOverlayStyleDiffers(GlideSettingsState current, GlideSettingsState next)
     {
-        var a = current.CloneState();
+        if (current.ContentEquals(next)) return false;
         var b = next.CloneState();
-        if (a.ContentEquals(b)) return false;
-        b.PictureCounterTemplate = a.PictureCounterTemplate;
-        b.PictureCounterFontSize = a.PictureCounterFontSize;
-        b.PictureCounterBold = a.PictureCounterBold;
-        b.PictureCounterOpacity = a.PictureCounterOpacity;
-        b.PictureCounterPosition = a.PictureCounterPosition;
-        b.PictureCounterColor = a.PictureCounterColor;
-        b.PictureCounterShadow = a.PictureCounterShadow;
-        return a.ContentEquals(b);
+        b.PictureCounterTemplate = current.PictureCounterTemplate;
+        b.PictureCounterFontSize = current.PictureCounterFontSize;
+        b.PictureCounterBold = current.PictureCounterBold;
+        b.PictureCounterOpacity = current.PictureCounterOpacity;
+        b.PictureCounterPosition = current.PictureCounterPosition;
+        b.PictureCounterColor = current.PictureCounterColor;
+        b.PictureCounterShadow = current.PictureCounterShadow;
+        b.PictureCounterBorder = current.PictureCounterBorder;
+        return current.ContentEquals(b);
     }
 
     private ImagePerformancePolicy BuildPerformancePolicy()
@@ -534,8 +566,12 @@ public partial class MainWindow
         BrowserView.Resources["BrushSearch"] = new SolidColorBrush(Color.Parse(search));
     }
 
+    /// <summary>Full settings re-applies so far (tests: a text overlay restyle must not cause one).</summary>
+    internal int SettingsVisualsPassesForTests { get; private set; }
+
     private void ApplySettingsVisuals(bool deferSecondaryChrome = false)
     {
+        SettingsVisualsPassesForTests++;
         ThemePaletteApplier.Apply(_settings.ThemeChoice, _settings.AccentChoice, _settings.GlowChoice, _settings.GlowIntensityPercent, _settings.CustomAccentHex, _settings.CustomGlowHex, _settings.MainBackgroundChoice, _settings.CustomMainBackgroundHex);
         ApplyTopmostState(forceNative: true);
         // GIF controls visibility depends on "Show GIF controls only on GIFs": re-evaluate on every settings change

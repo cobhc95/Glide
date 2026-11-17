@@ -128,17 +128,23 @@ public sealed class TesterRoundFixesTests : IDisposable
             {
                 var scroll = Named<ScrollViewer>(window, "ContentScroll");
                 var pages = Field<Dictionary<string, List<SettingsCard>>>(window, "_cardsByPage");
-                var (key, cards) = pages.OrderByDescending(p => p.Value.Count).First();
-                Call(window, "ShowCategory", key, true, false, null!);
-                foreach (var c in cards) c.IsExpanded = true;
-                Settle(window);
-                Assert.True(scroll.ScrollBarMaximum.Y > 0, "the page must scroll for this test");
+                SettingsCard? card = null;
+                // The largest page that, fully expanded and scrolled to the very bottom, still shows a card header (a page
+                // whose last card is taller than the viewport shows none there).
+                foreach (var (key, cards) in pages.OrderByDescending(p => p.Value.Count))
+                {
+                    Call(window, "ShowCategory", key, true, false, null!);
+                    foreach (var c in cards) c.IsExpanded = true;
+                    Settle(window);
+                    if (scroll.ScrollBarMaximum.Y <= 0) continue; // the page must scroll for this test
 
-                // Scroll to the very bottom and collapse a card whose header is visible: the page shrinks below the offset.
-                scroll.Offset = new Vector(0, scroll.ScrollBarMaximum.Y);
-                Settle(window);
-                var card = cards.Where(c => c.IsEffectivelyVisible && c.TranslatePoint(new Point(0, 0), scroll) is { Y: >= 0 } p && p.Y < scroll.Viewport.Height)
-                    .OrderBy(c => c.TranslatePoint(new Point(0, 0), scroll)!.Value.Y).FirstOrDefault();
+                    // Scroll to the very bottom and collapse a card whose header is visible: the page shrinks below the offset.
+                    scroll.Offset = new Vector(0, scroll.ScrollBarMaximum.Y);
+                    Settle(window);
+                    card = cards.Where(c => c.IsEffectivelyVisible && c.TranslatePoint(new Point(0, 0), scroll) is { Y: >= 0 } p && p.Y < scroll.Viewport.Height)
+                        .OrderBy(c => c.TranslatePoint(new Point(0, 0), scroll)!.Value.Y).FirstOrDefault();
+                    if (card is not null) break;
+                }
                 Assert.NotNull(card);
                 var before = card.TranslatePoint(new Point(0, 0), scroll)!.Value.Y;
                 card.IsExpanded = false;

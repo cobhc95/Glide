@@ -120,11 +120,6 @@ public partial class SettingsWindow
         ShowCategory(page, clearSearch: true, revealTarget: card);
         HighlightRevealedRow(card.Header);
         if (_backupSelector.FirstCheck is { } first) FocusRevealedEditor(first, card);
-        Dispatcher.UIThread.Post(() =>
-        {
-            if (!string.Equals(_activeCategory, page, StringComparison.OrdinalIgnoreCase) || SearchPanel.IsVisible) return;
-            ScrollToReveal(card);
-        }, DispatcherPriority.Background);
     }
 
     /// <summary>The "Export / Import Glide backup" commands (hotkeys): reveal the card, then run the flow.</summary>

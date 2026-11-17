@@ -5,7 +5,10 @@ public enum WindowPlacementMode
 {
     /// <summary>Resizable windows: size, position and the maximized state.</summary>
     SizeAndPosition,
-    /// <summary>Fixed-size or content-sized dialogs: only where the window was; its size always comes from its content.</summary>
+    /// <summary>
+    /// Fixed-size or content-sized dialogs: nothing is remembered (since 5.0.6). They always open centred on their owner
+    /// (<see cref="WindowPlacementResolver.CenterOnOwner"/>); their size comes from the dialog itself.
+    /// </summary>
     PositionOnly,
 }
 
@@ -152,6 +155,23 @@ public static class WindowPlacementResolver
         if (mode == WindowPlacementMode.PositionOnly && x is null) return null;
         return new ResolvedWindowPlacement(resolvedWidth, resolvedHeight, resolvedMinWidth, resolvedMinHeight, x, y,
             mode == WindowPlacementMode.SizeAndPosition && saved.Maximized);
+    }
+
+    /// <summary>
+    /// Where a dialog opens: centred on its owner, all in device pixels (outer frames; the caller converts DIPs with the
+    /// owner's DPI scale), then moved so the whole dialog lies inside <paramref name="ownerScreen"/>'s working area (the
+    /// monitor the owner is on). Dialogs never remember a position, so this is the only rule.
+    /// </summary>
+    public static (int X, int Y) CenterOnOwner(int ownerX, int ownerY, int ownerWidth, int ownerHeight, int dialogWidth, int dialogHeight, ScreenWorkArea? ownerScreen)
+    {
+        var x = ownerX + (ownerWidth - dialogWidth) / 2;
+        var y = ownerY + (ownerHeight - dialogHeight) / 2;
+        if (ownerScreen is { IsEmpty: false } area)
+        {
+            x = Math.Max(area.X, Math.Min(x, area.Right - dialogWidth));
+            y = Math.Max(area.Y, Math.Min(y, area.Bottom - dialogHeight));
+        }
+        return (x, y);
     }
 
     private static double ScaleOf(ScreenWorkArea screen) => screen.Scale > 0 && !double.IsNaN(screen.Scale) ? screen.Scale : 1;

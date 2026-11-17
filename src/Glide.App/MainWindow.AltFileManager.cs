@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using Avalonia.Controls;
-using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Glide.App.Services;
 using Glide.App.Settings;
@@ -17,6 +16,9 @@ namespace Glide.App;
 public partial class MainWindow
 {
     internal const string AlternativeFileManagerSettingId = "explorer.altFileManagerPath";
+
+    /// <summary>The entry's text while no program is set (the menu entry and the Explorer toolbar button's tooltip).</summary>
+    private const string AlternativeFileManagerSetUpLabel = "Show in other file manager…";
 
     /// <summary>The configured program's display name: its FileDescription, else its file name without extension; null when none is set.</summary>
     internal static string? AlternativeFileManagerDisplayName(string? exe)
@@ -59,7 +61,7 @@ public partial class MainWindow
         if (name is null)
         {
             var header = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
-            header.Children.Add(new TextBlock { Text = "Show in other file manager…" });
+            header.Children.Add(new TextBlock { Text = AlternativeFileManagerSetUpLabel });
             header.Children.Add(new TextBlock { Text = "Set up", Opacity = 0.55, FontSize = 11, VerticalAlignment = VerticalAlignment.Center });
             item = MenuActions.Tag(new MenuItem { Header = header }, "explorer.showInAlternative");
             item.Click += (_, _) => OpenSettingsAtSetting(AlternativeFileManagerSettingId);
@@ -80,6 +82,19 @@ public partial class MainWindow
         return item;
     }
 
+    /// <summary>
+    /// The Explorer toolbar's Show in File Explorer button tooltip: the left-click action and, on a second line, what its
+    /// right-click menu adds (the alternative file manager, or setting one up), each with its live keys.
+    /// </summary>
+    private string ExplorerRevealButtonTip()
+    {
+        var windows = WithActionShortcuts("Show in Windows File Explorer, with the selected item selected", "explorer.showInWindows");
+        var alternative = AlternativeFileManagerDisplayName(_settings.AlternativeFileManagerPath) is { } name
+            ? WithActionShortcuts("Show in " + name, "explorer.showInAlternative")
+            : AlternativeFileManagerSetUpLabel + " (set up)";
+        return $"{windows}\nRight-click for more: {alternative}";
+    }
+
     /// <summary>The Explorer toolbar's Show in File Explorer button: right-click lists the targets (built on each opening).</summary>
     private void AttachExplorerToolbarRevealMenu(Button button)
     {
@@ -95,19 +110,5 @@ public partial class MainWindow
         if (!ShowInExplorerTargets.IsAlternative(_settings.ShowInExplorerTarget)) return OpenContainingFolderAsync();
         ShowInAlternativeFileManager();
         return Task.CompletedTask;
-    }
-
-    /// <summary>Opens Settings (or the open Settings window) at <paramref name="settingId"/>: page, expanded card, scroll, focus, highlight.</summary>
-    internal void OpenSettingsAtSetting(string settingId)
-    {
-        _diagnostics.Write("settings", "open_at_setting", new { settingId });
-        if (_openSettingsWindow is { } open)
-        {
-            open.Activate();
-            open.RevealSettingFromCommand(settingId);
-            return;
-        }
-        _settingsOpenedHook = window => window.RevealSettingFromCommand(settingId);
-        SettingsClicked(this, new RoutedEventArgs());
     }
 }

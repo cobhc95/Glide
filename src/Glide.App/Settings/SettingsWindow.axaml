@@ -49,12 +49,12 @@
         <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
           <StackPanel x:Name="NavigationRail" Margin="0,0,0,8" Spacing="0">
             <Button Classes="settingsNav selected" Tag="General" Click="CategoryClicked"><Grid ColumnDefinitions="28,*"><controls:GlideIconView Kind="General" Classes="navGlyph" HorizontalAlignment="Center" VerticalAlignment="Center"/><TextBlock Grid.Column="1" Text="General &amp; startup" VerticalAlignment="Center" Margin="8,0,0,0"/></Grid></Button>
+            <Button Classes="settingsNav" Tag="Performance" Click="CategoryClicked"><Grid ColumnDefinitions="28,*"><controls:GlideIconView Kind="Performance" Classes="navGlyph" HorizontalAlignment="Center" VerticalAlignment="Center"/><TextBlock Grid.Column="1" Text="Performance" VerticalAlignment="Center" Margin="8,0,0,0"/></Grid></Button>
             <Button Classes="settingsNav" Tag="Appearance" Click="CategoryClicked"><Grid ColumnDefinitions="28,*"><controls:GlideIconView Kind="Appearance" Classes="navGlyph" HorizontalAlignment="Center" VerticalAlignment="Center"/><TextBlock Grid.Column="1" Text="Appearance &amp; viewing" VerticalAlignment="Center" Margin="8,0,0,0"/></Grid></Button>
             <Button Classes="settingsNav" Tag="Interface" Click="CategoryClicked"><Grid ColumnDefinitions="28,*"><controls:GlideIconView Kind="Interface" Classes="navGlyph" HorizontalAlignment="Center" VerticalAlignment="Center"/><TextBlock Grid.Column="1" Text="Window &amp; navigation" VerticalAlignment="Center" Margin="8,0,0,0"/></Grid></Button>
-            <Button Classes="settingsNav" Tag="Mouse" Click="CategoryClicked"><Grid ColumnDefinitions="28,*"><controls:GlideIconView Kind="Mouse" Classes="navGlyph" HorizontalAlignment="Center" VerticalAlignment="Center"/><TextBlock Grid.Column="1" Text="Mouse &amp; keyboard" VerticalAlignment="Center" Margin="8,0,0,0"/></Grid></Button>
-            <Button Classes="settingsNav" Tag="Performance" Click="CategoryClicked"><Grid ColumnDefinitions="28,*"><controls:GlideIconView Kind="Performance" Classes="navGlyph" HorizontalAlignment="Center" VerticalAlignment="Center"/><TextBlock Grid.Column="1" Text="Performance" VerticalAlignment="Center" Margin="8,0,0,0"/></Grid></Button>
-            <Button Classes="settingsNav" Tag="Slideshow" Click="CategoryClicked"><Grid ColumnDefinitions="28,*"><controls:GlideIconView Kind="Slideshow" Classes="navGlyph" HorizontalAlignment="Center" VerticalAlignment="Center"/><TextBlock Grid.Column="1" Text="Slideshow &amp; overlays" VerticalAlignment="Center" Margin="8,0,0,0"/></Grid></Button>
             <Button Classes="settingsNav" Tag="Tabs" Click="CategoryClicked"><Grid ColumnDefinitions="28,*"><controls:GlideIconView Kind="Tabs" Classes="navGlyph" HorizontalAlignment="Center" VerticalAlignment="Center"/><TextBlock Grid.Column="1" Text="Tabs &amp; status bar" VerticalAlignment="Center" Margin="8,0,0,0"/></Grid></Button>
+            <Button Classes="settingsNav" Tag="Mouse" Click="CategoryClicked"><Grid ColumnDefinitions="28,*"><controls:GlideIconView Kind="Mouse" Classes="navGlyph" HorizontalAlignment="Center" VerticalAlignment="Center"/><TextBlock Grid.Column="1" Text="Mouse &amp; keyboard" VerticalAlignment="Center" Margin="8,0,0,0"/></Grid></Button>
+            <Button Classes="settingsNav" Tag="Slideshow" Click="CategoryClicked"><Grid ColumnDefinitions="28,*"><controls:GlideIconView Kind="Slideshow" Classes="navGlyph" HorizontalAlignment="Center" VerticalAlignment="Center"/><TextBlock Grid.Column="1" Text="Slideshow &amp; overlays" VerticalAlignment="Center" Margin="8,0,0,0"/></Grid></Button>
             <Button Classes="settingsNav" Tag="Windows" Click="CategoryClicked"><Grid ColumnDefinitions="28,*"><controls:GlideIconView Kind="Windows" Classes="navGlyph" HorizontalAlignment="Center" VerticalAlignment="Center"/><TextBlock Grid.Column="1" Text="Windows &amp; developer" VerticalAlignment="Center" Margin="8,0,0,0"/></Grid></Button>
           </StackPanel>
         </ScrollViewer>
@@ -149,6 +149,46 @@
           </controls:SettingsCard>
           </StackPanel>
 
+          <!-- PERFORMANCE -->
+          <StackPanel x:Name="PerformancePanel" IsVisible="False" Spacing="0">
+            <controls:SettingsCard CardId="performance-quality" Title="Quality profile" Subtitle="Balance speed and image quality while browsing" Icon="HighQuality" IsExpanded="False">
+              <StackPanel Classes="settingsCardBody" Spacing="10">
+                <TextBlock Text="Glide uses a staged first-frame → full-resolution pipeline. Profiles coordinate preview size, interpolation, refinement, prefetch and decoded-neighbour policy; advanced controls remain independently editable." Classes="phaseNote" Margin="0,0,0,4"/>
+                <Grid ColumnDefinitions="270,240,Auto,*" Margin="6,0,0,0"><TextBlock Text="Browsing / image quality profile" VerticalAlignment="Center"/><ComboBox x:Name="InitialQualityCombo" Grid.Column="1" Width="240" SelectionChanged="PerformanceProfileChanged" ToolTip.Tip="Stock profiles apply coordinated defaults. Any non-matching edit automatically becomes User custom."><ComboBoxItem Content="Maximum speed"/><ComboBoxItem Content="Balanced"/><ComboBoxItem Content="Maximum quality"/><ComboBoxItem Content="User custom"/></ComboBox><Button x:Name="SaveUserPerformancePresetButton" Grid.Column="2" Classes="secondaryAction" Content="Save custom" Click="SaveUserPerformancePresetClicked" Margin="10,0,0,0" ToolTip.Tip="Save the current performance controls as your reusable User custom preset."/></Grid>
+                <Grid ColumnDefinitions="270,240,*" Margin="6,0,0,0"><TextBlock Text="Quality while dragging / panning" VerticalAlignment="Center"/><ComboBox x:Name="InteractivePanQualityCombo" Grid.Column="1" Width="240" ToolTip.Tip="The Balanced and Maximum quality presets default to Full quality while moving. Fast prefers the lightest available interaction preview. This control remains independently overridable."><ComboBoxItem Content="Fast"/><ComboBoxItem Content="Balanced"/><ComboBoxItem Content="Full quality"/></ComboBox></Grid>
+                <CheckBox x:Name="AdaptiveFastPreviewCheck" Content="Decoder-scaled first useful frame for large images"/>
+                <Grid ColumnDefinitions="270,150,*" Margin="6,0,0,0"><TextBlock Text="Full-resolution refinement delay (ms)" VerticalAlignment="Center"/><NumericUpDown x:Name="AdaptivePreviewDelayBox" Grid.Column="1" Minimum="5" Maximum="500"/></Grid>
+                <CheckBox x:Name="BackgroundRefinementCheck" Content="Refine preview to full resolution while idle"/>
+                <CheckBox x:Name="ProgressiveColorCheck" Content="Keep progressive JPEG first frame in colour" ToolTip.Tip="On: request an early progressive level that normally contains luminance and chroma, avoiding a black-and-white first-frame flash. All stock profiles keep this enabled by default; you can still disable it manually."/>
+                <TextBlock Classes="phaseNote" Text="All stock profiles, including Maximum speed, default to a colour first frame. This checkbox remains independently editable after choosing any profile; disabling it permits the earliest luminance-only progressive level when a codec exposes one. Settled refinement always restores final fidelity." TextWrapping="Wrap" Margin="6,-4,8,2"/>
+            </StackPanel>
+          </controls:SettingsCard>
+            <controls:SettingsCard CardId="performance-prefetch" Title="Prefetch" Subtitle="Prepare nearby images and folders before you get there" Icon="Next" IsExpanded="False">
+              <StackPanel Classes="settingsCardBody" Spacing="10">
+                <CheckBox x:Name="PrefetchCheck" Content="Predictively prepare neighbouring images"/>
+                <Grid ColumnDefinitions="270,150,*" Margin="6,0,0,0"><TextBlock Text="Neighbour prefetch depth per direction" VerticalAlignment="Center"/><NumericUpDown x:Name="PrefetchDepthBox" Grid.Column="1" Minimum="1" Maximum="30" ToolTip.Tip="Images prefetched in each direction. Balanced and Maximum quality default to 5; Maximum speed defaults to 3. Changing it manually makes the performance profile User custom."/></Grid>
+                <CheckBox x:Name="PrefetchSiblingFoldersCheck" Content="Prefetch surrounding sibling folders" ToolTip.Tip="Lightly warms only the chosen leading images from the nearest previous and next sibling folders."/>
+                <Grid ColumnDefinitions="270,150,*" Margin="6,0,0,0"><TextBlock Text="Pictures per surrounding folder" VerticalAlignment="Center"/><NumericUpDown x:Name="PrefetchSiblingFolderCountBox" Grid.Column="1" Minimum="1" Maximum="30"/></Grid>
+                <CheckBox x:Name="SequentialReadCheck" Content="Use sequential read hints for foreground image streams"/>
+            </StackPanel>
+          </controls:SettingsCard>
+            <controls:SettingsCard CardId="performance-rapid" Title="Fast browsing previews" Subtitle="Lighter frames while you hold an arrow key or spin the wheel" Icon="FrameNext" IsExpanded="False">
+              <StackPanel Classes="settingsCardBody" Spacing="10">
+                <Grid ColumnDefinitions="270,150,*" Margin="6,0,0,0"><TextBlock Text="Rapid navigation preview (px)" VerticalAlignment="Center"/><NumericUpDown x:Name="RapidBrowsePreviewBox" Grid.Column="1" Minimum="640" Maximum="4096" ToolTip.Tip="Long edge of the temporary frame used while holding Left/Right or rapidly scrolling through images. Profiles choose a default; you can override it afterwards."/></Grid>
+                <Grid ColumnDefinitions="270,150,*" Margin="6,0,0,0"><TextBlock Text="Rapid preview longest side (px)" VerticalAlignment="Center"/><NumericUpDown x:Name="RapidPreviewBox" Grid.Column="1" Minimum="480" Maximum="4096"/></Grid>
+                <TextBlock Classes="phaseNote" Text="Rapid navigation automatically uses reduced frames only during sustained keyboard holds or a fast wheel burst. A single key press or isolated wheel notch remains a normal full-quality navigation step, and the selected image refines after input settles." TextWrapping="Wrap" Margin="6,-4,8,2"/>
+            </StackPanel>
+          </controls:SettingsCard>
+            <controls:SettingsCard CardId="performance-memory" Title="Memory and caches" Subtitle="How much memory Glide keeps for images" Icon="Performance" IsExpanded="False">
+              <StackPanel Classes="settingsCardBody" Spacing="10">
+                <Grid ColumnDefinitions="270,150,*" Margin="6,0,0,0"><TextBlock Text="Compressed cache (items)" VerticalAlignment="Center"/><NumericUpDown x:Name="CacheItemsBox" Grid.Column="1" Minimum="2" Maximum="64"/></Grid>
+                <Grid ColumnDefinitions="270,150,*" Margin="6,0,0,0"><TextBlock Text="Compressed cache budget (MB)" VerticalAlignment="Center"/><NumericUpDown x:Name="CompressedCacheMbBox" Grid.Column="1" Minimum="32" Maximum="2048"/></Grid>
+                <Grid ColumnDefinitions="270,150,*" Margin="6,0,0,0"><TextBlock Text="Decoded-frame budget (MB)" VerticalAlignment="Center"/><NumericUpDown x:Name="DecodedCacheMbBox" Grid.Column="1" Minimum="32" Maximum="2048"/></Grid>
+                <CheckBox x:Name="PurgeCacheCheck" Content="Purge compressed and decoded caches when Glide is minimized"/>
+            </StackPanel>
+          </controls:SettingsCard>
+          </StackPanel>
+
           <!-- APPEARANCE &amp; VIEWING -->
           <StackPanel x:Name="AppearancePanel" IsVisible="False" Spacing="0">
             <controls:SettingsCard CardId="appearance-theme" Title="Theme and colours" Subtitle="Theme, accent, glow and the image background" Icon="Appearance" IsExpanded="False">
@@ -181,16 +221,16 @@
             <controls:SettingsCard CardId="appearance-text-overlay" Title="Text overlay" Subtitle="The picture counter over the image and the folder position line under it" Icon="Info" IsExpanded="False">
               <StackPanel Classes="settingsCardBody" Spacing="10">
                 <CheckBox x:Name="PictureCounterCheck" Content="Show text overlay"/>
-                <Grid ColumnDefinitions="205,330,*" Margin="6,0,0,0"><TextBlock Text="Text overlay template" VerticalAlignment="Center"/><TextBox x:Name="PictureTemplateBox" Grid.Column="1" Width="320" Text="[{index}/{total}]" ToolTip.Tip="Combine tokens freely. See the token list directly below. Type &lt;br&gt; or 
- to start a new line."/></Grid>
-                <TextBlock Classes="phaseNote" Margin="6,-2,8,2" TextWrapping="Wrap" Text="Tokens: {index}, {total}, {file}, {filename}, {stem}, {extension}, {format}, {folder}, {folderpath}, {path}, {width}, {height}, {dimensions}, {megapixels}, {filesize}, {filesizebytes}, {zoom}. Line break: &lt;br&gt; or 
-. Example: {stem}  •  {dimensions}  •  {filesize}  •  {index}/{total}"/>
+                <Grid ColumnDefinitions="205,330,*" Margin="6,0,0,0"><TextBlock Text="Text overlay template" VerticalAlignment="Center"/><TextBox x:Name="PictureTemplateBox" Grid.Column="1" Width="320" Text="[{index}/{total}]"/></Grid>
+                <!-- Text and the template box tooltip come from code (TextOverlayTemplateHelp / Tip), where backslash-n cannot turn into a raw line break. -->
+                <TextBlock x:Name="PictureTemplateHelpText" Classes="phaseNote" Margin="6,-2,8,2" TextWrapping="Wrap"/>
                 <Grid ColumnDefinitions="245,220,*" Margin="6,0,0,0"><TextBlock Text="Text overlay position" VerticalAlignment="Center"/><ComboBox x:Name="PicturePositionCombo" Grid.Column="1" Width="210"><ComboBoxItem Content="Top left"/><ComboBoxItem Content="Top center"/><ComboBoxItem Content="Top right"/><ComboBoxItem Content="Bottom left"/><ComboBoxItem Content="Bottom center"/><ComboBoxItem Content="Bottom right"/></ComboBox></Grid>
                 <Grid ColumnDefinitions="245,150,*" Margin="6,0,0,0"><TextBlock Text="Text overlay font size" VerticalAlignment="Center"/><NumericUpDown x:Name="PictureFontSizeBox" Grid.Column="1" Minimum="8" Maximum="48"/></Grid>
                 <CheckBox x:Name="PictureBoldCheck" Content="Text overlay bold"/>
                 <Grid ColumnDefinitions="245,220,*" Margin="6,0,0,0"><TextBlock Text="Text overlay colour" VerticalAlignment="Center"/><ComboBox x:Name="PictureColorCombo" Grid.Column="1" Width="210"><ComboBoxItem Content="White"/><ComboBoxItem Content="Soft gray"/><ComboBoxItem Content="Accent"/><ComboBoxItem Content="Amber"/></ComboBox></Grid>
                 <Grid ColumnDefinitions="245,150,*" Margin="6,0,0,0"><TextBlock Text="Text overlay opacity (%)" VerticalAlignment="Center"/><NumericUpDown x:Name="PictureOpacityBox" Grid.Column="1" Minimum="10" Maximum="100"/></Grid>
                 <CheckBox x:Name="PictureShadowCheck" Content="Text overlay shadow"/>
+                <CheckBox x:Name="PictureBorderCheck" Content="Text overlay border" ToolTip.Tip="Encloses every line of the text overlay (the counter and the folder position line) in one box, styled like the Image information panel."/>
                 <TextBlock Text="Folder position line" Classes="settingsSectionLabel" FontWeight="SemiBold" Margin="4,10,0,0"/>
                 <CheckBox x:Name="ShowFolderCounterCheck" Content="Show folder position under image counter" ToolTip.Tip="Shows the current folder position and number of sibling folders."/>
                 <CheckBox x:Name="FolderCounterGrandparentCheck" Content="Include parent folder position in folder counter" ToolTip.Tip="Adds the parent folder position within the grandparent, for example 5/50/4."/>
@@ -278,8 +318,11 @@
                 <Grid ColumnDefinitions="300,170,*" Margin="6,0,0,0">
                   <TextBlock Text="Minimum interval between actions (ms)" VerticalAlignment="Center"/>
                   <NumericUpDown x:Name="NavigationRateLimitMsBox" Grid.Column="1" Minimum="0" Maximum="600000" Increment="1"/>
-                  <TextBlock Grid.Column="2" Classes="phaseNote" Text="0 = unlimited. Default: 80 ms. Any millisecond value may be used." VerticalAlignment="Center" Margin="8,0,0,0"/>
+                  <TextBlock Grid.Column="2" Classes="phaseNote" Text="0 = unlimited. Default: 120 ms. Any millisecond value may be used." VerticalAlignment="Center" Margin="8,0,0,0"/>
                 </Grid>
+                <TextBlock x:Name="NavigationRateLimitHelpText" Classes="phaseNote" Text="Raise this if one key press skips several pictures (common on laptop keyboards). Lower it for faster browsing. 0 = no limit." TextWrapping="Wrap" Margin="6,-4,8,2"/>
+                <CheckBox x:Name="NavigationSkipHintCheck" Content="Tell me when a key press seems to skip pictures" Margin="6,0,0,0"
+                          ToolTip.Tip="Shows a small hint (at most once every 5 minutes) when one press of a next / previous key seems to skip several pictures."/>
                 <Grid ColumnDefinitions="300,220,*" Margin="6,0,0,0">
                   <TextBlock Text="Apply limit to" VerticalAlignment="Center"/>
                   <ComboBox x:Name="NavigationRateLimitInputCombo" Grid.Column="1" Width="210">
@@ -303,11 +346,86 @@
                 </Grid>
             </StackPanel>
           </controls:SettingsCard>
+            <controls:SettingsCard CardId="window-explorer" Title="Explorer tab" Subtitle="The view and which files Glide's own Explorer tab lists" Icon="Browser" IsExpanded="False">
+              <StackPanel Classes="settingsCardBody" Spacing="10">
+                <Grid ColumnDefinitions="260,230,*" Margin="6,0,0,0">
+                  <TextBlock Text="Explorer default view" VerticalAlignment="Center"/>
+                  <!-- Items come from the Explorer tab's own view labels (PopulateExplorerDefaultViewCombo). -->
+                  <ComboBox x:Name="ExplorerDefaultViewCombo" Grid.Column="1" Width="220"/>
+                </Grid>
+                <Grid ColumnDefinitions="260,230,*" Margin="6,0,0,0">
+                  <TextBlock Text="Open a picture's folder in" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                  <ComboBox x:Name="ExplorerLocateOpensInCombo" Grid.Column="1" Width="220" ToolTip.Tip="Where Ctrl+E (Show in Explorer tab, Open file location) shows the picture's folder. Same tab: Back returns to the picture in that tab.">
+                    <ComboBoxItem Content="Same tab"/>
+                    <ComboBoxItem Content="Existing or new tab"/>
+                    <ComboBoxItem Content="Always a new tab"/>
+                    <ComboBoxItem Content="New window"/>
+                  </ComboBox>
+                </Grid>
+                <Grid x:Name="ExplorerBackReturnsToImageRow" ColumnDefinitions="260,230,*" Margin="6,0,0,0" ToolTip.Tip="Only used when a picture's folder opens in another tab or window. With Same tab, Back is the tab's own history.">
+                  <TextBlock Text="Back after opening a picture's folder" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                  <ComboBox x:Name="ExplorerBackReturnsToImageCombo" Grid.Column="1" Width="220">
+                    <ComboBoxItem Content="Folders, then back to the picture"/>
+                    <ComboBoxItem Content="Straight back to the picture"/>
+                    <ComboBoxItem Content="Folders only"/>
+                  </ComboBox>
+                </Grid>
+                <CheckBox x:Name="ExplorerShowHiddenFilesCheck" Content="Show hidden files in Explorer tab"/>
+                <CheckBox x:Name="ExplorerClickToRenameCheck" Content="Click a selected item's name to rename it" ToolTip.Tip="On (default): click the name of the one selected item again, slowly (not a double-click), to rename it, as in Windows File Explorer. F2 and the Rename menu item always work."/>
+                <CheckBox x:Name="ExplorerKeepSelectionInViewCheck" Content="Keep selection in view when sorting" ToolTip.Tip="Off (default): changing the sort keeps the list where it was. On: the list scrolls to the selected item. Also in the Sort menu."/>
+                <CheckBox x:Name="ExplorerShowOnlyImagesCheck" Content="Explorer tab lists only folders and images (off: every file type)"/>
+                <!-- Mouse-wheel scrolling: one group so "Explorer scroll speed and amount" on Mouse & keyboard reveals and highlights all of it. -->
+                <StackPanel x:Name="ExplorerScrollSettingsGroup" Spacing="10">
+                <Grid ColumnDefinitions="260,230,*" Margin="6,0,0,0">
+                  <TextBlock Text="Explorer scroll amount" VerticalAlignment="Center"/>
+                  <ComboBox x:Name="ExplorerScrollModeCombo" Grid.Column="1" Width="220" ToolTip.Tip="How far one mouse-wheel notch scrolls. Rows move by the current view's row height.">
+                    <ComboBoxItem Content="One row per notch"/>
+                    <ComboBoxItem Content="Rows per notch (fixed)"/>
+                    <ComboBoxItem Content="Per view (1 / 2 / 3)"/>
+                    <ComboBoxItem Content="Pixels per notch"/>
+                  </ComboBox>
+                </Grid>
+                <Grid x:Name="ExplorerScrollRowsRow" ColumnDefinitions="260,230,*" Margin="6,0,0,0">
+                  <TextBlock Text="Rows per notch" VerticalAlignment="Center"/>
+                  <NumericUpDown x:Name="ExplorerScrollRowsBox" Grid.Column="1" Width="220" Minimum="1" Maximum="20" Increment="1" FormatString="0" ToolTip.Tip="Used when Explorer scroll amount is Rows per notch (fixed)."/>
+                </Grid>
+                <Grid x:Name="ExplorerScrollPixelsRow" ColumnDefinitions="260,230,*" Margin="6,0,0,0">
+                  <TextBlock Text="Pixels per notch" VerticalAlignment="Center"/>
+                  <NumericUpDown x:Name="ExplorerScrollPixelsBox" Grid.Column="1" Width="220" Minimum="10" Maximum="1000" Increment="10" FormatString="0" ToolTip.Tip="Used when Explorer scroll amount is Pixels per notch; ignores row size."/>
+                </Grid>
+                <Grid ColumnDefinitions="260,230,*" Margin="6,0,0,0">
+                  <TextBlock Text="Explorer scroll speed (x)" VerticalAlignment="Center"/>
+                  <NumericUpDown x:Name="ExplorerScrollSpeedBox" Grid.Column="1" Width="220" Minimum="0.25" Maximum="4" Increment="0.25" FormatString="0.##" ToolTip.Tip="Wheel speed multiplier applied on top of the Explorer scroll amount, in every mode."/>
+                </Grid>
+                </StackPanel>
+                <Grid ColumnDefinitions="260,*,Auto,Auto" ColumnSpacing="7" Margin="6,0,0,0">
+                  <TextBlock Text="Alternative file manager (.exe)" VerticalAlignment="Center"/>
+                  <TextBox x:Name="AlternativeFileManagerPathBox" Grid.Column="1" Watermark="Empty: none" ToolTip.Tip="Offered in the right-click menu of the Show in File Explorer buttons (title bar and Explorer toolbar)."/>
+                  <Button x:Name="AlternativeFileManagerBrowseButton" Grid.Column="2" Classes="secondaryAction" Content="Browse…" Click="BrowseAlternativeFileManagerClicked" ToolTip.Tip="Choose a file manager program (.exe)"/>
+                  <Button x:Name="AlternativeFileManagerClearButton" Grid.Column="3" Classes="secondaryAction" MinWidth="0" Padding="10,4" Content="✕" Click="ClearAlternativeFileManagerClicked" ToolTip.Tip="Clear: no alternative file manager"/>
+                </Grid>
+                <Grid ColumnDefinitions="260,*" Margin="6,0,0,0">
+                  <TextBlock Text="Alternative file manager arguments" VerticalAlignment="Center"/>
+                  <TextBox x:Name="AlternativeFileManagerArgumentsBox" Grid.Column="1" ToolTip.Tip="{}{path} is replaced with the selected file, or the folder when nothing is selected."/>
+                </Grid>
+                <!-- A link, not a copy: how pictures open in new tabs lives on Tabs & status bar > Tabs (NewTabSettingsGroup). -->
+                <Button x:Name="NewTabsLinkButton" Click="NewTabsLinkClicked" Background="Transparent" BorderThickness="0" CornerRadius="6" Padding="6,8" MinHeight="44"
+                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Center" Cursor="Hand">
+                  <Grid ColumnDefinitions="Auto,*">
+                    <controls:GlideIconView Kind="Tabs" Classes="settingsCardIcon" Margin="0,0,12,0" VerticalAlignment="Center"/>
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                      <TextBlock Classes="settingsCardTitle" Text="Opening pictures in new tabs →"/>
+                      <TextBlock Classes="settingsCardSubtitle" Margin="0,1,0,0" TextTrimming="CharacterEllipsis" Text="Foreground or background, position, Shift and Alt. Opens Tabs &amp; status bar > Tabs."/>
+                    </StackPanel>
+                  </Grid>
+                </Button>
+              </StackPanel>
+            </controls:SettingsCard>
           </StackPanel>
 
           <!-- TABS &amp; STATUS BAR -->
           <StackPanel x:Name="TabsPanel" IsVisible="False" Spacing="0">
-            <controls:SettingsCard CardId="tabs-tabs" Title="Tabs" Subtitle="Turning tabs on, switching, closing and closed-tab history" Icon="Tabs" IsExpanded="False">
+            <controls:SettingsCard CardId="tabs-tabs" Title="Tabs" Subtitle="Turning tabs on, opening, switching, closing, hover previews and closed-tab history" Icon="Tabs" IsExpanded="False">
               <StackPanel Classes="settingsCardBody" Spacing="10">
                 <CheckBox x:Name="TabsCheck" Content="Enable tabs"/>
                 <Grid ColumnDefinitions="260,230,*" Margin="6,0,0,0">
@@ -327,6 +445,29 @@
                 </Grid>
                 <CheckBox x:Name="ConfirmCloseMultipleTabsCheck" Content="Ask before closing a Glide window that contains multiple image tabs"/>
                 <Grid ColumnDefinitions="225,150,*" Margin="6,0,0,0"><TextBlock Text="Recently closed tabs retained" VerticalAlignment="Center"/><NumericUpDown x:Name="ClosedHistoryBox" Grid.Column="1" Minimum="1" Maximum="100"/></Grid>
+                <Grid ColumnDefinitions="260,230,*" Margin="6,0,0,0">
+                  <TextBlock Text="After closing a tab, activate" VerticalAlignment="Center"/>
+                  <ComboBox x:Name="AfterTabCloseActivateCombo" Grid.Column="1" Width="220" ToolTip.Tip="Previously used tab (default): the tab you were on before. Match Ctrl+Tab order: the previously used tab when Ctrl+Tab switching order is Most recently used, otherwise the tab to the right.">
+                    <ComboBoxItem Content="Match Ctrl+Tab order"/>
+                    <ComboBoxItem Content="Previously used tab"/>
+                    <ComboBoxItem Content="Tab to the right"/>
+                    <ComboBoxItem Content="Tab to the left"/>
+                  </ComboBox>
+                </Grid>
+                <!-- How a picture or folder opens in a new tab: one group so the Explorer tab card's "Opening pictures in new tabs" link reveals and highlights all of it. -->
+                <StackPanel x:Name="NewTabSettingsGroup" Spacing="10">
+                <Grid ColumnDefinitions="260,230,*" Margin="6,0,0,0">
+                  <TextBlock Text="New tabs open at" VerticalAlignment="Center"/>
+                  <ComboBox x:Name="NewTabPositionCombo" Grid.Column="1" Width="220" ToolTip.Tip="For every new tab: Ctrl+T and +, and pictures and folders opened in a new tab from inside Glide.">
+                    <ComboBoxItem Content="Next to the current tab"/>
+                    <ComboBoxItem Content="At the end"/>
+                  </ComboBox>
+                </Grid>
+                <CheckBox x:Name="SwitchToNewTabsCheck" Content="Open new tabs in the foreground" ToolTip.Tip="On (default): Glide switches to a picture or folder you open in a new tab. Off: it opens in the background. Ctrl+T and + always switch."/>
+                <CheckBox x:Name="NewTabModifiersCheck" Content="Shift and Alt change how a new tab opens" ToolTip.Tip="When on, hold Shift while opening a picture or folder in a new tab to do the opposite of Open new tabs in the foreground; hold Alt to use the other position."/>
+                </StackPanel>
+                <CheckBox x:Name="TabHoverPreviewsCheck" Content="Show tab previews on hover" ToolTip.Tip="Hovering a background tab shows a small preview of its picture or folder in the tab tooltip."/>
+                <CheckBox x:Name="AnimateGifPreviewsCheck" Content="Animate GIF previews on hover" Margin="24,0,0,0" IsEnabled="{Binding #TabHoverPreviewsCheck.IsChecked}" ToolTip.Tip="An animated GIF tab's hover preview plays while the tooltip is open. Very large GIFs keep the still first frame. Needs Show tab previews on hover."/>
             </StackPanel>
           </controls:SettingsCard>
             <controls:SettingsCard CardId="tabs-strip-look" Title="Tab strip look" Subtitle="Tab widths, overflow arrows and tooltip size" Icon="Tabs" IsExpanded="False">
@@ -353,71 +494,6 @@
                 <CheckBox x:Name="TabTopAutoHideCheck" Content="Auto-hide the top tab strip (it appears at the top edge)"/>
             </StackPanel>
           </controls:SettingsCard>
-            <controls:SettingsCard CardId="tabs-explorer" Title="Explorer tab" Subtitle="The view and which files Glide's own Explorer tab lists" Icon="Browser" IsExpanded="False">
-              <StackPanel Classes="settingsCardBody" Spacing="10">
-                <Grid ColumnDefinitions="260,230,*" Margin="6,0,0,0">
-                  <TextBlock Text="Explorer default view" VerticalAlignment="Center"/>
-                  <ComboBox x:Name="ExplorerDefaultViewCombo" Grid.Column="1" Width="220">
-                    <ComboBoxItem Content="Extra large thumbnails"/>
-                    <ComboBoxItem Content="Large thumbnails"/>
-                    <ComboBoxItem Content="Medium thumbnails"/>
-                    <ComboBoxItem Content="Small thumbnails"/>
-                    <ComboBoxItem Content="List"/>
-                    <ComboBoxItem Content="Details"/>
-                  </ComboBox>
-                </Grid>
-                <Grid ColumnDefinitions="260,230,*" Margin="6,0,0,0">
-                  <TextBlock Text="Open a picture's folder in" VerticalAlignment="Center" TextWrapping="Wrap"/>
-                  <ComboBox x:Name="ExplorerLocateOpensInCombo" Grid.Column="1" Width="220" ToolTip.Tip="Where Ctrl+E (Show in Explorer tab, Open file location) shows the picture's folder. Same tab: Back returns to the picture in that tab.">
-                    <ComboBoxItem Content="Same tab"/>
-                    <ComboBoxItem Content="Existing or new tab"/>
-                    <ComboBoxItem Content="Always a new tab"/>
-                    <ComboBoxItem Content="New window"/>
-                  </ComboBox>
-                </Grid>
-                <Grid x:Name="ExplorerBackReturnsToImageRow" ColumnDefinitions="260,230,*" Margin="6,0,0,0" ToolTip.Tip="Only used when a picture's folder opens in another tab or window. With Same tab, Back is the tab's own history.">
-                  <TextBlock Text="Back after opening a picture's folder" VerticalAlignment="Center" TextWrapping="Wrap"/>
-                  <ComboBox x:Name="ExplorerBackReturnsToImageCombo" Grid.Column="1" Width="220">
-                    <ComboBoxItem Content="Folders, then back to the picture"/>
-                    <ComboBoxItem Content="Straight back to the picture"/>
-                    <ComboBoxItem Content="Folders only"/>
-                  </ComboBox>
-                </Grid>
-                <CheckBox x:Name="ExplorerShowHiddenFilesCheck" Content="Show hidden files in Explorer tab"/>
-                <CheckBox x:Name="ExplorerShowOnlyImagesCheck" Content="Explorer tab lists only folders and images (off: every file type)"/>
-                <Grid ColumnDefinitions="260,230,*" Margin="6,0,0,0">
-                  <TextBlock Text="Explorer scroll amount" VerticalAlignment="Center"/>
-                  <ComboBox x:Name="ExplorerScrollModeCombo" Grid.Column="1" Width="220" ToolTip.Tip="How far one mouse-wheel notch scrolls. Rows move by the current view's row height.">
-                    <ComboBoxItem Content="One row per notch"/>
-                    <ComboBoxItem Content="Rows per notch (fixed)"/>
-                    <ComboBoxItem Content="Per view (1 / 2 / 3)"/>
-                    <ComboBoxItem Content="Pixels per notch"/>
-                  </ComboBox>
-                </Grid>
-                <Grid x:Name="ExplorerScrollRowsRow" ColumnDefinitions="260,230,*" Margin="6,0,0,0">
-                  <TextBlock Text="Rows per notch" VerticalAlignment="Center"/>
-                  <NumericUpDown x:Name="ExplorerScrollRowsBox" Grid.Column="1" Width="220" Minimum="1" Maximum="20" Increment="1" FormatString="0" ToolTip.Tip="Used when Explorer scroll amount is Rows per notch (fixed)."/>
-                </Grid>
-                <Grid x:Name="ExplorerScrollPixelsRow" ColumnDefinitions="260,230,*" Margin="6,0,0,0">
-                  <TextBlock Text="Pixels per notch" VerticalAlignment="Center"/>
-                  <NumericUpDown x:Name="ExplorerScrollPixelsBox" Grid.Column="1" Width="220" Minimum="10" Maximum="1000" Increment="10" FormatString="0" ToolTip.Tip="Used when Explorer scroll amount is Pixels per notch; ignores row size."/>
-                </Grid>
-                <Grid ColumnDefinitions="260,230,*" Margin="6,0,0,0">
-                  <TextBlock Text="Explorer scroll speed (x)" VerticalAlignment="Center"/>
-                  <NumericUpDown x:Name="ExplorerScrollSpeedBox" Grid.Column="1" Width="220" Minimum="0.25" Maximum="4" Increment="0.25" FormatString="0.##" ToolTip.Tip="Wheel speed multiplier applied on top of the Explorer scroll amount, in every mode."/>
-                </Grid>
-                <Grid ColumnDefinitions="260,*,Auto,Auto" ColumnSpacing="7" Margin="6,0,0,0">
-                  <TextBlock Text="Alternative file manager (.exe)" VerticalAlignment="Center"/>
-                  <TextBox x:Name="AlternativeFileManagerPathBox" Grid.Column="1" Watermark="Empty: none" ToolTip.Tip="Offered in the right-click menu of the Show in File Explorer buttons (title bar and Explorer toolbar)."/>
-                  <Button x:Name="AlternativeFileManagerBrowseButton" Grid.Column="2" Classes="secondaryAction" Content="Browse…" Click="BrowseAlternativeFileManagerClicked" ToolTip.Tip="Choose a file manager program (.exe)"/>
-                  <Button x:Name="AlternativeFileManagerClearButton" Grid.Column="3" Classes="secondaryAction" MinWidth="0" Padding="10,4" Content="✕" Click="ClearAlternativeFileManagerClicked" ToolTip.Tip="Clear: no alternative file manager"/>
-                </Grid>
-                <Grid ColumnDefinitions="260,*" Margin="6,0,0,0">
-                  <TextBlock Text="Alternative file manager arguments" VerticalAlignment="Center"/>
-                  <TextBox x:Name="AlternativeFileManagerArgumentsBox" Grid.Column="1" ToolTip.Tip="{}{path} is replaced with the selected file, or the folder when nothing is selected."/>
-                </Grid>
-              </StackPanel>
-            </controls:SettingsCard>
             <controls:SettingsCard CardId="tabs-detach" Title="Moving tabs between windows" Subtitle="Drag tabs out into new windows or onto another window" Icon="Move" IsExpanded="False">
               <StackPanel Classes="settingsCardBody" Spacing="10">
                 <CheckBox x:Name="TabDetachCheck" Content="Allow dragging tabs out into new Glide windows" ToolTip.Tip="Drag a tab outside the strip and release to create a new Glide window."/>
@@ -549,6 +625,19 @@
                 <CheckBox x:Name="TabFocusNavigationCheck" Content="Allow Tab key to navigate focus through buttons and controls" ToolTip.Tip="When disabled, pressing Tab will not cycle keyboard focus through toolbar buttons and UI controls."/>
             </StackPanel>
           </controls:SettingsCard>
+            <!-- A link, not a copy: the Explorer tab's mouse-wheel settings live on Window & navigation > Explorer tab. -->
+            <Border Classes="settingsCard">
+              <Button x:Name="ExplorerScrollLinkButton" Click="ExplorerScrollLinkClicked" Background="Transparent" BorderThickness="0" CornerRadius="0" Padding="14,10" MinHeight="52"
+                      HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Center" Cursor="Hand">
+                <Grid ColumnDefinitions="Auto,*">
+                  <controls:GlideIconView Kind="Browser" Classes="settingsCardIcon" Margin="0,0,12,0" VerticalAlignment="Center"/>
+                  <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                    <TextBlock Classes="settingsCardTitle" Text="Explorer scroll speed and amount →"/>
+                    <TextBlock Classes="settingsCardSubtitle" Margin="0,1,0,0" TextTrimming="CharacterEllipsis" Text="How far the mouse wheel scrolls the Explorer tab. Opens Window &amp; navigation > Explorer tab."/>
+                  </StackPanel>
+                </Grid>
+              </Button>
+            </Border>
           </StackPanel>
 
           <!-- SLIDESHOW &amp; OVERLAYS -->
@@ -597,46 +686,6 @@
                 <TextBlock Text="Whole-app Overlay mode removes ordinary Glide chrome and requests real transparent window composition. Transparent PNG regions can reveal the desktop where the platform compositor supports transparency. Normal Glide remains the default." Classes="phaseNote" TextWrapping="Wrap"/>
                 <CheckBox x:Name="WholeAppOverlayAlwaysStartCheck" Content="Always start Glide in Overlay / Window-in-Window mode" ToolTip.Tip="Off by default. You can also toggle this from the Overlay-mode context menu."/>
                 <CheckBox x:Name="WholeAppOverlayWindowedInteractionsCheck" Content="Use normal windowed image interactions while in Overlay mode" ToolTip.Tip="Off by default. Off = Window-in-Window behavior: left-drag moves the Overlay window. On = normal Glide selection/pan/click behavior. This can also be toggled from Overlay mode's right-click menu."/>
-            </StackPanel>
-          </controls:SettingsCard>
-          </StackPanel>
-
-          <!-- PERFORMANCE -->
-          <StackPanel x:Name="PerformancePanel" IsVisible="False" Spacing="0">
-            <controls:SettingsCard CardId="performance-quality" Title="Quality profile" Subtitle="Balance speed and image quality while browsing" Icon="HighQuality" IsExpanded="False">
-              <StackPanel Classes="settingsCardBody" Spacing="10">
-                <TextBlock Text="Glide uses a staged first-frame → full-resolution pipeline. Profiles coordinate preview size, interpolation, refinement, prefetch and decoded-neighbour policy; advanced controls remain independently editable." Classes="phaseNote" Margin="0,0,0,4"/>
-                <Grid ColumnDefinitions="270,240,Auto,*" Margin="6,0,0,0"><TextBlock Text="Browsing / image quality profile" VerticalAlignment="Center"/><ComboBox x:Name="InitialQualityCombo" Grid.Column="1" Width="240" SelectionChanged="PerformanceProfileChanged" ToolTip.Tip="Stock profiles apply coordinated defaults. Any non-matching edit automatically becomes User custom."><ComboBoxItem Content="Maximum speed"/><ComboBoxItem Content="Balanced"/><ComboBoxItem Content="Maximum quality"/><ComboBoxItem Content="User custom"/></ComboBox><Button x:Name="SaveUserPerformancePresetButton" Grid.Column="2" Classes="secondaryAction" Content="Save custom" Click="SaveUserPerformancePresetClicked" Margin="10,0,0,0" ToolTip.Tip="Save the current performance controls as your reusable User custom preset."/></Grid>
-                <Grid ColumnDefinitions="270,240,*" Margin="6,0,0,0"><TextBlock Text="Quality while dragging / panning" VerticalAlignment="Center"/><ComboBox x:Name="InteractivePanQualityCombo" Grid.Column="1" Width="240" ToolTip.Tip="The Balanced and Maximum quality presets default to Full quality while moving. Fast prefers the lightest available interaction preview. This control remains independently overridable."><ComboBoxItem Content="Fast"/><ComboBoxItem Content="Balanced"/><ComboBoxItem Content="Full quality"/></ComboBox></Grid>
-                <CheckBox x:Name="AdaptiveFastPreviewCheck" Content="Decoder-scaled first useful frame for large images"/>
-                <Grid ColumnDefinitions="270,150,*" Margin="6,0,0,0"><TextBlock Text="Full-resolution refinement delay (ms)" VerticalAlignment="Center"/><NumericUpDown x:Name="AdaptivePreviewDelayBox" Grid.Column="1" Minimum="5" Maximum="500"/></Grid>
-                <CheckBox x:Name="BackgroundRefinementCheck" Content="Refine preview to full resolution while idle"/>
-                <CheckBox x:Name="ProgressiveColorCheck" Content="Keep progressive JPEG first frame in colour" ToolTip.Tip="On: request an early progressive level that normally contains luminance and chroma, avoiding a black-and-white first-frame flash. All stock profiles keep this enabled by default; you can still disable it manually."/>
-                <TextBlock Classes="phaseNote" Text="All stock profiles, including Maximum speed, default to a colour first frame. This checkbox remains independently editable after choosing any profile; disabling it permits the earliest luminance-only progressive level when a codec exposes one. Settled refinement always restores final fidelity." TextWrapping="Wrap" Margin="6,-4,8,2"/>
-            </StackPanel>
-          </controls:SettingsCard>
-            <controls:SettingsCard CardId="performance-prefetch" Title="Prefetch" Subtitle="Prepare nearby images and folders before you get there" Icon="Next" IsExpanded="False">
-              <StackPanel Classes="settingsCardBody" Spacing="10">
-                <CheckBox x:Name="PrefetchCheck" Content="Predictively prepare neighbouring images"/>
-                <Grid ColumnDefinitions="270,150,*" Margin="6,0,0,0"><TextBlock Text="Neighbour prefetch depth per direction" VerticalAlignment="Center"/><NumericUpDown x:Name="PrefetchDepthBox" Grid.Column="1" Minimum="1" Maximum="30" ToolTip.Tip="Images prefetched in each direction. Balanced and Maximum quality default to 5; Maximum speed defaults to 3. Changing it manually makes the performance profile User custom."/></Grid>
-                <CheckBox x:Name="PrefetchSiblingFoldersCheck" Content="Prefetch surrounding sibling folders" ToolTip.Tip="Lightly warms only the chosen leading images from the nearest previous and next sibling folders."/>
-                <Grid ColumnDefinitions="270,150,*" Margin="6,0,0,0"><TextBlock Text="Pictures per surrounding folder" VerticalAlignment="Center"/><NumericUpDown x:Name="PrefetchSiblingFolderCountBox" Grid.Column="1" Minimum="1" Maximum="30"/></Grid>
-                <CheckBox x:Name="SequentialReadCheck" Content="Use sequential read hints for foreground image streams"/>
-            </StackPanel>
-          </controls:SettingsCard>
-            <controls:SettingsCard CardId="performance-rapid" Title="Fast browsing previews" Subtitle="Lighter frames while you hold an arrow key or spin the wheel" Icon="FrameNext" IsExpanded="False">
-              <StackPanel Classes="settingsCardBody" Spacing="10">
-                <Grid ColumnDefinitions="270,150,*" Margin="6,0,0,0"><TextBlock Text="Rapid navigation preview (px)" VerticalAlignment="Center"/><NumericUpDown x:Name="RapidBrowsePreviewBox" Grid.Column="1" Minimum="640" Maximum="4096" ToolTip.Tip="Long edge of the temporary frame used while holding Left/Right or rapidly scrolling through images. Profiles choose a default; you can override it afterwards."/></Grid>
-                <Grid ColumnDefinitions="270,150,*" Margin="6,0,0,0"><TextBlock Text="Rapid preview longest side (px)" VerticalAlignment="Center"/><NumericUpDown x:Name="RapidPreviewBox" Grid.Column="1" Minimum="480" Maximum="4096"/></Grid>
-                <TextBlock Classes="phaseNote" Text="Rapid navigation automatically uses reduced frames only during sustained keyboard holds or a fast wheel burst. A single key press or isolated wheel notch remains a normal full-quality navigation step, and the selected image refines after input settles." TextWrapping="Wrap" Margin="6,-4,8,2"/>
-            </StackPanel>
-          </controls:SettingsCard>
-            <controls:SettingsCard CardId="performance-memory" Title="Memory and caches" Subtitle="How much memory Glide keeps for images" Icon="Performance" IsExpanded="False">
-              <StackPanel Classes="settingsCardBody" Spacing="10">
-                <Grid ColumnDefinitions="270,150,*" Margin="6,0,0,0"><TextBlock Text="Compressed cache (items)" VerticalAlignment="Center"/><NumericUpDown x:Name="CacheItemsBox" Grid.Column="1" Minimum="2" Maximum="64"/></Grid>
-                <Grid ColumnDefinitions="270,150,*" Margin="6,0,0,0"><TextBlock Text="Compressed cache budget (MB)" VerticalAlignment="Center"/><NumericUpDown x:Name="CompressedCacheMbBox" Grid.Column="1" Minimum="32" Maximum="2048"/></Grid>
-                <Grid ColumnDefinitions="270,150,*" Margin="6,0,0,0"><TextBlock Text="Decoded-frame budget (MB)" VerticalAlignment="Center"/><NumericUpDown x:Name="DecodedCacheMbBox" Grid.Column="1" Minimum="32" Maximum="2048"/></Grid>
-                <CheckBox x:Name="PurgeCacheCheck" Content="Purge compressed and decoded caches when Glide is minimized"/>
             </StackPanel>
           </controls:SettingsCard>
           </StackPanel>

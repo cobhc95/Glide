@@ -11,6 +11,7 @@ using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Glide.App.Controls;
 using Glide.App.Explorer;
+using Glide.App.Platform;
 using Glide.App.Settings;
 using Glide.App.Services;
 using Glide.Core;
@@ -144,6 +145,7 @@ public partial class MainWindow
             }
             surface.ViewModeCombo.SelectedIndex = _browserViewMode;
             surface.FilterBox.Text = _explorerFilterText;
+            UpdateExplorerSortButton();
         }
         finally { _explorerApplyingState = false; }
         ConfigureBrowserRepeaterLayout();
@@ -157,6 +159,8 @@ public partial class MainWindow
 
     private async Task RefreshManagedBrowserAsync(string folder)
     {
+        // A folder change or reload cancels a pending click-to-rename.
+        CancelExplorerClickRename();
         _browserThumbnailCts?.Cancel();
         _browserThumbnailCts?.Dispose();
         _browserThumbnailCts = CancellationTokenSource.CreateLinkedTokenSource(_windowLifetimeCts.Token);
@@ -262,9 +266,12 @@ public partial class MainWindow
     /// <summary>
     /// Re-sorts / re-filters / re-lays out the already enumerated folder (view, sort or filter changed).
     /// Retires the realized tiles first so a measured tree is never reused across geometries.
+    /// <paramref name="revealCurrent"/> false (a sort change with Keep selection in view off) keeps the scroll position
+    /// instead of scrolling to the selected item.
     /// </summary>
-    private async Task ApplyExplorerViewAsync()
+    private async Task ApplyExplorerViewAsync(bool revealCurrent = true)
     {
+        var keptOffset = _browserSurface?.ScrollViewer.Offset;
         var version = Interlocked.Increment(ref _explorerViewVersion);
         var generation = Volatile.Read(ref _browserGeneration);
         var currentPath = _browserCurrentIndex >= 0 && _browserCurrentIndex < _browserEntries.Count ? _browserEntries[_browserCurrentIndex].Path : null;
@@ -280,9 +287,18 @@ public partial class MainWindow
         _browserSelectionAnchor = _browserCurrentIndex;
         ConfigureBrowserRepeaterLayout();
         UpdateExplorerDetailsHeader();
+        UpdateExplorerSortButton();
         BrowserRepeater.ItemsSource = _browserEntries;
         UpdateExplorerStatus();
-        if (_browserCurrentIndex >= 0) EnsureExplorerIndexVisible(_browserCurrentIndex);
+        if (revealCurrent)
+        {
+            if (_browserCurrentIndex >= 0) EnsureExplorerIndexVisible(_browserCurrentIndex);
+        }
+        else if (keptOffset is { } offset && _browserSurface is { } surface)
+        {
+            surface.ScrollViewer.UpdateLayout();
+            surface.ScrollViewer.Offset = offset;
+        }
     }
 
     private void SetExplorerFilterBoxText(string text)
@@ -518,9 +534,18 @@ public partial class MainWindow
     {
         if (tile.Tag is not ExplorerEntry entry) return;
         tile.Classes.Set("selected", _browserSelection.Contains(entry.Path));
-        tile.Classes.Set("focused", _explorerListHasFocus && _browserCurrentIndex >= 0 && _browserCurrentIndex < _browserEntries.Count && ReferenceEquals(_browserEntries[_browserCurrentIndex], entry));
+        tile.Classes.Set("focused", ExplorerShowsFocusBorder(entry));
         tile.Classes.Set("cut", _explorerCutPaths.Contains(entry.Path));
     }
+
+    /// <summary>
+    /// The focus border: on the focused item while the list has the keyboard focus, and on the item an open context menu
+    /// acts on (the menu takes the keyboard focus, so the list alone would lose the border on right-click).
+    /// </summary>
+    private bool ExplorerShowsFocusBorder(ExplorerEntry entry) =>
+        _explorerMenuEntry is { } menuEntry
+            ? ReferenceEquals(menuEntry, entry)
+            : _explorerListHasFocus && ReferenceEquals(ExplorerCurrentEntry, entry);
 
     private IEnumerable<Border> RealizedExplorerTiles() =>
         _browserSurface is null ? Enumerable.Empty<Border>() : _browserSurface.Repeater.Children.OfType<Border>();
@@ -625,15 +650,13 @@ public partial class MainWindow
             entered = true;
             // Thumbnail work is deliberately independent from the foreground image pipeline: opening
             // a browser tab must never steal the decode generation or cancel an image-view request.
-            Bitmap bitmap;
+            Bitmap? bitmap;
             try
             {
                 bitmap = await Task.Run(() =>
                 {
                     token.ThrowIfCancellationRequested();
-                    using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete,
-                        64 * 1024, FileOptions.SequentialScan);
-                    return Bitmap.DecodeToWidth(stream, Math.Max(16, width), BitmapInterpolationMode.LowQuality);
+                    return ThumbnailDecode.DecodeToWidth(path, Math.Max(16, width));
                 }, token).ConfigureAwait(false);
             }
             finally
@@ -643,6 +666,7 @@ public partial class MainWindow
                 _browserThumbnailGate.Release();
                 entered = false;
             }
+            if (bitmap is null) return; // too large to decode safely: the tile keeps its file-type icon
             if (token.IsCancellationRequested || generation != Volatile.Read(ref _browserGeneration)) { bitmap.Dispose(); return; }
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
@@ -733,6 +757,7 @@ public partial class MainWindow
 
     private void UpdateRealizedBrowserSelection()
     {
+        CancelExplorerClickRenameIfSelectionChanged();
         foreach (var tile in RealizedExplorerTiles()) UpdateExplorerTileVisual(tile);
         UpdateExplorerStatus();
         NoteExplorerSessionChanged();
@@ -740,6 +765,10 @@ public partial class MainWindow
 
     private List<ExplorerEntry> SelectedExplorerEntries() =>
         _browserEntries.Where(e => _browserSelection.Contains(e.Path)).ToList();
+
+    /// <summary>The focused (current) item of the listing, or null when there is none.</summary>
+    private ExplorerEntry? ExplorerCurrentEntry =>
+        _browserCurrentIndex >= 0 && _browserCurrentIndex < _browserEntries.Count ? _browserEntries[_browserCurrentIndex] : null;
 
     private int ExplorerIndexOf(ExplorerEntry entry)
     {
@@ -880,13 +909,20 @@ public partial class MainWindow
         else if (key == _explorerSortKey) _explorerSortAscending = !_explorerSortAscending;
         else _explorerSortAscending = true;
         _explorerSortKey = key;
-        _explorerRefreshTask = ApplyExplorerViewAsync();
+        _explorerRefreshTask = ApplyExplorerViewAsync(revealCurrent: _settings.ExplorerKeepSelectionInView);
     }
 
     private void SetExplorerFoldersFirst(bool value)
     {
         _explorerFoldersFirst = value;
-        _explorerRefreshTask = ApplyExplorerViewAsync();
+        _explorerRefreshTask = ApplyExplorerViewAsync(revealCurrent: _settings.ExplorerKeepSelectionInView);
+    }
+
+    /// <summary>Sort menu toggle for the explorer.keepSelectionInView setting (saved like a Settings change).</summary>
+    private void ToggleExplorerKeepSelectionInView()
+    {
+        _settings.ExplorerKeepSelectionInView = !_settings.ExplorerKeepSelectionInView;
+        SaveSettingsAndPublish();
     }
 
     private void BrowserFilterTextChanged(object? sender, TextChangedEventArgs e)
@@ -923,8 +959,8 @@ public partial class MainWindow
         if (!ExplorerIsDetails) return;
         var grid = new Grid { Margin = new Thickness(11, 0, 0, 0), Width = _explorerColumnWidths.Sum() + 12, HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Left };
         for (var i = 0; i < 4; i++) grid.ColumnDefinitions.Add(new ColumnDefinition(_explorerColumnWidths[i] + (i == 0 ? 4 : 0), GridUnitType.Pixel));
-        var names = new[] { "Name", "Date modified", "Type", "Size" };
-        var keys = new[] { ExplorerSortKey.Name, ExplorerSortKey.Modified, ExplorerSortKey.Type, ExplorerSortKey.Size };
+        var names = ExplorerSortFields.All.Select(f => f.Label).ToArray();
+        var keys = ExplorerSortFields.All.Select(f => f.Key).ToArray();
         for (var i = 0; i < 4; i++)
         {
             var column = i;
@@ -996,7 +1032,7 @@ public partial class MainWindow
     private string? ExplorerRevealSelection(BrowserTabState browser)
     {
         if (_explorerDisplayedTabId != browser.Id || !string.Equals(_explorerLoadedFolder, browser.Folder, StringComparison.OrdinalIgnoreCase)) return null;
-        var current = _browserCurrentIndex >= 0 && _browserCurrentIndex < _browserEntries.Count ? _browserEntries[_browserCurrentIndex].Path : null;
+        var current = ExplorerCurrentEntry?.Path;
         var pick = PickExplorerSessionSelection(_browserSelection, current, browser.Folder);
         return pick is not null && (File.Exists(pick) || Directory.Exists(pick)) ? pick : null;
     }
@@ -1030,11 +1066,13 @@ public partial class MainWindow
     /// Opens an Explorer entry. The default action (double-click / Enter / Open) follows the
     /// "Explorer: open images with" setting; <paramref name="alternate"/> (middle-click) does the
     /// other. Folders navigate in place, or open in a new Explorer tab as the alternate action.
-    /// An image opened in the current tab replaces the Explorer tab; one opened in a new tab by
-    /// middle-click is added next to it in the background so several can be queued up.
+    /// An image opened in the current tab replaces the Explorer tab; one opened in a new tab is placed and activated
+    /// as "New tabs open at" / "Open new tabs in the foreground" say (by default next to it in the background, so several can be
+    /// queued up), with Shift / Alt held flipping them when "Shift and Alt change how a new tab opens" is on (NewTabPolicy). Menu items read the keys held when they run.
     /// </summary>
     private async Task OpenBrowserEntryAsync(string path, bool alternate, KeyModifiers modifiers = KeyModifiers.None, bool fromMenu = false)
     {
+        if (fromMenu && modifiers == KeyModifiers.None) modifiers = ModifierKeyState.Current();
         // Explorer gesture rows (4.8.0): the double-click row (also Enter / "Open") and the
         // middle-click row. Default = current tab for double-click, new tab for middle-click.
         var action = ResolveGestureSlot(alternate ? "explorer.middleClick" : "explorer.doubleClick", modifiers);
@@ -1052,28 +1090,25 @@ public partial class MainWindow
         if (Directory.Exists(path))
         {
             if (!alternate) { NavigateBrowserTo(path, addHistory: true); return; }
-            _workspace.InsertTransferred(new BrowserTabState(Guid.NewGuid(), Path.GetFullPath(path)), _workspace.ActiveIndex + 1, activate: false);
-            RebuildTabStrip();
+            await OpenFolderInNewTabAsync(path, modifiers, fromMenu ? "explorer_menu" : "explorer_middle_click");
             return;
         }
         if (!File.Exists(path)) return;
         if (!ImageNavigator.IsSupported(path)) { ExplorerShell.Open(path); return; }
         var newTab = action == GestureCatalog.OpenInNewTab;
         _diagnostics.Write("browser", "open_image", new { path, newTab, alternate });
-        if (newTab && alternate)
+        if (newTab)
         {
-            _workspace.InsertTransferred(new ImageTabState(Guid.NewGuid(), Path.GetFullPath(path)), _workspace.ActiveIndex + 1, activate: false);
-            RebuildTabStrip();
-            if (_settings.RecentHistoryEnabled) RecentHistoryStore.RecordFile(path, _settings.HistorySize);
+            await OpenImageInNewTabAsync(path, modifiers, fromMenu ? "explorer_menu" : alternate ? "explorer_middle_click" : "explorer_double_click");
             return;
         }
-        if (!newTab && _workspace.Active is BrowserTabState browser)
+        if (_workspace.Active is BrowserTabState browser)
         {
             // The Explorer tab becomes this image tab. Its history and its view of the folder (sort, icon size, filter)
             // are kept: Back returns to this folder with the image selected (MainWindow.History.cs).
             _browserHighlightTargets.Remove(browser.Id);
         }
-        await OpenAsImageTabAsync(path, openInNewTab: newTab);
+        await OpenAsImageTabAsync(path);
     }
 
     // The Explorer toolbar Back / Forward buttons (and explorer.back / explorer.forward) step through the same per-tab

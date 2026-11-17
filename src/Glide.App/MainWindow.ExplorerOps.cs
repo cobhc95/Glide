@@ -333,11 +333,15 @@ public partial class MainWindow
 
     private void ShowExplorerProperties(ExplorerEntry? entry = null)
     {
-        var target = entry?.Path ?? SelectedExplorerEntries().FirstOrDefault()?.Path ?? ExplorerCurrentFolder;
+        var target = entry?.Path ?? ExplorerFocusedSelectedEntry()?.Path ?? ExplorerCurrentFolder;
         if (target is null) return;
         if (!WindowsShellProperties.Show(target))
             ShowExplorerMessage($"Couldn't show the properties of '{Path.GetFileName(target.TrimEnd('\\'))}'.", isError: true);
     }
+
+    /// <summary>The focused item when it is selected (it has the focus border), otherwise the first selected item.</summary>
+    private ExplorerEntry? ExplorerFocusedSelectedEntry() =>
+        ExplorerCurrentEntry is { } current && _browserSelection.Contains(current.Path) ? current : SelectedExplorerEntries().FirstOrDefault();
 
     private void ExplorerOpenWith(string path)
     {

@@ -82,7 +82,7 @@ public sealed class ExplorerTabOperationsTests
             var menu = h.ActiveMenu!;
             Assert.Equal(new[]
             {
-                "Open all 2 in new tabs", "-", "Cut", "Copy", "Copy path", "-", "Delete 2 items", "-", "Properties"
+                "Open all 2 in new tabs", "-", "Cut", "Copy", "Copy 2 paths", "-", "Delete 2 items", "-", "Properties of b.png"
             }, Headers(menu));
             return Task.CompletedTask;
         });
@@ -103,7 +103,7 @@ public sealed class ExplorerTabOperationsTests
                 "Show in Windows File Explorer", "Properties"
             }, Headers(menu));
             var view = Item(menu, "View").Items.OfType<MenuItem>().Select(i => i.Header!.ToString()).ToArray();
-            Assert.Equal(new[] { "Extra large thumbnails", "Large thumbnails  ✓", "Medium thumbnails", "Small thumbnails", "List", "Details" }, view);
+            Assert.Equal(new[] { "Thumbnails (XL)", "Thumbnails (L)  ✓", "Thumbnails (M)", "Thumbnails (S)", "List", "Details" }, view);
             return Task.CompletedTask;
         });
     }
@@ -160,6 +160,7 @@ public sealed class ExplorerTabOperationsTests
     {
         await ExplorerHarness.Run(async h =>
         {
+            h.Settings.SwitchToNewTabs = false; // background, explicitly (the default is foreground since 5.0.6)
             h.Click("Gamma", MouseButton.Right);
             Raise(Item(h.ActiveMenu!, "Open in new Explorer tab"));
             await h.WaitUntil(() => h.Workspace.Tabs.OfType<BrowserTabState>().Count() == 2, "new explorer tab");
@@ -176,6 +177,7 @@ public sealed class ExplorerTabOperationsTests
     {
         await ExplorerHarness.Run(async h =>
         {
+            h.Settings.SwitchToNewTabs = false; // background, explicitly (the default is foreground since 5.0.6)
             h.Click("a.png", MouseButton.Right);
             Raise(Item(h.ActiveMenu!, "Open in new tab"));
             await h.WaitUntil(() => h.Workspace.Tabs.OfType<ImageTabState>().Any(), "background image tab");

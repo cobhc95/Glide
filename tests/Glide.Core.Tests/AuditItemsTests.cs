@@ -325,6 +325,118 @@ public sealed class AuditItemsTests
         });
     }
 
+    /// <summary>
+    /// 5.0.6: "After closing a tab, activate" defaults to Previously used tab. Files saved before schema 12 store the old
+    /// default "Match Ctrl+Tab order" explicitly; that value moves to the new default once, other choices are kept, and
+    /// Match Ctrl+Tab order picked from schema 12 on stays.
+    /// </summary>
+    [Theory]
+    [InlineData(11, "Match Ctrl+Tab order", "Previously used tab")]
+    [InlineData(8, "Match Ctrl+Tab order", "Previously used tab")]
+    [InlineData(11, "Tab to the left", "Tab to the left")]
+    [InlineData(11, "Tab to the right", "Tab to the right")]
+    [InlineData(12, "Match Ctrl+Tab order", "Match Ctrl+Tab order")]
+    public void After_closing_a_tab_old_default_moves_to_previously_used_tab_once(int schema, string stored, string expected)
+    {
+        WithIsolatedStore(() =>
+        {
+            var state = new GlideSettingsState { SettingsSchemaVersion = schema, AfterTabCloseActivate = stored };
+            File.WriteAllText(SettingsStore.GetSettingsPath(), JsonSerializer.Serialize(state, Glide.App.AppJsonContext.Default.GlideSettingsState));
+            var loaded = SettingsStore.Load();
+            Assert.Equal(expected, loaded.AfterTabCloseActivate);
+            Assert.Equal(SettingsStore.CurrentSettingsSchema, loaded.SettingsSchemaVersion);
+        });
+        Assert.Equal("Previously used tab", new GlideSettingsState().AfterTabCloseActivate);
+    }
+
+    /// <summary>
+    /// 5.0.6: "Open new tabs in the foreground" defaults to on. Files saved before schema 13 store the old default (off)
+    /// explicitly; it moves to on once. Off chosen from schema 13 on stays off (background opening is still available).
+    /// </summary>
+    [Theory]
+    [InlineData(12, false, true)]
+    [InlineData(8, false, true)]
+    [InlineData(12, true, true)]
+    [InlineData(13, false, false)]
+    [InlineData(13, true, true)]
+    public void Open_new_tabs_in_the_foreground_old_default_moves_to_on_once(int schema, bool stored, bool expected)
+    {
+        WithIsolatedStore(() =>
+        {
+            var state = new GlideSettingsState { SettingsSchemaVersion = schema, SwitchToNewTabs = stored };
+            File.WriteAllText(SettingsStore.GetSettingsPath(), JsonSerializer.Serialize(state, Glide.App.AppJsonContext.Default.GlideSettingsState));
+            var loaded = SettingsStore.Load();
+            Assert.Equal(expected, loaded.SwitchToNewTabs);
+            Assert.Equal(SettingsStore.CurrentSettingsSchema, loaded.SettingsSchemaVersion);
+            // Saved again at the current schema, an explicit off is kept from now on.
+            loaded.SwitchToNewTabs = false;
+            File.WriteAllText(SettingsStore.GetSettingsPath(), JsonSerializer.Serialize(loaded, Glide.App.AppJsonContext.Default.GlideSettingsState));
+            Assert.False(SettingsStore.Load().SwitchToNewTabs);
+        });
+        Assert.True(new GlideSettingsState().SwitchToNewTabs);
+        Assert.True((bool)Glide.Core.Settings.SettingsCatalog.All.Single(s => s.Id == "tabs.switchToNewTabs").DefaultValue);
+        Assert.True(SettingsDefaults.RestoreAllSettings(new GlideSettingsState { SwitchToNewTabs = false }).SwitchToNewTabs);
+    }
+
+    /// <summary>
+    /// 5.0.6: "Navigation minimum interval" defaults to 120 ms (laptop keyboards often bounce). Files saved before schema 14
+    /// store the old default 80 explicitly; it moves to 120 once. Every other value is kept, and 80 chosen from schema 14 on
+    /// stays 80.
+    /// </summary>
+    [Theory]
+    [InlineData(13, 80, 120)]
+    [InlineData(8, 80, 120)]
+    [InlineData(13, 0, 0)]
+    [InlineData(13, 50, 50)]
+    [InlineData(13, 100, 100)]
+    [InlineData(13, 250, 250)]
+    [InlineData(14, 80, 80)]
+    [InlineData(14, 120, 120)]
+    public void Navigation_minimum_interval_old_default_moves_to_120_ms_once(int schema, int stored, int expected)
+    {
+        WithIsolatedStore(() =>
+        {
+            var state = new GlideSettingsState { SettingsSchemaVersion = schema, NavigationRateLimitMs = stored };
+            File.WriteAllText(SettingsStore.GetSettingsPath(), JsonSerializer.Serialize(state, Glide.App.AppJsonContext.Default.GlideSettingsState));
+            var loaded = SettingsStore.Load();
+            Assert.Equal(expected, loaded.NavigationRateLimitMs);
+            Assert.Equal(SettingsStore.CurrentSettingsSchema, loaded.SettingsSchemaVersion);
+            // Saved again at the current schema, an explicit 80 is the user's choice from now on.
+            loaded.NavigationRateLimitMs = 80;
+            File.WriteAllText(SettingsStore.GetSettingsPath(), JsonSerializer.Serialize(loaded, Glide.App.AppJsonContext.Default.GlideSettingsState));
+            Assert.Equal(80, SettingsStore.Load().NavigationRateLimitMs);
+        });
+        Assert.Equal(120, new GlideSettingsState().NavigationRateLimitMs);
+        Assert.Equal(120, Glide.Core.Settings.SettingsCatalog.All.Single(s => s.Id == "navigation.rateLimitMs").DefaultValue);
+        Assert.Equal(120, SettingsDefaults.RestoreAllSettings(new GlideSettingsState { NavigationRateLimitMs = 80 }).NavigationRateLimitMs);
+    }
+
+    /// <summary>
+    /// 5.0.6: "Tell me when a key press seems to skip pictures" (navigation.skipHint) is a real Toggle setting: on by default,
+    /// catalogued and searchable, hotkey-bindable, restored by Restore defaults and listed as a pending Settings change.
+    /// </summary>
+    [Fact]
+    public void Navigation_skip_hint_is_a_real_toggle_setting()
+    {
+        Assert.True(new GlideSettingsState().NavigationSkipHint);
+        var entry = Glide.Core.Settings.SettingsCatalog.All.Single(s => s.Id == "navigation.skipHint");
+        Assert.Equal("Tell me when a key press seems to skip pictures", entry.Label);
+        Assert.Equal("Window & navigation", entry.Category);
+        Assert.Equal(Glide.Core.Settings.SettingKind.Toggle, entry.Kind);
+        Assert.Equal(true, entry.DefaultValue);
+        foreach (var term in new[] { "skip", "hint", "toast", "remind", "bounce", "laptop", "notification" })
+            Assert.Contains(term, entry.SearchTerms);
+        Assert.Contains(Glide.Core.Settings.SettingEffectRegistry.All, x => x.SettingId == "navigation.skipHint");
+        var accessor = SettingAccessors.Find("navigation.skipHint");
+        Assert.NotNull(accessor);
+        var state = new GlideSettingsState();
+        accessor!.SetBool!(state, false);
+        Assert.False(state.NavigationSkipHint);
+        Assert.Contains(AppActionRegistry.All, a => a.SettingId == "navigation.skipHint" && a.Kind == AppActionKind.SettingToggle);
+        Assert.True(SettingsDefaults.RestoreAllSettings(new GlideSettingsState { NavigationSkipHint = false }).NavigationSkipHint);
+        Assert.Single(SettingsChangeSet.Compute(new GlideSettingsState(), new GlideSettingsState { NavigationSkipHint = false }));
+    }
+
     private static void WithIsolatedStore(Action action)
     {
         var dir = Path.Combine(Path.GetTempPath(), "glide-audit-items-" + Guid.NewGuid().ToString("N"));

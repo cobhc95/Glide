@@ -50,6 +50,8 @@ public static class SettingActionCatalog
         ["overlay.picturePosition"] = ["Top left", "Top center", "Top right", "Bottom left", "Bottom center", "Bottom right"],
         ["overlay.pictureColor"] = ["White", "Soft gray", "Accent", "Amber"],
         ["overlay.animationRegion"] = ["Anywhere", "Top half", "Bottom half", "Top left quarter", "Top right quarter", "Bottom left quarter", "Bottom right quarter"],
+        ["tabs.newTabPosition"] = ["Next to the current tab", "At the end"],
+        ["tabs.afterCloseActivate"] = ["Match Ctrl+Tab order", "Previously used tab", "Tab to the right", "Tab to the left"],
     };
 
     /// <summary>

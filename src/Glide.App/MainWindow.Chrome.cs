@@ -134,6 +134,7 @@ public partial class MainWindow
         FolderCounterText.FontSize = size;
         FolderCounterText.FontWeight = weight;
         FolderCounterText.Opacity = CornerCounterText.Opacity * 0.7;
+        ApplyTextOverlayBorder();
 
         var position = _settings.PictureCounterPosition ?? "Top right";
         CornerCounterHost.HorizontalAlignment = position.Contains("left", StringComparison.OrdinalIgnoreCase)
@@ -148,6 +149,28 @@ public partial class MainWindow
             ? new Thickness(15, 28, 15, 0)
             : new Thickness(15, 0, 15, _settings.ShowStatusSurface ? 82 : 16);
         UpdatePictureCounter();
+    }
+
+    /// <summary>
+    /// "Text overlay border": one box around every line of the overlay (the counter and the folder position line), styled
+    /// like the Image information panel; a light box in the light theme so the overlay colours stay readable.
+    /// </summary>
+    private void ApplyTextOverlayBorder()
+    {
+        if (!_settings.PictureCounterBorder)
+        {
+            CornerCounterHost.Background = null;
+            CornerCounterHost.BorderBrush = null;
+            CornerCounterHost.BorderThickness = default;
+            CornerCounterHost.CornerRadius = default;
+            CornerCounterHost.Padding = default;
+            return;
+        }
+        CornerCounterHost.Background = new SolidColorBrush(Color.Parse(IsDarkTheme() ? "#D91B1E23" : "#E6F7F8FA"));
+        CornerCounterHost.BorderBrush = new SolidColorBrush(Color.Parse(CurrentAccentHex()));
+        CornerCounterHost.BorderThickness = new Thickness(1);
+        CornerCounterHost.CornerRadius = new CornerRadius(8);
+        CornerCounterHost.Padding = new Thickness(11, 7);
     }
 
     private void UpdateViewportScrollbars()

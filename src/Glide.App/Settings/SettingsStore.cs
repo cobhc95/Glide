@@ -22,7 +22,24 @@ public static class SettingsStore
     /// </summary>
     private const int LaunchPolicySchema = 4;
     // 9 (5.0.0 Back / Forward): the one-time title-bar default migration below is gated on it.
-    internal const int CurrentSettingsSchema = 11;
+    internal const int CurrentSettingsSchema = 14;
+    /// <summary>
+    /// Settings schema that made "Previously used tab" the default of "After closing a tab, activate" (5.0.6). Files
+    /// from an older schema that store the old default "Match Ctrl+Tab order" move to the new default once.
+    /// </summary>
+    internal const int PreviouslyUsedTabCloseSchema = 12;
+    /// <summary>
+    /// Settings schema that made "Open new tabs in the foreground" default to on (5.0.6). Files from an older schema that
+    /// store the old default (off) move to the new default once.
+    /// </summary>
+    internal const int ForegroundNewTabsSchema = 13;
+    /// <summary>
+    /// Settings schema that raised the "Navigation minimum interval" default from 80 to 120 ms (5.0.6). Files from an older
+    /// schema that store exactly the old default (80) move to 120 once.
+    /// </summary>
+    internal const int NavigationInterval120Schema = 14;
+    /// <summary>The navigation minimum interval default before 5.0.6.</summary>
+    internal const int PreviousNavigationRateLimitDefaultMs = 80;
     /// <summary>Settings schema that added Back / Forward to the default title-bar buttons.</summary>
     internal const int TitleBarNavigationSchema = 9;
 
@@ -320,6 +337,36 @@ public static class SettingsStore
         HotkeyDefaultMigrations.MigrateStatusToggle(state.Hotkeys, sourceSchema);
     }
 
+    /// <summary>
+    /// Schema 12: "After closing a tab, activate" defaults to Previously used tab. A file from an older schema that stores
+    /// the old default "Match Ctrl+Tab order" (saved explicitly with every settings write) moves to the new default once;
+    /// any other value, and any value saved from schema 12 on, is the user's choice and is kept.
+    /// </summary>
+    internal static string MigrateAfterTabCloseActivate(int sourceSchema, string value) =>
+        sourceSchema < PreviouslyUsedTabCloseSchema &&
+        string.Equals(value, Glide.Core.Workspace.TabCloseActivation.MatchCycleOrder, StringComparison.OrdinalIgnoreCase)
+            ? Glide.Core.Workspace.TabCloseActivation.PreviouslyUsed
+            : value;
+
+    /// <summary>
+    /// Schema 13: "Open new tabs in the foreground" defaults to on. A file from an older schema that stores the old default
+    /// (off, saved explicitly with every settings write) moves to on once; a value saved from schema 13 on is the user's
+    /// choice and is kept. Background opening stays available through the setting and through Shift when "Shift and Alt
+    /// change how a new tab opens" is on.
+    /// </summary>
+    internal static bool MigrateSwitchToNewTabs(int sourceSchema, bool value) =>
+        sourceSchema < ForegroundNewTabsSchema || value;
+
+    /// <summary>
+    /// Schema 14: "Navigation minimum interval" defaults to 120 ms (laptop keyboards often bounce, so one press skipped
+    /// several pictures at 80 ms). A file from an older schema that stores exactly the old default 80 (saved explicitly with
+    /// every settings write) moves to 120 once; any other value, and any value saved from schema 14 on, is kept.
+    /// </summary>
+    internal static int MigrateNavigationRateLimit(int sourceSchema, int value) =>
+        sourceSchema < NavigationInterval120Schema && value == PreviousNavigationRateLimitDefaultMs
+            ? new GlideSettingsState().NavigationRateLimitMs
+            : value;
+
     internal static List<string> NormalizeRecentGestureActions(IEnumerable<string>? recent) =>
         (recent ?? [])
             .Select(GestureCatalog.NormalizeAction)
@@ -394,6 +441,10 @@ public static class SettingsStore
             loaded.ExplorerOpenImagesWith = string.Equals(loaded.ExplorerOpenImagesWith, LegacyMouseToggles.ExplorerNewTab, StringComparison.OrdinalIgnoreCase)
                 ? LegacyMouseToggles.ExplorerNewTab : LegacyMouseToggles.ExplorerCurrentTab;
             loaded.TabToolTipTextSize = loaded.TabToolTipTextSize is "Small" or "Large" ? loaded.TabToolTipTextSize : "Medium";
+            loaded.NewTabPosition = Glide.Core.Workspace.NewTabPositions.Normalize(loaded.NewTabPosition);
+            loaded.AfterTabCloseActivate = MigrateAfterTabCloseActivate(sourceSchema,
+                Glide.Core.Workspace.TabCloseActivation.Normalize(loaded.AfterTabCloseActivate));
+            loaded.SwitchToNewTabs = MigrateSwitchToNewTabs(sourceSchema, loaded.SwitchToNewTabs);
             // 4.8.0: the title-bar Show in Explorer button opens Glide's own Explorer tab by default. Files saved
             // before the setting existed omit it (so the new default applies; their hidden legacy
             // NavigateToFolderBehavior value never reflected a user choice); only an explicit
@@ -436,7 +487,9 @@ public static class SettingsStore
             // image. 0 was the only historical stock value for this field, so migrate exactly that
             // stock value; users who want unlimited navigation can set 0 again explicitly.
             if (sourceSchema < 5 && loaded.NavigationRateLimitMs == 0)
-                loaded.NavigationRateLimitMs = 80;
+                loaded.NavigationRateLimitMs = PreviousNavigationRateLimitDefaultMs;
+            // Schema 14 (5.0.6) raises the stock default to 120 ms; only the untouched old default 80 moves.
+            loaded.NavigationRateLimitMs = MigrateNavigationRateLimit(sourceSchema, loaded.NavigationRateLimitMs);
             loaded.NavigationRateLimitMs = Math.Clamp(loaded.NavigationRateLimitMs, 0, 600000);
 
             // 2.9-5 gives new Explorer tabs an independent navigation-memory scope. The historical

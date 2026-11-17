@@ -3,7 +3,8 @@ using Glide.Core.Windows;
 namespace Glide.App.Services;
 
 /// <summary>
-/// Inventory of every top-level window Glide can open and what it remembers. Keys are stable ids used in
+/// Inventory of every top-level window Glide can open and what it remembers (PositionOnly dialogs remember nothing
+/// since 5.0.6 and always open centred on their owner; their keys stay registered). Keys are stable ids used in
 /// glide.settings.json ("WindowPlacements"); never rename one (a renamed key forgets the user's placement).
 /// A guard-rail test (WindowPlacementGuardTests) fails when a new Window subclass or a new ad-hoc <c>new Window</c>
 /// dialog is not registered here and tracked with <see cref="WindowPlacementService.Track"/>, or allow-listed below

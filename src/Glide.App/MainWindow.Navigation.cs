@@ -872,8 +872,12 @@ public partial class MainWindow
     private Task NavigateMouseAsync(int delta) =>
         TryAcceptNavigationRateLimit(NavigationRateInput.Mouse) ? NavigateAsync(delta) : Task.CompletedTask;
 
-    private Task NavigateKeyboardAsync(int delta) =>
-        TryAcceptNavigationRateLimit(NavigationRateInput.Keyboard) ? NavigateAsync(delta) : Task.CompletedTask;
+    private Task NavigateKeyboardAsync(int delta)
+    {
+        if (!TryAcceptNavigationRateLimit(NavigationRateInput.Keyboard)) return Task.CompletedTask;
+        _acceptedKeyboardNavigations++;
+        return NavigateAsync(delta);
+    }
 
     private bool TryAcceptNavigationRateLimit(NavigationRateInput input, bool showIndicator = true)
     {
@@ -1520,6 +1524,7 @@ public partial class MainWindow
         browser.AddressNavigateRequested += (_, text) => BrowserAddressNavigateRequested(text);
         browser.ScrollViewer.ScrollChanged += (_, e) => { if (e.OffsetDelta.Y != 0) NoteExplorerSessionChanged(); };
         browser.ViewModeChanged += (_, e) => BrowserViewModeChanged(browser.ViewModeCombo, e);
+        browser.SortRequested += (_, _) => ShowExplorerSortMenu();
         browser.WindowsExplorerRequested += (_, _) => BrowserWindowsExplorerClicked(browser, new RoutedEventArgs());
         AttachExplorerToolbarRevealMenu(browser.WindowsExplorerButton);
         browser.FilterTextChanged += (_, e) => BrowserFilterTextChanged(browser.FilterBox, e);
@@ -1677,6 +1682,9 @@ public partial class MainWindow
     private async Task ActivateWorkspaceAsync()
     {
         if (_tabMruCycleSnapshot is null) TouchTabMru();
+        // The active tab owns its history from the moment it is active, not only after the awaits below (an image tab's
+        // load): Back / Forward and anything else that reads the active tab's history must never find it missing.
+        if (_workspace.Active is { } activating) HistoryFor(activating);
         switch (_workspace.Active)
         {
             case HomeTabState:
@@ -1692,8 +1700,7 @@ public partial class MainWindow
                 // Explorer tab (4.8.0): Glide's own managed folder browser. The native IExplorerBrowser
                 // COM host stays dormant (NativeAOT restricts COM interop); only BrowserSurface is used.
                 // A folder that no longer exists falls back to the fresh-Explorer location.
-                // The tab's history (restored from the session file / a moved tab the first time it is shown).
-                HistoryFor(browser);
+                // (Its history, restored from the session file / a moved tab, was created above.)
                 // A folder that is gone (or unreadable) opens its nearest existing parent instead, and the
                 // remembered selection/scroll then no longer applies.
                 var firstShown = !_explorerTabViews.ContainsKey(browser.Id) && _explorerDisplayedTabId != browser.Id;

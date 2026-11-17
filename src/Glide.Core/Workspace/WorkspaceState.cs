@@ -67,6 +67,7 @@ public sealed class WorkspaceState
     {
         var index = _tabs.FindIndex(t => t.Id == id);
         if (index < 0) return false;
+        if (index != ActiveIndex) _backgroundOpener = null; // switching tabs ends a run of background opens
         ActiveIndex = index;
         return true;
     }
@@ -81,7 +82,13 @@ public sealed class WorkspaceState
 
     public bool CloseActive() => Active is not null && Close(Active.Id);
 
-    public bool Close(Guid id, bool ensureHome = true)
+    public bool Close(Guid id, bool ensureHome = true) => Close(id, ensureHome, TabCloseActivationMode.Right, null);
+
+    /// <summary>
+    /// Closes a tab. When it is the active tab, <paramref name="activation"/> picks the next active tab
+    /// (<paramref name="recentlyUsed"/>: tab ids, most recently used first, for <see cref="TabCloseActivationMode.PreviouslyUsed"/>).
+    /// </summary>
+    public bool Close(Guid id, bool ensureHome, TabCloseActivationMode activation, IReadOnlyList<Guid>? recentlyUsed)
     {
         var index = _tabs.FindIndex(t => t.Id == id);
         if (index < 0) return false;
@@ -98,7 +105,7 @@ public sealed class WorkspaceState
         }
 
         if (index < ActiveIndex) ActiveIndex--;
-        else if (index == ActiveIndex) ActiveIndex = Math.Min(index, _tabs.Count - 1);
+        else if (index == ActiveIndex) ActiveIndex = TabCloseActivation.NextActiveIndex(_tabs, index, activation, recentlyUsed);
         ActiveIndex = Math.Clamp(ActiveIndex, 0, _tabs.Count - 1);
         return true;
     }
@@ -123,6 +130,32 @@ public sealed class WorkspaceState
         _tabs.Insert(target, tab);
         if (activate) ActiveIndex = target;
         else if (ActiveIndex >= target) ActiveIndex++;
+        return tab;
+    }
+
+    // The tab that the last background tab was opened from, and that last opened tab: further background tabs opened
+    // from the same tab go after it, so opening a, b, c next to the current tab keeps them in that order (as browsers do).
+    private Guid? _backgroundOpener;
+    private Guid? _lastBackgroundOpened;
+
+    /// <summary>Adds a tab opened "in a new tab" from the active tab, at the place and with the activation <paramref name="opening"/> says.</summary>
+    public TabState OpenTab(TabState tab, NewTabOpening opening)
+    {
+        var opener = Active?.Id;
+        var index = _tabs.Count;
+        if (!opening.AtEnd && opener is { } openerId)
+        {
+            index = ActiveIndex + 1;
+            if (_backgroundOpener == openerId && _lastBackgroundOpened is { } last)
+            {
+                var lastIndex = _tabs.FindIndex(t => t.Id == last);
+                if (lastIndex > ActiveIndex) index = lastIndex + 1;
+            }
+        }
+        InsertTransferred(tab, index, opening.Activate);
+        var chained = !opening.Activate && !opening.AtEnd && opener is not null;
+        _backgroundOpener = chained ? opener : null;
+        _lastBackgroundOpened = chained ? tab.Id : null;
         return tab;
     }
 

@@ -23,12 +23,12 @@ public sealed class SettingsCardLayoutTests
     private static readonly (string Panel, string Key, string Title)[] Pages =
     {
         ("GeneralPanel", "General", "General & startup"),
+        ("PerformancePanel", "Performance", "Performance"),
         ("AppearancePanel", "Appearance", "Appearance & viewing"),
         ("InterfacePanel", "Interface", "Window & navigation"),
-        ("MousePanel", "Mouse", "Mouse & keyboard"),
-        ("PerformancePanel", "Performance", "Performance"),
-        ("SlideshowPanel", "Slideshow", "Slideshow & overlays"),
         ("TabsPanel", "Tabs", "Tabs & status bar"),
+        ("MousePanel", "Mouse", "Mouse & keyboard"),
+        ("SlideshowPanel", "Slideshow", "Slideshow & overlays"),
         ("WindowsPanel", "Windows", "Windows & developer")
     };
 

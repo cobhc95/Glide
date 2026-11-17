@@ -722,6 +722,8 @@ public partial class MainWindow : Window
             if (_heldNavigationKeyIsDown && _heldNavigationDirection != 0)
                 _suppressedHeldNavigationDirection = _heldNavigationDirection;
             StopHeldNavigation(settle: false, reason: "window_deactivated");
+            // A key-up lost while inactive must not make the sticky-key detector treat the next press as auto-repeat.
+            _navigationSkipDetector.Reset();
             _homeKeyDown = false;
             // Losing activation must never strand an ordinary tab/viewport pointer capture.
             // A detached tab inside the native Windows move loop is intentionally exempt: the OS

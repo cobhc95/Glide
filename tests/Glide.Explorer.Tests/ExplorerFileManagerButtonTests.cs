@@ -47,11 +47,32 @@ public sealed class ExplorerFileManagerButtonTests
                 Assert.Empty(alternative);
 
                 Assert.Null(typeof(Glide.App.Controls.BrowserSurface).GetEvent("AlternativeFileManagerRequested"));
+                h.Call("RefreshDynamicTooltips"); // the tooltip names the program set above
                 var tip = ToolTip.GetTip(button)?.ToString() ?? "";
-                Assert.DoesNotContain("Right-click", tip, StringComparison.OrdinalIgnoreCase);
+                // 5.0.6: the tooltip names the right-click menu (it opens a menu, it launches nothing); middle-click does nothing.
+                Assert.Contains("Right-click for more: Show in TotalCmd64", tip, StringComparison.Ordinal);
                 Assert.DoesNotContain("Middle-click", tip, StringComparison.OrdinalIgnoreCase);
             }
             finally { ExplorerHost.LaunchAlternativeFileManager = previous; }
+        });
+    }
+
+    [Fact]
+    public async Task Title_bar_locate_button_tooltip_names_its_right_click_menu()
+    {
+        await ExplorerHarness.Run(async h =>
+        {
+            var buttons = h.Get<Dictionary<string, Button>>("_titleBarButtons");
+            Assert.True(buttons.TryGetValue("file.locate", out var locate), "locate button on the title bar");
+            h.Settings.AlternativeFileManagerPath = "";
+            h.Call("RefreshTitleActionTooltips");
+            Assert.Contains("Right-click for more", ToolTip.GetTip(locate!)?.ToString() ?? "", StringComparison.Ordinal);
+            h.Settings.AlternativeFileManagerPath = @"C:\Tools\TotalCmd64.exe";
+            h.Call("RefreshTitleActionTooltips");
+            Assert.Contains("Show in TotalCmd64", ToolTip.GetTip(locate!)?.ToString() ?? "", StringComparison.Ordinal);
+            // Other title buttons keep a single line.
+            Assert.DoesNotContain("Right-click", ToolTip.GetTip(buttons["nav.back"])?.ToString() ?? "", StringComparison.Ordinal);
+            await Task.CompletedTask;
         });
     }
 

@@ -56,6 +56,7 @@ public static class SettingEffectRegistry
         new("folderNav.counterGrandparent", SettingEffectOwner.FolderNavigation, SettingEditorKind.FromCatalog, SettingApplySemantics.LivePreview, "settings.effect.folderNav.counterGrandparent", SettingEvidenceStatus.Unknown),
         new("navigation.rateLimitMs", SettingEffectOwner.Navigation, SettingEditorKind.FromCatalog, SettingApplySemantics.CommitOnly, "settings.effect.navigation.rateLimitMs", SettingEvidenceStatus.Unknown),
         new("navigation.rateLimitInput", SettingEffectOwner.Navigation, SettingEditorKind.FromCatalog, SettingApplySemantics.CommitOnly, "settings.effect.navigation.rateLimitInput", SettingEvidenceStatus.Unknown),
+        new("navigation.skipHint", SettingEffectOwner.Navigation, SettingEditorKind.FromCatalog, SettingApplySemantics.CommitOnly, "settings.effect.navigation.skipHint", SettingEvidenceStatus.Unknown),
         new("navigation.rateLimitIndicator", SettingEffectOwner.Navigation, SettingEditorKind.FromCatalog, SettingApplySemantics.CommitOnly, "settings.effect.navigation.rateLimitIndicator", SettingEvidenceStatus.Unknown),
         new("navigation.rateLimitIndicatorPosition", SettingEffectOwner.Navigation, SettingEditorKind.FromCatalog, SettingApplySemantics.CommitOnly, "settings.effect.navigation.rateLimitIndicatorPosition", SettingEvidenceStatus.Unknown),
         new("navigation.rateLimitWindowed", SettingEffectOwner.Navigation, SettingEditorKind.FromCatalog, SettingApplySemantics.CommitOnly, "settings.effect.navigation.rateLimitWindowed", SettingEvidenceStatus.Unknown),
@@ -262,6 +263,8 @@ public static class SettingEffectRegistry
         new("reset.startup", SettingEffectOwner.Developer, SettingEditorKind.DynamicAction, SettingApplySemantics.Action, "settings.effect.reset.startup", SettingEvidenceStatus.Unknown),
         new("window.showInExplorerTarget", SettingEffectOwner.WindowChrome, SettingEditorKind.FromCatalog, SettingApplySemantics.LivePreview, "settings.effect.window.showInExplorerTarget", SettingEvidenceStatus.Unknown),
         new("explorer.defaultView", SettingEffectOwner.TabsWorkspace, SettingEditorKind.FromCatalog, SettingApplySemantics.CommitOnly, "settings.effect.explorer.defaultView", SettingEvidenceStatus.Unknown),
+        new("explorer.keepSelectionInView", SettingEffectOwner.TabsWorkspace, SettingEditorKind.FromCatalog, SettingApplySemantics.CommitOnly, "settings.effect.explorer.keepSelectionInView", SettingEvidenceStatus.Unknown),
+        new("explorer.clickToRename", SettingEffectOwner.TabsWorkspace, SettingEditorKind.FromCatalog, SettingApplySemantics.CommitOnly, "settings.effect.explorer.clickToRename", SettingEvidenceStatus.Unknown),
         new("explorer.showHidden", SettingEffectOwner.TabsWorkspace, SettingEditorKind.FromCatalog, SettingApplySemantics.CommitOnly, "settings.effect.explorer.showHidden", SettingEvidenceStatus.Unknown),
         new("explorer.onlyImages", SettingEffectOwner.TabsWorkspace, SettingEditorKind.FromCatalog, SettingApplySemantics.CommitOnly, "settings.effect.explorer.onlyImages", SettingEvidenceStatus.Unknown),
         new("explorer.scrollSpeed", SettingEffectOwner.TabsWorkspace, SettingEditorKind.FromCatalog, SettingApplySemantics.CommitOnly, "settings.effect.explorer.scrollSpeed", SettingEvidenceStatus.Unknown),
@@ -280,6 +283,13 @@ public static class SettingEffectRegistry
         new("hotkeys.searchHotkey", SettingEffectOwner.Input, SettingEditorKind.DynamicAction, SettingApplySemantics.Action, "settings.effect.hotkeys.searchHotkey", SettingEvidenceStatus.Unknown),
         new("hotkeys.customPresets", SettingEffectOwner.Input, SettingEditorKind.DynamicAction, SettingApplySemantics.Action, "settings.effect.hotkeys.customPresets", SettingEvidenceStatus.Unknown),
         new("hotkeys.preset", SettingEffectOwner.Input, SettingEditorKind.DynamicAction, SettingApplySemantics.Action, "settings.effect.hotkeys.preset", SettingEvidenceStatus.Unknown),
+        new("tabs.newTabPosition", SettingEffectOwner.TabsWorkspace, SettingEditorKind.FromCatalog, SettingApplySemantics.CommitOnly, "settings.effect.tabs.newTabPosition", SettingEvidenceStatus.Unknown),
+        new("tabs.switchToNewTabs", SettingEffectOwner.TabsWorkspace, SettingEditorKind.FromCatalog, SettingApplySemantics.CommitOnly, "settings.effect.tabs.switchToNewTabs", SettingEvidenceStatus.Unknown),
+        new("tabs.newTabModifiers", SettingEffectOwner.TabsWorkspace, SettingEditorKind.FromCatalog, SettingApplySemantics.CommitOnly, "settings.effect.tabs.newTabModifiers", SettingEvidenceStatus.Unknown),
+        new("tabs.afterCloseActivate", SettingEffectOwner.TabsWorkspace, SettingEditorKind.FromCatalog, SettingApplySemantics.CommitOnly, "settings.effect.tabs.afterCloseActivate", SettingEvidenceStatus.Unknown),
+        new("tabs.hoverPreview", SettingEffectOwner.TabsWorkspace, SettingEditorKind.FromCatalog, SettingApplySemantics.CommitOnly, "settings.effect.tabs.hoverPreview", SettingEvidenceStatus.Unknown),
+        new("tabs.animateGifPreviews", SettingEffectOwner.TabsWorkspace, SettingEditorKind.FromCatalog, SettingApplySemantics.CommitOnly, "settings.effect.tabs.animateGifPreviews", SettingEvidenceStatus.Unknown),
+        new("overlay.pictureBorder", SettingEffectOwner.Overlay, SettingEditorKind.FromCatalog, SettingApplySemantics.LivePreview, "settings.effect.overlay.pictureBorder", SettingEvidenceStatus.Unknown),
     };
 
     public static IReadOnlyList<string> Validate()
