@@ -9,8 +9,8 @@ namespace Glide.Imaging;
 /// camera-rendered JPEG (often full size). This decoder walks the container structure — TIFF IFD
 /// chains incl. SubIFDs/EXIF (DNG, CR2, NEF, ARW, ORF, RW2, PEF, SRW, …), ISO-BMFF (CR3), the RAF
 /// header, CIFF heaps (CRW), X3F section directories and MRW blocks — collects every embedded JPEG,
-/// validates each header (baseline/extended/progressive 8-bit only) and decodes the largest one with
-/// the bundled JPEG codec. If the structure yields nothing large, the file is scanned for embedded JPEG
+/// validates each header (baseline/extended/progressive 8-bit only), adds uncompressed 8/16-bit RGB
+/// strip previews (3FR, FFF, IIQ, MEF, DCR, ERF) and decodes the largest one (JPEGs with the bundled codec). If the structure yields nothing large, the file is scanned for embedded JPEG
 /// streams. Only the chosen JPEG's bytes are read; the raw sensor data is never touched.
 /// Orientation: the preview's own EXIF orientation wins, otherwise the container's IFD0 orientation.
 /// </summary>
@@ -29,9 +29,28 @@ internal static class RawPreviewDecoder
         _ => false,
     };
 
-    private readonly record struct RawRef(long Offset, long Length, bool PatchSoi);
+    private readonly record struct RawRef(long Offset, long Length, bool PatchSoi, RgbLayout? Rgb = null);
 
-    private readonly record struct Candidate(long Offset, long Length, bool PatchSoi, int Width, int Height, int Orientation, long SosOffset);
+    /// <summary>
+    /// An uncompressed, chunky RGB preview (TIFF compression 1, photometric RGB, 3 samples of 8 or 16
+    /// bits). Hasselblad 3FR/FFF, Phase One IIQ, Mamiya MEF, Kodak DCR and Epson ERF store their only
+    /// rendered previews this way. Strips are listed in order and hold whole rows.
+    /// </summary>
+    /// <remarks>
+    /// <paramref name="Kodak65000"/> is the TIFF photometric (2 = RGB, 6 = YCbCr) of a Kodak DCR preview stored with
+    /// Kodak's private compression 65000 (DCS Pro 14n/SLR, …: their 1125x750 and 375x250 previews); 0 for plain strips.
+    /// </remarks>
+    private sealed record RgbLayout(int Width, int Height, int Bits, bool LittleEndian, long[] Offsets, long[] Counts, int Kodak65000 = 0)
+    {
+        public long ByteCount => Kodak65000 != 0 ? Counts.Sum() : (long)Width * Height * 3 * (Bits / 8);
+    }
+
+    private readonly record struct Candidate(long Offset, long Length, bool PatchSoi, int Width, int Height, int Orientation, long SosOffset,
+        RgbLayout? Rgb = null)
+    {
+        /// <summary>Tie-break at equal size: JPEG, then 8-bit RGB, then 16-bit RGB (unknown tone range).</summary>
+        public int Rank => Rgb is null ? 0 : Rgb.Bits == 8 ? 1 : 2;
+    }
 
     public static bool TryProbe(string path, out ImageDimensions dimensions)
     {
@@ -65,26 +84,48 @@ internal static class RawPreviewDecoder
             if (source is null) return false;
             if (!TrySelect(source, allowScan: true, out var best, out var containerOrientation)) return false;
             if (!ManagedCodecSupport.FitsMemory(best.Width, best.Height)) return false;
-
-            // The preview must be complete (end with EOI): a truncated or corrupt preview is rejected so
-            // the caller falls through to WIC/Shell instead of showing a half-grey frame.
-            var bytes = ReadJpeg(source, best, scan: false);
-            if (bytes is null || !ManagedCodecSupport.TryDecodeEncoded(bytes, maxLongestSide, out var decoded, out _))
-            {
-                // A wrong declared length: find the real end of the stream instead.
-                if (best.Length <= 0) return false;
-                bytes = ReadJpeg(source, best, scan: true);
-                if (bytes is null || !ManagedCodecSupport.TryDecodeEncoded(bytes, maxLongestSide, out decoded, out _)) return false;
-            }
             var orientation = best.Orientation > 1 ? best.Orientation : containerOrientation;
-            image = ManagedCodecSupport.ApplyOrientation(decoded, orientation);
-            return true;
+
+            if (best.Rgb is not null)
+            {
+                DecodedImage rgb;
+                if (!TryReadRgb(source, best.Rgb, out rgb))
+                {
+                    // A Kodak 65000 preview that does not decode (corrupt strip) falls back to the next best preview.
+                    if (best.Rgb.Kodak65000 == 0 ||
+                        !TrySelect(source, allowScan: true, out best, out containerOrientation, allowKodak: false)) return false;
+                    orientation = best.Orientation > 1 ? best.Orientation : containerOrientation;
+                    if (best.Rgb is null) return TryDecodeJpeg(source, best, maxLongestSide, orientation, out image);
+                    if (!TryReadRgb(source, best.Rgb, out rgb)) return false;
+                }
+                image = ManagedCodecSupport.ApplyOrientation(rgb, orientation);
+                return true;
+            }
+
+            return TryDecodeJpeg(source, best, maxLongestSide, orientation, out image);
         }
         catch
         {
             image = default;
             return false;
         }
+    }
+
+    private static bool TryDecodeJpeg(FileSource source, Candidate best, int maxLongestSide, int orientation, out DecodedImage image)
+    {
+        image = default;
+        // The preview must be complete (end with EOI): a truncated or corrupt preview is rejected so
+        // the caller falls through to WIC/Shell instead of showing a half-grey frame.
+        var bytes = ReadJpeg(source, best, scan: false);
+        if (bytes is null || !ManagedCodecSupport.TryDecodeEncoded(bytes, maxLongestSide, out var decoded, out _))
+        {
+            // A wrong declared length: find the real end of the stream instead.
+            if (best.Length <= 0) return false;
+            bytes = ReadJpeg(source, best, scan: true);
+            if (bytes is null || !ManagedCodecSupport.TryDecodeEncoded(bytes, maxLongestSide, out decoded, out _)) return false;
+        }
+        image = ManagedCodecSupport.ApplyOrientation(decoded, orientation);
+        return true;
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -96,19 +137,29 @@ internal static class RawPreviewDecoder
         public required FileSource Source;
         public readonly List<RawRef> Refs = new();
         public readonly HashSet<long> Visited = new();
+        /// <summary>Byte ranges the directories declare as image data (sensor strips/tiles, the Phase One raw
+        /// blob). They hold no hidden previews, so the fallback scan skips them.</summary>
+        public readonly List<(long Start, long End)> Declared = new();
         public int Orientation = 1;
         public bool MinoltaMakerNote;
+        public bool IsDng;
         public int IfdBudget = 128;
 
-        public void Add(long offset, long length, bool patch = false)
+        public void Add(long offset, long length, bool patch = false, RgbLayout? rgb = null)
         {
             if (Refs.Count >= MaxCandidates || offset < 0 || offset >= Source.Length) return;
             foreach (var r in Refs) if (r.Offset == offset) return;
-            Refs.Add(new RawRef(offset, length, patch));
+            Refs.Add(new RawRef(offset, length, patch, rgb));
+        }
+
+        public void Declare(long start, long length)
+        {
+            if (length <= 0 || start < 0 || start >= Source.Length || Declared.Count >= 1 << 16) return;
+            Declared.Add((start, Math.Min(Source.Length, start + length)));
         }
     }
 
-    private static bool TrySelect(FileSource source, bool allowScan, out Candidate best, out int containerOrientation)
+    private static bool TrySelect(FileSource source, bool allowScan, out Candidate best, out int containerOrientation, bool allowKodak = true)
     {
         best = default;
         var context = new Context { Source = source };
@@ -126,7 +177,11 @@ internal static class RawPreviewDecoder
         var found = false;
         foreach (var r in context.Refs)
         {
-            if (TryValidate(source, r, out var candidate) && (!found || Area(candidate) > Area(best)))
+            // A DNG without a real preview is better served by the platform DNG codec (which develops the
+            // sensor data) than by its 256-pixel uncompressed thumbnail.
+            if (r.Rgb is not null && context.IsDng && Math.Max(r.Rgb.Width, r.Rgb.Height) < SmallPreviewLongestSide) continue;
+            if (!allowKodak && r.Rgb is { Kodak65000: not 0 }) continue;
+            if (TryValidate(source, r, out var candidate) && (!found || Better(candidate, best)))
             {
                 best = candidate;
                 found = true;
@@ -135,10 +190,10 @@ internal static class RawPreviewDecoder
 
         if (allowScan && (!found || Math.Max(best.Width, best.Height) < SmallPreviewLongestSide))
         {
-            foreach (var offset in ScanForJpegs(source))
+            foreach (var offset in ScanForJpegs(source, context.Declared))
             {
                 if (context.Refs.Exists(r => r.Offset == offset)) continue;
-                if (TryValidate(source, new RawRef(offset, 0, false), out var candidate) && (!found || Area(candidate) > Area(best)))
+                if (TryValidate(source, new RawRef(offset, 0, false), out var candidate) && (!found || Better(candidate, best)))
                 {
                     best = candidate;
                     found = true;
@@ -149,6 +204,9 @@ internal static class RawPreviewDecoder
     }
 
     private static long Area(Candidate c) => (long)c.Width * c.Height;
+
+    private static bool Better(Candidate candidate, Candidate best)
+        => Area(candidate) > Area(best) || (Area(candidate) == Area(best) && candidate.Rank < best.Rank);
 
     private static void CollectStructured(Context context, ReadOnlySpan<byte> head)
     {
@@ -226,6 +284,8 @@ internal static class RawPreviewDecoder
         int compression = 0;
         long stripOffset = -1, stripCount = -1;
         int stripEntries = 0;
+        int width = 0, height = 0, bits = 0, photometric = -1, samples = 1, planar = 1;
+        long[]? stripOffsets = null, stripCounts = null, tileOffsets = null, tileCounts = null;
 
         for (var i = 0; i < count; i++)
         {
@@ -250,6 +310,8 @@ internal static class RawPreviewDecoder
                     case 0x0088: jpegOffset = ReadFirst(source, inline, type, raw32, inlineShort, inlineByte, valueOffset, le); break;
                     case 0x0089: jpegLength = ReadFirst(source, inline, type, raw32, inlineShort, inlineByte, valueOffset, le); break;
                     case 0x0081: if (!inline) context.Add(valueOffset, total, patch: true); break;
+                    // Epson (Olympus-style) maker note PreviewImage: a JPEG whose first byte is not 0xFF (ERF: 640x424).
+                    case 0x0280: if (!inline && type is 1 or 7) context.Add(valueOffset, total, patch: true); break;
                 }
                 continue;
             }
@@ -262,8 +324,24 @@ internal static class RawPreviewDecoder
                 case 0x0201: jpegOffset = ReadFirst(source, inline, type, raw32, inlineShort, inlineByte, valueOffset, le); break;
                 case 0x0202: jpegLength = ReadFirst(source, inline, type, raw32, inlineShort, inlineByte, valueOffset, le); break;
                 case 0x0103: compression = (int)ReadFirst(source, inline, type, raw32, inlineShort, inlineByte, valueOffset, le); break;
-                case 0x0111: stripEntries = (int)Math.Min(valueCount, int.MaxValue); stripOffset = ReadFirst(source, inline, type, raw32, inlineShort, inlineByte, valueOffset, le); break;
-                case 0x0117: stripCount = ReadFirst(source, inline, type, raw32, inlineShort, inlineByte, valueOffset, le); break;
+                case 0x0111:
+                    stripEntries = (int)Math.Min(valueCount, int.MaxValue);
+                    stripOffset = ReadFirst(source, inline, type, raw32, inlineShort, inlineByte, valueOffset, le);
+                    stripOffsets = ReadValues(source, e[8..], inline, type, valueCount, valueOffset, le);
+                    break;
+                case 0x0117:
+                    stripCount = ReadFirst(source, inline, type, raw32, inlineShort, inlineByte, valueOffset, le);
+                    stripCounts = ReadValues(source, e[8..], inline, type, valueCount, valueOffset, le);
+                    break;
+                case 0x0144: tileOffsets = ReadValues(source, e[8..], inline, type, valueCount, valueOffset, le); break;
+                case 0x0145: tileCounts = ReadValues(source, e[8..], inline, type, valueCount, valueOffset, le); break;
+                case 0x0100: width = (int)Math.Clamp(ReadFirst(source, inline, type, raw32, inlineShort, inlineByte, valueOffset, le), 0, int.MaxValue); break;
+                case 0x0101: height = (int)Math.Clamp(ReadFirst(source, inline, type, raw32, inlineShort, inlineByte, valueOffset, le), 0, int.MaxValue); break;
+                case 0x0102: bits = (int)ReadFirst(source, inline, type, raw32, inlineShort, inlineByte, valueOffset, le); break;
+                case 0x0106: photometric = (int)ReadFirst(source, inline, type, raw32, inlineShort, inlineByte, valueOffset, le); break;
+                case 0x0115: samples = (int)ReadFirst(source, inline, type, raw32, inlineShort, inlineByte, valueOffset, le); break;
+                case 0x011C: planar = (int)ReadFirst(source, inline, type, raw32, inlineShort, inlineByte, valueOffset, le); break;
+                case 0xC612: context.IsDng = true; break;
                 case 0x002E:
                     // RW2/RWL "JpgFromRaw" stored as an UNDEFINED blob directly in IFD0.
                     if (type == 7 && !inline) context.Add(valueOffset, total);
@@ -286,6 +364,10 @@ internal static class RawPreviewDecoder
                 case 0x927C:
                     if (context.MinoltaMakerNote && !inline)
                         ParseIfd(context, tiffBase, raw32, le, depth + 1, false, minolta: true);
+                    else if (!inline && IsEpsonMakerNote(source, valueOffset))
+                        ParseIfd(context, tiffBase, raw32 + 8, le, depth + 1, false, minolta: true); // "EPSON " + version, offsets file-relative
+                    else if (!inline && IsPhaseOneMakerNote(source, valueOffset))
+                        context.Declare(valueOffset, total); // IIQ: the sensor data lives inside this blob
                     break;
             }
         }
@@ -296,10 +378,80 @@ internal static class RawPreviewDecoder
         // (SOF3) streams are rejected later by header validation.
         if (compression is 6 or 7 or 99 or 34892 && stripEntries == 1 && stripOffset > 0 && stripCount > 0)
             context.Add(tiffBase + stripOffset, stripCount);
+        else if (compression == 1 && photometric == 2 && samples == 3 && planar == 1 && bits is 8 or 16 &&
+                 TryRgbLayout(source, tiffBase, width, height, bits, le, stripOffsets, stripCounts, out var rgb))
+            context.Add(rgb.Offsets[0], rgb.ByteCount, rgb: rgb);
+        else if (compression == 65000 && photometric is 2 or 6 && samples == 3 && bits is > 0 and <= 16 &&
+                 TryRgbLayout(source, tiffBase, width, height, bits, le, stripOffsets, stripCounts, out var kodak, kodak65000: photometric))
+            context.Add(kodak.Offsets[0], kodak.ByteCount, rgb: kodak);
+        else
+        {
+            // Anything else is sensor data (CFA, linear raw, lossless or vendor-compressed strips/tiles).
+            DeclareData(context, tiffBase, stripOffsets, stripCounts);
+            DeclareData(context, tiffBase, tileOffsets, tileCounts);
+        }
 
         var nextOffset = ifd + 2 + count * 12L;
         if (!source.TryU32(nextOffset, le, out var next)) return 0;
         return next;
+    }
+
+    /// <summary>Reads a SHORT/LONG array (at most 1M values); null for other types or unreadable data.</summary>
+    private static long[]? ReadValues(FileSource source, ReadOnlySpan<byte> inlineValue, bool inline, int type, long count, long valueOffset, bool le)
+    {
+        if (type is not (3 or 4 or 13) || count is <= 0 or > 1 << 20) return null;
+        var size = type == 3 ? 2 : 4;
+        var bytes = inline ? inlineValue[..(int)(count * size)].ToArray() : source.ReadBytes(valueOffset, count * size);
+        if (bytes is null || bytes.Length < count * size) return null;
+        var values = new long[count];
+        for (var i = 0; i < count; i++)
+        {
+            var at = bytes.AsSpan(i * size);
+            values[i] = size == 2
+                ? le ? BinaryPrimitives.ReadUInt16LittleEndian(at) : BinaryPrimitives.ReadUInt16BigEndian(at)
+                : le ? BinaryPrimitives.ReadUInt32LittleEndian(at) : BinaryPrimitives.ReadUInt32BigEndian(at);
+        }
+        return values;
+    }
+
+    private static bool TryRgbLayout(FileSource source, long tiffBase, int width, int height, int bits, bool le,
+        long[]? offsets, long[]? counts, out RgbLayout layout, int kodak65000 = 0)
+    {
+        layout = null!;
+        if (offsets is null || counts is null || offsets.Length == 0 || offsets.Length != counts.Length) return false;
+        if (!ManagedCodecSupport.IsValidDimensions(width, height)) return false;
+        var absolute = new long[offsets.Length];
+        long total = 0;
+        for (var i = 0; i < offsets.Length; i++)
+        {
+            absolute[i] = tiffBase + offsets[i];
+            if (offsets[i] <= 0 || counts[i] <= 0 || absolute[i] + counts[i] > source.Length) return false;
+            total += counts[i];
+        }
+        layout = new RgbLayout(width, height, bits, le, absolute, counts, kodak65000);
+        if (kodak65000 != 0) return offsets.Length == 1 && total <= MaxJpegBytes;
+        return total >= layout.ByteCount && layout.ByteCount <= MaxJpegBytes;
+    }
+
+    private static void DeclareData(Context context, long tiffBase, long[]? offsets, long[]? counts)
+    {
+        if (offsets is null || counts is null || offsets.Length != counts.Length) return;
+        for (var i = 0; i < offsets.Length; i++) context.Declare(tiffBase + offsets[i], counts[i]);
+    }
+
+    private static bool IsEpsonMakerNote(FileSource source, long offset)
+    {
+        var magic = source.ReadBytes(offset, 6);
+        return magic is not null && magic.AsSpan().SequenceEqual("EPSON "u8);
+    }
+
+    /// <summary>Phase One makernotes ("IIII"/"MMMM" + "CwaR"/"RawC") carry the IIQ sensor data.</summary>
+    private static bool IsPhaseOneMakerNote(FileSource source, long offset)
+    {
+        var magic = source.ReadBytes(offset, 8);
+        return magic is not null && magic.Length == 8 &&
+               (magic.AsSpan(0, 4).SequenceEqual("IIII"u8) || magic.AsSpan(0, 4).SequenceEqual("MMMM"u8)) &&
+               (magic.AsSpan(4, 4).SequenceEqual("CwaR"u8) || magic.AsSpan(4, 4).SequenceEqual("RawC"u8));
     }
 
     private static long ReadFirst(FileSource source, bool inline, int type, uint raw32, int inlineShort, byte inlineByte, long valueOffset, bool le)
@@ -526,17 +678,32 @@ internal static class RawPreviewDecoder
     // Generic embedded-JPEG scan (fallback)
     // ---------------------------------------------------------------------------------------------
 
-    private static List<long> ScanForJpegs(FileSource source)
+    private static List<long> ScanForJpegs(FileSource source, List<(long Start, long End)> declared)
     {
-        const int ChunkSize = 4 << 20;
         var results = new List<long>();
-        var buffer = new byte[ChunkSize + 2];
-        for (long position = 0; position < source.Length && results.Count < MaxCandidates; position += ChunkSize)
+        var buffer = new byte[(4 << 20) + 2];
+        // Only the gaps between the declared image data are scanned.
+        declared.Sort();
+        long from = 0;
+        foreach (var (start, end) in declared)
         {
-            var length = (int)Math.Min(ChunkSize + 2, source.Length - position);
+            if (start > from) ScanRange(source, from, start, buffer, results);
+            from = Math.Max(from, end);
+            if (results.Count >= MaxCandidates) return results;
+        }
+        ScanRange(source, from, source.Length, buffer, results);
+        return results;
+    }
+
+    private static void ScanRange(FileSource source, long rangeStart, long rangeEnd, byte[] buffer, List<long> results)
+    {
+        var chunkSize = buffer.Length - 2;
+        for (long position = rangeStart; position < rangeEnd && results.Count < MaxCandidates; position += chunkSize)
+        {
+            var length = (int)Math.Min(chunkSize + 2, source.Length - position);
             if (length < 3 || !source.TryRead(position, buffer.AsSpan(0, length))) break;
             var span = buffer.AsSpan(0, length);
-            var limit = Math.Min(length - 2, ChunkSize);
+            var limit = (int)Math.Min(Math.Min(length - 2, chunkSize), rangeEnd - position);
             var index = 0;
             while (index < limit)
             {
@@ -551,7 +718,53 @@ internal static class RawPreviewDecoder
                 index++;
             }
         }
-        return results;
+    }
+
+    /// <summary>
+    /// Converts an uncompressed RGB preview to BGRA. 16-bit previews have no declared tone range (Kodak
+    /// stores ~10-bit values, Hasselblad full 16-bit), so they are scaled by their own largest sample.
+    /// </summary>
+    private static bool TryReadRgb(FileSource source, RgbLayout layout, out DecodedImage image)
+    {
+        image = default;
+        if (layout.Kodak65000 != 0) return Kodak65000Decoder.TryDecode(source, layout.Offsets[0], layout.Counts[0], layout.Width, layout.Height, layout.Kodak65000 == 6, out image);
+        var data = new byte[layout.ByteCount];
+        long filled = 0;
+        for (var i = 0; i < layout.Offsets.Length && filled < data.Length; i++)
+        {
+            var take = (int)Math.Min(layout.Counts[i], data.Length - filled);
+            if (!source.TryRead(layout.Offsets[i], data.AsSpan((int)filled, take))) return false;
+            filled += take;
+        }
+        if (filled < data.Length || !ManagedCodecSupport.TryAllocatePixels(layout.Width, layout.Height, out var bgra)) return false;
+        var pixels = (long)layout.Width * layout.Height;
+        if (layout.Bits == 8)
+        {
+            for (long p = 0; p < pixels; p++)
+            {
+                bgra[p * 4] = data[p * 3 + 2];
+                bgra[p * 4 + 1] = data[p * 3 + 1];
+                bgra[p * 4 + 2] = data[p * 3];
+                bgra[p * 4 + 3] = 255;
+            }
+        }
+        else
+        {
+            int Sample(long index) => layout.LittleEndian
+                ? BinaryPrimitives.ReadUInt16LittleEndian(data.AsSpan((int)(index * 2)))
+                : BinaryPrimitives.ReadUInt16BigEndian(data.AsSpan((int)(index * 2)));
+            var max = 255;
+            for (long s = 0; s < pixels * 3; s++) max = Math.Max(max, Sample(s));
+            for (long p = 0; p < pixels; p++)
+            {
+                bgra[p * 4] = (byte)(Sample(p * 3 + 2) * 255 / max);
+                bgra[p * 4 + 1] = (byte)(Sample(p * 3 + 1) * 255 / max);
+                bgra[p * 4 + 2] = (byte)(Sample(p * 3) * 255 / max);
+                bgra[p * 4 + 3] = 255;
+            }
+        }
+        image = new DecodedImage(layout.Width, layout.Height, bgra);
+        return true;
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -561,6 +774,11 @@ internal static class RawPreviewDecoder
     private static bool TryValidate(FileSource source, RawRef r, out Candidate candidate)
     {
         candidate = default;
+        if (r.Rgb is not null)
+        {
+            candidate = new Candidate(r.Offset, r.Length, false, r.Rgb.Width, r.Rgb.Height, 1, 0, r.Rgb);
+            return true;
+        }
         if (!ParseJpegHeader(source, r.Offset, r.PatchSoi, out var width, out var height, out var orientation, out var sos)) return false;
         if (r.Length > 0 && sos > r.Offset + r.Length) return false;
         candidate = new Candidate(r.Offset, r.Length, r.PatchSoi, width, height, orientation, sos);
@@ -579,7 +797,7 @@ internal static class RawPreviewDecoder
         orientation = 1;
         sosOffset = 0;
         Span<byte> two = stackalloc byte[2];
-        if (!source.TryRead(offset, two) || two[1] != 0xD8 || (two[0] != 0xFF && !(patchSoi && two[0] == 0))) return false;
+        if (!source.TryRead(offset, two) || two[1] != 0xD8 || (two[0] != 0xFF && !patchSoi)) return false;
         var position = offset + 2;
         var sawFrame = false;
         var sawTables = false;

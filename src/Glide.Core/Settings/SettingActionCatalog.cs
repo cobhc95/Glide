@@ -16,6 +16,7 @@ public static class SettingActionCatalog
     /// <summary>Choice option lists, in Settings combo-box order.</summary>
     public static IReadOnlyDictionary<string, string[]> Choices { get; } = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
     {
+        ["navigation.endOfFolder"] = ["Do nothing", "Loop this folder", "Move to the next folder", "Move to the next folder in a new tab", "Go back to the previous folder", "Show Home", "Ask me each time"],
         ["navigation.hierarchicalPreviousEntry"] = ["First image", "Last image"],
         ["navigation.rateLimitInput"] = ["Mouse only", "Keyboard only", "Both"],
         ["navigation.rateLimitIndicatorPosition"] = ["Top left", "Top right", "Bottom left", "Bottom right", "Centre"],

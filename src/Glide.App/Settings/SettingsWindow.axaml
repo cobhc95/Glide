@@ -277,21 +277,38 @@
           </controls:SettingsCard>
             <controls:SettingsCard CardId="window-folders" Title="Moving between folders" Subtitle="What next / previous does at the end of a folder" Icon="FolderNext" IsExpanded="False">
               <StackPanel Classes="settingsCardBody" Spacing="10">
-                <CheckBox x:Name="ContinueSiblingFoldersCheck" Content="Automatically continue into sibling folders" ToolTip.Tip="At image-list boundaries Glide continues browsing into the next eligible folder."/>
-                <CheckBox x:Name="HierarchicalFolderTraversalCheck" Content="Continue into nearby parent/grandparent folder branches" ToolTip.Tip="When the current sibling set ends, continue into the next nearby branch. Enabled by default."/>
-                <CheckBox x:Name="ConfirmHierarchicalFolderTraversalCheck" Content="Confirm before leaving the current folder branch" ToolTip.Tip="The first ancestor-boundary transition asks before continuing; the prompt can be disabled permanently."/>
-                <Grid ColumnDefinitions="300,220,*" Margin="6,0,0,0">
-                  <TextBlock Text="Previous into parent/grandparent branch" VerticalAlignment="Center"/>
-                  <ComboBox x:Name="HierarchicalPreviousFolderEntryCombo" Grid.Column="1" Width="210">
-                    <ComboBoxItem Content="First image"/>
-                    <ComboBoxItem Content="Last image"/>
+                <Grid ColumnDefinitions="300,300,*">
+                  <TextBlock Text="When the last image is reached" VerticalAlignment="Center"/>
+                  <ComboBox x:Name="EndOfFolderActionCombo" Grid.Column="1" Width="290" ToolTip.Tip="What Next does at the last image of a folder. Previous at the first image does the same in the other direction (&quot;next&quot; is the folder in the direction you are moving).">
+                    <ComboBoxItem Content="Do nothing"/>
+                    <ComboBoxItem Content="Loop this folder"/>
+                    <ComboBoxItem Content="Move to the next folder"/>
+                    <ComboBoxItem Content="Move to the next folder in a new tab"/>
+                    <ComboBoxItem Content="Go back to the previous folder"/>
+                    <ComboBoxItem Content="Show Home"/>
+                    <ComboBoxItem Content="Ask me each time"/>
                   </ComboBox>
-                  <TextBlock Grid.Column="2" Classes="phaseNote" Text="Default: first image." VerticalAlignment="Center" Margin="8,0,0,0"/>
                 </Grid>
-                <CheckBox x:Name="FolderNavFirstImageCheck" Content="Open the first image when entering a sibling folder (off: the last image)"/>
-                <CheckBox x:Name="FolderNavWrapCheck" Content="Wrap sibling-folder navigation at parent-directory ends"/>
-                <CheckBox x:Name="FolderNavSkipEmptyCheck" Content="Skip sibling folders that contain no supported images"/>
-                <CheckBox x:Name="FolderNavIncludeHiddenCheck" Content="Include hidden sibling folders" ToolTip.Tip="Off by default. When disabled, folders marked Hidden (and dot-prefixed folders) are excluded from sibling navigation."/>
+                <TextBlock Classes="phaseNote" Text="Default: move to the next folder." Margin="0,-4,0,0"/>
+                <Border x:Name="EndOfFolderFolderOptions" BorderBrush="#40FFFFFF" BorderThickness="1,0,0,0" Padding="14,2,0,2" Margin="8,0,0,0">
+                  <StackPanel Spacing="10">
+                    <TextBlock Text="Folder options" FontWeight="SemiBold" Opacity="0.85"/>
+                    <CheckBox x:Name="HierarchicalFolderTraversalCheck" Content="Continue into nearby parent/grandparent folder branches" ToolTip.Tip="When the current sibling set ends, continue into the next nearby branch. Enabled by default."/>
+                    <CheckBox x:Name="ConfirmHierarchicalFolderTraversalCheck" Content="Confirm before leaving the current folder branch" ToolTip.Tip="The first ancestor-boundary transition asks before continuing; the prompt can be disabled permanently."/>
+                    <Grid ColumnDefinitions="300,220,*" Margin="6,0,0,0">
+                      <TextBlock Text="Previous into parent/grandparent branch" VerticalAlignment="Center"/>
+                      <ComboBox x:Name="HierarchicalPreviousFolderEntryCombo" Grid.Column="1" Width="210">
+                        <ComboBoxItem Content="First image"/>
+                        <ComboBoxItem Content="Last image"/>
+                      </ComboBox>
+                      <TextBlock Grid.Column="2" Classes="phaseNote" Text="Default: first image." VerticalAlignment="Center" Margin="8,0,0,0"/>
+                    </Grid>
+                    <CheckBox x:Name="FolderNavFirstImageCheck" Content="Open the first image when entering a sibling folder (off: the last image)"/>
+                    <CheckBox x:Name="FolderNavWrapCheck" Content="Wrap sibling-folder navigation at parent-directory ends"/>
+                    <CheckBox x:Name="FolderNavSkipEmptyCheck" Content="Skip sibling folders that contain no supported images"/>
+                    <CheckBox x:Name="FolderNavIncludeHiddenCheck" Content="Include hidden sibling folders" ToolTip.Tip="Off by default. When disabled, folders marked Hidden (and dot-prefixed folders) are excluded from sibling navigation."/>
+                  </StackPanel>
+                </Border>
             </StackPanel>
           </controls:SettingsCard>
             <controls:SettingsCard CardId="window-title-bar" Title="Title bar buttons" Subtitle="Utility buttons and the folder navigation buttons" Icon="Interface" IsExpanded="False">

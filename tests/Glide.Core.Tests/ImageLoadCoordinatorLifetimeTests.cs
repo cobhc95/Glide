@@ -342,13 +342,17 @@ public sealed class ImageLoadCoordinatorLifetimeTests : IDisposable
     }
 
     [Theory]
-    [InlineData("direct.png")]
-    [InlineData("direct.jpg")]
-    [InlineData("direct.tif")]
-    [InlineData("direct.bmp")]
-    public void DirectFullDecode_IsPixelIdenticalToTheBufferedPath(string name)
+    [InlineData("direct.png", 1500, 1000)]
+    [InlineData("direct.jpg", 1500, 1000)]
+    [InlineData("direct.tif", 1500, 1000)]
+    [InlineData("direct.bmp", 1500, 1000)]
+    // 5.0.7: TIFF and BMP of 4 MP and more decode in parallel bands (one WIC decoder per band).
+    [InlineData("direct-bands.tif", 3000, 2000)]
+    [InlineData("direct-bands.bmp", 3000, 2000)]
+    [InlineData("direct-bands-odd.tif", 2999, 2003)]
+    public void DirectFullDecode_IsPixelIdenticalToTheBufferedPath(string name, int width, int height)
     {
-        var path = WriteImage(name, 1500, 1000, seed: 5);
+        var path = WriteImage(name, width, height, seed: 5);
         Assert.True(NativeImageDecoder.TryDecodeFullBufferedForTests(path, out var buffered));
         using (buffered)
         {
@@ -379,16 +383,40 @@ public sealed class ImageLoadCoordinatorLifetimeTests : IDisposable
         Assert.True(NativeImageDecoder.IsNativeCodecKnownUnavailable("d" + ext));
         Assert.False(NativeImageDecoder.IsNativeCodecKnownUnavailable("photo.jpg"));
     }
-    [Fact]
-    public void DirectFullDecode_DefersRotatedImagesToTheOrientationAwarePath()
+    [Theory]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    [InlineData(5)]
+    [InlineData(6)]
+    [InlineData(7)]
+    [InlineData(8)]
+    public void DirectFullDecode_OfAnExifOrientedJpeg_IsPixelIdenticalToTheBufferedOrientationPath(ushort orientation)
     {
-        var jpeg = WriteImage("direct-rotated.jpg", 1200, 800, exifApp1: ExifOrientation(6));
-        Assert.False(NativeImageDecoder.TryDecodeFullDirectForTests(jpeg, out _));
-        Assert.True(NativeImageDecoder.TryDecode(jpeg, 0, out var rotated));
-        using (rotated)
+        // 2400 x 1700 = 4.08 MP: large enough for the multi-threaded transform (5.0.7).
+        var jpeg = WriteImage($"direct-rotated-{orientation}.jpg", 2400, 1700, seed: orientation, exifApp1: ExifOrientation(orientation));
+        var swaps = orientation >= 5;
+        Assert.True(NativeImageDecoder.TryDecode(jpeg, 0, out var oriented));
+        using (oriented)
         {
-            Assert.Equal(800, rotated.PixelSize.Width);
-            Assert.Equal(1200, rotated.PixelSize.Height);
+            Assert.Equal(swaps ? 1700 : 2400, oriented.PixelSize.Width);
+            Assert.Equal(swaps ? 2400 : 1700, oriented.PixelSize.Height);
+            Assert.True(NativeImageDecoder.TryDecodeFullBufferedForTests(jpeg, out var buffered));
+            using (buffered)
+            {
+                if (!NativeImageDecoder.TryDecodeFullDirectForTests(jpeg, out var direct))
+                {
+                    // Bridges before 5.0.7 hand oriented frames to the buffered path (status 2).
+                    Assert.NotEqual("1", Environment.GetEnvironmentVariable("GLIDE_EXPECT_DIRECT_DECODE"));
+                    return;
+                }
+                using (direct)
+                {
+                    Assert.Equal(buffered.PixelSize, direct.PixelSize);
+                    Assert.Equal(Pixels(buffered), Pixels(direct));
+                    Assert.Equal(Pixels(oriented), Pixels(direct));
+                }
+            }
         }
     }
 

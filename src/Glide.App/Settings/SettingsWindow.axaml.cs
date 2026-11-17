@@ -220,6 +220,7 @@ public partial class SettingsWindow : Window
         HotkeyPresetCombo.SelectionChanged += (_, _) => UpdateHotkeyPresetButtons();
         ExplorerScrollModeCombo.SelectionChanged += (_, _) => UpdateExplorerScrollModeRows();
         ExplorerLocateOpensInCombo.SelectionChanged += (_, _) => UpdateLocateDependentControls();
+        EndOfFolderActionCombo.SelectionChanged += (_, _) => UpdateEndOfFolderDependentControls();
         _searchDebounceTimer.Tick += (_, _) =>
         {
             _searchDebounceTimer.Stop();
@@ -259,8 +260,9 @@ public partial class SettingsWindow : Window
         SettingsAlwaysExpandSwitch.IsCheckedChanged += (_, _) =>
         {
             if (_loadingControls) return;
-            // Off restores the collapsed view instead of leaving every section open.
-            SetActivePageCardsExpanded(SettingsAlwaysExpandSwitch.IsChecked == true);
+            // Off restores the collapsed view on every page (not just the visible one) instead of leaving sections open.
+            if (SettingsAlwaysExpandSwitch.IsChecked == true) ApplyAlwaysExpand();
+            else CollapseCardsOpenedByAlwaysExpand();
         };
         ApplySettingsTooltips();
         Glide.Core.GlidePerformanceTrace.Mark("settings_wired");
@@ -414,7 +416,8 @@ public partial class SettingsWindow : Window
             HistorySizeBox.Value = s.HistorySize;
             RememberPlacementCheck.IsChecked = s.RememberWindowPlacement;
             ReuseSingleInstanceCheck.IsChecked = s.ReuseSingleInstance;
-            ContinueSiblingFoldersCheck.IsChecked = s.ContinueSiblingFolders;
+            SelectByText(EndOfFolderActionCombo, Glide.Core.Navigation.EndOfFolderActions.Normalize(s.EndOfFolderAction));
+            UpdateEndOfFolderDependentControls();
             HierarchicalFolderTraversalCheck.IsChecked = s.HierarchicalFolderTraversal;
             ConfirmHierarchicalFolderTraversalCheck.IsChecked = s.ConfirmHierarchicalFolderTraversal;
             SelectByText(HierarchicalPreviousFolderEntryCombo, string.IsNullOrWhiteSpace(s.HierarchicalPreviousFolderEntry) ? "First image" : s.HierarchicalPreviousFolderEntry);
@@ -678,10 +681,39 @@ public partial class SettingsWindow : Window
     /// </summary>
     private void ApplyAlwaysExpand()
     {
-        if (SettingsAlwaysExpandSwitch?.IsChecked != true) return;
+        if (SettingsAlwaysExpandSwitch?.IsChecked != true)
+        {
+            // A load that turns the switch off (Restore defaults, a profile, a backup) must not leave the pages it had
+            // opened expanded.
+            if (_alwaysExpandedPages.Count > 0) CollapseCardsOpenedByAlwaysExpand();
+            return;
+        }
+        if (!string.IsNullOrEmpty(_activeCategory)) _alwaysExpandedPages.Add(_activeCategory);
         if (ActivePageCards().Any(c => !c.IsExpanded)) SetActivePageCardsExpanded(true);
         else UpdateExpandCollapseButtons();
     }
+
+    // Pages whose cards "Always expand" opened in this window; turning it off collapses them all, not only the visible
+    // page (otherwise a page visited while it was on, e.g. Mouse & keyboard, stayed fully expanded with the switch off).
+    private readonly HashSet<string> _alwaysExpandedPages = new(StringComparer.OrdinalIgnoreCase);
+
+    private void CollapseCardsOpenedByAlwaysExpand()
+    {
+        _alwaysExpandedPages.Add(_activeCategory ?? "");
+        _bulkExpandChange = true;
+        try
+        {
+            foreach (var page in _alwaysExpandedPages)
+                foreach (var card in _cardsByPage.GetValueOrDefault(page) ?? new List<SettingsCard>()) card.IsExpanded = false;
+        }
+        finally { _bulkExpandChange = false; }
+        _alwaysExpandedPages.Clear();
+        SetSettingsScrollSlack(0);
+        UpdateExpandCollapseButtons();
+    }
+
+    /// <summary>Test hook: whether a card is expanded.</summary>
+    internal bool IsCardExpandedForTests(string cardId) => _cardById.TryGetValue(cardId, out var c) && c.IsExpanded;
 
     /// <summary>How many times every editor was read into a state (tests: typing must not do it per keystroke).</summary>
     internal int ReadControlsCountForTests { get; private set; }
@@ -699,7 +731,7 @@ public partial class SettingsWindow : Window
         state.HistorySize = (int)(HistorySizeBox.Value ?? 8);
         state.RememberWindowPlacement = RememberPlacementCheck.IsChecked == true;
         state.ReuseSingleInstance = ReuseSingleInstanceCheck.IsChecked == true;
-        state.ContinueSiblingFolders = ContinueSiblingFoldersCheck.IsChecked == true;
+        state.EndOfFolderAction = Glide.Core.Navigation.EndOfFolderActions.Normalize(SelectedText(EndOfFolderActionCombo, Glide.Core.Navigation.EndOfFolderActions.Default));
         state.HierarchicalFolderTraversal = HierarchicalFolderTraversalCheck.IsChecked == true;
         state.ConfirmHierarchicalFolderTraversal = ConfirmHierarchicalFolderTraversalCheck.IsChecked == true;
         state.HierarchicalPreviousFolderEntry = SelectedText(HierarchicalPreviousFolderEntryCombo, "First image");
@@ -954,6 +986,11 @@ public partial class SettingsWindow : Window
 
     /// <summary>Greys out the Rows / Pixels per notch rows unless their scroll amount mode is selected.</summary>
     /// <summary>"Back after opening a picture's folder" only matters when the folder opens in another tab or window.</summary>
+    /// <summary>The "Folder options" under "When the last image is reached" apply only to the folder choices (and Ask).</summary>
+    private void UpdateEndOfFolderDependentControls() =>
+        EndOfFolderFolderOptions.IsEnabled = Glide.Core.Navigation.EndOfFolderActions.UsesFolderOptions(
+            Glide.Core.Navigation.EndOfFolderActions.Parse(SelectedText(EndOfFolderActionCombo, Glide.Core.Navigation.EndOfFolderActions.Default)));
+
     private void UpdateLocateDependentControls() =>
         ExplorerBackReturnsToImageRow.IsEnabled = Glide.Core.Navigation.ExplorerLocateTargets.Normalize(
             SelectedText(ExplorerLocateOpensInCombo, Glide.Core.Navigation.ExplorerLocateTargets.Default)) != Glide.Core.Navigation.ExplorerLocateTargets.SameTab;
@@ -2364,7 +2401,7 @@ public partial class SettingsWindow : Window
     {
         void M(string id, Control control) => _settingControls[id] = control;
         M("general.recentHistory", RecentHistoryCheck); M("search.showRelatedResults", SearchShowRelatedCheck); M("general.historySize", HistorySizeBox); M("windows.rememberPlacement", RememberPlacementCheck); M("general.openFileDefaultDirectory", OpenFileDefaultDirectoryBox);
-        M("general.singleInstance", ReuseSingleInstanceCheck); M("navigation.siblingFolders", ContinueSiblingFoldersCheck); M("navigation.hierarchicalFolders", HierarchicalFolderTraversalCheck); M("navigation.confirmHierarchicalBoundary", ConfirmHierarchicalFolderTraversalCheck); M("navigation.hierarchicalPreviousEntry", HierarchicalPreviousFolderEntryCombo); M("navigation.rateLimitMs", NavigationRateLimitMsBox); M("navigation.rateLimitInput", NavigationRateLimitInputCombo); M("navigation.rateLimitIndicator", NavigationRateLimitIndicatorCheck); M("navigation.skipHint", NavigationSkipHintCheck); M("navigation.rateLimitIndicatorPosition", NavigationRateLimitIndicatorPositionCombo); M("navigation.rateLimitWindowed", NavigationRateLimitWindowedCheck); M("navigation.rateLimitFullscreen", NavigationRateLimitFullscreenCheck); M("navigation.rateLimitSlideshow", NavigationRateLimitSlideshowCheck); M("general.lastOpenLocation", RememberLastOpenCheck); M("general.newExplorerTabLastLocation", NewExplorerTabLastLocationCheck); M("general.newExplorerTabDefaultDirectory", NewExplorerTabDefaultDirectoryBox);
+        M("general.singleInstance", ReuseSingleInstanceCheck); M("navigation.endOfFolder", EndOfFolderActionCombo); M("navigation.hierarchicalFolders", HierarchicalFolderTraversalCheck); M("navigation.confirmHierarchicalBoundary", ConfirmHierarchicalFolderTraversalCheck); M("navigation.hierarchicalPreviousEntry", HierarchicalPreviousFolderEntryCombo); M("navigation.rateLimitMs", NavigationRateLimitMsBox); M("navigation.rateLimitInput", NavigationRateLimitInputCombo); M("navigation.rateLimitIndicator", NavigationRateLimitIndicatorCheck); M("navigation.skipHint", NavigationSkipHintCheck); M("navigation.rateLimitIndicatorPosition", NavigationRateLimitIndicatorPositionCombo); M("navigation.rateLimitWindowed", NavigationRateLimitWindowedCheck); M("navigation.rateLimitFullscreen", NavigationRateLimitFullscreenCheck); M("navigation.rateLimitSlideshow", NavigationRateLimitSlideshowCheck); M("general.lastOpenLocation", RememberLastOpenCheck); M("general.newExplorerTabLastLocation", NewExplorerTabLastLocationCheck); M("general.newExplorerTabDefaultDirectory", NewExplorerTabDefaultDirectoryBox);
         M("appearance.theme", ThemeCombo); M("appearance.explorerTheme", ExplorerThemeCombo); M("appearance.accent", AccentCombo); M("appearance.glowColor", GlowCombo); M("appearance.background", MainBackgroundCombo); M("appearance.glowIntensity", GlowIntensityBox);
         M("general.showRecentOnHome", ShowRecentOnHomeCheck); M("general.confirmDiscardSettings", ConfirmDiscardSettingsCheck);
         M("updates.checkDaily", UpdateCheckDailyCheck); M("updates.dontRemind", UpdateDontRemindCheck);

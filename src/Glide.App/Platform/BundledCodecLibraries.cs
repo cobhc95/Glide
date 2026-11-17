@@ -34,6 +34,7 @@ internal static class BundledCodecLibraries
         ".dng", ".cr2", ".cr3", ".crw", ".nef", ".nrw", ".arw", ".srf", ".sr2", ".raf", ".orf", ".ori", ".rw2", ".rwl",
         ".pef", ".ptx", ".3fr", ".fff", ".iiq", ".cap", ".eip", ".mef", ".mos", ".mrw", ".x3f", ".erf", ".kdc", ".dcr",
         ".k25", ".bay", ".srw", ".rwz", ".gpr", ".mdc", ".raw", ".dcs", ".drf", ".dsc", ".r2d", ".rw1",
+        ".icns", ".ras", ".sun", ".xwd", ".dpx",
     };
 
     /// <summary><c>&lt;directory of Glide.exe&gt;\codecs</c>, where the installer and the portable ZIP put them.</summary>

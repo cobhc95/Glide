@@ -9,7 +9,13 @@
     <Style Selector=":is(Border).exTile:pointerover Border.exFill"><Setter Property="Opacity" Value="0.16"/></Style>
     <Style Selector=":is(Border).exTile.selected Border.exFill"><Setter Property="Opacity" Value="0.34"/></Style>
     <Style Selector=":is(Border).exTile.selected:pointerover Border.exFill"><Setter Property="Opacity" Value="0.46"/></Style>
-    <Style Selector=":is(Border).exTile.focused"><Setter Property="BorderBrush" Value="{DynamicResource BrushAccent}"/></Style>
+    <!-- Selection outline sits directly on the fill's edge (no gap): 3 px when selected, 1 px for keyboard focus alone;
+         selected + focused keeps the 3 px band with a light inner hairline so focus stays visible within a selection. -->
+    <Style Selector=":is(Border).exTile Border.exOutline"><Setter Property="BorderBrush" Value="{DynamicResource BrushExplorerOutline}"/><Setter Property="BorderThickness" Value="0"/></Style>
+    <Style Selector=":is(Border).exTile.focused Border.exOutline"><Setter Property="BorderThickness" Value="1"/></Style>
+    <Style Selector=":is(Border).exTile.selected Border.exOutline"><Setter Property="BorderThickness" Value="3"/></Style>
+    <Style Selector=":is(Border).exTile Border.exFocus"><Setter Property="BorderBrush" Value="{DynamicResource BrushText}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="Opacity" Value="0"/></Style>
+    <Style Selector=":is(Border).exTile.selected.focused Border.exFocus"><Setter Property="Opacity" Value="0.85"/></Style>
     <Style Selector=":is(Border).exTile.drop"><Setter Property="BorderBrush" Value="{DynamicResource BrushAccent}"/><Setter Property="BorderThickness" Value="2"/></Style>
     <Style Selector=":is(Border).exTile.cut"><Setter Property="Opacity" Value="0.5"/></Style>
     <Style Selector=":is(Border).exTile TextBlock.exName"><Setter Property="Foreground" Value="{DynamicResource BrushText}"/></Style>

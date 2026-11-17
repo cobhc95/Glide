@@ -364,13 +364,13 @@ public partial class MainWindow
         Control? thumbnailFallback = null;
         var thumbnailWidth = 0;
         Control content;
-        var nameBlock = new TextBlock
-        {
-            Text = entry.Name, FontSize = 12.5,
-            TextTrimming = TextTrimming.CharacterEllipsis,
-            VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
-            Tag = "name"
-        };
+        // Icon-mode captions wrap and always end a clipped name with an ellipsis (see CaptionTextBlock).
+        var nameBlock = ExplorerViewModes.IsIconMode(mode) ? new Glide.App.Controls.CaptionTextBlock() : new TextBlock();
+        nameBlock.Text = entry.Name;
+        nameBlock.FontSize = 12.5;
+        nameBlock.TextTrimming = TextTrimming.CharacterEllipsis;
+        nameBlock.VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center;
+        nameBlock.Tag = "name";
         nameBlock.Classes.Add("exName");
         var nameHost = new Panel { Name = "NameHost", Tag = "namehost" };
         nameHost.Children.Add(nameBlock);
@@ -379,11 +379,16 @@ public partial class MainWindow
         {
             var (previewWidth, previewHeight) = ExplorerViewModes.PreviewSize(mode);
             nameBlock.TextAlignment = TextAlignment.Center;
-            nameBlock.MaxLines = 2;
+            // Wrap (long names without spaces break anywhere), clamp to the reserved lines and end with an ellipsis;
+            // the tile height reserves exactly these lines so the caption never leaves the selection fill.
+            nameBlock.MaxLines = ExplorerViewModes.CaptionLines;
+            nameBlock.LineHeight = ExplorerViewModes.CaptionLineHeight;
             nameBlock.TextWrapping = TextWrapping.Wrap;
+            nameBlock.VerticalAlignment = Avalonia.Layout.VerticalAlignment.Top;
+            // (No fixed height or clip on the host: the inline rename editor lives there and may need more room.)
             nameHost.Width = previewWidth;
             nameHost.HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center;
-            var panel = new StackPanel { Spacing = 6, HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center };
+            var panel = new StackPanel { Spacing = ExplorerViewModes.CaptionSpacing, HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center, Margin = new Thickness(0, ExplorerViewModes.IconTopInset(mode), 0, 0) };
             var previewBorder = new Border
             {
                 Width = previewWidth,
@@ -499,16 +504,32 @@ public partial class MainWindow
             content = grid;
         }
 
+        var compact = !ExplorerViewModes.IsIconMode(mode);
+        // The fill reaches out into the tile padding by the outline width, so the 3 px selection outline (drawn on the
+        // fill's own edge, no gap) wraps the content without covering it or moving it, and the tile size never changes.
+        var reach = compact ? ExplorerViewModes.CompactOutlineReach : ExplorerViewModes.IconOutlineReach;
+        var fillMargin = new Thickness(-reach.Left, -reach.Top, -reach.Right, -reach.Bottom);
+        var fillRadius = compact ? 5 : 7;
         var fill = new Border
         {
-            Name = "SelectionFill", CornerRadius = new CornerRadius(5), IsHitTestVisible = false,
+            Name = "SelectionFill", CornerRadius = new CornerRadius(fillRadius), IsHitTestVisible = false, Margin = fillMargin,
             Background = (IBrush?)this.FindResource("BrushAccent") ?? Brushes.DodgerBlue
         };
         fill.Classes.Add("exFill");
+        var outline = new Border { Name = "SelectionOutline", CornerRadius = new CornerRadius(fillRadius), IsHitTestVisible = false, Margin = fillMargin };
+        outline.Classes.Add("exOutline");
+        // Focus hairline: the innermost pixel of the 3 px band (shown only on a selected + focused tile).
+        var focusRing = new Border
+        {
+            Name = "FocusHairline", CornerRadius = new CornerRadius(fillRadius - 2), IsHitTestVisible = false,
+            Margin = new Thickness(2 - reach.Left, 2 - reach.Top, 2 - reach.Right, 2 - reach.Bottom)
+        };
+        focusRing.Classes.Add("exFocus");
         var root = new Grid();
         root.Children.Add(fill);
         root.Children.Add(content);
-        var compact = !ExplorerViewModes.IsIconMode(mode);
+        root.Children.Add(outline);
+        root.Children.Add(focusRing);
         tile.Tag = entry;
         if (tile is ExplorerTile built) built.BuiltMode = mode;
         tile.Child = root;

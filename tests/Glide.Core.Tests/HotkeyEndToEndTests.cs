@@ -810,6 +810,8 @@ public sealed class HotkeyEndToEndTests
             ["MainWindow.Slideshow.cs"] = "slideshow interval dialog keys",
             ["MainWindow.Browser.cs"] = "Explorer filter text box: Esc / Down / Enter move between the box and the list",
             ["MainWindow.Navigation.cs"] = "folder-boundary prompt: remembers a held arrow until it is released",
+            ["MainWindow.EndOfFolder.cs"] = "\"Ask me each time\" end-of-folder picker: owns the keyboard while open (its keys come from EndOfFolderPickerCard.Translate; the repeat key is resolved through the hotkey map)",
+            ["Controls/EndOfFolderPickerCard.cs"] = "\"Ask me each time\" picker keys: arrows, Enter, Esc, 1-5",
             ["Services/KeyboardShortcutText.cs"] = "the canonical key-to-text adapter",
             ["Services/DialogEscape.cs"] = "Esc cancels every dialog / secondary window (one class handler; never the main viewer window)",
             ["Controls/ExplorerAddressBar.cs"] = "address bar text editing",

@@ -16,6 +16,7 @@ using Glide.App.Settings;
 using Glide.App.Services;
 using Glide.Core;
 using Glide.Core.Commands;
+using Glide.Core.Navigation;
 using Glide.Core.Workspace;
 using Glide.Imaging;
 
@@ -1025,7 +1026,8 @@ public partial class MainWindow
             return;
         }
 
-        if (atBoundary && _settings.ContinueSiblingFolders)
+        var endStep = atBoundary ? EndOfFolderStepFor(delta) : EndOfFolderStep.Stay;
+        if (atBoundary && endStep.Kind != EndOfFolderStepKind.Stay)
         {
             // The folder index may still be a stale single-item fallback after a transient
             // enumeration failure or a late folder refresh. Before declaring a branch boundary,
@@ -1053,10 +1055,10 @@ public partial class MainWindow
                     return;
                 }
             }
-            // Sibling lookup/presentation is itself serialized by this gate, but it is deliberately
-            // entered only after the caller has reached this branch; ordinary in-folder clicks never
-            // queue behind a previous image decode.
-            await RunSerializedNavigationResultAsync(() => TryNavigateSiblingFolderAsync(Math.Sign(delta)));
+            // The end-of-folder step (sibling lookup, loop, new tab, Home, picker) is itself serialized by this gate,
+            // but it is deliberately entered only after the caller has reached this branch; ordinary in-folder clicks
+            // never queue behind a previous image decode.
+            await RunSerializedNavigationResultAsync(() => ExecuteEndOfFolderStepAsync(endStep, Math.Sign(delta)));
             return;
         }
 
@@ -1214,48 +1216,7 @@ public partial class MainWindow
 
     private async Task<bool> TryNavigateSiblingFolderAsync(int direction, bool forceFirstImage = false, bool forceDirectionalEdge = false, bool rapidPreviewOnly = false)
     {
-        var navigationEpoch = _navigationCommandEpoch;
-        var current = _navigator.Current;
-        if (current is null || direction == 0 || _navigationBoundaryPromptActive) return false;
-        SiblingFolderNavigationResult? result;
-        try
-        {
-            result = await SiblingFolderNavigationService.FindAsync(
-                current,
-                direction,
-                new SiblingFolderNavigationOptions(
-                    _settings.FolderNavIncludeHidden,
-                    _settings.FolderNavWrap,
-                    _settings.FolderNavSkipEmpty,
-                    forceDirectionalEdge ? direction > 0 : _settings.FolderNavOpenFirstImage,
-                    _settings.HierarchicalFolderTraversal,
-                    _settings.FolderNavOrder,
-                    string.Equals(_settings.HierarchicalPreviousFolderEntry, "First image", StringComparison.OrdinalIgnoreCase)),
-                forceFirstImage,
-                ImageNavigator.IsSupported);
-        }
-        catch (OperationCanceledException) { return false; }
-        catch (Exception ex)
-        {
-            _diagnostics.Write("navigation", "sibling_folder_failed", new { path = current, error = ex.GetType().Name });
-            return false;
-        }
-        if (result is null || navigationEpoch != _navigationCommandEpoch ||
-            !string.Equals(_navigator.Current, current, StringComparison.OrdinalIgnoreCase)) return false;
-        if (result.CrossedAncestorBoundary && _settings.ConfirmHierarchicalFolderTraversal)
-        {
-            // A blocking boundary prompt is a hard navigation barrier. Do not allow a second
-            // in-flight click/wheel/key request to open another prompt or become stale work that
-            // executes after the first dialog closes.
-            if (_navigationBoundaryPromptActive) return false;
-            var decision = await ConfirmHierarchicalFolderBoundaryAsync(result);
-            if (!decision.Continue) return false;
-            if (decision.DontRemindAgain)
-            {
-                _settings.ConfirmHierarchicalFolderTraversal = false;
-                SaveSettingsAndPublish();
-            }
-        }
+        if (await FindSiblingFolderAsync(direction, forceFirstImage, forceDirectionalEdge) is not { } result) return false;
         _navigator.ReplaceFolderIndex(result.Images, result.SelectedPath);
         _folderIndexReady = true;
         _folderIndexCanonicalReady = true;
@@ -1271,6 +1232,50 @@ public partial class MainWindow
         });
         await PresentCurrentAsync(rapidPreviewOnly: rapidPreviewOnly, forceFull: !rapidPreviewOnly);
         return true;
+    }
+
+    /// <summary>
+    /// The sibling (or nearby-branch) folder in <paramref name="direction"/> with the folder options applied, after the
+    /// branch-boundary confirmation; null when there is none, the user declined, or navigation moved on meanwhile.
+    /// </summary>
+    private async Task<SiblingFolderNavigationResult?> FindSiblingFolderAsync(int direction, bool forceFirstImage = false, bool forceDirectionalEdge = false)
+    {
+        var navigationEpoch = _navigationCommandEpoch;
+        var current = _navigator.Current;
+        if (current is null || direction == 0 || _navigationBoundaryPromptActive) return null;
+        SiblingFolderNavigationResult? result;
+        try
+        {
+            result = await SiblingFolderNavigationService.FindAsync(
+                current,
+                direction,
+                SiblingFolderOptions(direction, forceDirectionalEdge),
+                forceFirstImage,
+                ImageNavigator.IsSupported);
+        }
+        catch (OperationCanceledException) { return null; }
+        catch (Exception ex)
+        {
+            _diagnostics.Write("navigation", "sibling_folder_failed", new { path = current, error = ex.GetType().Name });
+            return null;
+        }
+        if (result is null || navigationEpoch != _navigationCommandEpoch ||
+            !string.Equals(_navigator.Current, current, StringComparison.OrdinalIgnoreCase)) return null;
+        if (result.CrossedAncestorBoundary && _settings.ConfirmHierarchicalFolderTraversal)
+        {
+            // A blocking boundary prompt is a hard navigation barrier. Do not allow a second
+            // in-flight click/wheel/key request to open another prompt or become stale work that
+            // executes after the first dialog closes.
+            if (_navigationBoundaryPromptActive) return null;
+            var decision = await ConfirmHierarchicalFolderBoundaryAsync(result);
+            if (!decision.Continue) return null;
+            if (decision.DontRemindAgain)
+            {
+                _settings.ConfirmHierarchicalFolderTraversal = false;
+                SaveSettingsAndPublish();
+            }
+        }
+        return result;
     }
 
     private async Task<(bool Continue, bool DontRemindAgain)> ConfirmHierarchicalFolderBoundaryAsync(SiblingFolderNavigationResult result)
@@ -1723,6 +1728,7 @@ public partial class MainWindow
         // (an image tab turned into an Explorer view...) gets a new step.
         RecordActiveTabLocation();
         UpdateTabNavigationButtons();
+        UpdateLoopFolderStatusButton();
     }
 
     private void CaptureActiveTabRuntimeState()

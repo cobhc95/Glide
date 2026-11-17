@@ -626,6 +626,9 @@ public sealed class StatusBarAutoHideTests
         await OnWindow(window =>
         {
             var settings = Settings(window);
+            // Wrap mechanics are measured on the nine groups only (5.0.7 adds the Loop this folder button by default).
+            settings.StatusBarGroups = Glide.Core.StatusBarGroupCatalog.Format(Glide.Core.StatusBarGroupCatalog.DefaultOrder);
+            Invoke(window, "ApplyStatusBarSize");
             settings.StatusAutoHide = true;
             Apply(window);
             var wide = Box(window);
@@ -797,6 +800,9 @@ public sealed class StatusBarAutoHideTests
         await OnWindow(window =>
         {
             var settings = Settings(window);
+            // Wrap mechanics are measured on the nine groups only (5.0.7 adds the Loop this folder button by default).
+            settings.StatusBarGroups = Glide.Core.StatusBarGroupCatalog.Format(Glide.Core.StatusBarGroupCatalog.DefaultOrder);
+            Invoke(window, "ApplyStatusBarSize");
             settings.StatusCollapsedToCorner = true;
             SetField(window, "_statusCollapsed", true);
             Apply(window);

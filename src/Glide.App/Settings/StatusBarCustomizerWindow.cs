@@ -189,7 +189,7 @@ public sealed class StatusBarCustomizerWindow : Window
     internal void RestoreDefaults()
     {
         _shown.Clear();
-        _shown.AddRange(StatusBarGroupCatalog.DefaultOrder);
+        _shown.AddRange(StatusBarGroupCatalog.DefaultLayout);
         RebuildLists();
     }
 }

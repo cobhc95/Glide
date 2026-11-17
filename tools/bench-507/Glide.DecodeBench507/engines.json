@@ -1,0 +1,18 @@
+// Alternative codec binaries for the 5.0.7 decode benchmark. Relative paths resolve against codecRoot (optional; default %USERPROFILE%\Downloads\Glide-bench-codecs).
+// Every binary here came from the project's official release channel (see docs\perf\benchmark-plan-5.0.7.md, "Candidate binaries").
+{
+  // Empty = the Glide.Native.dll copied next to the harness (current production bridge). Point at a tuned build to A/B it.
+  "glideNative": "",
+  // 5.0.7 tricks prototype (WIC rotate-in-decoder, parallel TIFF/BMP bands, SSSE3 24->32 bpp); bench-only switch GLIDE_TUNE_DISABLE=rotate,bands,simd
+  "glideNativeTuned": "glide-native-tuned\\Glide.Native.tuned.dll",
+  "turbojpeg": "libjpeg-turbo\\x\\bin\\turbojpeg.dll",
+  "vips": "nuget\\netvips.native.win-x64.8.18.7-x\\runtimes\\win-x64\\native\\libvips-42.dll",
+  "vipsAll": "libvips\\vips-dev-x64-all-8.18.7-x\\vips-dev-8.18\\bin\\libvips-42.dll",
+  "libraw": "libraw\\LibRaw-0.22.3-Win64-x\\LibRaw-0.22.3\\bin\\libraw.dll",
+  "cli": [
+    { "name": "djxl", "exe": "libjxl\\jxl-x64-windows-x\\x64-windows\\bin\\djxl.exe", "args": "\"{in}\" --disable_output --num_threads={threads}", "ext": [".jxl"], "library": "libjxl 0.13.0 official release build (BSD-3)" },
+    { "name": "dwebp", "exe": "libwebp\\libwebp-1.6.0-windows-x64-x\\libwebp-1.6.0-windows-x64\\bin\\dwebp.exe", "args": "\"{in}\" -quiet", "ext": [".webp"], "library": "libwebp 1.6.0 (BSD-3)" },
+    { "name": "avifdec", "exe": "libavif\\windows-artifacts-x\\avifdec.exe", "args": "-j {threads} \"{in}\" \"{out}.y4m\"", "ext": [".avif"], "library": "libavif 1.4.2 artifacts (BSD-2; AV1 decoder as bundled)" },
+    { "name": "opj", "exe": "openjpeg\\openjpeg-v2.5.4-windows-x64-x\\openjpeg-v2.5.4-windows-x64\\bin\\opj_decompress.exe", "args": "-i \"{in}\" -o \"{out}.raw\" -threads {threads} -quiet", "ext": [".jp2", ".j2k", ".jpf", ".j2c"], "library": "OpenJPEG 2.5.4 official build (BSD-2)" }
+  ]
+}

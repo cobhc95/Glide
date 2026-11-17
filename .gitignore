@@ -41,3 +41,5 @@ docs/mockups/
 
 # Codec libraries are rebuilt by build.cmd (tools/build-codecs.ps1 and the Glide.ThumbnailCodecs publish)
 codecs/*.dll
+
+tools/bench-507/.out/

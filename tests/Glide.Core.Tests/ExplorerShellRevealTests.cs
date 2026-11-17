@@ -13,9 +13,9 @@ public sealed class ExplorerShellRevealTests
     [Fact]
     public void Selecting_a_file_uses_the_select_switch_with_only_the_path_quoted()
     {
-        var args = ExplorerShell.RevealArguments(@"D:\Photos\Wallpaper 4k\Dark\5sh7n01d9b311.jpg", directory: false);
+        var args = ExplorerShell.RevealArguments(@"D:\Pictures\Wallpaper 4k\Dark\5sh7n01d9b311.jpg", directory: false);
 
-        Assert.Equal("/select,\"D:\\Photos\\Wallpaper 4k\\Dark\\5sh7n01d9b311.jpg\"", args);
+        Assert.Equal("/select,\"D:\\Pictures\\Wallpaper 4k\\Dark\\5sh7n01d9b311.jpg\"", args);
         Assert.StartsWith("/select,\"", args);
         Assert.False(args.StartsWith("\"/select", StringComparison.Ordinal));
     }
@@ -23,7 +23,7 @@ public sealed class ExplorerShellRevealTests
     [Fact]
     public void Opening_a_folder_quotes_just_the_path()
     {
-        Assert.Equal("\"D:\\Photos\\Wallpaper 4k\"", ExplorerShell.RevealArguments(@"D:\Photos\Wallpaper 4k", directory: true));
+        Assert.Equal("\"D:\\Pictures\\Wallpaper 4k\"", ExplorerShell.RevealArguments(@"D:\Pictures\Wallpaper 4k", directory: true));
     }
 
     [Fact]

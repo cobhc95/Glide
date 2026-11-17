@@ -29,8 +29,12 @@ internal static class ThumbnailDecode
     {
         using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete,
             64 * 1024, FileOptions.SequentialScan);
-        try { SkiaDecodeGuard.EnsureAllowed(stream, width); }
-        catch (Exception ex) when (SkiaDecodeGuard.IsRefusal(ex)) { return null; }
+        try
+        {
+            SkiaDecodeGuard.EnsurePlausibleFormat(stream, path); // no 33x4 "WBMP" thumbnails of unrelated files
+            SkiaDecodeGuard.EnsureAllowed(stream, width);
+        }
+        catch (Exception ex) when (SkiaDecodeGuard.IsRefusal(ex) || ex is InvalidDataException) { return null; }
         DecodingForTests?.Invoke(path);
         return Bitmap.DecodeToWidth(stream, width, BitmapInterpolationMode.LowQuality);
     }

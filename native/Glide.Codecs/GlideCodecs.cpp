@@ -60,12 +60,16 @@ namespace
         return w > 0 && h > 0 && w <= MaxDimension && h <= MaxDimension && w * h <= MaxPixels;
     }
 
-    // Worker cap shared by every decoder here (and Glide's managed decoders): clamp(cores, 1, 8).
+    // Worker cap shared by every decoder here. 5.0.7: every logical processor (the former clamp to 8 left half of a
+    // 16-thread CPU idle; benchmark-report-5.0.7.md section 6). GLIDE_CODECS_MAX_THREADS is a build-time cap.
+#ifndef GLIDE_CODECS_MAX_THREADS
+#define GLIDE_CODECS_MAX_THREADS 64
+#endif
     unsigned DecodeThreads()
     {
         SYSTEM_INFO si{};
         GetSystemInfo(&si);
-        return static_cast<unsigned>(std::clamp<DWORD>(si.dwNumberOfProcessors, 1, 8));
+        return static_cast<unsigned>(std::clamp<DWORD>(si.dwNumberOfProcessors, 1, GLIDE_CODECS_MAX_THREADS));
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -376,7 +380,7 @@ namespace
         options->convert_hdr_to_8bit = 1;
         options->ignore_transformations = 0;
         // Grid images (phone HEIC/AVIF are usually 512x512 tiles): libheif decodes tiles concurrently.
-        // Its default is 4; use the same clamp(cores, 1, 8) as OpenJPEG/libjxl. Output is unchanged.
+        // Its default is 4; use the same DecodeThreads() as OpenJPEG/libjxl. Output is unchanged.
         const unsigned threads = DecodeThreads();
         heif_context_set_max_decoding_threads(ctx, static_cast<int>(threads));
 
@@ -443,7 +447,7 @@ namespace
         struct RunnerGuard { void* r; ~RunnerGuard() { if (r) JxlThreadParallelRunnerDestroy(r); } } runnerGuard{ nullptr };
         if (!req.probeOnly)
         {
-            const size_t threads = std::min<size_t>(JxlThreadParallelRunnerDefaultNumWorkerThreads(), 8);
+            const size_t threads = std::min<size_t>(JxlThreadParallelRunnerDefaultNumWorkerThreads(), DecodeThreads());
             if (threads > 1 && (runner = JxlThreadParallelRunnerCreate(nullptr, threads)) != nullptr)
             {
                 runnerGuard.r = runner;
@@ -676,9 +680,7 @@ namespace
         if (!opj_setup_decoder(codec, &params)) return false;
         if (!req.probeOnly)
         {
-            SYSTEM_INFO si{};
-            GetSystemInfo(&si);
-            opj_codec_set_threads(codec, static_cast<int>(std::clamp<DWORD>(si.dwNumberOfProcessors, 1, 8)));
+            opj_codec_set_threads(codec, static_cast<int>(DecodeThreads()));
         }
 
         OpjStreamState state{ &file, base, length, 0 };

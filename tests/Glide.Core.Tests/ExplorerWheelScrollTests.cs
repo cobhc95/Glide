@@ -65,7 +65,7 @@ public sealed class ExplorerWheelScrollTests
     [Fact]
     public void Row_pitch_is_tile_height_plus_row_spacing_and_details_has_no_spacing()
     {
-        Assert.Equal(188 + Spacing, ExplorerWheelScroll.RowPitch(ExplorerViewModes.Large, Spacing));
+        Assert.Equal(ExplorerViewModes.TileSize(ExplorerViewModes.Large).Height + Spacing, ExplorerWheelScroll.RowPitch(ExplorerViewModes.Large, Spacing));
         Assert.Equal(28, ExplorerWheelScroll.RowPitch(ExplorerViewModes.Details, Spacing));
     }
 

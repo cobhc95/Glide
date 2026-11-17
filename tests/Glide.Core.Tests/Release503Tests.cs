@@ -35,9 +35,9 @@ public sealed class Release503Tests
     [Fact]
     public void Status_bar_groups_parse_format_and_default()
     {
-        Assert.Equal(StatusBarGroupCatalog.DefaultOrder, StatusBarGroupCatalog.Parse(""));
+        Assert.Equal(StatusBarGroupCatalog.DefaultLayout, StatusBarGroupCatalog.Parse(""));
         Assert.Equal(new[] { "nav", "zoom" }, StatusBarGroupCatalog.Parse("nav, zoom, bogus, nav"));
-        Assert.Equal(string.Empty, StatusBarGroupCatalog.Format(StatusBarGroupCatalog.DefaultOrder));
+        Assert.Equal(string.Empty, StatusBarGroupCatalog.Format(StatusBarGroupCatalog.DefaultLayout));
         Assert.Equal("nav,zoom", StatusBarGroupCatalog.Format(["nav", "zoom"]));
         Assert.Equal("none", StatusBarGroupCatalog.Format([]));
         Assert.Empty(StatusBarGroupCatalog.Parse("none"));
@@ -55,7 +55,7 @@ public sealed class Release503Tests
             Assert.Equal(action.Icon, a.Icon);
         });
         Assert.DoesNotContain(StatusBarGroupCatalog.AvailableActions, a => a.ActionId == "view.zoomIn");
-        Assert.All(StatusBarGroupCatalog.Parse(""), id => Assert.True(StatusBarGroupCatalog.IsGroup(id)));
+        Assert.All(StatusBarGroupCatalog.Parse("").Where(id => id != StatusBarGroupCatalog.LoopFolderButtonId), id => Assert.True(StatusBarGroupCatalog.IsGroup(id)));
         var extra = StatusBarGroupCatalog.AvailableActions[0].Id;
         Assert.Equal(new[] { "nav", extra }, StatusBarGroupCatalog.Parse("nav," + extra + ",a:no.such.action"));
     }
@@ -66,7 +66,7 @@ public sealed class Release503Tests
         await AvaloniaHeadlessFixture.RunOnUIThreadAsync(() =>
         {
             var window = new StatusBarCustomizerWindow(string.Empty);
-            Assert.Equal(StatusBarGroupCatalog.DefaultOrder, window.Shown);
+            Assert.Equal(StatusBarGroupCatalog.DefaultLayout, window.Shown);
             Assert.Equal(string.Empty, window.Result());
 
             var extra = StatusBarGroupCatalog.AvailableActions[0].Id;
@@ -108,6 +108,11 @@ public sealed class Release503Tests
             InvokeArgs(window, "ApplyStatusBarSize");
             Dispatcher.UIThread.RunJobs();
             var row = window.FindControl<StackPanel>("StatusRow1")!;
+            // 5.0.7: the default bar has exactly one extra button, Loop this folder.
+            Assert.Single(row.Children.OfType<Border>(), b => b.Classes.Contains("extraGroup"));
+            live.StatusBarGroups = StatusBarGroupCatalog.Format(StatusBarGroupCatalog.DefaultOrder);
+            InvokeArgs(window, "ApplyStatusBarSize");
+            Dispatcher.UIThread.RunJobs();
             var defaultButtons = row.GetLogicalDescendants().OfType<Button>().Count();
             Assert.DoesNotContain(row.Children.OfType<Border>(), b => b.Classes.Contains("extraGroup"));
 

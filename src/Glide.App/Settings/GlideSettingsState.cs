@@ -22,7 +22,9 @@ public sealed record GlideSettingsState
     public int HistorySize { get; set; } = 8;
     public bool RememberWindowPlacement { get; set; } = true;
     public bool ReuseSingleInstance { get; set; } = true;
-    public bool ContinueSiblingFolders { get; set; } = true;
+    // "When the last image is reached" (5.0.7, navigation.endOfFolder): an EndOfFolderActions name. Replaces the old
+    // ContinueSiblingFolders checkbox (schema 15 migrates it: on = next folder, off = do nothing).
+    public string EndOfFolderAction { get; set; } = Glide.Core.Navigation.EndOfFolderActions.Default;
     public bool HierarchicalFolderTraversal { get; set; } = true;
     public bool ConfirmHierarchicalFolderTraversal { get; set; } = true;
     // When Previous crosses into a parent/grandparent branch, choose which image opens.

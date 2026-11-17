@@ -408,6 +408,8 @@ public sealed class StatusStackInfoLineTests
     {
         await OnWindow(window =>
         {
+            // Measured on the nine groups only (5.0.7 adds the Loop this folder button by default).
+            Settings(window).StatusBarGroups = Glide.Core.StatusBarGroupCatalog.Format(Glide.Core.StatusBarGroupCatalog.DefaultOrder);
             Settings(window).FullscreenStatusAlwaysOn = true;
             window.WindowState = WindowState.FullScreen;
             Dispatcher.UIThread.RunJobs();

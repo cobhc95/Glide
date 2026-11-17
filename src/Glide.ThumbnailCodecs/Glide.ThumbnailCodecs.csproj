@@ -63,9 +63,12 @@
     <Compile Include="..\Glide.Imaging\ManagedCodecSupport.cs" Link="Imaging\ManagedCodecSupport.cs" />
     <Compile Include="..\Glide.Imaging\BuiltInRasterDecoder.cs" Link="Imaging\BuiltInRasterDecoder.cs" />
     <Compile Include="..\Glide.Imaging\BuiltInRasterDecoder.Dds.cs" Link="Imaging\BuiltInRasterDecoder.Dds.cs" />
+    <Compile Include="..\Glide.Imaging\BuiltInRasterDecoder.Legacy.cs" Link="Imaging\BuiltInRasterDecoder.Legacy.cs" />
     <Compile Include="..\Glide.Imaging\RawPreviewDecoder.cs" Link="Imaging\RawPreviewDecoder.cs" />
+    <Compile Include="..\Glide.Imaging\Kodak65000Decoder.cs" Link="Imaging\Kodak65000Decoder.cs" />
     <Compile Include="..\Glide.Imaging\ExrDecoder.cs" Link="Imaging\ExrDecoder.cs" />
     <Compile Include="..\Glide.Imaging\ExrPiz.cs" Link="Imaging\ExrPiz.cs" />
+    <Compile Include="..\Glide.Imaging\ExrDwa.cs" Link="Imaging\ExrDwa.cs" />
     <Compile Include="..\Glide.Imaging\ScientificDecoders.cs" Link="Imaging\ScientificDecoders.cs" />
     <Compile Include="..\Glide.Imaging\LayeredEditorDecoders.cs" Link="Imaging\LayeredEditorDecoders.cs" />
     <Compile Include="..\Glide.Imaging\PdnDecoder.cs" Link="Imaging\PdnDecoder.cs" />

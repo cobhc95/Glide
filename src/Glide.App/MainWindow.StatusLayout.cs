@@ -71,6 +71,7 @@ public partial class MainWindow
         var slot = new StatusSlot(id, border, inner, 1, () => new[] { (definition.Icon, definition.Label, button) });
         _extraStatusSlots[id] = slot;
         _extraStatusButtons[button] = action.Id;
+        if (string.Equals(action.Id, LoopFolderActionId, StringComparison.OrdinalIgnoreCase)) UpdateLoopFolderStatusButton();
         return slot;
     }
 

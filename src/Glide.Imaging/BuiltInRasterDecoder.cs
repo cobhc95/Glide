@@ -120,6 +120,7 @@ public static partial class BuiltInRasterDecoder
         ".ora" or ".kra" or ".pdn" or ".xcf" => true,
         ".ktx" or ".ktx2" or ".pvr" or ".astc" => true,
         ".dds" => true, // uncompressed only; block-compressed DDS returns false and continues to WIC
+        ".dib" or ".icns" or ".ras" or ".sun" or ".xwd" or ".dpx" => true, // no Windows codec (packed DIB, ICNS, Sun, X11, DPX)
         _ => RawPreviewDecoder.IsRawExtension(extension),
     };
 
@@ -252,6 +253,11 @@ public static partial class BuiltInRasterDecoder
                 ".xcf" => XcfDecoder.TryDecode(data, out image),
                 ".ktx" or ".ktx2" or ".pvr" or ".astc" => TextureDecoders.TryDecode(data, extension, out image),
                 ".dds" => TryDecodeDds(data, out image),
+                ".dib" => TryDecodeDib(data, maxLongestSide, out image),
+                ".icns" => TryDecodeIcns(data, maxLongestSide, out image),
+                ".ras" or ".sun" => TryDecodeSunRaster(data, out image),
+                ".xwd" => TryDecodeXwd(data, out image),
+                ".dpx" => TryDecodeDpx(data, out image),
                 _ => false,
             };
         }
@@ -288,6 +294,11 @@ public static partial class BuiltInRasterDecoder
                 ".xcf" => XcfDecoder.TryProbe(data, out dimensions),
                 ".ktx" or ".ktx2" or ".pvr" or ".astc" => TextureDecoders.TryProbe(data, extension, out dimensions),
                 ".dds" => TryProbeDds(data, out dimensions),
+                ".dib" => TryProbeDib(data, out dimensions),
+                ".icns" => TryProbeIcns(data, out dimensions),
+                ".ras" or ".sun" => TryProbeSunRaster(data, out dimensions),
+                ".xwd" => TryProbeXwd(data, out dimensions),
+                ".dpx" => TryProbeDpx(data, out dimensions),
                 _ => false,
             };
         }

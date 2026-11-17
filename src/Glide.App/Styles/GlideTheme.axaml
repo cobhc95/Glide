@@ -36,6 +36,7 @@
     <SolidColorBrush x:Key="BrushMuted" Color="{StaticResource GlideMuted}"/>
     <SolidColorBrush x:Key="BrushMuted2" Color="{StaticResource GlideMuted2}"/>
     <SolidColorBrush x:Key="BrushAccent" Color="{StaticResource GlideAccent}"/>
+    <SolidColorBrush x:Key="BrushExplorerOutline" Color="{StaticResource GlideAccent}"/>
     <SolidColorBrush x:Key="BrushAccentSoft" Color="{StaticResource GlideAccentSoft}"/>
     <SolidColorBrush x:Key="BrushNavAccent" Color="{StaticResource GlideNavAccent}"/>
     <SolidColorBrush x:Key="BrushSettingsRail" Color="{StaticResource GlideSettingsRail}"/>
@@ -231,12 +232,14 @@
   <Style Selector="Border.statusGroup.overlayGroup controls|GlideIconView.statusGlyph"><Setter Property="IconBrush" Value="#C590FF"/></Style>
   <Style Selector="Border.statusGroup.slideshowGroup controls|GlideIconView.statusGlyph"><Setter Property="IconBrush" Value="#F1B85B"/></Style>
   <!-- Slideshow state must be obvious on the persistent status-bar control itself. -->
-  <Style Selector="Button.statusIcon.slideshowPlaying">
+  <!-- The same active state for status-bar toggles (5.0.7 "Loop this folder" on); off = the icon dimmed. -->
+  <Style Selector="Button.statusIcon.slideshowPlaying, Button.statusIcon.statusToggleOn">
     <Setter Property="Background" Value="#5538C879"/>
     <Setter Property="BorderBrush" Value="#FF63E6A2"/>
     <Setter Property="BorderThickness" Value="2"/>
   </Style>
-  <Style Selector="Button.statusIcon.slideshowPlaying controls|GlideIconView.statusGlyph">
+  <Style Selector="Button.statusIcon.statusToggleOff controls|GlideIconView.statusGlyph"><Setter Property="Opacity" Value="0.5"/></Style>
+  <Style Selector="Button.statusIcon.slideshowPlaying controls|GlideIconView.statusGlyph, Button.statusIcon.statusToggleOn controls|GlideIconView.statusGlyph">
     <Setter Property="IconBrush" Value="#E8FFF2"/>
     <Setter Property="StrokeWidth" Value="2.2"/>
   </Style>
@@ -339,7 +342,7 @@
   <!-- Settings uses a responsive grid; rail/content scroll independently and the footer remains fixed. -->
   <Style Selector="Button.settingsNav">
     <Setter Property="Background" Value="Transparent"/><Setter Property="Foreground" Value="{DynamicResource BrushText}"/>
-    <Setter Property="BorderThickness" Value="0"/><Setter Property="CornerRadius" Value="7"/>
+    <Setter Property="BorderThickness" Value="0"/><Setter Property="CornerRadius" Value="0"/>
     <Setter Property="Height" Value="50"/><Setter Property="HorizontalAlignment" Value="Stretch"/><Setter Property="HorizontalContentAlignment" Value="Stretch"/>
     <Setter Property="Padding" Value="16,0"/><Setter Property="FontSize" Value="15"/>
   </Style>

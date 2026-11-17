@@ -18,9 +18,12 @@ public partial class MainWindow
             shift: modifiers.HasFlag(KeyModifiers.Shift), alt: modifiers.HasFlag(KeyModifiers.Alt), modifiersEnabled: _settings.NewTabModifiers);
 
     /// <summary>Adds <paramref name="tab"/> as a tab opened from the current one: placed and activated as the settings and held keys say.</summary>
-    private async Task OpenInNewTabAsync(TabState tab, KeyModifiers modifiers, string source)
+    private Task OpenInNewTabAsync(TabState tab, KeyModifiers modifiers, string source) =>
+        OpenInNewTabAsync(tab, ResolveNewTabOpening(modifiers), source);
+
+    /// <summary>Adds <paramref name="tab"/> placed and activated exactly as <paramref name="opening"/> says.</summary>
+    private async Task OpenInNewTabAsync(TabState tab, NewTabOpening opening, string source)
     {
-        var opening = ResolveNewTabOpening(modifiers);
         if (opening.Activate) CaptureActiveTabRuntimeState();
         _workspace.OpenTab(tab, opening);
         _diagnostics.Write("tabs", "opened_in_new_tab", new { tab.Id, tab.Kind, source, atEnd = opening.AtEnd, activate = opening.Activate });

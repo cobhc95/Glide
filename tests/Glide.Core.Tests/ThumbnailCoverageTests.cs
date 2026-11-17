@@ -246,6 +246,10 @@ public sealed class ThumbnailCoverageTests : IDisposable
         ".xbm" => Encoding.ASCII.GetBytes("#define t_width 16\n#define t_height 4\nstatic char t_bits[] = {\n0xff,0x00,0xff,0x00,0xff,0x00,0xff,0x00};\n"),
         ".xpm" => Encoding.ASCII.GetBytes("/* XPM */\nstatic char *t[] = {\n\"4 2 2 1\",\n\"a c #DC1E1E\",\n\"b c #1E1EDC\",\n\"aabb\",\n\"aabb\"\n};\n"),
         ".sgi" or ".rgb" or ".rgba" or ".bw" => Sgi(),
+        ".icns" => Icns(),
+        ".ras" or ".sun" => SunRaster(),
+        ".xwd" => Xwd(),
+        ".dpx" => Dpx(),
         ".psd" or ".psb" or ".pdd" => Psd(compression: 0),
         "zip.psd" or "zip.psb" => Psd(compression: 2),
         ".exr" => Exr(),
@@ -383,6 +387,44 @@ public sealed class ThumbnailCoverageTests : IDisposable
         for (var plane = 0; plane < 3; plane++)
             for (var y = 0; y < H; y++)
                 for (var x = 0; x < W; x++) { var c = At(x); w.U8(plane == 0 ? c.Red : plane == 1 ? c.Green : c.Blue); }
+        return w.ToArray();
+    }
+
+    private static byte[] Icns()
+    {
+        var png = Png(W, H, (x, _) => At(x));
+        var w = new Writer { BigEndian = true };
+        w.Ascii("icns").U32(16 + png.Length).Ascii("ic12").U32(8 + png.Length).Bytes(png);
+        return w.ToArray();
+    }
+
+    private static byte[] SunRaster()
+    {
+        var w = new Writer { BigEndian = true };
+        w.U32(0x59A66A95).U32(W).U32(H).U32(24).U32(W * H * 3).U32(1).U32(0).U32(0);
+        for (var y = 0; y < H; y++)
+            for (var x = 0; x < W; x++) { var c = At(x); w.U8(c.Blue).U8(c.Green).U8(c.Red); }
+        return w.ToArray();
+    }
+
+    private static byte[] Xwd()
+    {
+        var w = new Writer { BigEndian = true };
+        w.U32(100).U32(7).U32(2).U32(24).U32(W).U32(H).U32(0).U32(1).U32(32).U32(1).U32(32).U32(32).U32(W * 4).U32(4)
+         .U32(0xFF0000).U32(0xFF00).U32(0xFF).U32(8).U32(0).U32(0).U32(W).U32(H).U32(0).U32(0).U32(0);
+        for (var y = 0; y < H; y++)
+            for (var x = 0; x < W; x++) { var c = At(x); w.U8(0).U8(c.Red).U8(c.Green).U8(c.Blue); }
+        return w.ToArray();
+    }
+
+    private static byte[] Dpx()
+    {
+        var w = new Writer { BigEndian = true };
+        w.Ascii("SDPX").U32(2048).Ascii("V2.0").Zeros(768 - 12).U16(0).U16(1).U32(W).U32(H);
+        w.Zeros(20).U8(50).U8(2).U8(2).U8(8).U16(0).U16(0).U32(2048).U32(0).U32(0);
+        w.Zeros(2048 - (int)w.Length);
+        for (var y = 0; y < H; y++)
+            for (var x = 0; x < W; x++) { var c = At(x); w.U8(c.Red).U8(c.Green).U8(c.Blue); }
         return w.ToArray();
     }
 

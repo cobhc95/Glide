@@ -4,6 +4,44 @@ All notable changes to Glide Image Viewer are documented here. The format is bas
 [Keep a Changelog](https://keepachangelog.com/), and the project uses dotted feature releases with
 hyphenated follow-up corrections (for example `4.2.0-1`).
 
+## [Unreleased]
+
+## [5.0.7] - 2026-11-17
+
+### Added
+- New setting **When the last image is reached** (Settings > Window & navigation > Moving between folders): what Next does at the last image of a folder, and Previous at the first. Choose **Do nothing**, **Loop this folder**, **Move to the next folder** (the default), **Move to the next folder in a new tab** (opens in the foreground), **Go back to the previous folder**, **Show Home** or **Ask me each time**. "Next" always means the folder in the direction you are moving. The existing folder options (nearby branches, first image, wrap, skip empty, hidden folders) are grouped below it as **Folder options** and are greyed out unless a folder choice (or Ask me each time) is selected. Settings search finds it with "end of folder", "last image", "loop", "next folder", "new tab", "home" and "ask"; it is also a bindable "Cycle:" action.
+- **Ask me each time** shows a small card over the picture: End of "folder", the position and the next folder's name, and Next folder (1), Next folder in new tab (2), Previous folder (3), Loop this folder (4), Show Home (5) and Stay here (Esc). Use the arrow keys and Enter, a number key, or press the same Next / Previous key again to pick the highlighted row; click a row, or click outside the card to stay. **Remember this choice** saves the pick as the setting. Reached with Previous at the first image, the card is mirrored (Previous folder first).
+- Status-bar button **Loop this folder**, shown by default right after the First / previous / next / last buttons (remove or move it with Customize status-bar buttons; also the hotkey-bindable action "Loop this folder (this tab)"): turns looping on or off for the current tab only. While it is on, the end (or start) of the folder wraps around inside the folder whatever When the last image is reached says. Off shows a dimmed icon, on uses the status bar's active style; the tooltip says which and that it overrides the setting for this tab. It is not saved: new tabs and new sessions start with it off.
+
+### Changed
+- **Automatically continue into sibling folders** is replaced by When the last image is reached. Settings are migrated once (settings schema 15): on becomes Move to the next folder, off becomes Do nothing. A hotkey or gesture bound to the old "Toggle: Continue through sibling folders" action is dropped; bind "Cycle: When the last image is reached" or "Loop this folder (this tab)" instead.
+- **Faster TIFF and BMP opening:** large TIFF (LZW, Deflate, JPEG-in-TIFF, PackBits, uncompressed, tiled) and BMP files decode in parallel bands, one Windows decoder per band, with the same pixels. Measured on a 16-thread desktop through Glide's own open path, the first picture appears in 0.19–0.36x the time for TIFF (24 MP LZW 184 → 39 ms, 100 MP LZW 768 → 164 ms) and 0.6–0.7x for BMP. **Rotated JPEGs** (EXIF orientation) now decode straight into the picture with the rotation applied: 24 MP full resolution 163 → 118 ms. Details: `docs/perf/benchmark-report-5.0.7.md`.
+- **Faster JPEG opening.** Full-resolution JPEGs now decode with libjpeg-turbo 3.2.1 (built into Glide.Native.dll) straight into the picture, with large baseline JPEGs split into up to 8 parallel bands; progressive JPEGs decode on one thread (banding them would multiply memory). Pixels match the Windows decoder within 1 level per channel. CMYK/YCCK, 12-bit, lossless and arithmetic-coded JPEGs, and any file libjpeg-turbo warns about, still decode with Windows as before. Quick check on a 16-thread desktop (Glide's open path, median of 4): Canon R6 II 24 MP 131 → 97 ms, Nikon D850 45 MP 300 → 230 ms, 24 MP progressive 445 → 253 ms.
+- **Camera JPEGs show a picture sooner:** when a camera JPEG carries a large embedded preview (MPF, typically 1620 x 1080) with the same shape and at least half the size needed for the window, Glide shows it first and replaces it with the full decode moments later (Nikon D850 45 MP: first picture 225 → 39 ms). Small EXIF thumbnails (160 x 120) are never used. Other JPEGs keep the Windows scaled first view.
+- **Faster JPEG XL, AVIF, HEIC and JPEG 2000:** the bundled codec module (codecs\glidecodecs.dll) is now built for speed (/O2) and may use every logical processor instead of at most 8 threads. Quick check, full decode: JPEG XL 12 MP 151 → 130 ms, 24 MP lossless 256 → 206 ms, HEIC 12 MP 164 → 144 ms, JPEG 2000 12 MP 315 → 252 ms, AVIF unchanged (133 → 131 ms).
+- **Explorer:** the selected thumbnail now has a 3 px accent outline drawn right on the edge of its selection fill (no dark gap), so the fill and outline read as one selection (the outline is the accent colour darkened about 22%, and the band above the thumbnail is as thick as the bands beside it); tile sizes and content positions do not change. Keyboard focus alone shows a 1 px outline, and a selected item that also has focus adds a thin light inner line. A file name that has to break mid-word now breaks before its extension ("3m90fxiwwfo61" / ".png") when that fits in the two caption lines.
+- Settings: the selected, hovered and pressed category in the left rail now has square corners (same colours, accent bar and sizes).
+- The default status bar now includes the Loop this folder button (Restore defaults in Customize status-bar buttons includes it too). A customised status-bar layout gets it added once, after the navigation buttons (settings schema 16); remove it there if you do not want it. A layout with every button hidden is left as is.
+
+### Fixed
+- **Explorer:** a selected thumbnail's wrapped file name no longer spills below the selection highlight (the last line, e.g. the "g" of "3m90fxiwwfo61.png", was drawn outside it). Thumbnail tiles now reserve room for two full caption lines, and a name longer than two lines ends with "…", as in Windows Explorer; the full name is in the tooltip.
+- Files that only resemble a headerless WBMP (for example a Minolta MDC sensor dump) no longer open as a meaningless tiny black-and-white picture.
+- **Camera RAW previews:** Glide now picks the largest preview stored anywhere in the file, including uncompressed RGB previews (not only JPEGs). Mamiya MEF shows 1328x992 instead of 192x144. Hasselblad 3FR/FFF, Kodak DCR, Epson ERF and Phase One IIQ now show their previews; 3FR, FFF, DCR and ERF showed no picture before. Kodak DCR previews stored with Kodak's own compression are now decoded (DCS Pro 14N/SLR: 1125x750; DCS 760: 760x504). Epson ERF shows the 640x424 preview from its maker note instead of the 160x120 thumbnail.
+- **Phase One IIQ opens faster** (about 96 → 35 ms through the open path): the search for hidden previews now skips sensor data and the Phase One raw block, so it no longer reads the whole 50–80 MB file.
+- **No picture before, now decoded:**
+  - headerless ("packed") DIB files
+  - Apple ICNS (the largest PNG icon)
+  - Sun raster (RAS/SUN: standard, RLE, colour-mapped)
+  - X11 window dumps (XWD)
+  - DPX (8/10/12/16-bit RGB, RGBA, luma)
+  - OpenEXR files compressed with DWAA/DWAB (e.g. Poly Haven HDRIs)
+
+  ICNS, RAS, XWD and DPX also get Explorer thumbnails through Glide's thumbnail provider.
+- Still not shown, because each needs a decoder Glide doesn't ship:
+  - **RAW development:** GoPro GPR (VC-5 compressed, no embedded preview); headerless CHDK CRW, Gitup RAW, ARRI ARI and Minolta RD-175 (MDC) sensor dumps.
+  - **HEVC:** Canon CR3 files shot in HDR PQ mode, whose previews are HEVC.
+  - **PDF:** a renderer.
+
 ## [5.0.6] - 2026-11-17
 
 Thanks to Vertigo220 for yet another round of detailed feedback.

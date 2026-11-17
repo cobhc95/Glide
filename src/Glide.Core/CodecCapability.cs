@@ -36,6 +36,7 @@ public static class CodecCapabilityRegistry
         ".qoi", ".hdr", ".rgbe", ".hdr.gz", ".wbmp", ".xbm", ".xpm",
         ".psd", ".psb", ".pdd",
         ".sgi", ".rgb", ".rgba", ".bw",
+        ".icns", ".ras", ".sun", ".xwd", ".dpx",
         ".exr",
         ".dcm", ".dicom", ".ima", ".nii", ".nii.gz", ".fits", ".fit", ".fts", ".fts.gz",
         ".ora", ".kra", ".pdn", ".xcf",

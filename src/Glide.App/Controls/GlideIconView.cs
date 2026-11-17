@@ -288,6 +288,11 @@ public sealed class GlideIconView : Control
             case "Paste":
                 // Clipboard with its clip and two lines of text.
                 Box(5.5, 5, 13, 16); Box(9, 3, 6, 4); L(8.5, 12, 15.5, 12); L(8.5, 16, 13.5, 16); break;
+            case "Loop":
+                // Repeat / loop (5.0.7 "Loop this folder"): two opposed half-loops, each ending in an arrowhead.
+                Arc(12, 12, 7, 200, 340); Head(12 + 7 * Math.Cos(340 * Math.PI / 180), 12 + 7 * Math.Sin(340 * Math.PI / 180), 0.34, 0.94, 3.5);
+                Arc(12, 12, 7, 20, 160); Head(12 + 7 * Math.Cos(160 * Math.PI / 180), 12 + 7 * Math.Sin(160 * Math.PI / 180), -0.34, -0.94, 3.5);
+                break;
             case "Sort":
                 // Up arrow and down arrow side by side.
                 L(8, 5, 8, 19); Head(8, 4.5, 0, -1); L(16, 5, 16, 19); Head(16, 19.5, 0, 1); break;

@@ -36,10 +36,13 @@ foreach(_opt ANIM_UTILS CWEBP DWEBP GIF2WEBP IMG2WEBP VWEBP WEBPINFO LIBWEBPMUX 
 endforeach()
 set(WEBP_USE_THREAD OFF CACHE BOOL "" FORCE)
 set(WEBP_NEAR_LOSSLESS OFF CACHE BOOL "" FORCE)
+# 5.0.7: speed build (/O2) by default; GLIDE_CODECS_OPT=O1 restores the former size-first build.
+set(GLIDE_CODECS_OPT "O2" CACHE STRING "Optimisation level for the glue and vendored libwebp (O1 or O2)")
+set(GLIDE_CODECS_MAX_THREADS "64" CACHE STRING "Upper bound on decoder worker threads (logical processors are used up to this)")
 set(_glide_c_flags_release "${CMAKE_C_FLAGS_RELEASE}")
 set(_glide_static_flags_release "${CMAKE_STATIC_LINKER_FLAGS_RELEASE}")
 if(MSVC)
-  set(CMAKE_C_FLAGS_RELEASE "/O1 /Gw /GL /Gy /guard:cf /DNDEBUG")
+  set(CMAKE_C_FLAGS_RELEASE "/${GLIDE_CODECS_OPT} /Gw /GL /Gy /guard:cf /DNDEBUG")
   set(CMAKE_STATIC_LINKER_FLAGS_RELEASE "/LTCG")
 endif()
 add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../third_party/libwebp" "${CMAKE_CURRENT_BINARY_DIR}/libwebp" EXCLUDE_FROM_ALL)
@@ -67,11 +70,12 @@ target_link_libraries(glidecodecs PRIVATE ${_libs} webp)
 if(MSVC)
   string(REPLACE "/O2" "" CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE}")
   string(REPLACE "/Ob2" "" CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE}")
-  # Size first: /O1 + whole-program optimisation across the /GL static libraries, identical-COMDAT
+  # /O2 (5.0.7; formerly /O1 size-first) + whole-program optimisation across the /GL static libraries, identical-COMDAT
   # folding and unreferenced-section removal (drops every decoder/encoder/tool path the glue never calls).
   # Hardening matches Glide.Native: CFG, CET shadow stack compatibility, ASLR and DEP. /sdl applies
   # to the glue only; the third-party libraries are compiled with their upstream warning settings.
-  target_compile_options(glidecodecs PRIVATE /O1 /Gw /GL /Gy /guard:cf /sdl /W4 /EHsc /DNDEBUG)
+  target_compile_definitions(glidecodecs PRIVATE GLIDE_CODECS_MAX_THREADS=${GLIDE_CODECS_MAX_THREADS})
+  target_compile_options(glidecodecs PRIVATE /${GLIDE_CODECS_OPT} /Gw /GL /Gy /guard:cf /sdl /W4 /EHsc /DNDEBUG)
   target_link_options(glidecodecs PRIVATE /LTCG /OPT:REF /OPT:ICF /INCREMENTAL:NO /DEBUG:NONE /Brepro
     /guard:cf /CETCOMPAT /DYNAMICBASE /HIGHENTROPYVA /NXCOMPAT /IGNORE:4099)
   if(GLIDE_CODECS_MAP)

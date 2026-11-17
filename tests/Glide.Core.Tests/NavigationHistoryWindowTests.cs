@@ -91,7 +91,7 @@ public sealed class NavigationHistoryWindowTests
             Assert.Equal(new[] { "Alt+Right" }, loaded.Hotkeys["view.fit"]);
             Assert.Empty(loaded.Hotkeys["nav.previousBack"]);
             Assert.Equal(SettingsStore.CurrentSettingsSchema, loaded.SettingsSchemaVersion);
-            Assert.Equal(14, SettingsStore.CurrentSettingsSchema); // 14 (5.0.6): Navigation minimum interval default 80 -> 120 ms
+            Assert.Equal(16, SettingsStore.CurrentSettingsSchema); // 16 (5.0.7): the Loop this folder status-bar button is shown by default
         });
     }
 

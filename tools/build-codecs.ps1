@@ -17,6 +17,8 @@
 #   ... -NoAsm                 build dav1d without NASM assembly (smaller, slower AV1)
 #   ... -Dav1dBitdepths 8      8-bit AV1 only (smaller; 10/12-bit AVIF then fails to decode)
 #   ... -MapFile               also write native\Glide.Codecs\build\glidecodecs.map for size audits
+#   ... -Optimize size         former size-first /O1 build (default speed: /O2, 5.0.7)
+#   ... -MaxThreads <n>        cap decoder worker threads (default 64 = every logical processor)
 #   ... -OutDir <dir>          write the DLL/manifest/NOTICE somewhere other than codecs\ (experiments)
 param(
     [switch]$Force,
@@ -24,6 +26,8 @@ param(
     [switch]$NoAsm,
     [ValidateSet('8', '8,16')][string]$Dav1dBitdepths = '8,16',
     [switch]$MapFile,
+    [ValidateSet('speed', 'size')][string]$Optimize = 'speed',
+    [int]$MaxThreads = 64,
     [string]$OutDir,
     [switch]$FetchOnly
 )
@@ -164,9 +168,11 @@ if (-not $NoAsm) { $env:PATH = "$(Get-Nasm);$env:PATH" }
 # /O1 (minimise size) + whole-program /GL so the final /LTCG link can inline across libraries and
 # discard everything the decoder glue never reaches. Static CRT (/MT, incl. dav1d via b_vscrt=mt)
 # in every library, like Glide.Native.dll: Glide ships no VC++ redistributable.
-$CFlags = '/O1 /Gw /GL /Gy /guard:cf /DNDEBUG'
+# 5.0.7: speed by default (/O2; dav1d meson optimization=2). Measured in benchmark-report-5.0.7.md section 6.
+$OptFlag = if ($Optimize -eq 'size') { '/O1' } else { '/O2' }
+$CFlags = "$OptFlag /Gw /GL /Gy /guard:cf /DNDEBUG"
 $flavor = (@($(if ($NoHevc) { 'nohevc' } else { 'hevc' }), $(if ($NoAsm) { 'noasm' } else { 'asm' }),
-    $(if ($Dav1dBitdepths -eq '8') { 'av1-8bit' } else { 'av1-hbd' })) -join '-')
+    $(if ($Dav1dBitdepths -eq '8') { 'av1-8bit' } else { 'av1-hbd' })) + $(if ($Optimize -eq 'speed') { @('o2') } else { @() }) -join '-')
 $buildRoot = Join-Path $cache "build-$flavor"
 $prefix = Join-Path $cache "prefix-$flavor"
 if ($Force) { foreach ($dir in $buildRoot, $prefix) { if (Test-Path $dir) { Remove-Item -Recurse -Force $dir } } }
@@ -215,7 +221,7 @@ if (-not (Test-Stamp 'dav1d')) {
     Write-Host '==== dav1d'
     $asm = if ($NoAsm) { 'false' } else { 'true' }
     Invoke-Native meson @('setup', $build, $paths.dav1d,
-        '--buildtype=release', '-Doptimization=s', '-Db_ndebug=true', '-Db_vscrt=mt',
+        '--buildtype=release', "-Doptimization=$(if ($Optimize -eq 'size') { 's' } else { '2' })", '-Db_ndebug=true', '-Db_vscrt=mt',
         '--default-library=static', "--prefix=$prefix", '--libdir=lib',
         "-Dbitdepths=$Dav1dBitdepths", "-Denable_asm=$asm", '-Denable_tools=false', '-Denable_examples=false',
         '-Denable_tests=false', '-Denable_docs=false', '-Dlogging=false', '-Dtrim_dsp=true',
@@ -298,7 +304,7 @@ $mapOption = if ($MapFile) { 'ON' } else { 'OFF' }
 if (Test-Path $glueBuild) { Remove-Item -Recurse -Force $glueBuild }
 Write-Host '==== glidecodecs'
 Invoke-Native cmake @('-G', 'Ninja', '-S', $glueSource, '-B', $glueBuild, '-DCMAKE_BUILD_TYPE=Release',
-    "-DGLIDE_CODECS_PREFIX=$prefix", "-DGLIDE_CODECS_HEVC=$hevcOption", "-DGLIDE_CODECS_MAP=$mapOption",
+    "-DGLIDE_CODECS_PREFIX=$prefix", "-DGLIDE_CODECS_OPT=$($OptFlag.TrimStart('/'))", "-DGLIDE_CODECS_MAX_THREADS=$MaxThreads", "-DGLIDE_CODECS_HEVC=$hevcOption", "-DGLIDE_CODECS_MAP=$mapOption",
     '-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded')
 Invoke-Native cmake @('--build', $glueBuild, '--parallel')
 

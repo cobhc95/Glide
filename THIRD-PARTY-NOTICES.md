@@ -10,7 +10,7 @@ GPL-3.0-or-later program; Svg.Custom (Ms-PL) is covered by Glide's additional pe
 Where the full licence text lives:
 
 * `licenses\` (next to this file in the installer and the portable ZIP; `licenses/` in the repository)
-  holds the SkiaSharp, HarfBuzzSharp, ANGLE and libwebp notices.
+  holds the SkiaSharp, HarfBuzzSharp, ANGLE, libwebp and libjpeg-turbo notices.
 * `codecs\glidecodecs.NOTICE.txt` holds the licence texts for the bundled codec module.
 * The MIT licence used by the .NET packages is reproduced at the end of this file.
 
@@ -31,6 +31,7 @@ Where the full licence text lives:
 | System.Drawing.Common | 10.0.15 | MIT | https://github.com/dotnet/runtime | MIT text below |
 | .NET 10 runtime and base class libraries (self-contained, NativeAOT) | 10.x | MIT | https://github.com/dotnet/runtime | MIT text below |
 | libwebp (statically linked in `Glide.ShellThumbnail.dll`, decode only) | 1.5.0 | BSD-3-Clause plus the WebM patent grant | https://github.com/webmproject/libwebp | `licenses\libwebp-COPYING.txt`, `licenses\libwebp-PATENTS.txt` |
+| libjpeg-turbo (TurboJPEG, statically linked in `Glide.Native.dll`, JPEG decode) | 3.2.1 | IJG AND BSD-3-Clause AND Zlib | https://libjpeg-turbo.org | `licenses\libjpeg-turbo-LICENSE.md`, `licenses\libjpeg-turbo-README.ijg`. This software is based in part on the work of the Independent JPEG Group. |
 | dav1d (in `codecs\glidecodecs.dll`) | 1.5.4 | BSD-2-Clause | https://code.videolan.org/videolan/dav1d | `codecs\glidecodecs.NOTICE.txt` |
 | libheif (in `codecs\glidecodecs.dll`) | 1.23.7 | LGPL-3.0-or-later | https://github.com/strukturag/libheif | `codecs\glidecodecs.NOTICE.txt` |
 | libde265 (in `codecs\glidecodecs.dll`) | 1.1.3 | LGPL-3.0-or-later | https://github.com/strukturag/libde265 | `codecs\glidecodecs.NOTICE.txt` |

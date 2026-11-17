@@ -106,6 +106,7 @@ public sealed class AvaloniaImageDecoderBackend : IImageDecoderBackend, IPathOpt
 
         try
         {
+            SkiaDecodeGuard.EnsurePlausibleFormat(stream, sourcePath);
             SkiaDecodeGuard.EnsureAllowed(stream, 0);
             var managed = new Bitmap(stream);
             if (nativeMissed) NativeImageDecoder.MarkNativeCodecUnavailable(sourcePath);
@@ -165,6 +166,7 @@ public sealed class AvaloniaImageDecoderBackend : IImageDecoderBackend, IPathOpt
 
         try
         {
+            SkiaDecodeGuard.EnsurePlausibleFormat(stream, sourcePath);
             var managed = DecodePreview(stream, source, longestSide, interpolationMode);
             if (nativeMissed) NativeImageDecoder.MarkNativeCodecUnavailable(sourcePath);
             return managed;
@@ -514,8 +516,10 @@ public static partial class NativeImageDecoder
 
     /// <summary>
     /// Full-resolution decode straight into the presentation bitmap (no intermediate native buffer and
-    /// copy). Returns false when the bridge is older, the image needs an EXIF rotation, or decoding failed,
-    /// so the caller falls back to the buffered path with identical pixels.
+    /// copy). Since 5.0.7 the bridge also applies EXIF orientation into the bitmap and decodes TIFF/BMP of
+    /// 4 MP and more in parallel bands (benchmark: docs/perf/benchmark-report-5.0.7.md). Returns false when
+    /// the bridge is older (status 2 = "needs EXIF rotation" from pre-5.0.7 bridges) or decoding failed, so
+    /// the caller falls back to the buffered path with identical pixels.
     /// </summary>
     private static unsafe bool TryDecodeFullInto(string path, out Bitmap bitmap, out int status)
     {
@@ -664,6 +668,12 @@ public static partial class NativeImageDecoder
 
     [LibraryImport("Glide.Native", EntryPoint = "GlideDecodeImageW", StringMarshalling = StringMarshalling.Utf16)]
     private static partial int GlideDecodeImageW(string path, uint maxLongestSide, out NativeDecodedImage image);
+
+    /// <summary>Tests: true when the 5.0.7 libjpeg-turbo path accepts this JPEG (false = WIC decodes it).</summary>
+    internal static bool JpegTurboAcceptsForTests(string path) => GlideJpegTurboAcceptsW(path) == 1;
+
+    [LibraryImport("Glide.Native", EntryPoint = "GlideJpegTurboAcceptsW", StringMarshalling = StringMarshalling.Utf16)]
+    private static partial int GlideJpegTurboAcceptsW(string path);
 
     [LibraryImport("Glide.Native", EntryPoint = "GlideDecodeImageIntoW", StringMarshalling = StringMarshalling.Utf16)]
     private static partial int GlideDecodeImageIntoW(string path, IntPtr allocate, IntPtr context);

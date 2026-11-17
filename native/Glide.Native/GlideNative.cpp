@@ -7,6 +7,10 @@
 #include <cstdint>
 #include <cmath>
 #include <limits>
+#include <thread>
+#include <vector>
+#include <atomic>
+#include "GlideJpeg.h"
 
 struct GlideImageInfo
 {
@@ -385,6 +389,10 @@ static int DecodeImageBoundedW(const wchar_t* path, std::uint32_t maxWidth, std:
 {
     if (!path || !image) return 0;
     *image = {};
+    // 5.0.7: a camera JPEG's embedded MPF large preview as the first view (GlideJpeg.cpp). Everything else, and
+    // any JPEG that path declines or fails on, continues with WIC below exactly as before.
+    if (maxWidth > 0 && maxHeight > 0 && GlideTurboDecodeBounded(path, maxWidth, maxHeight, image)) return 1;
+    *image = {};
     const HRESULT init = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     const bool mustUninit = SUCCEEDED(init);
     if (FAILED(init) && init != RPC_E_CHANGED_MODE) return 0;
@@ -529,12 +537,138 @@ extern "C" __declspec(dllexport) int __cdecl GlideDecodeImageW(const wchar_t* pa
 // peak memory of every full decode: 2 x 384 MB for a 100 MP frame).
 typedef void* (__cdecl* GlideSurfaceAllocator)(void* context, std::uint32_t width, std::uint32_t height, std::uint32_t* stride);
 
-// Full-resolution decode of frame 0 into a caller surface. Returns 1 on success, 0 on failure, and 2
-// when the image needs an EXIF orientation transform (the caller then uses GlideDecodeImageW, which
-// rotates through an intermediate buffer). Pixels are identical to GlideDecodeImageW(path, 0).
+// EXIF orientation applied while copying the decoded frame into the caller's surface: cache-blocked
+// (64x64 pixel tiles) and split over threads by source row bands, which map to disjoint destination areas.
+// Same mapping as OrientBgra, so pixels are identical to the buffered GlideDecodeImageW path.
+static void OrientIntoSurface(const std::uint8_t* source, std::uint32_t width, std::uint32_t height, std::uint16_t orientation,
+                              std::uint8_t* destination, std::uint32_t destinationStride)
+{
+    const auto* src = reinterpret_cast<const std::uint32_t*>(source);
+    auto band = [&](std::uint32_t yBegin, std::uint32_t yEnd)
+    {
+        constexpr std::uint32_t Tile = 64;
+        for (std::uint32_t ty = yBegin; ty < yEnd; ty += Tile)
+        for (std::uint32_t tx = 0; tx < width; tx += Tile)
+        {
+            const std::uint32_t yMax = std::min(ty + Tile, yEnd), xMax = std::min(tx + Tile, width);
+            for (std::uint32_t y = ty; y < yMax; ++y)
+            for (std::uint32_t x = tx; x < xMax; ++x)
+            {
+                std::uint32_t dx = x, dy = y;
+                switch (orientation)
+                {
+                case 2: dx = width - 1 - x; break;
+                case 3: dx = width - 1 - x; dy = height - 1 - y; break;
+                case 4: dy = height - 1 - y; break;
+                case 5: dx = y; dy = x; break;
+                case 6: dx = height - 1 - y; dy = x; break;
+                case 7: dx = height - 1 - y; dy = width - 1 - x; break;
+                case 8: dx = y; dy = width - 1 - x; break;
+                default: break;
+                }
+                *reinterpret_cast<std::uint32_t*>(destination + static_cast<std::size_t>(dy) * destinationStride + static_cast<std::size_t>(dx) * 4) =
+                    src[static_cast<std::size_t>(y) * width + x];
+            }
+        }
+    };
+    SYSTEM_INFO si{};
+    GetSystemInfo(&si);
+    const std::uint32_t threads = (static_cast<std::uint64_t>(width) * height >= 4'000'000ull)
+        ? std::clamp<std::uint32_t>(si.dwNumberOfProcessors, 1u, 8u) : 1u;
+    const std::uint32_t rows = ((height + threads - 1) / threads + 63) / 64 * 64;
+    std::vector<std::thread> workers;
+    try
+    {
+        for (std::uint32_t t = 1; t < threads && t * rows < height; ++t)
+            workers.emplace_back(band, t * rows, std::min(height, (t + 1) * rows));
+    }
+    catch (...) { } // a thread could not start: the remaining rows run below
+    const std::uint32_t done = static_cast<std::uint32_t>(workers.size()) + 1;
+    band(0, std::min(height, rows));
+    for (auto& w : workers) w.join();
+    if (done * rows < height) band(done * rows, height);
+}
+
+// Strip/row-addressable containers (TIFF strips or tiles, BMP rows) let several decoder instances fill
+// disjoint horizontal bands of the same surface concurrently. Each band opens its own decoder (WIC objects
+// are not shared across threads). Returns false if any band failed; the caller then decodes serially.
+static bool CopyBandsParallel(const wchar_t* path, IWICFormatConverter* firstBand, UINT width, UINT height,
+                              std::uint32_t stride, std::uint8_t* destination, unsigned bands)
+{
+    const UINT rowsPerBand = (height + bands - 1) / bands;
+    std::atomic<bool> ok{ true };
+    auto decodeBand = [&](unsigned band)
+    {
+        const UINT y0 = band * rowsPerBand;
+        if (y0 >= height) return;
+        const UINT rows = std::min(rowsPerBand, height - y0);
+        const WICRect rect{ 0, static_cast<INT>(y0), static_cast<INT>(width), static_cast<INT>(rows) };
+        std::uint8_t* target = destination + static_cast<std::size_t>(y0) * stride;
+        const UINT bytes = static_cast<UINT>(static_cast<std::uint64_t>(stride) * rows);
+        if (band == 0)
+        {
+            if (FAILED(firstBand->CopyPixels(&rect, stride, bytes, target))) ok = false;
+            return;
+        }
+        const HRESULT init = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+        const bool mustUninit = SUCCEEDED(init);
+        IWICImagingFactory* factory = nullptr;
+        IWICBitmapDecoder* decoder = nullptr;
+        IWICBitmapFrameDecode* frame = nullptr;
+        IWICFormatConverter* converter = nullptr;
+        HRESULT hr = (FAILED(init) && init != RPC_E_CHANGED_MODE) ? init : S_OK;
+        if (SUCCEEDED(hr)) hr = CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&factory));
+        if (SUCCEEDED(hr)) hr = factory->CreateDecoderFromFilename(path, nullptr, GENERIC_READ, WICDecodeMetadataCacheOnDemand, &decoder);
+        if (SUCCEEDED(hr)) hr = decoder->GetFrame(0, &frame);
+        UINT w = 0, h = 0;
+        if (SUCCEEDED(hr)) hr = frame->GetSize(&w, &h);
+        if (SUCCEEDED(hr) && (w != width || h != height)) hr = E_FAIL; // the file changed under us
+        if (SUCCEEDED(hr)) hr = factory->CreateFormatConverter(&converter);
+        if (SUCCEEDED(hr)) hr = converter->Initialize(frame, GUID_WICPixelFormat32bppPBGRA, WICBitmapDitherTypeNone, nullptr, 0.0, WICBitmapPaletteTypeCustom);
+        if (SUCCEEDED(hr)) hr = converter->CopyPixels(&rect, stride, bytes, target);
+        if (FAILED(hr)) ok = false;
+        if (converter) converter->Release();
+        if (frame) frame->Release();
+        if (decoder) decoder->Release();
+        if (factory) factory->Release();
+        if (mustUninit) CoUninitialize();
+    };
+    std::vector<std::thread> workers;
+    try
+    {
+        for (unsigned band = 1; band < bands; ++band) workers.emplace_back(decodeBand, band);
+    }
+    catch (...) { ok = false; } // a thread could not start: finish what started, then fall back
+    decodeBand(0);
+    for (auto& worker : workers) worker.join();
+    return ok;
+}
+
+static unsigned ParallelBandCount(IWICBitmapDecoder* decoder, UINT width, UINT height)
+{
+    GUID container{};
+    if (FAILED(decoder->GetContainerFormat(&container))) return 1;
+    if (!IsEqualGUID(container, GUID_ContainerFormatTiff) && !IsEqualGUID(container, GUID_ContainerFormatBmp)) return 1;
+    if (static_cast<std::uint64_t>(width) * height < 4'000'000ull) return 1; // thread start-up outweighs the gain
+    SYSTEM_INFO si{};
+    GetSystemInfo(&si);
+    const unsigned cores = std::clamp<unsigned>(si.dwNumberOfProcessors, 1u, 8u);
+    return std::max(1u, std::min(cores, height / 256u)); // at least 256 rows per band
+}
+
+// Full-resolution decode of frame 0 into a caller surface. Returns 1 on success and 0 on failure. Pixels are
+// identical to GlideDecodeImageW(path, 0). 5.0.7: an EXIF-oriented frame is transformed straight into the
+// surface (cache-blocked, multi-threaded) instead of returning 2 so the caller re-decoded it through the
+// buffered path (decode + orient + managed copy); TIFF and BMP of 4 MP and more decode in parallel bands.
+// Status 2 is still understood by the managed side for older bridges.
 extern "C" __declspec(dllexport) int __cdecl GlideDecodeImageIntoW(const wchar_t* path, GlideSurfaceAllocator allocate, void* context)
 {
     if (!path || !allocate) return 0;
+    // 5.0.7: JPEG through libjpeg-turbo (GlideJpeg.cpp). If it declines before asking for a surface, WIC runs as
+    // before; if it fails after the surface exists, WIC decodes into that same surface (never a second one).
+    std::uint8_t* turboSurface = nullptr;
+    std::uint32_t turboStride = 0, turboWidth = 0, turboHeight = 0;
+    if (GlideTurboDecodeInto(path, allocate, context, &turboSurface, &turboStride, &turboWidth, &turboHeight)) return 1;
     const HRESULT init = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     const bool mustUninit = SUCCEEDED(init);
     if (FAILED(init) && init != RPC_E_CHANGED_MODE) return 0;
@@ -551,10 +685,11 @@ extern "C" __declspec(dllexport) int __cdecl GlideDecodeImageIntoW(const wchar_t
     if (SUCCEEDED(hr)) hr = decoder->GetFrame(0, &frame);
     UINT width = 0, height = 0;
     if (SUCCEEDED(hr)) hr = frame->GetSize(&width, &height);
-    if (SUCCEEDED(hr) && ReadOrientation(frame) != 1)
+    std::uint16_t orientation = 1;
+    if (SUCCEEDED(hr))
     {
-        result = 2;
-        hr = E_ABORT;
+        orientation = ReadOrientation(frame);
+        if (orientation < 1 || orientation > 8) orientation = 1;
     }
     const std::uint64_t minimumStride = static_cast<std::uint64_t>(width) * 4ull;
     // Decoded-pixel cap before the caller is asked for a surface (R3: the managed side may not know the size).
@@ -562,15 +697,32 @@ extern "C" __declspec(dllexport) int __cdecl GlideDecodeImageIntoW(const wchar_t
     if (SUCCEEDED(hr)) hr = factory->CreateFormatConverter(&converter);
     if (SUCCEEDED(hr)) hr = converter->Initialize(frame, GUID_WICPixelFormat32bppPBGRA,
                                                    WICBitmapDitherTypeNone, nullptr, 0.0, WICBitmapPaletteTypeCustom);
+    const bool rotated = orientation >= 5 && orientation <= 8;
+    std::uint8_t* upright = nullptr; // decoded frame before the EXIF transform (rotated files only)
+    if (SUCCEEDED(hr) && orientation != 1)
+    {
+        upright = static_cast<std::uint8_t*>(CoTaskMemAlloc(static_cast<std::size_t>(width) * height * 4));
+        hr = upright ? converter->CopyPixels(nullptr, width * 4, static_cast<UINT>(static_cast<std::uint64_t>(width) * height * 4), upright) : E_OUTOFMEMORY;
+    }
     std::uint32_t stride = 0;
     std::uint8_t* destination = nullptr;
+    const UINT outWidth = rotated ? height : width, outHeight = rotated ? width : height;
     if (SUCCEEDED(hr))
     {
-        destination = static_cast<std::uint8_t*>(allocate(context, width, height, &stride));
-        const std::uint64_t bytes = static_cast<std::uint64_t>(stride) * height;
-        if (!destination || stride < minimumStride || bytes > std::numeric_limits<UINT>::max()) hr = E_OUTOFMEMORY;
+        if (!turboSurface) destination = static_cast<std::uint8_t*>(allocate(context, outWidth, outHeight, &stride));
+        else if (turboWidth == outWidth && turboHeight == outHeight) { destination = turboSurface; stride = turboStride; }
+        const std::uint64_t bytes = static_cast<std::uint64_t>(stride) * outHeight;
+        if (!destination || stride < static_cast<std::uint64_t>(outWidth) * 4ull || bytes > std::numeric_limits<UINT>::max()) hr = E_OUTOFMEMORY;
     }
-    if (SUCCEEDED(hr)) hr = converter->CopyPixels(nullptr, stride, static_cast<UINT>(static_cast<std::uint64_t>(stride) * height), destination);
+    if (SUCCEEDED(hr) && upright)
+        OrientIntoSurface(upright, width, height, orientation, destination, stride);
+    else if (SUCCEEDED(hr))
+    {
+        const unsigned bands = ParallelBandCount(decoder, width, height);
+        if (bands < 2 || !CopyBandsParallel(path, converter, width, height, stride, destination, bands))
+            hr = converter->CopyPixels(nullptr, stride, static_cast<UINT>(static_cast<std::uint64_t>(stride) * height), destination);
+    }
+    if (upright) CoTaskMemFree(upright);
     if (SUCCEEDED(hr)) result = 1;
 
     if (converter) converter->Release();
@@ -1197,4 +1349,25 @@ extern "C" __declspec(dllexport) int __cdecl GlideEncodeImageW(const wchar_t* pa
 {
     if (format > 2) return 0;
     return GlideEncodeImageExW(path, width, height, stride, pixels, format, 0.95f);
+}
+
+// Shared with GlideJpeg.cpp (same EXIF mapping and decode cap as the WIC paths above).
+void GlideOrientBgra(const std::uint8_t* source, std::uint32_t width, std::uint32_t height,
+                     std::uint16_t orientation, std::uint8_t* destination, std::uint32_t destinationWidth)
+{
+    OrientBgra(source, width, height, orientation, destination, destinationWidth);
+}
+
+void GlideOrientIntoSurface(const std::uint8_t* source, std::uint32_t width, std::uint32_t height, std::uint16_t orientation,
+                            std::uint8_t* destination, std::uint32_t destinationStride)
+{
+    OrientIntoSurface(source, width, height, orientation, destination, destinationStride);
+}
+
+bool GlideWithinDecodeCap(std::uint64_t width, std::uint64_t height) { return WithinDecodeCap(width, height); }
+
+// 5.0.7 diagnostics/tests: 1 when the libjpeg-turbo path accepts this JPEG (CMYK, 12-bit etc. return 0 = WIC).
+extern "C" __declspec(dllexport) int __cdecl GlideJpegTurboAcceptsW(const wchar_t* path)
+{
+    return GlideTurboAccepts(path) ? 1 : 0;
 }

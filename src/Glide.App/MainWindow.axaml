@@ -123,6 +123,9 @@
           <TextBlock x:Name="NavigationBoundaryNoticeText" Text="End of folder" FontSize="18" FontWeight="SemiBold" Foreground="White"/>
         </Border>
 
+        <!-- "When the last image is reached: Ask me each time" (5.0.7): the picker card is added here; clicking outside it = Stay. -->
+        <Panel x:Name="EndOfFolderPickerHost" IsVisible="False" ZIndex="1455" Background="Transparent"/>
+
         <Border x:Name="NavigationRateLimitNotice" IsVisible="False" IsHitTestVisible="False"
                 HorizontalAlignment="Left" VerticalAlignment="Top" Margin="14,14,0,0" ZIndex="1460"
                 Background="#B51B1E23" BorderBrush="#7FFFFFFF" BorderThickness="1"

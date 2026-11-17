@@ -132,10 +132,10 @@ public sealed class ExrDecoderTests : IDisposable
         var corrupt = (byte[])good.Clone();
         for (var i = good.Length - 30; i < good.Length; i++) corrupt[i] ^= 0x5A;
         AssertFails(Temp(_files, corrupt, ".exr"));
-        // Unsupported compression (DWAA = 8) is reported, not guessed at.
+        // An unknown compression id (10) is reported, not guessed at.
         var dwaa = WriteExr(8, 8, channels, 0, false, 0, 0);
         var index = IndexOf(dwaa, Encoding.ASCII.GetBytes("compression\0compression\0"));
-        dwaa[index + 24 + 4] = 8;
+        dwaa[index + 24 + 4] = 10;
         AssertFails(Temp(_files, dwaa, ".exr"));
         // B44 / PXR24 with garbage payloads fail instead of producing noise.
         foreach (var compression in new[] { 5, 6 })
@@ -151,6 +151,118 @@ public sealed class ExrDecoderTests : IDisposable
         AssertFails(Temp(_files, piz, ".exr"));
     }
 
+    // -- DWAA / DWAB ------------------------------------------------------------------------------
+
+    // Two 8x8 blocks side by side, each a flat colour (scene-linear).
+    private static readonly (float R, float G, float B)[] DwaBlocks = { (0.5f, 0.25f, 0.1f), (0.2f, 0.6f, 0.9f) };
+
+    [Theory]
+    [InlineData(8, 0)] // DWAA, static Huffman AC stream
+    [InlineData(9, 1)] // DWAB, zlib AC stream
+    public void Dwa_lossy_rgb_rle_alpha_and_unknown_channel_decode(int compression, int acCompression)
+    {
+        var pixels = Decode(Temp(_files, WriteDwaExr(compression, acCompression), ".exr"));
+        Assert.Equal((16, 8), (pixels.Width, pixels.Height));
+        foreach (var (x, y) in new[] { (0, 0), (5, 7), (7, 3), (8, 0), (12, 5), (15, 7) })
+        {
+            var (r, g, b) = DwaBlocks[x / 8];
+            AssertColor(pixels.At(x, y), Srgb(r), Srgb(g), Srgb(b), 3);
+            Assert.Equal(255, pixels.At(x, y).A);
+        }
+    }
+
+    [Fact]
+    public void Malformed_dwa_chunks_fail_gracefully()
+    {
+        var good = WriteDwaExr(8, 0);
+        var chunk = good.Length - DwaChunkLength; // start of the DWA size header
+        // DC count that does not match the block grid.
+        var badDc = (byte[])good.Clone();
+        BinaryPrimitives.WriteUInt64LittleEndian(badDc.AsSpan(chunk + 9 * 8), 7);
+        AssertFails(Temp(_files, badDc, ".exr"));
+        // Absurd sizes must not allocate.
+        var huge = (byte[])good.Clone();
+        BinaryPrimitives.WriteUInt64LittleEndian(huge.AsSpan(chunk + 8 * 8), ulong.MaxValue / 3);
+        AssertFails(Temp(_files, huge, ".exr"));
+        var bigRle = (byte[])good.Clone();
+        BinaryPrimitives.WriteUInt64LittleEndian(bigRle.AsSpan(chunk + 6 * 8), int.MaxValue);
+        AssertFails(Temp(_files, bigRle, ".exr"));
+        // Unknown version, truncated payload and garbage streams.
+        var badVersion = (byte[])good.Clone();
+        badVersion[chunk] = 7;
+        AssertFails(Temp(_files, badVersion, ".exr"));
+        AssertFails(Temp(_files, good.Take(good.Length - 10).ToArray(), ".exr"));
+        var garbage = (byte[])good.Clone();
+        for (var i = good.Length - 40; i < good.Length; i++) garbage[i] ^= 0x5A;
+        AssertFails(Temp(_files, garbage, ".exr"));
+    }
+
+    private static int DwaChunkLength;
+
+    /// <summary>
+    /// 16x8 file with channels A (RLE), B/G/R (lossy DCT as one Y'CbCr set, DC-only blocks) and Z (UNKNOWN, zlib),
+    /// hand-encoded like OpenEXR's DwaCompressor: version-2 rules, perceptual (x^(1/2.2)) values, orthonormal DC = 8 x mean.
+    /// </summary>
+    private static byte[] WriteDwaExr(int compression, int acCompression)
+    {
+        const int width = 16, height = 8;
+        var channels = new[] { new Channel("A", 1), new Channel("B", 1), new Channel("G", 1), new Channel("R", 1), new Channel("Z", 1) };
+        var plain = WriteExr(width, height, channels, 0, false, 0, 0);
+        // The uncompressed file has one chunk per scanline; keep only its attribute header.
+        var headerEnd = plain.Length - height * (8 + 8 + width * channels.Length * 2);
+        var index = IndexOf(plain, Encoding.ASCII.GetBytes("compression\0compression\0"));
+        plain[index + 24 + 4] = (byte)compression;
+
+        // DC per component (Y, then Cb, then Cr), one value per block; nonlinear R'G'B' -> Y'CbCr (Rec.709).
+        var dc = new ushort[6];
+        for (var block = 0; block < 2; block++)
+        {
+            var (r, g, b) = DwaBlocks[block];
+            float nr = MathF.Pow(r, 1 / 2.2f), ng = MathF.Pow(g, 1 / 2.2f), nb = MathF.Pow(b, 1 / 2.2f);
+            var yv = 0.2126f * nr + 0.7152f * ng + 0.0722f * nb;
+            dc[block] = BitConverter.HalfToUInt16Bits((Half)(8 * yv));
+            dc[2 + block] = BitConverter.HalfToUInt16Bits((Half)(8 * (nb - yv) / 1.8556f));
+            dc[4 + block] = BitConverter.HalfToUInt16Bits((Half)(8 * (nr - yv) / 1.5747f));
+        }
+        var dcBytes = new Writer();
+        foreach (var v in dc) dcBytes.U16(v);
+        var dcStream = Zlib(Predict(dcBytes.ToArray()));
+        // AC: every block/component is just "end of block".
+        var ac = Enumerable.Repeat((ushort)0xff00, 6).ToArray();
+        byte[] acStream;
+        if (acCompression == 0) acStream = HufCompress(ac);
+        else
+        {
+            var acBytes = new Writer();
+            foreach (var v in ac) acBytes.U16(v);
+            acStream = Zlib(acBytes.ToArray());
+        }
+        // A = 1.0: RLE of its byte planes (all low bytes, then all high bytes), then zlib.
+        var one = BitConverter.HalfToUInt16Bits((Half)1f);
+        var planes = new byte[width * height * 2];
+        planes.AsSpan(0, width * height).Fill((byte)one);
+        planes.AsSpan(width * height).Fill((byte)(one >> 8));
+        var rlePacked = Rle(planes);
+        var rleStream = Zlib(rlePacked);
+        // Z = 0.5: plain zlib.
+        var z = new Writer();
+        for (var i = 0; i < width * height; i++) z.U16(BitConverter.HalfToUInt16Bits((Half)0.5f));
+        var unknownRaw = z.ToArray();
+        var unknownStream = Zlib(unknownRaw);
+
+        var rules = new Writer();
+        foreach (var (suffix, csc) in new[] { ("R", 0), ("G", 1), ("B", 2) }) rules.Ascii(suffix).U8(0).U8((csc + 1) << 4 | 1 << 2).U8(1);
+        rules.Ascii("A").U8(0).U8(2 << 2).U8(1);
+        var ruleBytes = rules.ToArray();
+
+        var chunk = new Writer();
+        foreach (var size in new long[] { 2, unknownRaw.Length, unknownStream.Length, acStream.Length, dcStream.Length, rleStream.Length, rlePacked.Length, planes.Length, ac.Length, dc.Length, acCompression })
+            chunk.U64(size);
+        chunk.U16(ruleBytes.Length + 2).Bytes(ruleBytes).Bytes(unknownStream).Bytes(acStream).Bytes(dcStream).Bytes(rleStream);
+        var payload = chunk.ToArray();
+        DwaChunkLength = payload.Length;
+        return new Writer().Bytes(plain.AsSpan(0, headerEnd)).U64(headerEnd + 8).U32(0).U32(payload.Length).Bytes(payload).ToArray();
+    }
     private static int IndexOf(byte[] haystack, byte[] needle)
     {
         for (var i = 0; i + needle.Length <= haystack.Length; i++)

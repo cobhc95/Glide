@@ -40,6 +40,7 @@ internal static class ThemePaletteApplier
         resources["SystemAccentColorDark3"] = Shift(accentColor, 0.58);
         resources["BrushAccent"] = B(accent);
         resources["BrushNavAccent"] = B(accent);
+        resources["BrushExplorerOutline"] = new SolidColorBrush(Shift(accentColor, 0.78));
 
         if (theme == "Light")
         {

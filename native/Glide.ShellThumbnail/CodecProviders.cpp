@@ -416,7 +416,7 @@ namespace glide::thumb::providers
             L".dng", L".cr2", L".cr3", L".crw", L".nef", L".nrw", L".arw", L".srf", L".sr2", L".raf", L".orf", L".ori",
             L".rw2", L".rwl", L".pef", L".ptx", L".3fr", L".fff", L".iiq", L".cap", L".eip", L".mef", L".mos", L".mrw",
             L".x3f", L".erf", L".kdc", L".dcr", L".k25", L".bay", L".srw", L".rwz", L".gpr", L".mdc", L".raw", L".dcs",
-            L".drf", L".dsc", L".r2d", L".rw1",
+            L".drf", L".dsc", L".r2d", L".rw1", L".icns", L".ras", L".sun", L".xwd", L".dpx",
         };
     }
 

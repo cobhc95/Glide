@@ -51,13 +51,41 @@ internal static class ExplorerViewModes
     /// <summary>Tile footprint (width, height) in device-independent pixels.</summary>
     public static (double Width, double Height) TileSize(int mode) => mode switch
     {
-        ExtraLarge => (260, 252),
-        Large => (176, 188),
-        Medium => (126, 146),
+        ExtraLarge => (IconTileWidth(ExtraLarge), IconTileHeight(ExtraLarge)),
+        Large => (IconTileWidth(Large), IconTileHeight(Large)),
+        Medium => (IconTileWidth(Medium), IconTileHeight(Medium)),
         Small => (250, 40),
         List => (240, 28),
         _ => (double.NaN, 28)
     };
+
+    /// <summary>Caption line height and line count of icon-mode tiles: the tile reserves room for every caption line.</summary>
+    public const double CaptionLineHeight = 17;
+    public const int CaptionLines = 2;
+    /// <summary>Gap between the preview and the caption.</summary>
+    public const double CaptionSpacing = 6;
+    /// <summary>Tile padding (7 each side) plus border (1 each side) of icon-mode tiles.</summary>
+    public const double IconTileChrome = 16;
+    /// <summary>Width of the selection outline drawn on the edge of the selection fill.</summary>
+    public const double SelectionOutlineThickness = 3;
+    /// <summary>How far the selection fill/outline extend into the tile padding (icon tiles: padding 7, compact rows: 5,2).</summary>
+    public static readonly Avalonia.Thickness IconOutlineReach = new(SelectionOutlineThickness);
+    public static readonly Avalonia.Thickness CompactOutlineReach = new(SelectionOutlineThickness, 2);
+
+    /// <summary>
+    /// Icon-mode tile height: preview + gap + all caption lines + chrome. Before 5.0.7 the heights were fixed numbers
+    /// that left room for only ~1.5 caption lines, so a wrapped second line spilled below the selection fill.
+    /// </summary>
+    public static double IconTileHeight(int mode) =>
+        IconTopInset(mode) + PreviewSize(mode).Height + CaptionSpacing + CaptionLineHeight * CaptionLines + IconTileChrome;
+
+    private static double IconTileWidth(int mode) => mode switch { ExtraLarge => 260, Large => 176, _ => 126 };
+
+    /// <summary>
+    /// Space above the thumbnail inside an icon tile: equal to the space on its left and right, so with the selection fill
+    /// reaching the same distance out on every side, the brown band above the thumbnail is as thick as the side bands.
+    /// </summary>
+    public static double IconTopInset(int mode) => (IconTileWidth(mode) - IconTileChrome - PreviewSize(mode).Width) / 2;
 
     /// <summary>Thumbnail preview box (width, height) for icon modes; Small uses a tiny square.</summary>
     public static (int Width, int Height) PreviewSize(int mode) => mode switch

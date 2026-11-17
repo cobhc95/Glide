@@ -18,6 +18,7 @@ using Glide.App.Settings;
 using Glide.App.Services;
 using Glide.Core;
 using Glide.Core.Commands;
+using Glide.Core.Navigation;
 using Glide.Core.Settings;
 using Glide.Core.Workspace;
 using Glide.Imaging;
@@ -148,6 +149,12 @@ public partial class MainWindow
     private async void GlobalKeyDown(object? sender, KeyEventArgs e)
     {
         if (e.Handled) return;
+        // The "Ask me each time" end-of-folder picker owns the keyboard while it is open (before any hotkey routing).
+        if (_endOfFolderPicker is not null)
+        {
+            EndOfFolderPickerKeyDown(sender, e);
+            return;
+        }
         if (e.Key == Key.Tab && e.KeyModifiers.HasFlag(KeyModifiers.Control))
         {
             // Ctrl+Tab must be claimed on the tunnel route (Avalonia's focus navigation consumes Tab before the
@@ -515,8 +522,16 @@ public partial class MainWindow
             // navigation. The lookup happens only at a real boundary, never on every frame. If automatic
             // continuation is disabled, stop here; otherwise enter the next sibling / hierarchical branch
             // using the same settings and confirmation rules as NavigateAsync.
-            if (!_settings.ContinueSiblingFolders) return false;
-            if (!await TryNavigateSiblingFolderAsync(Math.Sign(delta), rapidPreviewOnly: true)) return false;
+            // Only the steps that keep the user browsing (a folder in this tab, a loop) carry held playback on; a new tab,
+            // Home or the "Ask me each time" picker stops it and runs once as a fresh navigation.
+            var endStep = EndOfFolderStepFor(delta);
+            if (endStep.Kind == EndOfFolderStepKind.Stay) return false;
+            if (!EndOfFolderPolicy.ContinuesHeldNavigation(endStep))
+            {
+                Dispatcher.UIThread.Post(async () => await ExecuteEndOfFolderStepSerializedAsync(endStep, Math.Sign(delta)));
+                return false;
+            }
+            if (!await ExecuteEndOfFolderStepAsync(endStep, Math.Sign(delta), rapidPreviewOnly: true)) return false;
             if (navigationEpoch != _navigationCommandEpoch && _navigationBoundaryPromptActive) return false;
 
             await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Render);
@@ -782,6 +797,7 @@ public partial class MainWindow
             [GlideCommand.OpenFile] = () => Event(OpenClicked), [GlideCommand.OpenFolder] = () => Event(OpenFolderClicked),
             [GlideCommand.RefreshFolder] = async () => { if (_workspace.Active is BrowserTabState b) NavigateBrowserTo(b.Folder, false); else if (_currentPath is not null) await LoadPathAsync(_currentPath, true); },
             [GlideCommand.Home] = NavigateHomeAsync,
+            [GlideCommand.ToggleLoopFolder] = ToggleLoopFolderAsync,
             [GlideCommand.PreviousImage] = () => NavigateAsync(-1), [GlideCommand.NextImage] = () => NavigateAsync(1),
             [GlideCommand.FirstImage] = () => NavigateEdgeAsync(-1), [GlideCommand.LastImage] = () => NavigateEdgeAsync(1),
             [GlideCommand.PreviousFolder] = () => RunSerializedNavigationResultAsync(() => TryNavigateSiblingFolderAsync(-1)), [GlideCommand.NextFolder] = () => RunSerializedNavigationResultAsync(() => TryNavigateSiblingFolderAsync(1)),

@@ -26,7 +26,6 @@ internal static class SettingAccessors
         ["search.showRelatedResults"] = Bool(s => s.SearchShowRelatedResults, (s, v) => s.SearchShowRelatedResults = v),
         ["windows.rememberPlacement"] = Bool(s => s.RememberWindowPlacement, (s, v) => s.RememberWindowPlacement = v),
         ["general.singleInstance"] = Bool(s => s.ReuseSingleInstance, (s, v) => s.ReuseSingleInstance = v),
-        ["navigation.siblingFolders"] = Bool(s => s.ContinueSiblingFolders, (s, v) => s.ContinueSiblingFolders = v),
         ["navigation.hierarchicalFolders"] = Bool(s => s.HierarchicalFolderTraversal, (s, v) => s.HierarchicalFolderTraversal = v),
         ["navigation.confirmHierarchicalBoundary"] = Bool(s => s.ConfirmHierarchicalFolderTraversal, (s, v) => s.ConfirmHierarchicalFolderTraversal = v),
         ["navigation.skipHint"] = Bool(s => s.NavigationSkipHint, (s, v) => s.NavigationSkipHint = v),
@@ -135,6 +134,7 @@ internal static class SettingAccessors
         ["overlay.scaleWithWindow"] = Bool(s => s.OverlayScaleWithWindow, (s, v) => s.OverlayScaleWithWindow = v),
         ["overlay.animationPauseWhileInteracting"] = Bool(s => s.OverlayAnimationPauseWhileInteracting, (s, v) => s.OverlayAnimationPauseWhileInteracting = v),
         ["overlay.animationAvoidOverlap"] = Bool(s => s.OverlayAnimationAvoidOverlap, (s, v) => s.OverlayAnimationAvoidOverlap = v),
+        ["navigation.endOfFolder"] = Text(s => s.EndOfFolderAction, (s, v) => s.EndOfFolderAction = v),
         ["navigation.hierarchicalPreviousEntry"] = Text(s => s.HierarchicalPreviousFolderEntry, (s, v) => s.HierarchicalPreviousFolderEntry = v),
         ["navigation.rateLimitInput"] = Text(s => s.NavigationRateLimitInput, (s, v) => s.NavigationRateLimitInput = v),
         ["navigation.rateLimitIndicatorPosition"] = Text(s => s.NavigationRateLimitIndicatorPosition, (s, v) => s.NavigationRateLimitIndicatorPosition = v),
@@ -208,6 +208,9 @@ internal static class SettingAccessors
                 break;
             case "window.showInExplorerTarget":
                 state.ShowInExplorerTarget = ShowInExplorerTargets.Normalize(state.ShowInExplorerTarget);
+                break;
+            case "navigation.endOfFolder":
+                state.EndOfFolderAction = Glide.Core.Navigation.EndOfFolderActions.Normalize(state.EndOfFolderAction);
                 break;
             case "explorer.locateOpensIn":
                 state.ExplorerLocateOpensIn = Glide.Core.Navigation.ExplorerLocateTargets.Normalize(state.ExplorerLocateOpensIn);

@@ -127,7 +127,7 @@ internal static class ExrPiz
         public int[]? P;
     }
 
-    private static bool HufUncompress(ReadOnlySpan<byte> compressed, ushort[] raw)
+    internal static bool HufUncompress(ReadOnlySpan<byte> compressed, ushort[] raw)
     {
         if (raw.Length == 0) return true;
         if (compressed.Length < 20) return false;

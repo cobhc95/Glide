@@ -156,13 +156,16 @@ internal sealed class ExplorerHarness : IDisposable
     }
 
     /// <summary>A real, decodable PNG of one solid colour.</summary>
-    public static byte[] Png(int width, int height, byte r, byte g, byte b)
+    public static byte[] Png(int width, int height, byte r, byte g, byte b) => Png(width, height, (_, _) => (r, g, b));
+
+    /// <summary>A real, decodable PNG whose pixels come from <paramref name="pixel"/> (x, y).</summary>
+    public static byte[] Png(int width, int height, Func<int, int, (byte R, byte G, byte B)> pixel)
     {
         using var raw = new MemoryStream();
         for (var y = 0; y < height; y++)
         {
             raw.WriteByte(0);
-            for (var x = 0; x < width; x++) { raw.WriteByte(r); raw.WriteByte(g); raw.WriteByte(b); }
+            for (var x = 0; x < width; x++) { var (r, g, b) = pixel(x, y); raw.WriteByte(r); raw.WriteByte(g); raw.WriteByte(b); }
         }
         using var compressed = new MemoryStream();
         using (var z = new ZLibStream(compressed, CompressionLevel.Fastest, leaveOpen: true)) z.Write(raw.ToArray());

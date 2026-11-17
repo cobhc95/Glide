@@ -283,6 +283,28 @@ public sealed class SecurityHardening50Tests : IDisposable
     }
 
     [Fact]
+    public void Headerless_wbmp_lookalike_is_not_decoded_unless_named_wbmp()
+    {
+        // M001.MDC (Minolta RD-175) starts 00 00 21 04: Skia's sniffing took it for a 33x4 WBMP (5.0.7).
+        var bytes = new byte[] { 0, 0, 0x21, 0x04 }.Concat(Enumerable.Range(0, 64).Select(i => (byte)(i * 37))).ToArray();
+        var path = Write("M001.MDC", bytes);
+        using (var stream = new MemoryStream(bytes))
+        {
+            Assert.Equal(SkiaSharp.SKEncodedImageFormat.Wbmp, SkiaDecodeGuard.ReadEncodedFormat(stream));
+            Assert.Throws<InvalidDataException>(() => SkiaDecodeGuard.EnsurePlausibleFormat(stream, path));
+            Assert.Equal(0, stream.Position);
+            SkiaDecodeGuard.EnsurePlausibleFormat(stream, "real.wbmp"); // a real .wbmp passes
+        }
+        using (var stream = File.OpenRead(path))
+        {
+            var backend = new AvaloniaImageDecoderBackend();
+            Assert.ThrowsAny<Exception>(() => backend.DecodeFull(stream, path));
+            stream.Position = 0;
+            Assert.ThrowsAny<Exception>(() => backend.DecodePreview(stream, default, 256, Avalonia.Media.Imaging.BitmapInterpolationMode.LowQuality, path));
+        }
+    }
+
+    [Fact]
     public void Skia_fallback_reads_the_size_and_refuses_before_allocating()
     {
         using (var overCap = new MemoryStream(DeclaredBmp(30_000, 20_000))) // 600 MP

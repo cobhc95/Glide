@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- 5.0.7 decode/open-speed benchmark harness. NOT part of Glide.sln: build.cmd and the installer never
+       see it. It only REFERENCES Glide.Core / Glide.Imaging (to measure the production open path) and loads
+       alternative codec DLLs from an external folder (default <bench-codecs>).
+       Plan and method: docs\perf\benchmark-plan-5.0.7.md. Orchestrator: tools\bench-507\run-bench.ps1.
+
+       Build in isolation so it never shares obj/bin with a concurrent src build:
+         dotnet build tools\bench-507\Glide.DecodeBench507 -c Release -p:ArtifactsPath=<repo>\tools\bench-507\.out
+       -p:GlideRefs=false builds without the Glide projects (alternative engines only). -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <!-- Background GC threads would compete with the decoder threads being measured. -->
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
+    <TieredPGO>true</TieredPGO>
+    <IsPackable>false</IsPackable>
+    <EnforceCodeStyleInBuild>false</EnforceCodeStyleInBuild>
+    <AnalysisMode>None</AnalysisMode>
+    <NoWarn>$(NoWarn);CA1416;CA2007;CS1591</NoWarn>
+    <RootNamespace>Glide.DecodeBench507</RootNamespace>
+    <GlideRefs Condition="'$(GlideRefs)' == ''">true</GlideRefs>
+    <DefineConstants Condition="'$(GlideRefs)' == 'true'">$(DefineConstants);GLIDE_REFS</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Same SkiaSharp as Avalonia 11.3.20 (libjpeg-turbo/libpng/libwebp/giflib inside libSkiaSharp.dll). -->
+    <PackageReference Include="SkiaSharp" Version="2.88.9" />
+    <None Include="engines.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(GlideRefs)' == 'true'">
+    <PackageReference Include="Avalonia.Headless" Version="11.3.20" />
+    <PackageReference Include="Avalonia.Skia" Version="11.3.20" />
+    <ProjectReference Include="..\..\..\src\Glide.Core\Glide.Core.csproj" />
+    <ProjectReference Include="..\..\..\src\Glide.Imaging\Glide.Imaging.csproj" />
+  </ItemGroup>
+</Project>

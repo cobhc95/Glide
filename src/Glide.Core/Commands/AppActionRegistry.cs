@@ -278,6 +278,7 @@ public static class AppActionRegistry
             ["file manager", "alternative", "external", "total commander", "directory opus", "reveal", "open folder"]) with { Contexts = AppActionContexts.Explorer, Description = "Opens the folder or selected item in the alternative file manager set in Settings (Explorer)." },
         Cmd("titlebar.customize", "Customize title-bar buttons…", "Application", GlideCommand.CustomizeTitleBar, [], ["title bar", "toolbar", "buttons", "customize"]),
         Cmd("statusbar.customize", "Customize status-bar buttons…", "Application", GlideCommand.CustomizeStatusBar, [], ["status bar", "status", "buttons", "reorder", "customize", "customise"]),
+        Cmd("navigation.toggleLoopFolder", "Loop this folder (this tab)", "Navigation", GlideCommand.ToggleLoopFolder, [], ["loop", "repeat", "wrap around", "end of folder", "last image", "first image", "this tab", "status bar"]) with { Icon = "Loop", Description = "Turns looping on or off for the current tab: at the end (or start) of the folder Next / Previous wraps around inside the folder, whatever \"When the last image is reached\" says. Also available as a status-bar button." },
         Cmd("tabs.tooltipLarger", "Tab tooltip text larger", "Tabs", GlideCommand.TabToolTipLarger, [], ["tab", "tooltip", "font", "font size", "text size", "larger", "bigger", "increase"]),
         Cmd("tabs.tooltipSmaller", "Tab tooltip text smaller", "Tabs", GlideCommand.TabToolTipSmaller, [], ["tab", "tooltip", "font", "font size", "text size", "smaller", "decrease"]),
         Cmd("window.resetTransparency", "Reset window transparency to 100%", "Application", GlideCommand.ResetTransparency, [], ["transparency", "opacity", "reset"]),
@@ -447,7 +448,7 @@ public static class AppActionRegistry
     // A method, not a static field: BuildAll runs from the static initializer of All, declared above.
     private static HashSet<string> ViewerOnlyIds() => new(StringComparer.OrdinalIgnoreCase)
     {
-        "folder.previous", "folder.next", "slideshow.startPause", "view.info", "view.rotateLeft", "view.rotateRight",
+        "folder.previous", "folder.next", "navigation.toggleLoopFolder", "slideshow.startPause", "view.info", "view.rotateLeft", "view.rotateRight",
         "view.flipHorizontal", "view.flipVertical", "nav.next", "nav.previous", "nav.first", "nav.last", "view.fit",
         "view.fitWidth", "view.fitHeight", "view.fitWindow", "view.actual", "view.toggleFitActual", "view.zoomIn",
         "view.zoomOut", "gif.playPause", "gif.previousFrame", "gif.nextFrame", "file.copyImage", "file.copyFile",

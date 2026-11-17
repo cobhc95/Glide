@@ -26,6 +26,38 @@ internal static class SkiaDecodeGuard
             throw new InsufficientMemoryException($"There is not enough free memory to decode this {size.Width}x{size.Height} image.");
     }
 
+    /// <summary>
+    /// Throws (a plain decode failure, not a refusal) when Skia would decode the file as WBMP although its name is
+    /// not .wbmp. WBMP has no real magic number (two zero bytes and two variable-length sizes), so Skia's content
+    /// sniffing "recognises" many unrelated files as tiny 1-bit images (a Minolta M001.MDC opened as 33x4 noise).
+    /// The caller's fallbacks (WIC, Shell preview) then get their turn instead. Leaves the stream position unchanged.
+    /// </summary>
+    public static void EnsurePlausibleFormat(Stream stream, string? sourcePath)
+    {
+        if (string.IsNullOrWhiteSpace(sourcePath) || !stream.CanSeek || !stream.CanRead) return;
+        if (string.Equals(Path.GetExtension(sourcePath), ".wbmp", StringComparison.OrdinalIgnoreCase)) return;
+        if (ReadEncodedFormat(stream) == SkiaSharp.SKEncodedImageFormat.Wbmp)
+            throw new InvalidDataException("The file content is not a recognised image (it only resembles a headerless WBMP).");
+    }
+
+    internal static SkiaSharp.SKEncodedImageFormat? ReadEncodedFormat(Stream stream)
+    {
+        var start = stream.Position;
+        try
+        {
+            var wrapper = new SkiaSharp.SKManagedStream(stream, false);
+            using var codec = SkiaSharp.SKCodec.Create(wrapper);
+            var format = codec?.EncodedFormat;
+            GC.KeepAlive(wrapper);
+            return format;
+        }
+        catch { return null; }
+        finally
+        {
+            try { stream.Position = start; } catch { /* best effort */ }
+        }
+    }
+
     internal static bool TryReadOutputSize(Stream stream, int longestSide, out ImageDimensions size)
     {
         size = default;

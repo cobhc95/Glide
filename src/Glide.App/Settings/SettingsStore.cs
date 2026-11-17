@@ -22,7 +22,7 @@ public static class SettingsStore
     /// </summary>
     private const int LaunchPolicySchema = 4;
     // 9 (5.0.0 Back / Forward): the one-time title-bar default migration below is gated on it.
-    internal const int CurrentSettingsSchema = 14;
+    internal const int CurrentSettingsSchema = 16;
     /// <summary>
     /// Settings schema that made "Previously used tab" the default of "After closing a tab, activate" (5.0.6). Files
     /// from an older schema that store the old default "Match Ctrl+Tab order" move to the new default once.
@@ -38,6 +38,18 @@ public static class SettingsStore
     /// schema that store exactly the old default (80) move to 120 once.
     /// </summary>
     internal const int NavigationInterval120Schema = 14;
+    /// <summary>
+    /// Settings schema that replaced the "Automatically continue into sibling folders" checkbox (ContinueSiblingFolders)
+    /// with "When the last image is reached" (EndOfFolderAction, 5.0.7). Older files: on = next folder, off = do nothing.
+    /// </summary>
+    internal const int EndOfFolderActionSchema = 15;
+    /// <summary>
+    /// Settings schema that shows the "Loop this folder (this tab)" status-bar button by default (5.0.7). A customised
+    /// status-bar list from an older schema gets it inserted once (after "nav"); users can remove it again.
+    /// </summary>
+    internal const int LoopFolderStatusButtonSchema = 16;
+    /// <summary>The JSON name of the retired checkbox, read only by the schema 15 migration.</summary>
+    internal const string LegacyContinueSiblingFoldersProperty = "ContinueSiblingFolders";
     /// <summary>The navigation minimum interval default before 5.0.6.</summary>
     internal const int PreviousNavigationRateLimitDefaultMs = 80;
     /// <summary>Settings schema that added Back / Forward to the default title-bar buttons.</summary>
@@ -367,6 +379,27 @@ public static class SettingsStore
             ? new GlideSettingsState().NavigationRateLimitMs
             : value;
 
+    /// <summary>
+    /// 5.0.7: "When the last image is reached". A file older than schema 15 has no EndOfFolderAction; its old checkbox
+    /// decides (missing = its default, on = next folder). From schema 15 on the stored choice is kept (normalised).
+    /// </summary>
+    internal static string MigrateEndOfFolderAction(int sourceSchema, bool? legacyContinueSiblingFolders, string? stored) =>
+        sourceSchema < EndOfFolderActionSchema
+            ? Glide.Core.Navigation.EndOfFolderActions.FromLegacyContinueSiblingFolders(legacyContinueSiblingFolders ?? true)
+            : Glide.Core.Navigation.EndOfFolderActions.Normalize(stored);
+
+    /// <summary>
+    /// Schema 16: the Loop this folder button joins the default status bar. An empty list (the default layout) picks it up
+    /// by itself; "none" (everything deliberately hidden) is kept; any other list from an older schema gets it once.
+    /// </summary>
+    internal static string MigrateStatusBarGroups(int sourceSchema, string? stored)
+    {
+        if (sourceSchema >= LoopFolderStatusButtonSchema || string.IsNullOrWhiteSpace(stored)) return stored ?? string.Empty;
+        var shown = Glide.Core.StatusBarGroupCatalog.Parse(stored);
+        if (shown.Count == 0) return stored;
+        return Glide.Core.StatusBarGroupCatalog.Format(Glide.Core.StatusBarGroupCatalog.InsertLoopFolderButton(shown));
+    }
+
     internal static List<string> NormalizeRecentGestureActions(IEnumerable<string>? recent) =>
         (recent ?? [])
             .Select(GestureCatalog.NormalizeAction)
@@ -445,6 +478,12 @@ public static class SettingsStore
             loaded.AfterTabCloseActivate = MigrateAfterTabCloseActivate(sourceSchema,
                 Glide.Core.Workspace.TabCloseActivation.Normalize(loaded.AfterTabCloseActivate));
             loaded.SwitchToNewTabs = MigrateSwitchToNewTabs(sourceSchema, loaded.SwitchToNewTabs);
+            bool? legacyContinueSiblingFolders =
+                document.RootElement.TryGetProperty(LegacyContinueSiblingFoldersProperty, out var legacyContinue) &&
+                legacyContinue.ValueKind is JsonValueKind.True or JsonValueKind.False
+                    ? legacyContinue.GetBoolean() : null;
+            loaded.EndOfFolderAction = MigrateEndOfFolderAction(sourceSchema, legacyContinueSiblingFolders, loaded.EndOfFolderAction);
+            loaded.StatusBarGroups = MigrateStatusBarGroups(sourceSchema, loaded.StatusBarGroups);
             // 4.8.0: the title-bar Show in Explorer button opens Glide's own Explorer tab by default. Files saved
             // before the setting existed omit it (so the new default applies; their hidden legacy
             // NavigateToFolderBehavior value never reflected a user choice); only an explicit

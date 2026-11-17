@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup><IsPackable>false</IsPackable><IsTestProject>true</IsTestProject></PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
@@ -19,5 +19,6 @@
     <None Include="Fixtures\overlay-video-vp9.webm" CopyToOutputDirectory="PreserveNewest" />
     <None Include="Fixtures\Codecs\*" Exclude="Fixtures\Codecs\*.py" CopyToOutputDirectory="PreserveNewest" />
     <None Include="Fixtures\Pdn\*" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="Fixtures\Jpeg\*.jpg" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

@@ -6,17 +6,17 @@ namespace Glide.Imaging;
 
 /// <summary>
 /// Managed OpenEXR reader for single-part scanline and tiled images (level 0 of mip/rip-mapped
-/// files). Compressions: NONE, RLE, ZIPS, ZIP, PIZ, PXR24 and B44/B44A; channel types HALF, FLOAT and UINT.
+/// files). Compressions: NONE, RLE, ZIPS, ZIP, PIZ, PXR24, B44/B44A and DWAA/DWAB (<see cref="ExrDwa"/>); channel types HALF, FLOAT and UINT.
 /// Channels R/G/B/A (or a layer *.R/*.G/*.B/*.A, luminance/chroma Y+RY+BY, luminance Y, or the first
 /// channel as grey) are tone-mapped to 8-bit sRGB by clamping scene-linear values to [0,1]; premultiplied
 /// alpha is undone and an alpha channel that is zero everywhere is ignored.
-/// DWAA/DWAB, deep and multi-part files are reported as undecodable.
+/// Deep and multi-part files are reported as undecodable.
 /// </summary>
 internal static class ExrDecoder
 {
     private const uint Magic = 20000630;
 
-    private enum Compression { None = 0, Rle = 1, Zips = 2, Zip = 3, Piz = 4, Pxr24 = 5, B44 = 6, B44A = 7 }
+    private enum Compression { None = 0, Rle = 1, Zips = 2, Zip = 3, Piz = 4, Pxr24 = 5, B44 = 6, B44A = 7, Dwaa = 8, Dwab = 9 }
 
     private sealed class Channel
     {
@@ -55,7 +55,7 @@ internal static class ExrDecoder
         try
         {
             if (!TryParseHeader(data, out var header)) return false;
-            if (header.Compression is < 0 or > 7) return false;
+            if (header.Compression is < 0 or > 9) return false;
             if (!ManagedCodecSupport.FitsMemory(header.Width, header.Height)) return false;
 
             // Channel selection.
@@ -311,14 +311,15 @@ internal static class ExrDecoder
         }
         long expected = 0; // subsampled channels (RY/BY) store fewer samples than the full grid
         foreach (var channel in header.Channels) expected += (long)channel.PlaneWidth * channel.PlaneHeight * channel.Size;
-        long maxRatio = header.Compression switch { 0 => 1, 1 => 128, _ => 1100 };
+        long maxRatio = header.Compression switch { 0 => 1, 1 => 128, 8 or 9 => 1_000_000, _ => 1100 }; // DWA: a flat 8x8 block is one zlib-packed DC value
         return stored * maxRatio >= expected;
     }
 
     private static int LinesPerBlock(int compression) => compression switch
     {
         3 or 5 => 16, // ZIP, PXR24
-        4 or 6 or 7 => 32, // PIZ, B44, B44A
+        4 or 6 or 7 or 8 => 32, // PIZ, B44, B44A, DWAA
+        9 => 256, // DWAB
         _ => 1,
     };
 
@@ -445,6 +446,11 @@ internal static class ExrDecoder
                     break;
                 case Compression.Piz:
                     if (!ExrPiz.TryDecode(packed, header.Channels.Select(c => (c.Size, SampleCount(x0 + header.XMin, w, c.XSampling), SampleCount(absoluteY0, h, c.YSampling), c.YSampling)).ToArray(),
+                            absoluteY0, h, (int)expected, out raw)) return false;
+                    break;
+                case Compression.Dwaa:
+                case Compression.Dwab:
+                    if (!ExrDwa.TryDecode(packed, header.Channels.Select(c => new ExrDwa.Channel(c.Name, c.Type, SampleCount(x0 + header.XMin, w, c.XSampling), SampleCount(absoluteY0, h, c.YSampling), c.YSampling, c.PLinear)).ToArray(),
                             absoluteY0, h, (int)expected, out raw)) return false;
                     break;
                 default:
@@ -752,7 +758,7 @@ internal static class ExrDecoder
             s[i] = (s[i] & 0x8000) != 0 ? (ushort)(s[i] & 0x7FFF) : (ushort)~s[i];
     }
 
-    private static int Mod(int value, int divisor)
+    internal static int Mod(int value, int divisor)
     {
         var m = value % divisor;
         return m < 0 ? m + divisor : m;
@@ -767,7 +773,7 @@ internal static class ExrDecoder
         return n;
     }
 
-    private static bool RleDecode(ReadOnlySpan<byte> source, int expected, out byte[] output)
+    internal static bool RleDecode(ReadOnlySpan<byte> source, int expected, out byte[] output)
     {
         output = new byte[expected];
         int input = 0, produced = 0;
@@ -794,7 +800,7 @@ internal static class ExrDecoder
     }
 
     /// <summary>Undoes the ZIP/RLE byte predictor and the even/odd byte split.</summary>
-    private static byte[] Reconstruct(byte[] data)
+    internal static byte[] Reconstruct(byte[] data)
     {
         for (var i = 1; i < data.Length; i++) data[i] = (byte)(data[i - 1] + data[i] - 128);
         var output = new byte[data.Length];
