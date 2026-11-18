@@ -76,9 +76,9 @@ if (-not (Test-Path $portable)) { Fail "missing $portable" }
 $hash = (Get-FileHash $installer -Algorithm SHA256).Hash.ToLowerInvariant()
 Write-Host "   installer SHA256 $hash"
 Run 'write Glide.Setup.sha256' { Set-Content -Path $shaFile -Value "$hash  Glide.Setup.exe" -Encoding ascii -NoNewline }
-$notesText = Get-Content $notes -Raw
+$notesText = [IO.File]::ReadAllText($notes, [Text.Encoding]::UTF8)
 if ($notesText -match 'SHA256_PLACEHOLDER') {
-    Run 'replace SHA256_PLACEHOLDER in the release notes' { [IO.File]::WriteAllText($notes, $notesText.Replace('SHA256_PLACEHOLDER', $hash)) }
+    Run 'replace SHA256_PLACEHOLDER in the release notes' { [IO.File]::WriteAllText($notes, $notesText.Replace('SHA256_PLACEHOLDER', $hash), (New-Object Text.UTF8Encoding $false)) }
 } elseif ($notesText -notmatch [regex]::Escape($hash)) {
     $message = 'the release notes carry a SHA256 that is not the installer''s (rebuilt since the notes were written?)'
     if ($live) { Fail $message } else { Write-Host "   WARNING: $message" -ForegroundColor Yellow }

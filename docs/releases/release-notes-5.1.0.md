@@ -4,7 +4,7 @@ Released 2026-11-18. A feature release: much faster and lighter browsing of larg
 
 ## Highlights
 
-- **Browsing 30 MP JPEGs with a held arrow key: about 11â€“14 ms per picture** (was 28 ms median, 214 ms p95), with **0.3â€“1.0 GB of memory instead of 2.2â€“3.2 GB**.
+- **Browsing 30 MP JPEGs with a held arrow key: about 11–14 ms per picture** (was 28 ms median, 214 ms p95), with **0.3–1.0 GB of memory instead of 2.2–3.2 GB**.
 - **Instant tab switching**: going back to a recent picture or Explorer tab shows it at once instead of loading it again.
 - **Explorer tabs update live** when files are added, deleted or renamed outside Glide.
 - **Address bar over pictures** (optional), **tooltip delays per area**, **Overlay mode can be moved** by dragging, with a drag strip, Lock position and **Alt+O**.
@@ -28,14 +28,14 @@ Ten 30 MP baseline JPEGs (4:2:0, no EXIF, no embedded preview), *Maximum quality
 
 | Measure | 5.0.7 | 5.1.0 |
 |---|---:|---:|
-| Held arrow key, time per frame (median / p95) | 28 / 214 ms | 11â€“14 / â‰¤ 28 ms |
-| Held arrow key, throughput | â€” | about 70 frames/s |
+| Held arrow key, time per frame (median / p95) | 28 / 214 ms | 11–14 / ≤ 28 ms |
+| Held arrow key, throughput | — | about 70 frames/s |
 | Tap next / previous, cache hit (median / p95) | 5.4 / 8.5 ms | 6.0 / 16 ms |
 | Cache miss, input to first pixel (median / p95) | 76 / 81 ms | 79 / 83 ms |
-| Private memory while browsing | 2.2â€“3.2 GB | 0.3â€“1.0 GB |
-| Decoded-image cache | 933 MB | 23â€“71 MB |
+| Private memory while browsing | 2.2–3.2 GB | 0.3–1.0 GB |
+| Decoded-image cache | 933 MB | 23–71 MB |
 | Full-resolution 30 MP decodes during the script | 26 | 0 (only the picture you stop on, after 1.5 s idle) |
-| Prefetch hit rate | â€” | 100 % |
+| Prefetch hit rate | — | 100 % |
 
 Single taps on a cache hit are within noise of 5.0.7 (they were already fast); a cache miss costs about the same. The gains are in held-key browsing, memory and the amount of decoding work.
 
@@ -56,8 +56,8 @@ Headless test harness, synthetic 3000 x 2000 PNGs and a folder of 1,500 files. R
 
 | Switch | 5.0.7 | 5.1.0 |
 |---|---:|---:|
-| Back to an Explorer tab from a picture tab | 65â€“101 ms | 13â€“42 ms |
-| Back to a picture tab from an Explorer tab | 51â€“107 ms | 16â€“19 ms |
+| Back to an Explorer tab from a picture tab | 65–101 ms | 13–42 ms |
+| Back to a picture tab from an Explorer tab | 51–107 ms | 16–19 ms |
 
 ### Opening from File Explorer with Speed Boost
 
@@ -65,7 +65,7 @@ No before/after figures were measured for this change. What changed is visible: 
 
 ### 5.0.7 for reference
 
-The 5.0.7 decoder gains (TIFF about 4x, JPEG full decode 1.3â€“1.8x, camera JPEG embedded preview 225 â†’ 39 ms, JPEG XL / HEIC / JPEG 2000 12â€“20 %) carry over unchanged; see [release-notes-5.0.7.md](release-notes-5.0.7.md) and [benchmark-report-5.0.7.md](../perf/benchmark-report-5.0.7.md).
+The 5.0.7 decoder gains (TIFF about 4x, JPEG full decode 1.3–1.8x, camera JPEG embedded preview 225 → 39 ms, JPEG XL / HEIC / JPEG 2000 12–20 %) carry over unchanged; see [release-notes-5.0.7.md](release-notes-5.0.7.md) and [benchmark-report-5.0.7.md](../perf/benchmark-report-5.0.7.md).
 
 ## New features
 
@@ -73,8 +73,8 @@ The 5.0.7 decoder gains (TIFF about 4x, JPEG full decode 1.3â€“1.8x, camera
 - **Live updates from outside Glide.** A file or folder added, deleted or renamed in Windows File Explorer (or by another program) shows up within a fraction of a second, updated in place with no reload or flicker.
 - **In-place updates after your own file operations.** Copy, paste, delete, rename, new folder and Refresh update the list like Windows Explorer: other items keep their thumbnails, the selection and the scroll position.
 - **Extra info under thumbnails**: Date, Resolution and File size, each optional (off by default), in the Extra large, Large and Medium views.
-- **Sort by image dimensions** (Width, Height, Total pixels). The Sort list names every field with â–² / â–¼, so one pick sets field and direction; *Size* is now *File size*.
-- **Resizable drive bar** (drag its edge, or *Drive bar width* in Settings, 120â€“600 px).
+- **Sort by image dimensions** (Width, Height, Total pixels). The Sort list names every field with ▲ / ▼, so one pick sets field and direction; *Size* is now *File size*.
+- **Resizable drive bar** (drag its edge, or *Drive bar width* in Settings, 120–600 px).
 - **Ctrl+drag** a selection rectangle to deselect; **Escape** clears the selection; Shift+Home / End select to the start / end of the row (Ctrl+Shift+Home / End for the whole folder).
 - **Recent locations** shows full paths, most recent first; the background menu says **Properties of {folder}**.
 
@@ -82,15 +82,15 @@ The 5.0.7 decoder gains (TIFF about 4x, JPEG full decode 1.3â€“1.8x, camera
 Settings > Window & navigation > Explorer tab: *Show address bar while viewing pictures* (off by default; also on the right-click menu of the Explorer navigation row). Back, Forward, Recent locations, Up, Refresh and the address bar stay above pictures in picture tabs, showing the picture's folder, on their own row so the picture is never covered. Clicking a folder, Up or Refresh opens it in the Explorer view of the same tab. Hidden in fullscreen and Overlay mode; hotkey-bindable.
 
 ### Tooltips
-Settings > Appearance & viewing > **Tooltips**: a delay (0â€“5000 ms) for the Settings window, the main interface (title bar, tabs, status bar), Overlay mode and Explorer tab items, plus *Show info tooltip when hovering items* for the Explorer tab. The Explorer item tooltip now waits 1.5 s like Windows Explorer; the others wait 0.6 s.
+Settings > Appearance & viewing > **Tooltips**: a delay (0–5000 ms) for the Settings window, the main interface (title bar, tabs, status bar), Overlay mode and Explorer tab items, plus *Show info tooltip when hovering items* for the Explorer tab. The Explorer item tooltip now waits 1.5 s like Windows Explorer; the others wait 0.6 s.
 
 ### Tabs
-- **Middle-click opens in a background tab at the end**, like a web browser. Two new settings for middle-click only: foreground / background and at the end / next to the current tab / same as new tabs. The *Key to open â€¦ instead* keys still flip one middle-click.
+- **Middle-click opens in a background tab at the end**, like a web browser. Two new settings for middle-click only: foreground / background and at the end / next to the current tab / same as new tabs. The *Key to open … instead* keys still flip one middle-click.
 - **Middle-click a Recent item on the Welcome page** opens it in a new tab (a folder as an Explorer tab).
 - **Ctrl+T and the + button** always open the new tab at the far right and switch to it.
-- **New-tab options redesigned**: *New tabs open [at the end / next to the current tab]* and *Open new tabs in the [foreground / background]*, each with its own *Key to open â€¦ instead* (None / Shift / Ctrl / Alt). They replace the old *Shift and Alt change how a new tab opens* checkbox.
-- **After closing a tab, activate** can now also be **First tab**, **Last tab** or **Customâ€¦** (Home, a new empty Explorer tab, or an Explorer tab with the closed picture's folder).
-- **Tab preview size** (50â€“250 %), also with Ctrl + wheel over the tab (key configurable). The hover card's mouse hint is a row of key chips that follow your bindings.
+- **New-tab options redesigned**: *New tabs open [at the end / next to the current tab]* and *Open new tabs in the [foreground / background]*, each with its own *Key to open … instead* (None / Shift / Ctrl / Alt). They replace the old *Shift and Alt change how a new tab opens* checkbox.
+- **After closing a tab, activate** can now also be **First tab**, **Last tab** or **Custom…** (Home, a new empty Explorer tab, or an Explorer tab with the closed picture's folder).
+- **Tab preview size** (50–250 %), also with Ctrl + wheel over the tab (key configurable). The hover card's mouse hint is a row of key chips that follow your bindings.
 
 ### Overlay mode
 - **Move the window by dragging** the picture while it fits; when zoomed in, drag pans and the bottom bar or **Alt+drag** moves the window.
