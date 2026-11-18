@@ -430,12 +430,22 @@ public partial class MainWindow
     internal static bool OnlyTextOverlayStyleDiffers(GlideSettingsState current, GlideSettingsState next) =>
         SettingsDelta.Compute(current, next).OnlyTouches(TextOverlayStyleIds);
 
+    /// <summary>
+    /// Physical decode box: viewport DIPs x render scaling. Before the viewport is laid out (first show, warm window)
+    /// its bounds are 0, which used to yield a 240 px box; fall back to the window's client area, then 0 (= the
+    /// configured maximum) so the first frame is never decoded tiny.
+    /// </summary>
+    private (int Width, int Height) PhysicalViewportForDecode()
+    {
+        double w = Viewport.Bounds.Width, h = Viewport.Bounds.Height;
+        if (w < 16 || h < 16) { w = ClientSize.Width; h = ClientSize.Height; }
+        return (DisplayFrameSufficiency.ToPhysical(w < 16 ? 0 : w, RenderScaling), DisplayFrameSufficiency.ToPhysical(h < 16 ? 0 : h, RenderScaling));
+    }
+
     private ImagePerformancePolicy BuildPerformancePolicy()
     {
         var profile = ImagePerformancePolicy.ForProfile(_settings.InitialImageQuality);
-        var renderScale = Math.Max(1.0, RenderScaling);
-        var viewportWidth = (int)Math.Ceiling(Math.Max(1.0, Viewport.Bounds.Width) * renderScale);
-        var viewportHeight = (int)Math.Ceiling(Math.Max(1.0, Viewport.Bounds.Height) * renderScale);
+        var (viewportWidth, viewportHeight) = PhysicalViewportForDecode();
         var previewBounds = _settings.AdaptiveFastPreview
             ? ImagePerformanceGovernor.ChoosePreviewBounds(_settings.RapidPreviewLongestSide, viewportWidth, viewportHeight)
             : (_settings.RapidPreviewLongestSide, _settings.RapidPreviewLongestSide);
@@ -454,12 +464,10 @@ public partial class MainWindow
             SequentialForegroundReads = _settings.SequentialForegroundReads,
             PredictivePrefetch = _settings.PredictivePrefetch,
             PrefetchDepth = _settings.PrefetchDepth,
-            // 5.1: full neighbour frames only for the "Immediately" refine policy (DecodeScaleCatalog);
-            // otherwise neighbours stay display-sized so a hit never uploads a 30 MP texture.
-            FirstViewPercentOverride = _settings.FirstViewScalePercent,
-            PrefetchPercentOverride = _settings.PrefetchScalePercent,
-            RefineOverride = _settings.FullRefine,
-            FullNeighbourPredecodeCount = (profile with { RefineOverride = _settings.FullRefine }).RefinePolicyFor(_navigator.Current) == FullRefinePolicy.Immediate ? 1 : 0,
+            // Neighbours are prepared at the physical fit size only; the picture you stop on gets its full decode.
+            FullNeighbourPredecodeCount = 0,
+            PrefetchBoxWidth = viewportWidth,
+            PrefetchBoxHeight = viewportHeight,
             CompressedCacheItems = _settings.CacheItems,
             CompressedCacheMegabytes = _settings.CompressedCacheMegabytes,
             DecodedCacheMegabytes = _settings.DecodedCacheMegabytes
@@ -469,9 +477,7 @@ public partial class MainWindow
     private ImagePerformancePolicy BuildRapidBrowsePolicy()
     {
         var normal = BuildPerformancePolicy();
-        var renderScale = Math.Max(1.0, RenderScaling);
-        var viewportWidth = (int)Math.Ceiling(Math.Max(1.0, Viewport.Bounds.Width) * renderScale);
-        var viewportHeight = (int)Math.Ceiling(Math.Max(1.0, Viewport.Bounds.Height) * renderScale);
+        var (viewportWidth, viewportHeight) = PhysicalViewportForDecode();
         // Rapid browsing has its own user-visible quality tier. Balanced defaults to 1440 px,
         // deliberately higher than the old hard-coded 960 px frame. The visual performance profile
         // stages 960 / 1440 / 2048 px for Maximum speed / Balanced / Maximum quality, while this

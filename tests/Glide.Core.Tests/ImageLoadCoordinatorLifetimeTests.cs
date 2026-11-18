@@ -441,8 +441,7 @@ public sealed class ImageLoadCoordinatorLifetimeTests : IDisposable
     {
         var jpeg = WriteImage("refine.jpg", 4000, 3000);
         var backend = new CountingBackend();
-        // "Immediately" full refine (the pre-5.1 policy); the idle/zoom policies are covered below.
-        using var loader = new ImageLoadCoordinator(backend) { Policy = Policy(previewBox: 1900) with { PreviewLongestSide = 2400, RefineOverride = "Immediately" } };
+        using var loader = new ImageLoadCoordinator(backend) { Policy = Policy(previewBox: 1900) with { PreviewLongestSide = 2400 } };
         loader.SetViewportDemand(jpeg, new ImageViewportDemand(1900, 1000));
         var first = (await loader.LoadForegroundAsync(jpeg, loader.Policy))!;
         Assert.True(first.IsPreview);
@@ -458,25 +457,6 @@ public sealed class ImageLoadCoordinatorLifetimeTests : IDisposable
         Assert.Equal(4000, refined.Bitmap.PixelSize.Width);
         Assert.Equal(1, backend.FullDecodes);
         refined.Bitmap.Dispose();
-    }
-
-    [Fact]
-    public async Task Jpeg_IdleRefinePolicy_RefinesToTheViewportOnly_NeverFull()
-    {
-        // 5.1 (DecodeScaleCatalog): "When idle" / "On zoom only" refine a too-small first frame to the size the
-        // view needs; full resolution is fetched later by the app (idle timer or zoom), not by this refinement.
-        var jpeg = WriteImage("refine-idle.jpg", 4000, 3000);
-        var backend = new CountingBackend();
-        using var loader = new ImageLoadCoordinator(backend) { Policy = Policy(previewBox: 1900) with { PreviewLongestSide = 2400, RefineOverride = "When idle" } };
-        var first = (await loader.LoadForegroundAsync(jpeg, loader.Policy))!;
-        loader.SetViewportDemand(jpeg, new ImageViewportDemand(3800, 2000));
-        var refined = await loader.RefineForegroundAsync(first);
-        if (refined is not null)
-        {
-            Assert.True(refined.IsPreview);
-            refined.Bitmap.Dispose();
-        }
-        Assert.Equal(0, backend.FullDecodes);
     }
 
     [Fact]

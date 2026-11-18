@@ -24,6 +24,12 @@
     <CETCompat>false</CETCompat>
   </PropertyGroup>
   <ItemGroup>
+    <!-- 5.1.1 RAM (docs/audits/ram-audit-5.1.1.md #6): the GC compacts (incl. the large object heap) rather than grow
+         when fragmentation passes ~5/10. Decoded frames are native (Skia), so this only touches managed buffers; the
+         default workstation concurrent GC stays. Baked into the NativeAOT exe like a runtimeconfig knob. -->
+    <RuntimeHostConfigurationOption Include="System.GC.ConserveMemory" Value="5" />
+  </ItemGroup>
+  <ItemGroup>
     <PackageReference Include="Avalonia" Version="11.3.20" />
     <PackageReference Include="Avalonia.Win32" Version="11.3.20" />
     <PackageReference Include="Avalonia.Skia" Version="11.3.20" />

@@ -4,6 +4,17 @@ All notable changes to Glide Image Viewer are documented here. The format is bas
 [Keep a Changelog](https://keepachangelog.com/), and the project uses dotted feature releases with
 hyphenated follow-up corrections (for example `4.2.0-1`).
 
+## [5.1.1] - 2026-11-19
+
+### Changed
+- Faster browsing of large photos: the pictures before and after the current one are prepared at screen size, so holding an arrow key through 30 MP JPEGs stays smooth with much less memory; the picture you stop on still decodes at full resolution.
+- Lower memory use: a large photo you move away from is kept at screen size instead of full size (about 120 MB down to 30-55 MB for a 30 MP JPEG), image tabs you leave keep a screen-sized picture, only the pictures around the current one stay prepared, minimising Glide frees the prepared pictures and file data but keeps the one on screen, the tab hover previews have a size limit and the .NET memory manager compacts instead of growing. Zooming or a larger window still loads full detail, and a picture is never shown smaller than its screen size.
+
+### Fixed
+- Progressive JPEG previews now decode all scans, so a full-sized preview no longer loses fine detail while browsing.
+- 5.1.0 was withdrawn because of a decoder error; fixed in 5.1.1 (picture decoding as in 5.0.7, with faster progressive JPEG preloading).
+- Some progressive JPEGs stayed blurry: their quick first view looked full-size, so it was never replaced by the sharp picture. This also covers images reached with next/previous, which reused the blurry prepared copy, and images shrunk after you left them.
+
 ## [5.1.0] - 2026-11-18
 
 **Feature release** (5.0.8 was never released and is folded in here). Much faster browsing of large photos (display-sized decoding, about 3x less memory), instant tab switching, Explorer tabs that follow outside changes, an address bar over pictures, tooltip and Overlay-moving settings, browser-style middle-click and new-tab behaviour, a fix for Glide sometimes not opening after Overlay mode, a large internal clean-up (four audit stages), Vertigo220 round 3 changes, and new defaults for mouse side buttons and the end of a folder. Release notes: [docs/releases/release-notes-5.1.0.md](docs/releases/release-notes-5.1.0.md).

@@ -246,6 +246,10 @@ public sealed class AvaloniaImageDecoderBackend : IImageDecoderBackend, IPathOpt
                         $"output={nativeBitmap.PixelSize.Width}x{nativeBitmap.PixelSize.Height};progressive={(progressiveColorFirstPreview ? "colour-first" : "level0-fast")};elapsed={System.Diagnostics.Stopwatch.GetElapsedTime(nativeStarted).TotalMilliseconds:F3}ms");
                 var sourcePixels = (long)Math.Max(1, source.Width) * Math.Max(1, source.Height);
                 var outputPixels = (long)nativeBitmap.PixelSize.Width * nativeBitmap.PixelSize.Height;
+                // A bounded progressive JPEG comes from WIC's staged first-scans level (DC-only detail), even when
+                // the decoder's closest DCT size is the source size: never a final frame, whatever its pixel count.
+                if (ImageHeaderProbe.IsProgressiveJpeg(path))
+                    return new PathPreviewDecodeResult(nativeBitmap, true, Glide.Core.Settings.DisplayFrameSufficiency.ProgressiveStagedRoute);
                 return new PathPreviewDecodeResult(nativeBitmap, outputPixels < sourcePixels, "wic-native-scale");
             }
             if (GlidePerformanceTrace.Enabled)

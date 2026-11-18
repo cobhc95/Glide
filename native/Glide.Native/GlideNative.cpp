@@ -389,10 +389,10 @@ static int DecodeImageBoundedW(const wchar_t* path, std::uint32_t maxWidth, std:
 {
     if (!path || !image) return 0;
     *image = {};
-    // JPEG first view through libjpeg-turbo (GlideJpeg.cpp): the embedded MPF preview when it covers the request,
-    // else a DCT-scaled decode; progressive only without a staged WIC preview (WIC's first-scans preview is faster
-    // there). Any JPEG that path declines or fails on continues with WIC below exactly as before.
-    if (maxWidth > 0 && maxHeight > 0 && GlideTurboDecodeBounded(path, maxWidth, maxHeight, !stagedProgressivePreview, image)) return 1;
+    // A WIC early scan can have source dimensions while missing most JPEG detail.
+    // Decode all scans even for bounded JPEG requests, retaining decoder-native size limits.
+    const bool usePreviewLevel = stagedProgressivePreview && !GlideIsJpegPath(path);
+    if (maxWidth > 0 && maxHeight > 0 && GlideTurboDecodeBounded(path, maxWidth, maxHeight, !usePreviewLevel, image)) return 1;
     *image = {};
     const HRESULT init = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     const bool mustUninit = SUCCEEDED(init);
@@ -441,7 +441,7 @@ static int DecodeImageBoundedW(const wchar_t* path, std::uint32_t maxWidth, std:
     bool decoderNativeScaled = false;
     if (bounded && SUCCEEDED(hr))
     {
-        if (stagedProgressivePreview) SelectProgressivePreviewLevel(frame, progressiveColourFirst);
+        if (usePreviewLevel) SelectProgressivePreviewLevel(frame, progressiveColourFirst);
         // Critical large-photo fast path: ask the codec itself for the reduced frame. Microsoft's
         // JPEG WIC decoder can perform reduced IDCT/pyramid decoding here, avoiding construction of
         // the full-resolution 20-100+ MP raster merely to throw most pixels away in a scaler.

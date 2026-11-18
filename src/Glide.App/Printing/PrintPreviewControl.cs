@@ -202,88 +202,9 @@ public sealed class PrintPreviewControl : Control
             if (w <= 0 || h <= 0 || longest <= longestSide) return null;
             var scale = (double)longestSide / longest;
             var size = new PixelSize(Math.Max(1, (int)Math.Round(w * scale)), Math.Max(1, (int)Math.Round(h * scale)));
-            return AreaDownscale(source, size) ?? source.CreateScaledBitmap(size, BitmapInterpolationMode.HighQuality);
+            return Glide.Imaging.FrameDownscaler.TryAreaDownscale(source, size, PreviewWorkerCount) ?? source.CreateScaledBitmap(size, BitmapInterpolationMode.HighQuality);
         }
         catch { return null; }
-    }
-
-    /// <summary>
-    /// Box-filter (area average) downscale that works on any 32-bit Bitmap off the UI thread, including the decoder's
-    /// WriteableBitmaps. Reads the source in row bands (bounded memory: never a second full-size copy) and averages each
-    /// band on a few cores. Null when the pixel format is not 32-bit.
-    /// </summary>
-    private static Bitmap? AreaDownscale(Bitmap source, PixelSize size)
-    {
-        var format = source.Format;
-        if (format is null || (format != PixelFormat.Bgra8888 && format != PixelFormat.Rgba8888)) return null;
-        var sw = source.PixelSize.Width;
-        var sh = source.PixelSize.Height;
-        var dw = size.Width;
-        var dh = size.Height;
-        var alpha = source.AlphaFormat ?? AlphaFormat.Premul;
-        var target = new WriteableBitmap(size, new Vector(96, 96), format.Value, alpha);
-        try
-        {
-            var output = new byte[dw * dh * 4];
-            // Horizontal source span of each output column (same for every row).
-            var x0 = new int[dw];
-            var x1 = new int[dw];
-            for (var x = 0; x < dw; x++)
-            {
-                x0[x] = (int)((long)x * sw / dw);
-                x1[x] = Math.Max(x0[x] + 1, (int)((long)(x + 1) * sw / dw));
-            }
-            var options = new ParallelOptions { MaxDegreeOfParallelism = PreviewWorkerCount };
-            const int outRowsPerBand = 32;
-            var stride = sw * 4;
-            for (var bandStart = 0; bandStart < dh; bandStart += outRowsPerBand)
-            {
-                var bandEnd = Math.Min(dh, bandStart + outRowsPerBand);
-                var srcTop = (int)((long)bandStart * sh / dh);
-                var srcBottom = Math.Max(srcTop + 1, (int)((long)bandEnd * sh / dh));
-                var rows = srcBottom - srcTop;
-                var band = new byte[rows * stride];
-                var handle = GCHandle.Alloc(band, GCHandleType.Pinned);
-                try { source.CopyPixels(new PixelRect(0, srcTop, sw, rows), handle.AddrOfPinnedObject(), band.Length, stride); }
-                finally { handle.Free(); }
-                Parallel.For(bandStart, bandEnd, options, oy =>
-                {
-                    var y0 = (int)((long)oy * sh / dh);
-                    var y1 = Math.Max(y0 + 1, (int)((long)(oy + 1) * sh / dh));
-                    var outRow = oy * dw * 4;
-                    for (var ox = 0; ox < dw; ox++)
-                    {
-                        long b0 = 0, b1 = 0, b2 = 0, b3 = 0;
-                        for (var y = y0; y < y1; y++)
-                        {
-                            var row = (y - srcTop) * stride;
-                            for (var x = x0[ox]; x < x1[ox]; x++)
-                            {
-                                var i = row + x * 4;
-                                b0 += band[i]; b1 += band[i + 1]; b2 += band[i + 2]; b3 += band[i + 3];
-                            }
-                        }
-                        var n = (long)(y1 - y0) * (x1[ox] - x0[ox]);
-                        var o = outRow + ox * 4;
-                        output[o] = (byte)((b0 + n / 2) / n);
-                        output[o + 1] = (byte)((b1 + n / 2) / n);
-                        output[o + 2] = (byte)((b2 + n / 2) / n);
-                        output[o + 3] = (byte)((b3 + n / 2) / n);
-                    }
-                });
-            }
-            using (var fb = target.Lock())
-            {
-                for (var y = 0; y < dh; y++)
-                    Marshal.Copy(output, y * dw * 4, fb.Address + y * fb.RowBytes, dw * 4);
-            }
-            return target;
-        }
-        catch
-        {
-            target.Dispose();
-            return null;
-        }
     }
 
     /// <summary>

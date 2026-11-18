@@ -25,7 +25,7 @@ namespace
 {
 struct JpegConfig
 {
-    bool previewTurbo = true;        // baseline first view through libjpeg-turbo DCT scaling
+    bool previewTurbo = false;       // baseline first view through libjpeg-turbo DCT scaling (5.1.1: off, 5.0.7 WIC / MPF first view)
     bool previewTurboProgressive = true; // progressive bounded decode through libjpeg-turbo DCT scaling, where the caller
                                          // allows it: the prefetch/unstaged decode (WIC decoded those at full size, about 2x
                                          // slower). The staged foreground first view keeps WIC's faster first-scans preview.

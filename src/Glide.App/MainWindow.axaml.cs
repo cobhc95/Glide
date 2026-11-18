@@ -532,6 +532,8 @@ public partial class MainWindow : Window
                 SaveWindowPlacement();
                 if (_settings.PurgeCacheOnMinimize)
                     _loader.PurgeCaches();
+                else
+                    TrimMemoryForBackground();
                 // Minimize is a genuine Windows minimize: the window stays in the taskbar and can be
                 // restored exactly as the user expects. Speed Boost standby is reserved for *closing*
                 // the last window (see ShouldEnterSpeedBoostStandby / the Closing handler), so
@@ -539,6 +541,10 @@ public partial class MainWindow : Window
                 // standby here also depended on the live window count, which made minimize behave
                 // differently ("the window sometimes just disappeared") depending on how many Glide
                 // windows were open.
+            }
+            else if (oldState == WindowState.Minimized)
+            {
+                RestoreAfterBackgroundTrim();
             }
         };
         ApplyChromeLayoutForWindowState();
@@ -584,8 +590,13 @@ public partial class MainWindow : Window
         {
             UpdateViewportScrollbars(); NotifyViewerStatusChanged(); UpdateWindowTitle();
             PublishViewportDemand();
-            RequestFullDetailIfZoomNeedsIt();
         };
+        // Resize / maximize / DPI change: the frame drawn at Fit may now need more physical pixels.
+        Viewport.PropertyChanged += (_, args) =>
+        {
+            if (args.Property == BoundsProperty) EnsurePresentedFrameSufficient("viewport_resized");
+        };
+        ScalingChanged += (_, _) => EnsurePresentedFrameSufficient("dpi_changed");
         ViewportHScroll.PropertyChanged += (_, args) =>
         {
             if (!_syncingViewportScrollbars && args.Property == RangeBase.ValueProperty)

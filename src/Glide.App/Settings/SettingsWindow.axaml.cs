@@ -481,9 +481,6 @@ public partial class SettingsWindow : Window
             SelectByText(InteractivePanQualityCombo, string.IsNullOrWhiteSpace(s.InteractivePanQuality) ? "Full quality" : s.InteractivePanQuality);
             SelectByText(SpeedBoostTrayIconCombo, App.EffectiveTrayIconMode(s));
             AdaptivePreviewDelayBox.Value = s.AdaptivePreviewDelayMs;
-            FirstViewScaleBox.Value = Math.Clamp(s.FirstViewScalePercent, 0, 100);
-            PrefetchScaleBox.Value = Math.Clamp(s.PrefetchScalePercent, 0, 100);
-            SelectByText(FullRefineCombo, string.IsNullOrWhiteSpace(s.FullRefine) ? "Preset default" : s.FullRefine);
             PrefetchDepthBox.Value = Math.Clamp(s.PrefetchDepth, 1, 30);
             PrefetchSiblingFolderCountBox.Value = Math.Clamp(s.PrefetchSiblingFolderImageCount, 1, 30);
             CacheItemsBox.Value = s.CacheItems;
@@ -705,9 +702,6 @@ public partial class SettingsWindow : Window
         state.SpeedBoostTrayIcon = SelectedText(SpeedBoostTrayIconCombo, "Always");
         state.ShowTrayIcon = !string.Equals(state.SpeedBoostTrayIcon, "Never", StringComparison.OrdinalIgnoreCase);
         state.AdaptivePreviewDelayMs = (int)(AdaptivePreviewDelayBox.Value ?? 20);
-        state.FirstViewScalePercent = Math.Clamp((int)(FirstViewScaleBox.Value ?? 0), 0, 100);
-        state.PrefetchScalePercent = Math.Clamp((int)(PrefetchScaleBox.Value ?? 0), 0, 100);
-        state.FullRefine = SelectedText(FullRefineCombo, "Preset default");
         state.PrefetchDepth = Math.Clamp((int)(PrefetchDepthBox.Value ?? 5), 1, 30);
         state.PrefetchSiblingFolderImageCount = Math.Clamp((int)(PrefetchSiblingFolderCountBox.Value ?? 3), 1, 30);
         state.CacheItems = (int)(CacheItemsBox.Value ?? 16);
@@ -2249,7 +2243,6 @@ public partial class SettingsWindow : Window
         M("selection.bufferMaximizedPercent", SelectionBufferMaximizedBox); M("selection.bufferAllModes", SelectionBufferAllModesCheck);
         M("developer.reverseSelectionZoomOut", ReverseSelectionZoomOutScaleCheck); M("mouse.backgroundWindowDrag", BackgroundDragCheck);
         M("performance.initialQuality", InitialQualityCombo); M("performance.saveCustomPreset", SaveUserPerformancePresetButton); M("performance.adaptivePreview", AdaptiveFastPreviewCheck); M("performance.previewDelay", AdaptivePreviewDelayBox);
-        M("performance.firstViewScale", FirstViewScaleBox); M("performance.prefetchScale", PrefetchScaleBox); M("performance.fullRefine", FullRefineCombo);
         M("performance.interactivePanQuality", InteractivePanQualityCombo);
         M("performance.sequentialReads", SequentialReadCheck); M("performance.prefetch", PrefetchCheck); M("performance.backgroundRefinement", BackgroundRefinementCheck);
         M("performance.speedBoost", SpeedBoostCheck); M("performance.speedBoostTrayIcon", SpeedBoostTrayIconCombo); M("performance.startWithWindowsInBackground", StartWithWindowsInBackgroundCheck);

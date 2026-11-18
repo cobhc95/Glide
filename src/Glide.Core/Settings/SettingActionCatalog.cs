@@ -33,7 +33,6 @@ public static class SettingActionCatalog
         ["mouse.leftWindowDrag"] = ["Smart (normal window only)", "Never move window", "Allow move when maximized"],
         ["mouse.rightDragPan"] = ["Smart (pan image / move window)", "Pan image only", "Move window", "Do nothing"],
         ["performance.interactivePanQuality"] = ["Fast", "Balanced", "Full quality"],
-        ["performance.fullRefine"] = ["Preset default", "Immediately", "When idle", "On zoom only"],
         ["status.size"] = ["Tiny", "Very small", "Small", "Medium", "Large", "Extra large"],
         ["status.alignment"] = ["Center", "Left", "Right"],
         ["status.fitScope"] = ["Only the current image", "This session", "This session and future sessions"],

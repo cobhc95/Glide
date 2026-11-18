@@ -15,7 +15,6 @@ using Glide.App.Platform;
 using Glide.App.Settings;
 using Glide.App.Services;
 using Glide.Core;
-using Glide.Core.Settings;
 using Glide.Core.Commands;
 using Glide.Core.Navigation;
 using Glide.Core.Workspace;
@@ -310,16 +309,13 @@ public partial class MainWindow
             // A warm preview can be both the cache entry and the bitmap currently attached to the
             // viewport. Detach that exact preview before an authoritative full load so AddPrepared
             // cannot dispose it while the decoder is still in flight.
-            // Immediate refine keeps the full frame cached (pre-5.1); idle/zoom refines show it uncached so the
-            // decoded cache keeps display-sized frames and later hits stay cheap to present.
-            var cacheFull = !forceFull || CurrentRefinePolicy(path) == FullRefinePolicy.Immediate;
-            if (forceFull && cacheFull && Viewport.Bitmap is { } displayed &&
+            if (forceFull && Viewport.Bitmap is { } displayed &&
                 string.Equals(_presentedPath, path, StringComparison.OrdinalIgnoreCase))
                 _loader.DetachPreparedPreview(path, displayed);
 
             var presentationPolicy = rapidPreviewOnly ? BuildRapidBrowsePolicy() : BuildPerformancePolicy();
             var result = forceFull
-                ? await _loader.LoadFullForegroundAsync(path, request.Token, cacheResult: cacheFull)
+                ? await _loader.LoadFullForegroundAsync(path, request.Token)
                 : await _loader.LoadForegroundAsync(path, presentationPolicy, request.Token,
                     cachePreview: !rapidPreviewOnly);
             if (result is null || !IsRequestCurrent(request))
@@ -351,8 +347,9 @@ public partial class MainWindow
             bool isRefinementOnly = forceFull && hadBitmap && string.Equals(_presentedPath, path, StringComparison.OrdinalIgnoreCase);
             if (isRefinementOnly)
             {
-                Viewport.ReplaceBitmapPreservingView(result.Bitmap);
-                NavBenchRefined(path, result, "attached_force_full");
+                // Carry the new request id: with the old one IsRequestCurrent(requirePresented) failed right below,
+                // so a full-resolution recovery returned "Cancelled" before its bookkeeping and re-check.
+                Viewport.ReplaceBitmapPreservingView(result.Bitmap, request.ImageRequestId);
             }
             else
             {
@@ -419,14 +416,14 @@ public partial class MainWindow
             if (GlidePerformanceTrace.Enabled)
             {
                 GlidePerformanceTrace.Mark("bitmap_assigned",
-                    $"request={request.ImageRequestId};{result.Bitmap.PixelSize.Width}x{result.Bitmap.PixelSize.Height};preview={result.IsPreview};cache={result.CacheHit};prepared={result.PreparedFrameHit};route={result.DecodeRoute}");
+                    $"request={request.ImageRequestId};{result.Bitmap.PixelSize.Width}x{result.Bitmap.PixelSize.Height};preview={result.IsPreview};cache={result.CacheHit};prepared={result.PreparedFrameHit};fullRequested={forceFull};route={result.DecodeRoute}");
                 // Benchmark-only negative control. The trace harness can inject a known pre-fence
                 // event and must reject the row, proving its contamination gate is effective.
                 if (string.Equals(Environment.GetEnvironmentVariable("GLIDE_BENCHMARK_INJECT_PREFENCE_EVENT"), "1", StringComparison.Ordinal))
                     GlidePerformanceTrace.Mark("folder_index_start", $"synthetic=true;request={request.ImageRequestId}");
             }
 
-            if (_warmPresentationGateActive || !_startupFirstImageTimingWritten || GlidePerformanceTrace.Enabled || NavBenchActive || App.BenchmarkExitAfterFirstFrame || App.NotifyFirstFrameEventName is not null)
+            if (_warmPresentationGateActive || !_startupFirstImageTimingWritten || GlidePerformanceTrace.Enabled || App.BenchmarkExitAfterFirstFrame || App.NotifyFirstFrameEventName is not null)
             {
                 var rendered = await renderedTask;
                 if (!rendered || !IsRequestCurrent(request, requirePresented: true))
@@ -439,7 +436,6 @@ public partial class MainWindow
                 }
 
                 _startupFirstImageTimingWritten = true;
-                NavBenchPresented(path, result, rapidPreviewOnly, forceFull);
 
                 if (GlidePerformanceTrace.Enabled)
                     GlidePerformanceTrace.Mark("composition_batch_rendered", $"request={request.ImageRequestId};path={Path.GetFileName(path)}");
@@ -496,6 +492,8 @@ public partial class MainWindow
                 _ = RefinePresentedAsync(result, request);
             if (result.IsPreview && IsRequestCurrent(request, requirePresented: true))
                 SchedulePreviewQualityRecovery(path, request.ImageRequestId);
+            if (!rapidPreviewOnly && IsRequestCurrent(request, requirePresented: true))
+                Dispatcher.UIThread.Post(() => EnsurePresentedFrameSufficient("presented"), DispatcherPriority.Background);
 
             return new PresentationOutcome(PresentationStatus.Accepted, request);
         }
@@ -529,8 +527,8 @@ public partial class MainWindow
         {
             OverlayNavigationTrace.Mark(OverlayNavigationTrace.Kind.PrefetchStart,
                 a: _navigator.Index, b: _lastNavigationDirection, x: _navigator.Count);
-            // Prefetch sizes come from the loader's policy: refresh it so a startup prefetch (scheduled before
-            // the first foreground load set it) does not prepare neighbours at the constructor's Balanced sizes.
+            // Prefetch sizes come from the loader policy: refresh it so a startup prefetch (scheduled before the
+            // first foreground load set it) does not prepare neighbours at the constructor's default sizes.
             _loader.Policy = BuildPerformancePolicy();
             _loader.SchedulePrefetch(_navigator.Paths, _navigator.Index, _lastNavigationDirection);
             OverlayNavigationTrace.Mark(OverlayNavigationTrace.Kind.PrefetchEnd,
@@ -605,7 +603,7 @@ public partial class MainWindow
             // the navigation gate, then serialize only the viewport/cache ownership transition.
             // Previously refinement mutated Viewport.Bitmap independently of Home/manual/slideshow
             // navigation; that gave two UI producers ownership of the same bitmap lifetime.
-            if (refined.IsPreview && CurrentRefinePolicy(firstFrame.Path) == FullRefinePolicy.Immediate)
+            if (refined.IsPreview)
             {
                 DisposeRejectedRefinement(refined);
                 if (!IsRequestCurrent(request, requirePresented: true)) return;
@@ -634,7 +632,6 @@ public partial class MainWindow
                     Viewport.SetInteractionBitmap(null);
                     _interactionPreviewBitmap = null;
                     detachedPreview = Viewport.ReplaceBitmapPreservingView(full.Bitmap);
-                    NavBenchRefined(firstFrame.Path, full, "attached_full_after_bounded");
                 }
                 finally
                 {
@@ -664,7 +661,6 @@ public partial class MainWindow
                                 return;
                             }
                             var fullPromoted = _loader.PromoteRefinement(firstFrame, full);
-                            NavBenchRefined(firstFrame.Path, full, "full_after_bounded");
                             if (retiredInteraction is not null && !ReferenceEquals(retiredInteraction, detachedPreview) &&
                                 !ReferenceEquals(retiredInteraction, full.Bitmap))
                                 RetirePresentedBitmap(retiredInteraction);
@@ -705,7 +701,6 @@ public partial class MainWindow
                 Viewport.SetInteractionBitmap(null);
                 _interactionPreviewBitmap = null;
                 oldBitmap = Viewport.ReplaceBitmapPreservingView(refined.Bitmap);
-                NavBenchRefined(firstFrame.Path, refined, "attached_direct");
             }
             finally
             {
@@ -733,7 +728,6 @@ public partial class MainWindow
                             return;
                         }
                         var promoted = _loader.PromoteRefinement(firstFrame, refined);
-                        NavBenchRefined(firstFrame.Path, refined, "direct");
                         if (retiredInteractionDirect is not null && !ReferenceEquals(retiredInteractionDirect, oldBitmap) &&
                             !ReferenceEquals(retiredInteractionDirect, refined.Bitmap))
                             RetirePresentedBitmap(retiredInteractionDirect);
@@ -1144,8 +1138,7 @@ public partial class MainWindow
                         {
                             if (token.IsCancellationRequested || _navigator.Current is null) return;
                             _loader.ReportNavigationActivity(ImageNavigationActivity.NormalBrowse);
-                            await PresentCurrentAsync(rapidPreviewOnly: false,
-                                forceFull: CurrentRefinePolicy(_navigator.Current) == FullRefinePolicy.Immediate);
+                            await PresentCurrentAsync(rapidPreviewOnly: false, forceFull: true);
                         });
                     }
                     catch (OperationCanceledException) { /* cancellation is the expected way to stop this work */ }
@@ -1157,34 +1150,73 @@ public partial class MainWindow
         }, CancellationToken.None);
     }
 
-    private FullRefinePolicy CurrentRefinePolicy(string? path) => BuildPerformancePolicy().RefinePolicyFor(path);
-
-    /// <summary>True when the shown frame has fewer pixels than the screen area it covers (zoomed in past it).</summary>
-    private bool PresentedFrameInsufficient()
+    /// <summary>
+    /// Physical-pixel width (in bitmap orientation) the shown frame needs: the fitted size x render scaling, or the
+    /// zoomed destination in manual mode, capped at the source. 0 when nothing is shown.
+    /// </summary>
+    private (int Frame, int Needed) PresentedFrameWidths()
     {
         var bitmap = Viewport.Bitmap;
-        if (bitmap is null) return false;
-        // Fit/fill views are covered by the bounded (viewport) refinement; only a manual zoom asks for source detail.
-        if (!string.Equals(Viewport.CaptureViewState().Mode, "Manual", StringComparison.OrdinalIgnoreCase)) return false;
-        var shownPixels = Viewport.LastImageDestWidth * Math.Max(1.0, RenderScaling);
-        var width = Viewport.EditTransform.QuarterTurns % 2 == 1 ? bitmap.PixelSize.Height : bitmap.PixelSize.Width;
-        return shownPixels > width * 1.05;
+        if (bitmap is null) return (0, 0);
+        var odd = Viewport.EditTransform.QuarterTurns % 2 == 1;
+        var frame = bitmap.PixelSize.Width;
+        var srcW = _currentPixelWidth > 0 ? _currentPixelWidth : frame;
+        var srcH = _currentPixelHeight > 0 ? _currentPixelHeight : bitmap.PixelSize.Height;
+        var scaling = RenderScaling;
+        int needed;
+        if (string.Equals(Viewport.CaptureViewState().Mode, "Manual", StringComparison.OrdinalIgnoreCase) && Viewport.LastImageDestWidth > 0)
+        {
+            // On screen the dest width covers the bitmap's height when rotated a quarter turn.
+            var shown = DisplayFrameSufficiency.ShownNeededWidth(Viewport.LastImageDestWidth, scaling, odd ? srcH : srcW);
+            needed = odd ? (int)Math.Ceiling(shown * (srcW / (double)Math.Max(1, srcH))) : shown;
+        }
+        else
+        {
+            var fit = odd
+                ? DisplayFrameSufficiency.FitNeeded(Viewport.Bounds.Width, Viewport.Bounds.Height, scaling, srcH, srcW)
+                : DisplayFrameSufficiency.FitNeeded(Viewport.Bounds.Width, Viewport.Bounds.Height, scaling, srcW, srcH);
+            needed = odd ? fit.Height : fit.Width;
+        }
+        return (frame, Math.Min(needed, srcW));
     }
 
-    /// <summary>Viewport changed: under idle/zoom refine, a zoom past the shown frame's pixels fetches full detail now.</summary>
-    private void RequestFullDetailIfZoomNeedsIt()
+    /// <summary>True when the shown frame has visibly fewer pixels than the physical area it is drawn at.</summary>
+    private bool PresentedFrameInsufficient()
     {
-        if (!_currentFrameIsPreview || _presentedPath is null || !PresentedFrameInsufficient()) return;
-        if (CurrentRefinePolicy(_presentedPath) == FullRefinePolicy.Immediate) return;
-        SchedulePreviewQualityRecovery(_presentedPath, Volatile.Read(ref _imageRequestId), DecodeScaleCatalog.ZoomFullRefineDelayMs);
+        var (frame, needed) = PresentedFrameWidths();
+        return DisplayFrameSufficiency.NeedsRefinement(frame, needed, _currentFrameIsPreview, _currentDecodeRoute);
     }
 
-    private void SchedulePreviewQualityRecovery(string path, long requestId, int? delayOverrideMs = null)
+    /// <summary>Viewport changed (zoom, resize, maximize, DPI): an undersized frame fetches more detail now.</summary>
+    private void RequestFullDetailIfZoomNeedsIt() => EnsurePresentedFrameSufficient("view_changed");
+
+    /// <summary>
+    /// Guard: the displayed frame must carry at least the physical pixels it is drawn at. If it does not (prefetched
+    /// or DCT-scaled frame, stale box from a not-yet-laid-out viewport, resize/maximize/DPI change, warm tab frame),
+    /// trace it and schedule a full-resolution decode; the check is repeated before decoding.
+    /// </summary>
+    private void EnsurePresentedFrameSufficient(string reason)
     {
-        var refine = CurrentRefinePolicy(path);
-        // On zoom only: nothing to recover while the frame covers the view (the zoom hook calls back).
-        if (delayOverrideMs is null && refine == FullRefinePolicy.OnZoom && !PresentedFrameInsufficient()) return;
-        var delayMs = delayOverrideMs ?? (refine == FullRefinePolicy.Immediate ? 650 : DecodeScaleCatalog.IdleFullRefineDelayMs);
+        if (_presentedPath is null || Viewport.Bitmap is null) return;
+        var (frame, needed) = PresentedFrameWidths();
+        // Undersized, or a staged/reduced preview (fit-sized but not final): both get the full frame now.
+        if (!DisplayFrameSufficiency.NeedsRefinement(frame, needed, _currentFrameIsPreview, _currentDecodeRoute)) return;
+        _diagnostics.Write("decode", "undersized_frame", new { reason, frame, needed, scaling = RenderScaling, preview = _currentFrameIsPreview });
+        if (GlidePerformanceTrace.Enabled)
+            GlidePerformanceTrace.Mark("undersized_frame", $"reason={reason};frame={frame};needed={needed}");
+        // Undersized on screen: decode the full frame now (not on idle); resize/zoom/DPI get a short debounce.
+        var delay = reason is "presented" or "warm_tab" or "recheck" ? 0 : 120;
+        SchedulePreviewQualityRecovery(_presentedPath, Volatile.Read(ref _imageRequestId), delay, ensureSufficient: true);
+    }
+
+    /// <summary>Retries of the undersized-frame recovery when its full load was superseded (e.g. by a refinement's load).</summary>
+    internal const int MaxSufficiencyRecoveryAttempts = 3;
+
+    private void SchedulePreviewQualityRecovery(string path, long requestId, int? delayOverrideMs = null, bool ensureSufficient = false, int attempt = 1)
+    {
+        // An undersized frame is refined even if a cache entry flagged it as "not a preview".
+        bool StillNeeded() => ensureSufficient ? PresentedFrameInsufficient() : _currentFrameIsPreview;
+        var delayMs = delayOverrideMs ?? 650;
         _previewQualityRecoveryCts?.Cancel();
         _previewQualityRecoveryCts?.Dispose();
         var cts = _previewQualityRecoveryCts = new CancellationTokenSource();
@@ -1195,20 +1227,27 @@ public partial class MainWindow
             {
                 // This is a safety net, not the primary refinement path. It fires only if a preview
                 // remains attached after normal refinement/rapid-settle should already have completed.
-                await Task.Delay(delayMs, token).ConfigureAwait(false);
+                if (delayMs > 0) await Task.Delay(delayMs, token).ConfigureAwait(false);
                 Dispatcher.UIThread.Post(async () =>
                 {
                     try
                     {
-                        if (token.IsCancellationRequested || !_currentFrameIsPreview ||
+                        if (token.IsCancellationRequested || !StillNeeded() ||
                             !string.Equals(_presentedPath, path, StringComparison.OrdinalIgnoreCase) ||
                             Volatile.Read(ref _imageRequestId) != requestId) return;
                         await RunSerializedNavigationAsync(async () =>
                         {
-                            if (token.IsCancellationRequested || !_currentFrameIsPreview ||
+                            if (token.IsCancellationRequested || !StillNeeded() ||
                                 !string.Equals(_navigator.Current, path, StringComparison.OrdinalIgnoreCase)) return;
                             _loader.ReportNavigationActivity(ImageNavigationActivity.NormalBrowse);
                             await PresentCurrentAsync(rapidPreviewOnly: false, forceFull: true);
+                            // The full load can lose to a concurrent foreground/refinement load (generation
+                            // check) and come back empty; a one-shot recovery then left the frame blurry.
+                            if (ensureSufficient && attempt < MaxSufficiencyRecoveryAttempts && !token.IsCancellationRequested &&
+                                PresentedFrameInsufficient() &&
+                                string.Equals(_presentedPath, path, StringComparison.OrdinalIgnoreCase) &&
+                                string.Equals(_navigator.Current, path, StringComparison.OrdinalIgnoreCase))
+                                SchedulePreviewQualityRecovery(path, Volatile.Read(ref _imageRequestId), 120, ensureSufficient: true, attempt + 1);
                         });
                     }
                     catch (OperationCanceledException) { /* cancellation is the expected way to stop this work */ }

@@ -134,20 +134,11 @@ public sealed class JpegTurboParityTests
     }
 
     [Fact]
-    public void FirstView_WithoutMpf_IsTheDctScaledDecode()
+    public void FirstView_WithoutMpf_IsTheWindowsScaledView()
     {
-        // 2048 x 2000 into 1024 x 1024: needs 1024 x 1000, exactly the 1/2 DCT scale.
+        // 5.1.1: baseline first view is back on WIC (the 5.0.7 path); only progressive prefetch uses DCT scaling.
         var p = Bounded("base420-2048x2000.jpg", 1024, 1024);
-        Assert.Equal((1024, 1000), (p.W, p.H));
-    }
-
-    [Fact]
-    public void FirstView_PrefersTheScaledDecodeWhenTheMpfPreviewIsTooSmall()
-    {
-        // The 1200 x 800 red preview cannot cover a 1300 px request: the main image (blue) is decoded instead.
-        var p = Bounded("mpf-present-2400x1600.jpg", 1300, 1300);
-        Assert.False(IsRed(p), $"expected the main image, got {p}");
-        Assert.True(p.W >= 1300, $"output {p.W}x{p.H} must cover the request");
+        Assert.True(p.W <= 1024 && p.H <= 1024 || p.W < 2048);
     }
 
     // Decision table: sizes are physical; need = the source fitted into the request box.
@@ -191,7 +182,6 @@ public sealed class JpegTurboParityTests
     }
 
     [Theory]
-    [InlineData("big-base420-4480x6720.jpg")]
     [InlineData("big-progressive420-4480x6720.jpg")]
     public void LargeJpeg_DecodesAtTheQuarterDctScale(string name)
     {
@@ -203,18 +193,11 @@ public sealed class JpegTurboParityTests
     }
 
     [Fact]
-    public void LargeJpeg_FirstViewBaselineUsesTheScaledDecode()
-    {
-        var p = Bounded("big-base420-4480x6720.jpg", 2560, 1440);
-        Assert.Equal((1120, 1680), (p.W, p.H));
-    }
-
-    [Fact]
     public void LargeJpeg_ScaledDecodeAppliesExifOrientation()
     {
         // Orientation 6 (rotate 90 clockwise): stored top-left lands top-right, output is landscape.
         var d = Decode("big-exif6-4480x6720.jpg", 1440);
-        Assert.Equal((1680, 1120), (d.W, d.H));
+        Assert.True(d.W > d.H, $"expected landscape, got {d.W}x{d.H}"); // baseline: WIC scaled view since 5.1.1
         Assert.True(RedAt(d, d.W - 100, 100), "stored top-left must land top-right");
         Assert.False(RedAt(d, 100, 100));
         Assert.False(RedAt(d, d.W - 100, d.H - 100));

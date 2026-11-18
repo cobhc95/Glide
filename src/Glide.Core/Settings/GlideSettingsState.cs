@@ -305,10 +305,6 @@ public sealed record GlideSettingsState
     // Reduced-resolution frame used specifically while rapid keyboard/wheel browsing is active.
     // Presets stage sensible defaults, but the user may override this independently afterwards.
     public int RapidBrowsePreviewLongestSide { get; set; } = 3500;
-    // 5.1 decode-scale overrides; 0 / "Preset default" = DecodeScaleCatalog value for the preset and format.
-    public int FirstViewScalePercent { get; set; }
-    public int PrefetchScalePercent { get; set; }
-    public string FullRefine { get; set; } = "Preset default";
     public bool ProgressiveColorFirstPreview { get; set; } = true;
     // "Fast", "Balanced", or "Full quality". The stock Balanced performance preset intentionally
     // uses Full quality while dragging/panning; users can still override this independently.

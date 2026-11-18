@@ -1,6 +1,6 @@
 # Glide Image Viewer
 
-> **Glide 5.1.0:** [download](https://github.com/cobhc95/Glide/releases/latest) · held-arrow browsing through 30 MP photos at ~14 ms a picture with a third of the memory, instant tab switching, Explorer tabs that follow outside changes, an address bar over pictures, tooltip delays, a movable Overlay (Alt+O) and browser-style middle-click tabs. [Release notes](docs/releases/release-notes-5.1.0.md) · [changelog](CHANGELOG.md)
+> **Glide 5.1.1:** [download](https://github.com/cobhc95/Glide/releases/latest) · instant tab switching, faster browsing of large photos with less memory, Explorer tabs that follow outside changes, an address bar over pictures, tooltip delays, a movable Overlay (Alt+O) and browser-style middle-click tabs. [Release notes](docs/releases/release-notes-5.1.1.md) · [changelog](CHANGELOG.md)
 
 ## Fast. Multi-tabbed. Multi-window. Highly customizable.
 
@@ -15,25 +15,25 @@
 Windows 10 1607 or later, x64. From the [latest release](https://github.com/cobhc95/Glide/releases/latest):
 
 * **`Glide.Setup.exe`**: installer (administrator rights; adds Open With and Explorer thumbnails).
-* **`Glide-5.1.0-Portable.zip`**: extract anywhere and run `Glide.exe`.
+* **`Glide-5.1.1-Portable.zip`**: extract anywhere and run `Glide.exe`.
 * **`Glide.Setup.sha256`**: checksum (`certutil -hashfile Glide.Setup.exe SHA256`).
 
 Upgrades keep your settings, key bindings and title bar.
 
 ## Performance
 
-Glide shows a window-sized view as early as possible and decodes full resolution for the picture you stop on (after a short idle) or as soon as you zoom.
+Glide shows a sharp, screen-sized view as early as possible, prepares the pictures around it at screen size, and decodes the picture you stop on at full resolution straight away.
 
-**Measured in 5.1.0** (vs 5.0.7, median; synthetic or generic test files; [release notes](docs/releases/release-notes-5.1.0.md#speed-results)):
+**Measured in 5.1** (vs 5.0.7; synthetic or generic test files; [release notes](docs/releases/release-notes-5.1.1.md#speed-results)):
 
-* **Holding an arrow key** through 30 MP JPEGs: 11–14 ms per picture (p95 ≤ 28 ms, was 214 ms), about 70 frames/s; memory 0.3–1.0 GB instead of 2.2–3.2 GB.
-* **Large JPEGs without a camera preview**: 30 MP first frame 103 → 87 ms; progressive prefetch 630 → 300 ms.
+* **Lower memory**: neighbours are kept at screen size, pictures you leave shrink to screen size, and minimising frees all but the current picture.
+* **Progressive JPEGs**: preloading a 30 MP picture 630 → 300 ms.
 * **Tab switching**: back to an Explorer tab 65–101 → 13–42 ms, back to a picture tab 51–107 → 16–19 ms.
 * **From 5.0.7**: TIFF about 4x faster, JPEG full decode 1.3–1.8x, camera JPEG previews 225 → 39 ms, JPEG XL / HEIC / JPEG 2000 12–20 % faster ([report](docs/perf/benchmark-report-5.0.7.md)).
 
 **Which engine handles what, and why**
 
-* **JPEG** (`.jpg .jpeg .jpe .jfif` …): camera files with a large embedded (MPF) preview show it first; otherwise libjpeg-turbo's 1/2–1/8 reduced-size decode gives the first view and prefetch (WIC for progressive first views). The full picture is decoded by **libjpeg-turbo** (memory-mapped, straight into the bitmap, large baseline files in up to 8 parallel bands), within one level per channel of WIC. CMYK, 12-bit, lossless, arithmetic and anything odd fall back to WIC.
+* **JPEG** (`.jpg .jpeg .jpe .jfif` …): camera files with a large embedded (MPF) preview show it first; otherwise WIC gives the first view (progressive files decoded through their final scan) and libjpeg-turbo's reduced-size decode speeds up progressive prefetch. The full picture is decoded by **libjpeg-turbo** (memory-mapped, straight into the bitmap, large baseline files in up to 8 parallel bands), within one level per channel of WIC. CMYK, 12-bit, lossless, arithmetic and anything odd fall back to WIC.
 * **TIFF, BMP**: WIC, split into up to 8 parallel bands, each with its own decoder (identical pixels).
 * **PNG, GIF, ICO**: WIC, decoded at full resolution straight away when they fit the budget.
 * **WebP**: Skia (Windows has no WebP decoder without a Store extension).
@@ -45,10 +45,8 @@ Glide shows a window-sized view as early as possible and decodes full resolution
 
 * **Predictive prefetch** decodes the next and previous images off the UI thread (*prefetch depth* 1–30 each way, default 15), nearest first, in 1–6 parallel lanes by PC class, cancelling stale work when you jump.
 * **Decoded and compressed caches** keep finished bitmaps and raw neighbour file bytes (budgets in Settings > Performance).
-* **Per-preset decode sizes**: *First view decode size*, *Prefetch decode size* and *Decode full resolution* (immediately / when idle / on zoom only) in Settings > Performance.
 * **Speed Boost** keeps a warm Glide in the background (3–4 MB working set); opening from Explorer shows the window at once and the picture fills in.
 
-![Performance settings with decode sizes](docs/screenshots/5.1/settings-performance-decode-sizes.png)
 
 ## Feature tour
 

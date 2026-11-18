@@ -21,6 +21,8 @@ internal sealed class TabPreviewCache : IDisposable
     public const int FolderThumbCount = 4;
 
     private const int Capacity = 40;
+    /// <summary>5.1.1 RAM: byte ceiling next to the item count (shell thumbnails can come back larger than asked).</summary>
+    internal const long MaxBytes = 16L * 1024 * 1024;
     /// <summary>Files larger than this get no decoded preview (only a cached Windows thumbnail).</summary>
     private const long MaxDecodedFileBytes = 48L * 1024 * 1024;
 
@@ -33,6 +35,9 @@ internal sealed class TabPreviewCache : IDisposable
     private readonly HashSet<Bitmap> _shown = new(ReferenceEqualityComparer.Instance);
     private readonly SemaphoreSlim _lane = new(1, 1);
     private bool _disposed;
+    private long _bytes;
+
+    private static long BytesOf(Bitmap bitmap) => (long)bitmap.PixelSize.Width * bitmap.PixelSize.Height * 4;
 
     private static string Key(string path, int width, int height) => $"{width}x{height}|{path}";
 
@@ -109,16 +114,19 @@ internal sealed class TabPreviewCache : IDisposable
         {
             _lru.Remove(existing);
             _entries.Remove(key);
+            _bytes -= BytesOf(existing.Value.Bitmap);
             if (!_shown.Contains(existing.Value.Bitmap) && !ReferenceEquals(existing.Value.Bitmap, bitmap)) existing.Value.Bitmap.Dispose();
         }
         _entries[key] = _lru.AddFirst((key, bitmap));
-        for (var node = _lru.Last; _entries.Count > Capacity && node is not null;)
+        _bytes += BytesOf(bitmap);
+        for (var node = _lru.Last; (_entries.Count > Capacity || _bytes > MaxBytes) && node is not null;)
         {
             var previous = node.Previous;
             if (!_shown.Contains(node.Value.Bitmap))
             {
                 _lru.Remove(node);
                 _entries.Remove(node.Value.Key);
+                _bytes -= BytesOf(node.Value.Bitmap);
                 node.Value.Bitmap.Dispose();
             }
             node = previous;
@@ -147,5 +155,6 @@ internal sealed class TabPreviewCache : IDisposable
         _lru.Clear();
         _entries.Clear();
         _shown.Clear();
+        _bytes = 0;
     }
 }

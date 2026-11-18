@@ -6,7 +6,9 @@ using Glide.App.Explorer;
 using Glide.App.Diagnostics;
 using Glide.App.Services;
 using Glide.Core;
+using Glide.Core.Settings;
 using Glide.Core.Workspace;
+using Glide.Imaging;
 
 namespace Glide.App;
 
@@ -89,6 +91,45 @@ public partial class MainWindow
             frame.SourceSize.Height > 0 ? (int)frame.SourceSize.Height : bitmap.PixelSize.Height,
             _navigator.Paths.ToArray(), view, _currentFrameIsPreview, _currentDecodeMs, _currentDecodeRoute, _currentFileSize),
             (older, newer) => ReferenceEquals(older.Bitmap, newer.Bitmap));
+        if (!string.Equals(view.Mode, "Manual", StringComparison.OrdinalIgnoreCase)) ShrinkWarmImageFrameLater(image.Id, bitmap);
+    }
+
+    /// <summary>
+    /// 5.1.1 RAM: a left tab keeps its frame at the physical fit size (either orientation, <see cref="FrameMemoryBudget.ShrinkTarget"/>)
+    /// instead of a full frame of up to 64 MB. The copy is made in the background and swapped in only while the tab still
+    /// keeps the same frame and is not shown; switching back shows it at once and the "warm_tab" guard
+    /// (EnsurePresentedFrameSufficient) plus the preview recovery fetch full detail when the view needs it.
+    /// </summary>
+    private void ShrinkWarmImageFrameLater(Guid tabId, Bitmap bitmap)
+    {
+        var (boxWidth, boxHeight) = PhysicalViewportForDecode();
+        var target = FrameMemoryBudget.ShrinkTarget(bitmap.PixelSize.Width, bitmap.PixelSize.Height, boxWidth, boxHeight);
+        if (target.Width <= 0) return;
+        _loader.AddLease(bitmap); // alive while it is read; released below
+        _ = Task.Run(() =>
+        {
+            Bitmap? scaled = null;
+            try { scaled = FrameDownscaler.TryAreaDownscale(bitmap, new Avalonia.PixelSize(target.Width, target.Height), maxWorkers: 1); }
+            catch { /* best effort: the tab keeps its full frame */ }
+            Dispatcher.UIThread.Post(() =>
+            {
+                try
+                {
+                    if (scaled is null) return;
+                    if (_warmImageTabs is null || !_warmImageTabs.Contains(tabId) || _shownTabId == tabId ||
+                        !_warmImageTabs.TryGet(tabId, out var warm) || !ReferenceEquals(warm.Bitmap, bitmap))
+                    {
+                        scaled.Dispose();
+                        return;
+                    }
+                    // The warm cache's own lease on the reduced copy (released by its eviction, like any warm frame).
+                    _loader.AddLease(scaled);
+                    _warmImageTabs.Put(tabId, warm with { Bitmap = scaled, IsPreview = true, DecodeRoute = DisplayFrameSufficiency.ReducedFrameRoute });
+                    if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("tab_warm_frame_shrunk", $"{target.Width}x{target.Height}");
+                }
+                finally { _loader.ReleaseBitmap(bitmap); }
+            }, DispatcherPriority.Background);
+        });
     }
 
     /// <summary>
@@ -184,6 +225,7 @@ public partial class MainWindow
         _ = LoadMetadataAfterPaintAsync(path, request, _metadataCts.Token);
         ScheduleNavigationNeighbours();
         if (warm.IsPreview) SchedulePreviewQualityRecovery(path, request.ImageRequestId);
+        Dispatcher.UIThread.Post(() => EnsurePresentedFrameSufficient("warm_tab"), DispatcherPriority.Background);
         _ = ReconcileWarmImageFolderAsync(path, session);
 
         var ms = Stopwatch.GetElapsedTime(started).TotalMilliseconds;

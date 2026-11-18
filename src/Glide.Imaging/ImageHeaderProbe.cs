@@ -192,6 +192,61 @@ public static class ImageHeaderProbe
     private static uint ReadU32(ReadOnlySpan<byte> data, int offset, bool littleEndian) =>
         littleEndian ? BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(offset, 4)) : BinaryPrimitives.ReadUInt32BigEndian(data.Slice(offset, 4));
 
+    /// <summary>
+    /// True when the JPEG's main frame is progressive (SOF2/SOF6/SOF10/SOF14). Segments (APP1 EXIF with its
+    /// embedded thumbnail, ICC, MPF) are skipped by length, so only the main image's SOF counts. False for
+    /// non-JPEG data or when no SOF is found within <paramref name="data"/>.
+    /// </summary>
+    public static bool IsProgressiveJpeg(ReadOnlySpan<byte> data) => JpegFrameKind(data) == 1;
+
+    /// <summary>1 = progressive JPEG, 0 = anything else (decided), -1 = JPEG whose SOF lies beyond <paramref name="data"/>.</summary>
+    private static int JpegFrameKind(ReadOnlySpan<byte> data)
+    {
+        if (data.Length < 4) return -1;
+        if (data[0] != 0xFF || data[1] != 0xD8) return 0;
+        var i = 2;
+        while (i + 4 <= data.Length)
+        {
+            if (data[i] != 0xFF) return 0;
+            while (i < data.Length && data[i] == 0xFF) i++;
+            if (i >= data.Length) return -1;
+            var marker = data[i++];
+            if (marker is 0xD8 or 0x01 || marker is >= 0xD0 and <= 0xD7) continue;
+            if (marker is 0xD9 or 0xDA) return 0;
+            if (marker is 0xC2 or 0xC6 or 0xCA or 0xCE) return 1;
+            if (marker is >= 0xC0 and <= 0xCF and not 0xC4 and not 0xC8 and not 0xCC) return 0;
+            if (i + 2 > data.Length) return -1;
+            var length = BinaryPrimitives.ReadUInt16BigEndian(data.Slice(i, 2));
+            if (length < 2) return 0;
+            i += length;
+        }
+        return -1;
+    }
+
+    /// <summary>File variant of <see cref="IsProgressiveJpeg(ReadOnlySpan{byte})"/> (reads at most 256 KB of headers).</summary>
+    public static bool IsProgressiveJpeg(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return false;
+        byte[]? rented = null;
+        try
+        {
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 4096, FileOptions.SequentialScan);
+            rented = ArrayPool<byte>.Shared.Rent(MaxHeaderBytes);
+            var total = 0;
+            while (total < MaxHeaderBytes)
+            {
+                var chunk = stream.Read(rented, total, Math.Min(ProbeChunkBytes, MaxHeaderBytes - total));
+                if (chunk <= 0) break;
+                total += chunk;
+                var kind = JpegFrameKind(rented.AsSpan(0, total));
+                if (kind >= 0) return kind == 1;
+            }
+            return false;
+        }
+        catch { return false; }
+        finally { if (rented is not null) ArrayPool<byte>.Shared.Return(rented); }
+    }
+
     public const int MaxDimension = DecodeMemoryGuard.MaxDimension;
     public const long MaxTotalPixels = DecodeMemoryGuard.MaxTotalPixels; // 512 Megapixels (~2.05 GB uncompressed in 32bpp)
 

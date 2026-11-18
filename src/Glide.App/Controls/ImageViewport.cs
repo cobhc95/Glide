@@ -253,6 +253,14 @@ public sealed class ImageViewport : Control
         return old;
     }
 
+    /// <summary>Same image, sharper frame, owned by a new presentation request (full-resolution recovery/settle).</summary>
+    public Bitmap? ReplaceBitmapPreservingView(Bitmap? bitmap, long requestId)
+    {
+        var old = _presentedFrame.Bitmap;
+        SwapPresentedFramePreservingView(bitmap, _presentedFrame.SourceSize, requestId, _presentedFrame.Path);
+        return old;
+    }
+
     private void SwapPresentedFramePreservingView(Bitmap? bitmap, Size source, long requestId, string? path)
     {
         var old = _presentedFrame;
