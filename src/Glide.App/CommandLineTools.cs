@@ -153,7 +153,7 @@ internal static class CommandLineTools
             if (args[1].Equals("measure-launch", StringComparison.OrdinalIgnoreCase) ||
                 args[1].Equals("cold-launch", StringComparison.OrdinalIgnoreCase))
             {
-                var target = args.Length >= 3 && !args[2].StartsWith("--") ? args[2] : null;
+                var target = args.Length >= 3 && !args[2].StartsWith("--", StringComparison.Ordinal) ? args[2] : null;
                 var runs = args.Length >= 4 && int.TryParse(args[3], out var parsedRuns) ? parsedRuns :
                            (args.Length >= 3 && int.TryParse(args[2], out var r2) ? r2 : 3);
                 exitCode = DiagnosticRunner.MeasureLaunch(target, runs, Console.Out);
@@ -163,7 +163,7 @@ internal static class CommandLineTools
         if (args.Length >= 1 && (args[0].Equals("--measure-launch", StringComparison.OrdinalIgnoreCase) ||
                                 args[0].Equals("--measure-cold-launch", StringComparison.OrdinalIgnoreCase)))
         {
-            var target = args.Length >= 2 && !args[1].StartsWith("--") ? args[1] : null;
+            var target = args.Length >= 2 && !args[1].StartsWith("--", StringComparison.Ordinal) ? args[1] : null;
             var runs = args.Length >= 3 && int.TryParse(args[2], out var parsedRuns) ? parsedRuns :
                        (args.Length >= 2 && int.TryParse(args[1], out var r2) ? r2 : 3);
             exitCode = DiagnosticRunner.MeasureLaunch(target, runs, Console.Out);

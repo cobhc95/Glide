@@ -1,23 +1,28 @@
+using Glide.App.Settings;
 using Glide.Core.Settings;
 using Glide.Core.Workspace;
 
 namespace Glide.Core.Tests;
 
-/// <summary>5.0.6: the pure rules behind "New tabs open at", "Open new tabs in the foreground", "Shift and Alt change how a new tab opens" and "After closing a tab, activate".</summary>
+/// <summary>5.0.6: the pure rules behind "New tabs open", "Open new tabs in the", their "Key to open … instead" and "After closing a tab, activate".</summary>
+[Trait("Area", "Tabs")]
 public sealed class TabOpenClosePolicyTests
 {
     [Theory]
-    // position, switch, shift, alt -> at end, activate (with "Shift and Alt change how a new tab opens" on)
-    [InlineData(NewTabPositions.NextToCurrent, false, false, false, false, false)] // defaults = the behaviour before 5.0.6
-    [InlineData(NewTabPositions.NextToCurrent, false, true, false, false, true)]   // Shift: switch to it
-    [InlineData(NewTabPositions.NextToCurrent, false, false, true, true, false)]   // Alt: the other position
-    [InlineData(NewTabPositions.NextToCurrent, false, true, true, true, true)]
-    [InlineData(NewTabPositions.AtEnd, true, false, false, true, true)]
-    [InlineData(NewTabPositions.AtEnd, true, true, false, true, false)]            // Shift: stay in the background
-    [InlineData(NewTabPositions.AtEnd, true, false, true, false, true)]            // Alt: next to the current tab
-    public void Settings_give_the_default_and_Shift_and_Alt_flip_them(string position, bool switchTo, bool shift, bool alt, bool atEnd, bool activate)
+    // position, switch, position key, foreground key, held shift / ctrl / alt -> at end, activate
+    [InlineData(NewTabPositions.NextToCurrent, false, "Alt", "Shift", false, false, false, false, false)] // nothing held: the settings
+    [InlineData(NewTabPositions.NextToCurrent, false, "Alt", "Shift", true, false, false, false, true)]   // Shift: the other side
+    [InlineData(NewTabPositions.NextToCurrent, false, "Alt", "Shift", false, false, true, true, false)]   // Alt: the other position
+    [InlineData(NewTabPositions.NextToCurrent, false, "Alt", "Shift", true, false, true, true, true)]
+    [InlineData(NewTabPositions.AtEnd, true, "Alt", "Shift", true, false, false, true, false)]            // Shift: stay in the background
+    [InlineData(NewTabPositions.AtEnd, true, "Alt", "Shift", false, false, true, false, true)]            // Alt: next to the current tab
+    [InlineData(NewTabPositions.AtEnd, true, "Ctrl", "None", false, true, false, false, true)]            // Ctrl chosen for position
+    [InlineData(NewTabPositions.AtEnd, true, "Ctrl", "None", true, false, true, true, true)]              // keys not chosen do nothing
+    [InlineData(NewTabPositions.NextToCurrent, true, "Shift", "Shift", true, false, false, true, false)]  // one key for both flips both
+    public void Settings_give_the_default_and_the_chosen_keys_flip_them(string position, bool switchTo, string positionKey, string foregroundKey,
+        bool shift, bool ctrl, bool alt, bool atEnd, bool activate)
     {
-        Assert.Equal(new NewTabOpening(atEnd, activate), NewTabPolicy.Resolve(position, switchTo, shift, alt, modifiersEnabled: true));
+        Assert.Equal(new NewTabOpening(atEnd, activate), NewTabPolicy.Resolve(position, switchTo, positionKey, foregroundKey, shift, ctrl, alt));
     }
 
     [Theory]
@@ -25,21 +30,41 @@ public sealed class TabOpenClosePolicyTests
     [InlineData(NewTabPositions.NextToCurrent, true)]
     [InlineData(NewTabPositions.AtEnd, false)]
     [InlineData(NewTabPositions.AtEnd, true)]
-    public void With_the_modifier_setting_off_held_keys_change_nothing(string position, bool switchTo)
+    public void With_both_keys_None_held_keys_change_nothing(string position, bool switchTo)
     {
-        var expected = NewTabPolicy.Resolve(position, switchTo, shift: false, alt: false, modifiersEnabled: false);
-        Assert.Equal(new NewTabOpening(position == NewTabPositions.AtEnd, switchTo), expected);
-        foreach (var (shift, alt) in new[] { (true, false), (false, true), (true, true) })
-            Assert.Equal(expected, NewTabPolicy.Resolve(position, switchTo, shift, alt, modifiersEnabled: false));
+        var expected = new NewTabOpening(position == NewTabPositions.AtEnd, switchTo);
+        foreach (var (shift, ctrl, alt) in new[] { (false, false, false), (true, false, false), (false, true, false), (false, false, true), (true, true, true) })
+            Assert.Equal(expected, NewTabPolicy.Resolve(position, switchTo, NewTabKeys.None, NewTabKeys.None, shift, ctrl, alt));
     }
 
-    [Theory]
-    [InlineData(NewTabPositions.NextToCurrent, false)]
-    [InlineData(NewTabPositions.AtEnd, true)]
-    [InlineData(null, false)]
-    public void Ctrl_T_and_plus_follow_only_the_position_and_always_switch(string? position, bool atEnd)
+    [Fact]
+    public void Round3_18_the_key_labels_name_the_other_choice_and_never_say_at_at()
     {
-        Assert.Equal(new NewTabOpening(atEnd, Activate: true), NewTabPolicy.ForNewTabCommand(position));
+        Assert.Equal("Key to open at the end instead", NewTabPolicy.PositionKeyLabel(NewTabPositions.NextToCurrent));
+        Assert.Equal("Key to open next to the current tab instead", NewTabPolicy.PositionKeyLabel(NewTabPositions.AtEnd));
+        Assert.Equal("Key to open in the background instead", NewTabPolicy.ForegroundKeyLabel(true));
+        Assert.Equal("Key to open in the foreground instead", NewTabPolicy.ForegroundKeyLabel(false));
+        // #19: "New tabs open" + "at the end" reads once; the old label "New tabs open at" + "At the end" said "at at".
+        var position = SettingsCatalog.All.Single(s => s.Id == "tabs.newTabPosition");
+        foreach (var option in NewTabPositions.All)
+            Assert.DoesNotContain("at at", (position.Label + " " + option).ToLowerInvariant());
+    }
+
+    [Fact]
+    public void Round3_18_the_old_Shift_and_Alt_checkbox_maps_to_the_keys_it_used()
+    {
+        Assert.Equal((NewTabKeys.Shift, NewTabKeys.Alt), NewTabPolicy.MigrateLegacyModifiers(true)); // Shift = position, Alt = foreground/background
+        Assert.Equal((NewTabKeys.None, NewTabKeys.None), NewTabPolicy.MigrateLegacyModifiers(false));
+        Assert.Equal("Ctrl", NewTabKeys.Normalize("ctrl"));
+        Assert.Equal("None", NewTabKeys.Normalize("Win"));
+        Assert.True(NewTabSides.ToSwitch("foreground"));
+        Assert.False(NewTabSides.ToSwitch("Background"));
+    }
+
+    [Fact]
+    public void Ctrl_T_and_plus_always_open_at_the_end_and_switch()
+    {
+        Assert.Equal(new NewTabOpening(AtEnd: true, Activate: true), NewTabPolicy.ForNewTabCommand());
     }
 
     [Fact]
@@ -51,24 +76,55 @@ public sealed class TabOpenClosePolicyTests
     }
 
     [Fact]
-    public void The_new_tab_settings_describe_the_modifier_scheme_so_search_finds_it()
+    public void The_new_tab_settings_and_their_keys_are_catalogued_so_search_finds_them()
     {
-        var modifiers = SettingsCatalog.All.Single(s => s.Id == "tabs.newTabModifiers");
-        Assert.Equal(SettingKind.Toggle, modifiers.Kind);
-        Assert.False((bool)modifiers.DefaultValue);
-        Assert.Equal("Shift and Alt change how a new tab opens", modifiers.Label);
-        Assert.Equal("Open new tabs in the foreground", SettingsCatalog.All.Single(s => s.Id == "tabs.switchToNewTabs").Label);
-        Assert.True((bool)SettingsCatalog.All.Single(s => s.Id == "tabs.switchToNewTabs").DefaultValue); // on by default since 5.0.6
-        Assert.Contains("On (default)", SettingsCatalog.All.Single(s => s.Id == "tabs.switchToNewTabs").Description);
-        foreach (var id in new[] { "tabs.newTabPosition", "tabs.switchToNewTabs", "tabs.newTabModifiers" })
+        Assert.DoesNotContain(SettingsCatalog.All, s => s.Id == "tabs.newTabModifiers");
+        Assert.Equal("New tabs open", SettingsCatalog.All.Single(s => s.Id == "tabs.newTabPosition").Label);
+        var side = SettingsCatalog.All.Single(s => s.Id == "tabs.switchToNewTabs");
+        Assert.Equal("Open new tabs in the", side.Label);
+        Assert.Equal(SettingKind.Choice, side.Kind);
+        Assert.Equal(NewTabSides.Foreground, side.DefaultValue); // foreground by default since 5.0.6
+        foreach (var id in new[] { "tabs.newTabPositionKey", "tabs.newTabForegroundKey" })
         {
             var setting = SettingsCatalog.All.Single(s => s.Id == id);
-            Assert.Contains("Shift", setting.Description);
-            Assert.Contains("Alt", setting.Description);
-            Assert.Equal("Tabs & status bar", setting.Category);
+            Assert.Equal(SettingKind.Choice, setting.Kind);
+            Assert.Equal(NewTabKeys.None, setting.DefaultValue);
+            Assert.Contains("shift and alt change how a new tab opens", setting.SearchTerms);
+            Assert.Equal(NewTabKeys.All, SettingActionCatalog.Choices[id]);
         }
+        foreach (var id in new[] { "tabs.newTabPosition", "tabs.switchToNewTabs", "tabs.newTabPositionKey", "tabs.newTabForegroundKey" })
+            Assert.Equal("Tabs & status bar", SettingsCatalog.All.Single(s => s.Id == id).Category);
         Assert.Equal(NewTabPositions.All, SettingActionCatalog.Choices["tabs.newTabPosition"]);
+        Assert.Equal(NewTabSides.All, SettingActionCatalog.Choices["tabs.switchToNewTabs"]);
         Assert.Equal(TabCloseActivation.All, SettingActionCatalog.Choices["tabs.afterCloseActivate"]);
+    }
+
+    // ---- schema 18 migration of "Shift and Alt change how a new tab opens" -----------------------------------------
+
+    [Theory]
+    [InlineData("{\"SettingsSchemaVersion\":17,\"NewTabModifiers\":true}", "Shift", "Alt")]
+    [InlineData("{\"SettingsSchemaVersion\":17,\"NewTabModifiers\":false}", "None", "None")]
+    [InlineData("{\"SettingsSchemaVersion\":13}", "None", "None")]
+    [InlineData("{}", "None", "None")]
+    // An older file never had the new keys; the old checkbox decides.
+    [InlineData("{\"SettingsSchemaVersion\":17,\"NewTabModifiers\":true,\"NewTabPositionKey\":\"Ctrl\"}", "Shift", "Alt")]
+    // From schema 18 the stored keys are kept (a stray old checkbox is ignored).
+    [InlineData("{\"SettingsSchemaVersion\":18,\"NewTabPositionKey\":\"Ctrl\",\"NewTabForegroundKey\":\"alt\",\"NewTabModifiers\":false}", "Ctrl", "Alt")]
+    [InlineData("{\"SettingsSchemaVersion\":18,\"NewTabPositionKey\":\"Win\"}", "None", "None")]
+    public void Schema_18_migrates_the_old_Shift_and_Alt_checkbox(string json, string positionKey, string foregroundKey)
+    {
+        var loaded = SettingsStore.MigrateFromJson(json, isSettingsFile: false);
+        Assert.Equal(positionKey, loaded.NewTabPositionKey);
+        Assert.Equal(foregroundKey, loaded.NewTabForegroundKey);
+        Assert.Equal(SettingsStore.CurrentSettingsSchema, loaded.SettingsSchemaVersion);
+    }
+
+    [Fact]
+    public void A_5_0_6_file_keeps_its_position_under_the_new_wording()
+    {
+        var loaded = SettingsStore.MigrateFromJson("{\"SettingsSchemaVersion\":17,\"NewTabPosition\":\"At the end\",\"SwitchToNewTabs\":false}", isSettingsFile: false);
+        Assert.Equal(NewTabPositions.AtEnd, loaded.NewTabPosition);
+        Assert.False(loaded.SwitchToNewTabs);
     }
 
     private static WorkspaceState Workspace(int tabs, int active)

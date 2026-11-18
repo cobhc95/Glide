@@ -1,13 +1,15 @@
 
 namespace Glide.Core.Tests;
 
+[Trait("Area", "Decode")]
 public sealed class ImageFormatRegistryTests
 {
     [Fact]
-    public void Glide22Registry_Has196UniqueRoutedExtensions_AndTenProtectedCoreExtensions()
+    public void Glide22Registry_HasUniqueRoutedExtensions_AndTenProtectedCoreExtensions()
     {
-        Assert.Equal(196, ImageFormatRegistry.Extensions.Count);
-        Assert.Equal(196, ImageFormatRegistry.Extensions.Distinct(StringComparer.OrdinalIgnoreCase).Count());
+        Assert.NotEmpty(ImageFormatRegistry.Extensions);
+        Assert.Equal(ImageFormatRegistry.Extensions.Count, ImageFormatRegistry.Extensions.Distinct(StringComparer.OrdinalIgnoreCase).Count());
+        Assert.All(ImageFormatRegistry.Extensions, x => Assert.StartsWith(".", x, StringComparison.Ordinal));
         Assert.Equal(10, ImageFormatRegistry.CoreFastPathExtensions.Count);
         Assert.Equal(10, ImageFormatRegistry.CoreFastPathExtensions.Distinct(StringComparer.OrdinalIgnoreCase).Count());
     }

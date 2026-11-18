@@ -6,6 +6,7 @@ namespace Glide.Core.Tests;
 /// Guards the Explorer thumbnail registration surface: the extension set is always derived from
 /// Glide's authoritative format registry, and the provider CLSID matches the native shim.
 /// </summary>
+[Trait("Area", "Thumbnails")]
 public sealed class ThumbnailRegistrationTests
 {
     [Fact]

@@ -1,0 +1,23 @@
+# Analyzer severities for every project (wired in Directory.Build.props through GlobalAnalyzerConfigFiles).
+# Stage B (docs/audits/stage-b-notes.md): suppress rules that are noise for this codebase so real warnings stand out.
+# Each "none" carries its reason. Test-only relaxations live in tests/Glide.Tests.globalconfig.
+is_global = true
+
+# CA1861 "prefer static readonly fields over constant arrays as arguments": the hits are catalogue construction and
+# one-shot setup paths, not hot loops. Hot paths are covered by the perf benchmarks instead.
+dotnet_diagnostic.CA1861.severity = none
+
+# CA2007 "ConfigureAwait": a desktop UI app. Most awaits must resume on the UI thread; ConfigureAwait(false) is used
+# deliberately where it matters (decode workers), not everywhere.
+dotnet_diagnostic.CA2007.severity = none
+
+# CA1416 "platform compatibility": Glide is Windows-only (net10.0 TFM for build speed and tests, Win32 interop by
+# design). Every hit is a Windows API used on Windows.
+dotnet_diagnostic.CA1416.severity = none
+
+# CA1307 stays at the Recommended default (off): string.Contains/Replace/IndexOf without a comparison are already
+# ordinal in .NET, so its hits are wording only.
+# Culture / string comparison stays on: parsing, paths, file names and diagnostics must say Ordinal / Invariant, and
+# UI text says CurrentCulture explicitly. (Fixed sites: CommandLineTools, Program, FolderWatch, diagnostics, title bar.)
+dotnet_diagnostic.CA1305.severity = warning
+dotnet_diagnostic.CA1310.severity = warning

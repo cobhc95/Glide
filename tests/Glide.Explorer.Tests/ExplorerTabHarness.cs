@@ -246,7 +246,7 @@ internal sealed class ExplorerHarness : IDisposable
             try { s_window?.Close(); } catch { }
             s_window = null;
             RemoveThemes();
-            return null;
+            return null!;
         }, CancellationToken.None).GetAwaiter().GetResult();
     }
 
@@ -254,7 +254,7 @@ internal sealed class ExplorerHarness : IDisposable
     private void ResetWindow()
     {
         Set("_settings", new GlideSettingsState());
-        ((System.Collections.IDictionary)Get<object>("_tabHistories")).Clear();
+        Window.TabHistories.Clear();
         Call("CloseActiveOwnedMenu", new object?[] { null });
         Get<Dictionary<Guid, string>>("_browserHighlightTargets").Clear();
         ((System.Collections.IDictionary)Get<object>("_explorerTabViews")).Clear();
@@ -333,15 +333,10 @@ internal sealed class ExplorerHarness : IDisposable
         Dispatcher.UIThread.RunJobs(DispatcherPriority.SystemIdle);
     }
 
+    /// <summary>Pumps the UI and polls (shared <see cref="Wait"/> helper); fails the test naming <paramref name="what"/>.</summary>
     public async Task WaitUntil(Func<bool> condition, string what = "condition", int timeoutMs = 8000)
     {
-        var start = Environment.TickCount64;
-        while (Environment.TickCount64 - start < timeoutMs)
-        {
-            Pump();
-            if (condition()) return;
-            await Task.Delay(15);
-        }
+        if (await Wait.TryUntilAsync(condition, timeoutMs, Pump, pollMs: 15)) return;
         Pump();
         Assert.True(condition(), $"Timed out waiting for: {what}");
     }
@@ -477,8 +472,8 @@ internal sealed class ExplorerHarness : IDisposable
         ExplorerHost.OpenWith = null; ExplorerHost.OpenWithShell = null;
         ExplorerLocations.QuickAccessOverride = null; ExplorerLocations.DrivesOverride = null;
         SettingsStore.SettingsDirectoryOverrideForTests.Value = _previousSettingsOverride;
-        try { Directory.Delete(Root, true); } catch { }
-        try { Directory.Delete(SettingsRoot, true); } catch { }
+        TempDir.TryDelete(Root);
+        TempDir.TryDelete(SettingsRoot);
     }
 }
 

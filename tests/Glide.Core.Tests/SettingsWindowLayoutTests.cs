@@ -21,6 +21,7 @@ namespace Glide.Core.Tests;
 /// app styles (Fluent + GlideTheme). Set GLIDE_SAVE_RENDERS to also write PNG frames.
 /// </summary>
 [Collection(AvaloniaHeadlessCollection.Name)]
+[Trait("Area", "Settings")]
 public sealed class SettingsWindowLayoutTests : IDisposable
 {
     public SettingsWindowLayoutTests(AvaloniaHeadlessFixture fixture) => _ = fixture;

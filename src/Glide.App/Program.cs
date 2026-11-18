@@ -71,7 +71,7 @@ internal static partial class Program
             if (args[i].Equals("--run-diagnostics-export", StringComparison.OrdinalIgnoreCase))
             {
                 App.AutoExportDiagnostics = true;
-                if (i + 1 < args.Length && !args[i + 1].StartsWith("--"))
+                if (i + 1 < args.Length && !args[i + 1].StartsWith("--", StringComparison.Ordinal))
                     App.AutoExportDiagnosticsFolder = args[++i];
                 continue;
             }
@@ -84,21 +84,33 @@ internal static partial class Program
             appArgs.Add(args[i]);
         }
         GlidePerformanceTrace.Mark("process_entry");
+        var exitReason = "unknown";
         try
         {
+            StartupTrace.Write("launch", $"args={appArgs.Count} hidden={App.StartHidden} forceNew={forceNewInstance} exe={Environment.ProcessPath}");
             if (App.StartHidden && ExternalLaunchBroker.ExistingProcessPresent())
+            {
+                exitReason = "hidden_launch_existing_owner";
                 return 0;
+            }
 
             App.StartupPaths = appArgs.Where(a => File.Exists(a) || Directory.Exists(a)).ToArray();
             // The compact first-frame policy (a few ms) is read before the preloader starts so the
             // overlapped decode targets the same first-frame box the viewer will ask for.
             var firstFramePolicy = SettingsStore.LoadFirstFramePolicy();
             App.StartupFirstFramePolicy = firstFramePolicy;
-            if (App.StartupPaths.Count > 0 && File.Exists(App.StartupPaths[0]) && ImageNavigator.IsSupported(App.StartupPaths[0]))
+            // 5.1: when a warm owner is resident, the launcher is about to forward and exit; decoding the
+            // image here only competes for CPU/disk with the owner's decode. Preload only for a cold launch.
+            var warmOwnerPresent = !forceNewInstance && ExternalLaunchBroker.ExistingProcessPresent();
+            void StartPreloadIfImage()
             {
-                var (boxWidth, boxHeight) = StartupPreviewBox(firstFramePolicy);
-                Glide.Imaging.StartupImagePreloader.Start(App.StartupPaths[0], boxWidth, boxHeight);
+                if (App.StartupPaths.Count > 0 && File.Exists(App.StartupPaths[0]) && ImageNavigator.IsSupported(App.StartupPaths[0]))
+                {
+                    var (boxWidth, boxHeight) = StartupPreviewBox(firstFramePolicy);
+                    Glide.Imaging.StartupImagePreloader.Start(App.StartupPaths[0], boxWidth, boxHeight);
+                }
             }
+            if (!warmOwnerPresent) StartPreloadIfImage();
             var launchPolicy = new SettingsStore.LaunchPolicy(firstFramePolicy.ReuseSingleInstance, firstFramePolicy.ExternalOpenBehavior);
 
             // Image launches prefer an already-running Glide by default. The launch-only parser above
@@ -111,44 +123,62 @@ internal static partial class Program
             // election and exit before it ever opened the image.
             var shouldReuse = !forceNewInstance && !benchmarkForcesColdProcess && !App.BenchmarkExitAfterFirstFrame && launchPolicy.ReuseSingleInstance;
             // Prepare one immutable request batch for the entire launch attempt. The same request IDs
-            // are reused by both forwarding attempts so a lost acknowledgement cannot turn the second
+            // are reused by every forwarding attempt so a lost acknowledgement cannot turn a later
             // attempt into a duplicate open under fresh IDs.
             var forwardBatch = shouldReuse
                 ? (App.StartupPaths.Count > 0 ? ExternalLaunchBroker.PrepareForwardBatch(App.StartupPaths) : (!App.StartHidden ? ExternalLaunchBroker.PrepareActivateBatch() : null))
                 : null;
+            var requestKind = forwardBatch is null ? "none" : new string(forwardBatch.Requests.Select(r => r.Kind).Distinct().ToArray());
+            if (forwardBatch is not null) StartupTrace.Write("forward_send", $"warmOwner={warmOwnerPresent}");
             if (forwardBatch is not null && ExternalLaunchBroker.TryForwardToExisting(forwardBatch))
+            {
+                exitReason = $"forwarded_to_running_owner kind={requestKind}";
                 return 0;
+            }
+            if (warmOwnerPresent) StartPreloadIfImage();
 
             // Presence is claimed only after the forwarding attempt, so this cold process never
             // mistakes its own kernel object for an already-running Glide instance.
             var electedBrokerOwner = ExternalLaunchBroker.ClaimProcessPresence();
             if (!electedBrokerOwner && !forceNewInstance)
             {
-                if (forwardBatch is not null &&
-                    ExternalLaunchBroker.TryForwardToExisting(forwardBatch, TimeSpan.FromSeconds(2)))
-                    return 0;
-
-                // A presence object that survived the bounded handshake still belongs to a live
-                // owner. Starting Avalonia here creates the duplicate cold process regression. The
-                // owner will either accept a later retry or release the object as it exits.
-                if (forwardBatch is not null && ExternalLaunchBroker.ExistingProcessPresent())
-                    return 0;
-
-                // The owner released between the handshake and the probe. Make one final election;
-                // if another launcher won it, terminate this forwarding helper rather than creating
-                // an unowned second UI process.
-                electedBrokerOwner = ExternalLaunchBroker.ClaimProcessPresence();
-                if (!electedBrokerOwner)
-                    return 0;
+                // Another Glide holds the presence object. Keep forwarding/re-electing for a bounded
+                // budget; never exit silently while the user is waiting for a window (5.0.8: the old
+                // code returned 0 here whenever the owner was slow, dying or a probe handle lingered).
+                var outcome = LaunchElection.Resolve(
+                    hasRequest: forwardBatch is not null,
+                    startHidden: App.StartHidden,
+                    tryForward: timeout => ExternalLaunchBroker.TryForwardToExisting(forwardBatch, timeout),
+                    claimPresence: ExternalLaunchBroker.ClaimProcessPresence,
+                    budget: LaunchElection.DefaultBudget,
+                    trace: line => StartupTrace.Write(line));
+                switch (outcome)
+                {
+                    case LaunchElectionOutcome.Forwarded:
+                        exitReason = $"forwarded_to_running_owner_after_retry kind={requestKind}";
+                        return 0;
+                    case LaunchElectionOutcome.ExitHiddenDuplicate:
+                        exitReason = "hidden_launch_lost_election";
+                        return 0;
+                    case LaunchElectionOutcome.Elected:
+                        electedBrokerOwner = true;
+                        break;
+                    default:
+                        StartupTrace.Write("starting_follower_ui", forwardBatch is null ? "reason=reuse_disabled" : "reason=owner_unresponsive");
+                        break;
+                }
             }
 
-            // This process is now the elected UI/broker owner. Start the crash breadcrumb file only
-            // here so short-lived forwarding helper processes cannot overwrite the live owner trace.
+            // This process now creates a UI (normally as the elected broker owner). Start the crash
+            // breadcrumb file only here so short-lived forwarding helpers cannot overwrite the owner trace.
+            StartupTrace.Write("ui_process", $"owner={electedBrokerOwner}");
+            if (electedBrokerOwner) _ = Task.Run(StartupTrace.TrimIfLarge);
             if (diagnosticTraceRequested)
                 LiveDiagnosticTrace.Initialize(AppVersion.DiagnosticTag);
             AppDomain.CurrentDomain.UnhandledException += (_, eventArgs) =>
             {
                 AppendCrashLog("unhandled_exception", eventArgs.ExceptionObject?.ToString());
+                StartupTrace.Write("unhandled_exception", eventArgs.ExceptionObject?.GetType().Name);
                 if (eventArgs.ExceptionObject is Exception fatal)
                     LiveDiagnosticTrace.WriteException("process", "unhandled_exception", fatal, new { eventArgs.IsTerminating });
                 else
@@ -163,9 +193,14 @@ internal static partial class Program
             // startup latency; file speculation begins only after that shell has had a chance to paint.
             // Only a process that is actually going to create a UI pays for full settings hydration.
             // Forward-only helper processes exit without racing an unnecessary JSON read/deserialise.
-            App.StartupSettingsTask = Task.Run(SettingsStore.Load);
+            App.StartupSettingsTask = Task.Run(LoadSettingsAndActivateSortOrder);
             GlidePerformanceTrace.Mark("avalonia_build_start");
-            BuildAvaloniaApp().StartWithClassicDesktopLifetime(appArgs.ToArray());
+            var lifetimeExitCode = BuildAvaloniaApp().StartWithClassicDesktopLifetime(appArgs.ToArray());
+            // The UI loop has ended: stop acknowledging launches before the process finishes tearing
+            // down (background work can keep it alive for a while), so a new launch elects itself
+            // instead of handing its request to a process that will never show a window.
+            App.BeginApplicationShutdown("lifetime_returned");
+            exitReason = $"ui_lifetime_ended code={lifetimeExitCode} windowEverShown={App.AnyWindowEverOpened}";
             LiveDiagnosticTrace.MarkCleanExit(0);
             return 0;
         }
@@ -173,6 +208,7 @@ internal static partial class Program
         {
             // A GUI-subsystem executable can otherwise disappear without leaving anything the user
             // can copy back to an agent. Always persist fatal startup failures outside the build tree.
+            exitReason = "fatal_exception " + ex.GetType().Name + ": " + ex.Message;
             LiveDiagnosticTrace.WriteException("process", "main_catch", ex);
             WriteStartupCrashLog(ex);
             Console.Error.WriteLine(ex);
@@ -180,6 +216,7 @@ internal static partial class Program
         }
         finally
         {
+            StartupTrace.Write("exit", exitReason);
             GlidePerformanceTrace.Mark("process_exit");
             GlidePerformanceTrace.Flush();
         }
@@ -192,6 +229,17 @@ internal static partial class Program
     [System.Runtime.InteropServices.LibraryImport("kernel32.dll", StringMarshalling = System.Runtime.InteropServices.StringMarshalling.Utf16)]
     [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
     private static partial bool SetDllDirectoryW(string? pathName);
+
+    /// <summary>
+    /// Loads the settings file and activates the chosen image order before any folder is enumerated. (Until Stage B this
+    /// was a side effect inside <see cref="SettingsStore"/>; loading settings no longer changes process-wide state.)
+    /// </summary>
+    internal static Glide.Core.Settings.GlideSettingsState LoadSettingsAndActivateSortOrder()
+    {
+        var settings = SettingsStore.Load();
+        Glide.Core.ImageSortOrder.Current = Glide.Core.ImageSortOrder.SpecFor(settings.NavigationSortOrder, settings.NavigationSortDescending);
+        return settings;
+    }
 
     /// <summary>
     /// First-frame box for the cold-start preloader: the primary screen in physical pixels (the

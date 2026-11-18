@@ -18,6 +18,7 @@ namespace Glide.Core.Tests;
 /// The per-extension matrix (decode route / thumbnail route) is written to the test output.
 /// </summary>
 [Collection("ShellThumbnailProvider")]
+[Trait("Area", "Thumbnails")]
 public sealed class ThumbnailCoverageTests : IDisposable
 {
     private readonly ITestOutputHelper _output;
@@ -32,7 +33,7 @@ public sealed class ThumbnailCoverageTests : IDisposable
     public void Dispose()
     {
         try { ShellThumbnailProviderTests.Provider.Instance?.ClearOverrides(); } catch { }
-        try { Directory.Delete(_directory, recursive: true); } catch { }
+        TempDir.TryDelete(_directory);
     }
 
     /// <summary>Left to Windows on purpose: Glide never takes these from a working in-box thumbnailer.</summary>

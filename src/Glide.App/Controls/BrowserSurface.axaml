@@ -42,9 +42,8 @@
         <!-- Sort: shows the current sort field and direction; click opens the same Sort by list as the background menu. -->
         <Button x:Name="BrowserSortButton" Grid.Column="7" Classes="browserTool sortTool" Click="BrowserSortClicked" ToolTip.Tip="Sort">
           <StackPanel Orientation="Horizontal" Spacing="5">
-            <controls:GlideIconView Kind="Sort" Classes="toolbarGlyph"/>
             <TextBlock x:Name="BrowserSortText" VerticalAlignment="Center" Text="Name"/>
-            <controls:GlideIconView x:Name="BrowserSortDirection" Kind="Up" Width="10" Height="10" StrokeWidth="1.6" VerticalAlignment="Center" IconBrush="{DynamicResource BrushText}"/>
+            <TextBlock x:Name="BrowserSortDirection" Text="&#x25B2;" FontSize="13" VerticalAlignment="Center"/>
           </StackPanel>
         </Button>
         <!-- Items come from ExplorerViewModes.Labels (display text; the stored setting values are ExplorerViewModes.Names). -->
@@ -60,12 +59,14 @@
         </ScrollViewer>
       </Border>
       <Border Grid.Column="1" Background="{DynamicResource BrushBorderSoft}"/>
+      <!-- Round 3 #12: drag the divider to resize the drive bar (the width is remembered). A 7 px transparent grip over
+           the 1 px line; it is the last child of column 1 so it sits above the neighbouring panes' edges. -->
+      <Border x:Name="BrowserNavSplitter" Grid.Column="1" Width="7" Margin="-3,0" Background="Transparent" Cursor="SizeWestEast" ZIndex="1"
+              ToolTip.Tip="Drag to resize the drive bar"/>
       <Grid x:Name="BrowserContentSurface" Grid.Column="2" RowDefinitions="Auto,*">
         <!-- Details column headers: built at runtime, visible only in Details view. -->
         <Border x:Name="BrowserDetailsHeader" Grid.Row="0" IsVisible="False" Background="{DynamicResource BrushSurface}" BorderBrush="{DynamicResource BrushBorderSoft}" BorderThickness="0,0,0,1"/>
         <Grid Grid.Row="1">
-          <!-- Retained only so the isolated legacy COM-host code remains buildable for diagnostics/future fallback. -->
-          <Grid x:Name="NativeExplorerHostSurface" IsVisible="False" Width="1" Height="1"/>
           <ScrollViewer x:Name="BrowserScrollViewer" Margin="0" Padding="0" Focusable="True"
                         HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto"
                         AllowAutoHide="False"

@@ -15,6 +15,7 @@ namespace Glide.Core.Tests;
 /// exactly like windowed mode; image / Welcome tabs keep the normal edge-to-edge auto-hide.
 /// </summary>
 [Collection(AvaloniaHeadlessCollection.Name)]
+[Trait("Area", "Navigation")]
 public sealed class FullscreenExplorerTitleBarTests
 {
     public FullscreenExplorerTitleBarTests(AvaloniaHeadlessFixture fixture) { _ = fixture; }
@@ -144,7 +145,7 @@ public sealed class FullscreenExplorerTitleBarTests
         }
         finally
         {
-            try { Directory.Delete(root, true); } catch { }
+            TempDir.TryDelete(root);
         }
     }
 
@@ -195,7 +196,7 @@ public sealed class FullscreenExplorerTitleBarTests
                 SettingsStore.SettingsDirectoryOverrideForTests.Value = previousStore;
             }
         });
-        try { Directory.Delete(root, true); } catch { }
+        TempDir.TryDelete(root);
     }
 
     private const BindingFlags Flags = BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance;

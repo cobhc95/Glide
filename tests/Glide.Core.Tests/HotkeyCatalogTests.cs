@@ -2,6 +2,7 @@ using Glide.Core.Commands;
 
 namespace Glide.Core.Tests;
 
+[Trait("Area", "Hotkeys")]
 public sealed class HotkeyCatalogTests
 {
     [Fact]

@@ -6,6 +6,7 @@ using Glide.App.Explorer;
 using Glide.App.Services;
 using Glide.Core.Commands;
 using Glide.Core.Workspace;
+using Glide.Core.Navigation;
 
 namespace Glide.App;
 
@@ -79,8 +80,9 @@ public partial class MainWindow
     }
 
     /// <summary>A file or folder name for a menu header, shortened in the middle when long.</summary>
+    // A MenuItem header string is AccessText: "_" in a file name must be doubled or it becomes a mnemonic underline.
     private static string ExplorerMenuName(string name, int max = 40) =>
-        name.Length <= max ? name : string.Concat(name.AsSpan(0, max / 2 - 1), "…", name.AsSpan(name.Length - (max - max / 2)));
+        (name.Length <= max ? name : string.Concat(name.AsSpan(0, max / 2 - 1), "…", name.AsSpan(name.Length - (max - max / 2)))).Replace("_", "__");
 
     private void ShowExplorerContextMenuAtCurrent()
     {
@@ -126,7 +128,11 @@ public partial class MainWindow
             items.Add(ExplorerMenuItem("Select all", () => SelectAllBrowserEntries(), "fixed.explorer.selectAll", "Check", enabled: _browserEntries.Count > 0));
             items.Add(ExplorerSeparator());
             items.Add(ExplorerMenuItem("Show in Windows File Explorer", () => { if (folder is not null) ExplorerShell.Reveal(folder, directory: true); }, "explorer.showInWindows", "FolderLocate", enabled: folder is not null));
-            items.Add(ExplorerMenuItem("Properties", () => ShowExplorerProperties(), "fixed.explorer.properties", "Info", enabled: folder is not null));
+            // Round 3 #16: nothing selected, so Properties is the folder's: say which ("Properties of Pictures"; a drive root
+            // keeps its path, "Properties of D:\").
+            var folderName = folder is null ? null : Path.GetFileName(Path.TrimEndingDirectorySeparator(folder));
+            var propertiesHeader = folder is null ? "Properties" : $"Properties of {ExplorerMenuName(string.IsNullOrEmpty(folderName) ? folder : folderName)}";
+            items.Add(ExplorerMenuItem(propertiesHeader, () => ShowExplorerProperties(), "fixed.explorer.properties", "Info", enabled: folder is not null));
         }
         else if (selected.Count == 1)
         {
@@ -187,15 +193,20 @@ public partial class MainWindow
     private List<MenuItem> BuildExplorerSortMenuItems()
     {
         const string Tag = MenuActions.ContextPrefix + "explorer.sortOfThisTab";
-        var items = ExplorerSortFields.All
-            .Select(field => ExplorerMenuItem(field.Label, () => SetExplorerSort(field.Key, _explorerSortAscending), Tag, check: _explorerSortKey == field.Key))
-            .ToList();
-        items.Add(ExplorerSeparator());
-        items.Add(ExplorerMenuItem("Ascending", () => SetExplorerSort(_explorerSortKey, true), Tag, check: _explorerSortAscending));
-        items.Add(ExplorerMenuItem("Descending", () => SetExplorerSort(_explorerSortKey, false), Tag, check: !_explorerSortAscending));
+        // Each field twice ("Name ▲" / "Name ▼"): one pick sets the field and the direction.
+        IEnumerable<MenuItem> Both((ExplorerSortKey Key, string Label) field) => new[] { true, false }.Select(ascending =>
+            ExplorerMenuItem($"{field.Label} {ExplorerSortFields.Triangle(ascending)}", () => SetExplorerSort(field.Key, ascending), Tag,
+                check: _explorerSortKey == field.Key && _explorerSortAscending == ascending));
+        var items = ExplorerSortFields.All.SelectMany(Both).ToList();
+        var dimensions = MenuActions.Context(new MenuItem
+        {
+            Header = ExplorerSortFields.IsDimension(_explorerSortKey) ? "Dimensions  ✓" : "Dimensions",
+            ItemsSource = ExplorerSortFields.Dimensions.SelectMany(Both).ToList()
+        }, "explorer.sortOfThisTab");
+        items.Add(dimensions);
         items.Add(ExplorerSeparator());
         items.Add(ExplorerMenuItem("Group folders first", () => SetExplorerFoldersFirst(!_explorerFoldersFirst), Tag, check: _explorerFoldersFirst));
-        items.Add(ExplorerMenuItem("Keep selection in view", ToggleExplorerKeepSelectionInView, Tag, check: _settings.ExplorerKeepSelectionInView));
+        items.Add(ExplorerMenuItem("Keep selection in view", ToggleExplorerKeepSelectionInView, Tag, check: ExplorerOptionsView.KeepSelectionInView));
         return items;
     }
 
@@ -234,16 +245,17 @@ public partial class MainWindow
     internal ContextMenu BuildExplorerHistoryMenu()
     {
         var items = new List<MenuItem>();
-        if (_workspace.Active is BrowserTabState && ActiveHistory is { } history)
+        if (_workspace.Active is BrowserTabState or ImageTabState && ActiveHistory is { } history)
         {
-            // Newest first, like Explorer's "Recent locations". The tab history also holds an image opened from this tab
-            // and Home; choosing one goes there exactly like Back / Forward would.
-            var shown = 0;
-            for (var i = history.Count - 1; i >= 0 && shown < 15; i--, shown++)
+            // Round 3 #13: full paths, the most recently visited place first (each place once), not Back / Forward
+            // order. The tab history also holds an image opened from this tab and Home; choosing one goes there exactly
+            // like Back / Forward would.
+            foreach (var i in history.RecentOrder(15))
             {
                 var index = i;
                 var entry = history.Entries[i];
-                var (header, icon, tip) = HistoryEntryLabel(entry);
+                var (_, icon, tip) = HistoryEntryLabel(entry);
+                var header = entry.Kind == NavigationEntryKind.Home || string.IsNullOrEmpty(entry.Path) ? "Home" : entry.Path;
                 var item = ExplorerMenuItem(header, () => NavigateExplorerHistoryIndex(index), MenuActions.ContextPrefix + "explorer.historyEntry", icon, check: i == history.Index);
                 ToolTip.SetTip(item, tip);
                 item.Tag = entry.Path;

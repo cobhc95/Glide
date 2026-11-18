@@ -11,6 +11,7 @@ namespace Glide.Core.Tests;
 /// straight-BGRA, so alpha/orientation mistakes cannot hide behind a Skia-rendered comparison.
 /// </summary>
 [Collection(AvaloniaHeadlessCollection.Name)]
+[Trait("Area", "Decode")]
 public sealed class BuiltInRasterDecoderTests : IDisposable
 {
     private readonly List<string> _tempFiles = new();

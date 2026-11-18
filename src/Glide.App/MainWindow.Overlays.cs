@@ -5,8 +5,11 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media;
+using Avalonia.Platform;
+using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Glide.App.Controls;
+using Glide.Core;
 
 using Glide.App.Services;
 
@@ -58,32 +61,62 @@ public partial class MainWindow
             // Whole-app Overlay X is a real close affordance, not a mode toggle.
             // If this process owns multiple Glide windows, closing Overlay exits the entire
             // current Glide application/session exactly as requested.
-            if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
-                desktop.Shutdown();
+            // It must not divert into Speed Boost standby: before 5.0.8 the forced shutdown's Closing
+            // handler put the window into standby, which kept the broker acknowledging launches while
+            // the process exited, so the next launch forwarded to a dying process and vanished.
+            if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime)
+                App.ShutdownApplication("whole_app_overlay_close");
             else
                 Close();
         };
 
-        var opacityHit = new Slider
+        // Opacity grab area. Not an Avalonia Slider: its own track/thumb geometry differed from the drawn pill,
+        // so the dot lagged the pointer, a click paged the value and the 1 px thumb was hard to grab (round 3 #22).
+        // Press anywhere on the pill sets the value under the pointer, dragging follows it, the wheel steps it (#21).
+        var opacityHit = new Border
         {
-            Minimum = OverlayChromePolicy.WholeWindowMinimumOpacity,
-            Maximum = 1.0,
-            Value = _sessionOpacity,
-            Orientation = Avalonia.Layout.Orientation.Vertical,
-            Width = 22,
-            Height = 130,
+            Background = Brushes.Transparent,
             HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Left,
-            VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
-            Margin = new Thickness(8, 0, 0, 0),
-            Opacity = 0.01, Focusable = false, ZIndex = 2
+            VerticalAlignment = Avalonia.Layout.VerticalAlignment.Top,
+            Focusable = false, ZIndex = 2
         };
-        ToolTip.SetTip(opacityHit, "Overlay opacity");
-        opacityHit.PropertyChanged += (_, args) =>
+        opacityHit.Classes.Add(InteractiveHitClass);
+        ToolTip.SetTip(opacityHit, "Overlay opacity (drag or turn the mouse wheel)");
+        IPointer? opacityDrag = null;
+        void SetFromPointer(PointerEventArgs e)
         {
-            if (args.Property != RangeBase.ValueProperty || !_wholeAppOverlayMode) return;
-            var value = OverlayChromePolicy.ClampWholeWindowOpacity(opacityHit.Value);
-            if (Math.Abs(TransparencySlider.Value - value * 100.0) > 0.01)
-                TransparencySlider.Value = value * 100.0;
+            if (_wholeAppOverlayControlsHost is not { } controlsHost) return;
+            var slider = OverlayChromePolicy.SliderRect(controlsHost.Bounds.Size);
+            SetWholeAppOverlayOpacity(OverlayChromePolicy.WholeWindowOpacityFromTrackY(slider, e.GetPosition(controlsHost).Y));
+        }
+        opacityHit.PointerPressed += (_, e) =>
+        {
+            if (!_wholeAppOverlayMode || !e.GetCurrentPoint(opacityHit).Properties.IsLeftButtonPressed) return;
+            opacityDrag = e.Pointer;
+            e.Pointer.Capture(opacityHit);
+            SetFromPointer(e);
+            e.Handled = true;
+        };
+        opacityHit.PointerMoved += (_, e) =>
+        {
+            if (opacityDrag is null || !ReferenceEquals(e.Pointer, opacityDrag)) return;
+            if (!e.GetCurrentPoint(opacityHit).Properties.IsLeftButtonPressed) { opacityDrag = null; e.Pointer.Capture(null); return; }
+            SetFromPointer(e);
+            e.Handled = true;
+        };
+        opacityHit.PointerReleased += (_, e) =>
+        {
+            if (opacityDrag is null) return;
+            opacityDrag = null;
+            e.Pointer.Capture(null);
+            e.Handled = true;
+        };
+        opacityHit.PointerCaptureLost += (_, _) => opacityDrag = null;
+        opacityHit.PointerWheelChanged += (_, e) =>
+        {
+            if (!_wholeAppOverlayMode || e.Delta.Y == 0) return;
+            SetWholeAppOverlayOpacity(_sessionOpacity + Math.Sign(e.Delta.Y) * OverlayChromePolicy.WholeWindowOpacityWheelStep);
+            e.Handled = true;
         };
 
         Button ZoomHit(string tip, bool zoomIn)
@@ -115,7 +148,7 @@ public partial class MainWindow
         ToolTip.SetTip(topmostHit, "Always on top");
         topmostHit.Click += (_, _) =>
         {
-            _settings.OverlayAlwaysOnTop = !_settings.OverlayAlwaysOnTop;
+            _settings.OverlayAlwaysOnTop = !OverlayOptionsView.AlwaysOnTop;
             ApplyTopmostState(forceNative: true);
             SaveSettingsAndPublish();
         };
@@ -138,6 +171,7 @@ public partial class MainWindow
         };
         ToolTip.SetTip(dragBand, "Drag to move the Overlay window");
         dragBand.PointerPressed += WholeAppOverlayChromePointerPressed;
+        _wholeAppOverlayDragBand = dragBand;
 
         var host = new Grid
         {
@@ -155,16 +189,24 @@ public partial class MainWindow
         host.Children.Add(topmostHit);
         host.SizeChanged += (_, _) =>
         {
-            var slider = OverlayChromePolicy.SliderRect(host.Bounds.Size);
-            opacityHit.Height = slider.Height;
+            var hit = OverlayChromePolicy.WholeWindowOpacityHitRect(host.Bounds.Size);
+            opacityHit.Margin = new Thickness(hit.X, hit.Y, 0, 0);
+            opacityHit.Width = hit.Width;
+            opacityHit.Height = hit.Height;
         };
         WorkspaceLayer.Children.Add(host);
 
-        chrome.TopmostActive = _settings.OverlayAlwaysOnTop;
+        chrome.TopmostActive = OverlayOptionsView.AlwaysOnTop;
         _wholeAppOverlayChromeVisual = chrome;
-        _wholeAppOverlayOpacityHitTarget = opacityHit;
         _wholeAppOverlayControlsHost = host;
         return host;
+    }
+
+    /// <summary>Sets the whole-app Overlay opacity (clamped to 35-100 %, rounded to whole percent).</summary>
+    private void SetWholeAppOverlayOpacity(double value)
+    {
+        var clamped = OverlayChromePolicy.ClampWholeWindowOpacity(value);
+        TransparencySlider.Value = Math.Round(clamped * 100.0, 1);
     }
 
     private bool TryGetWholeAppOverlayPixelRect(out Rect rect)
@@ -221,20 +263,187 @@ public partial class MainWindow
     private void WholeAppOverlayBodyPointerPressed(object? sender, PointerPressedEventArgs e)
     {
         var physicalButtons = PhysicalMouseButtons(e.GetCurrentPoint(this));
-        if (!_wholeAppOverlayMode || _nativeSizeMoveActive || _settings.WholeAppOverlayUseWindowedInteractions) return;
-        if (!physicalButtons.Left || IsInteractiveSource(e.Source) || !IsPointerOverWholeAppOverlayPixels(e.GetPosition(this))) return;
-        BeginNativeWindowDrag(e);
-        e.Handled = true;
+        if (!_wholeAppOverlayMode || _nativeSizeMoveActive || !physicalButtons.Left || IsInteractiveSource(e.Source)) return;
+        var onHandle = IsOnWholeAppOverlayMoveHandle(e);
+        if (_settings.WholeAppOverlayUseWindowedInteractions)
+        {
+            // Windowed interactions keep normal Glide behaviour on the picture; the drag strip and the bottom bar
+            // still move the window (the top frame band has its own handler).
+            if (!onHandle) return;
+            if (!_settings.WholeAppOverlayLockPosition) BeginOverlayWindowDrag(e);
+            e.Handled = true;
+            return;
+        }
+        if (!onHandle && !IsPointerOverWholeAppOverlayPixels(e.GetPosition(this))) return;
+        var decision = OverlayWindowDragPolicy.Resolve(
+            zoomedBeyondWindow: Viewport.ImageExceedsViewport,
+            altDown: (e.KeyModifiers & KeyModifiers.Alt) != 0,
+            onMoveHandle: onHandle,
+            positionLocked: _settings.WholeAppOverlayLockPosition);
+        switch (decision)
+        {
+            case OverlayLeftDrag.MoveWindow:
+                BeginOverlayWindowDrag(e);
+                e.Handled = true;
+                break;
+            case OverlayLeftDrag.Nothing:
+                e.Handled = true;   // locked and nothing to pan: the press must not reach the viewport's window move
+                break;
+            // Pan: the viewport pans the zoomed picture.
+        }
+    }
+
+    /// <summary>The press is on the optional drag strip or the bottom button bar (outside its buttons).</summary>
+    private bool IsOnWholeAppOverlayMoveHandle(PointerEventArgs e)
+    {
+        if (_wholeAppOverlayDragStrip is { IsHitTestVisible: true } strip)
+            for (var current = e.Source as Visual; current is not null; current = current.GetVisualParent())
+                if (ReferenceEquals(current, strip)) return true;
+        if (_wholeAppOverlayControlsHost is not { IsVisible: true } host) return false;
+        var point = e.GetPosition(host);
+        return OverlayChromePolicy.BottomBarRect(host.Bounds.Size).Contains(point);
     }
 
     private void WholeAppOverlayChromePointerPressed(object? sender, PointerPressedEventArgs e)
     {
         var physicalButtons = PhysicalMouseButtons(e.GetCurrentPoint(this));
         if (!_wholeAppOverlayMode || _nativeSizeMoveActive || !physicalButtons.Left || IsInteractiveSource(e.Source)) return;
-        BeginNativeWindowDrag(e);
+        if (!_settings.WholeAppOverlayLockPosition) BeginOverlayWindowDrag(e);
         e.Handled = true;
     }
 
+    // ---- optional drag strip (round 3 #20) ----------------------------------------------------------------------
+
+    private Border? _wholeAppOverlayDragStrip;
+    private Border? _wholeAppOverlayDragBand;
+
+    /// <summary>Overlay mode with Lock position on: no drag moves the window.</summary>
+    private bool WholeAppOverlayPositionLocked => _wholeAppOverlayMode && _settings.WholeAppOverlayLockPosition;
+
+    private Border EnsureWholeAppOverlayDragStrip()
+    {
+        if (_wholeAppOverlayDragStrip is { } existing) return existing;
+        // Option A from the approved mockup: an inset pill (centred, 12 DIP below the top edge, so it is clear of the
+        // window resize band) with a light grip line; not a title bar.
+        var grip = new Border
+        {
+            Width = 44, Height = 4, CornerRadius = new CornerRadius(2),
+            Background = new SolidColorBrush(Color.FromArgb(0xC8, 0xE6, 0xE9, 0xEE)),
+            HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center,
+            VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
+            IsHitTestVisible = false
+        };
+        var strip = new Border
+        {
+            Height = OverlayChromePolicy.DragStripDip,
+            HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Left,
+            VerticalAlignment = Avalonia.Layout.VerticalAlignment.Top,
+            Background = new SolidColorBrush(Color.FromArgb(0xBF, 0x14, 0x14, 0x16)),
+            CornerRadius = new CornerRadius(OverlayChromePolicy.DragStripDip / 2),
+            Child = grip,
+            Opacity = 0,
+            IsHitTestVisible = false,
+            Cursor = new Cursor(StandardCursorType.SizeAll),
+            ZIndex = 1601
+        };
+
+        // No tooltip: its popup is a separate window, so showing it raised PointerExited on the Overlay, which hid the
+        // handle and took its hit area away before the press (user report after 1da8428).
+        WorkspaceLayer.Children.Add(strip);
+        _wholeAppOverlayDragStrip = strip;
+        return strip;
+    }
+
+    private DispatcherTimer? _dragStripFadeTimer;
+    private bool _dragStripPointerOver;
+    private long _dragStripLeftTick;
+
+    /// <summary>Tests: the handle's clock (ms); the real one is Environment.TickCount64.</summary>
+    internal Func<long>? DragStripClockForTests { get; set; }
+    private long DragStripNow => DragStripClockForTests?.Invoke() ?? Environment.TickCount64;
+
+    /// <summary>
+    /// Shows the drag handle at once while the pointer is over the Overlay (setting on); after it leaves, the handle
+    /// lingers and fades (<see cref="OverlayChromePolicy.DragStripOpacity"/>). Never hides during a window drag.
+    /// </summary>
+    private void UpdateWholeAppOverlayDragStrip(bool pointerOver)
+    {
+        var wanted = _wholeAppOverlayMode && _settings.WholeAppOverlayShowDragStrip;
+        if (!wanted && _wholeAppOverlayDragStrip is null) return;
+        if (pointerOver) _dragStripPointerOver = true;
+        else if (_dragStripPointerOver) { _dragStripPointerOver = false; _dragStripLeftTick = DragStripNow; }
+        else if (_dragStripLeftTick == 0) _dragStripLeftTick = DragStripNow - OverlayChromePolicy.DragStripHideDelayMs - OverlayChromePolicy.DragStripFadeMs;
+        RefreshWholeAppOverlayDragStrip();
+    }
+
+    private void RefreshWholeAppOverlayDragStrip()
+    {
+        var wanted = _wholeAppOverlayMode && _settings.WholeAppOverlayShowDragStrip;
+        var strip = EnsureWholeAppOverlayDragStrip();
+        var fits = false;
+        if (wanted && TryGetWholeAppOverlayPixelRect(out var rect) && OverlayChromePolicy.DragStripRect(rect) is { } pill)
+        {
+            strip.Width = pill.Width;
+            strip.Margin = new Thickness(pill.X, pill.Y, 0, 0);
+            fits = true;
+        }
+        var dragging = _manualWindowDragLeft && _manualWindowDragPointer is not null;
+        var opacity = OverlayChromePolicy.DragStripOpacity(wanted, fits, _dragStripPointerOver, dragging, DragStripNow - _dragStripLeftTick);
+        strip.IsVisible = wanted;
+        strip.Opacity = opacity;
+        strip.IsHitTestVisible = opacity > 0;
+        var settling = wanted && fits && !_dragStripPointerOver && !dragging && opacity > 0;
+        if (!settling) { _dragStripFadeTimer?.Stop(); return; }
+        if (_dragStripFadeTimer is null)
+        {
+            _dragStripFadeTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
+            _dragStripFadeTimer.Tick += (_, _) => RefreshWholeAppOverlayDragStrip();
+        }
+        if (!_dragStripFadeTimer.IsEnabled) _dragStripFadeTimer.Start();
+    }
+
+    private void ToggleWholeAppOverlayDragStrip()
+    {
+        _settings.WholeAppOverlayShowDragStrip = !_settings.WholeAppOverlayShowDragStrip;
+        SaveSettingsAndPublish();
+        UpdateWholeAppOverlayDragStrip(_wholeAppOverlayControlsHost?.IsVisible == true);
+        if (_wholeAppOverlayControlsHost is { } controls) controls.ContextMenu = BuildWholeAppOverlayOnlyContextMenu();
+        _diagnostics.Write("window", "whole_app_overlay_drag_strip", new { enabled = _settings.WholeAppOverlayShowDragStrip });
+    }
+
+    /// <summary>
+    /// The viewport properties that depend on the Overlay interaction mode and Lock position (the same values
+    /// ApplySettingsVisuals sets), applied without the full settings re-apply.
+    /// </summary>
+    private void ApplyWholeAppOverlayInteractionSettings()
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var useOverlayInteractions = _wholeAppOverlayMode && !_settings.WholeAppOverlayUseWindowedInteractions;
+        Viewport.RightDragWindowMoveAllowed = WindowState == WindowState.Normal && !WholeAppOverlayPositionLocked;
+        Viewport.BackgroundWindowDragEnabled = IsLeftWindowMoveAllowedForCurrentState() && !WholeAppOverlayPositionLocked;
+        Viewport.SelectionClickZoomEnabled = !useOverlayInteractions;
+        Viewport.SelectionRightClickZoomOutEnabled = !useOverlayInteractions;
+        Viewport.LeftDragMode = useOverlayInteractions
+            ? LeftImageDragMode.Pan
+            : _inputRouter.ResolveGesture("drag.leftImage", _settings.Gestures) switch
+            {
+                Glide.Core.Commands.GestureCatalog.Pan => LeftImageDragMode.Pan,
+                Glide.Core.Commands.GestureCatalog.MoveWindow => LeftImageDragMode.MoveWindow,
+                _ => LeftImageDragMode.Selection
+            };
+        ApplySelectionBuffer();
+        UpdateWholeAppOverlayDragStrip(_wholeAppOverlayControlsHost?.IsVisible == true);
+        _diagnostics.Write("window", "whole_app_overlay_interaction_apply", new { ms = sw.Elapsed.TotalMilliseconds });
+    }
+
+    private void ToggleWholeAppOverlayLockPosition()
+    {
+        _settings.WholeAppOverlayLockPosition = !_settings.WholeAppOverlayLockPosition;
+        ApplyWholeAppOverlayInteractionSettings();
+        SaveSettingsAndPublish();
+        if (_wholeAppOverlayControlsHost is { } controls) controls.ContextMenu = BuildWholeAppOverlayOnlyContextMenu();
+        _diagnostics.Write("window", "whole_app_overlay_lock_position", new { locked = _settings.WholeAppOverlayLockPosition });
+    }
     private void EnterWholeAppOverlayMode(string reason = "context_menu")
     {
         if (_wholeAppOverlayMode) return;
@@ -301,7 +510,7 @@ public partial class MainWindow
         ApplyWholeAppOverlayPlacementForCurrentImage(preferRemembered: true);
 
         ApplyChromeLayoutForWindowState();
-        ApplyStatusVisibility();
+        NotifyStatusChromeChanged();
         UpdateViewportScrollbars();
         RefreshDynamicTooltips();
         _diagnostics.Write("window", "whole_app_overlay_entered", new
@@ -325,6 +534,7 @@ public partial class MainWindow
             overlayControls.IsVisible = false;
             overlayControls.ContextMenu = null;
         }
+        if (_wholeAppOverlayDragStrip is { } dragStripOnExit) { dragStripOnExit.IsVisible = false; dragStripOnExit.Opacity = 0; dragStripOnExit.IsHitTestVisible = false; }
         TransparencyPanel.IsVisible = false;
         Viewport.SetBackgroundFillSuppressed(false);
         // Restore normal UI opacity on the inner visual root only. The native top-level stays
@@ -354,9 +564,20 @@ public partial class MainWindow
             WindowState = WindowState.Normal;
             if (snapshot.Width > 0 && snapshot.Height > 0)
             {
-                Width = Math.Max(MinWidth, snapshot.Width);
-                Height = Math.Max(MinHeight, snapshot.Height);
-                Position = snapshot.Position;
+                // Round 3 #28: the normal window sometimes kept the Overlay size. Restore the position first
+                // (moving back to a monitor with another DPI makes Windows rescale the window, which used to
+                // land after the size was set), and keep the size/position events of this hand-off out of the
+                // remembered normal placement. A deferred check re-applies the size if a late native resize won.
+                _applyingWholeAppOverlayPlacement = true;
+                try
+                {
+                    Position = snapshot.Position;
+                    Width = Math.Max(MinWidth, snapshot.Width);
+                    Height = Math.Max(MinHeight, snapshot.Height);
+                }
+                finally { _applyingWholeAppOverlayPlacement = false; }
+                if (snapshot.RestoreState != WindowState.Maximized) RememberNormalPlacementAfterOverlay(snapshot);
+                Dispatcher.UIThread.Post(() => VerifyNormalSizeAfterOverlay(snapshot), DispatcherPriority.Background);
             }
             if (snapshot.RestoreState == WindowState.Maximized)
                 WindowState = WindowState.Maximized;
@@ -364,7 +585,14 @@ public partial class MainWindow
 
         ApplySettingsVisuals();
         if (snapshot?.RestoreFullscreen == true && WindowState != WindowState.FullScreen)
-            EnterFullscreen();
+        {
+            // EnterFullscreen remembers the live bounds as the normal placement; right after the Overlay hand-off those
+            // can still be the Overlay geometry (the native resize has not settled), which later made leaving
+            // fullscreen return to the Overlay size (#28). The snapshot is already the remembered normal placement.
+            _applyingWholeAppOverlayPlacement = true;
+            try { EnterFullscreen(); }
+            finally { _applyingWholeAppOverlayPlacement = false; }
+        }
 
         _diagnostics.Write("window", "whole_app_overlay_exited", new
         {
@@ -373,6 +601,35 @@ public partial class MainWindow
         });
     }
 
+    private void RememberNormalPlacementAfterOverlay(WholeAppOverlaySnapshot snapshot)
+    {
+        _lastNormalWindowPosition = snapshot.Position;
+        _lastNormalWindowSize = new Size(Math.Max(MinWidth, snapshot.Width), Math.Max(MinHeight, snapshot.Height));
+        _normalPlacementKnown = true;
+        _settings.WindowX = snapshot.Position.X;
+        _settings.WindowY = snapshot.Position.Y;
+        _settings.WindowWidth = _lastNormalWindowSize.Width;
+        _settings.WindowHeight = _lastNormalWindowSize.Height;
+    }
+
+    /// <summary>After leaving Overlay: if a late native resize/DPI change left the normal window at another size, put it back.</summary>
+    private void VerifyNormalSizeAfterOverlay(WholeAppOverlaySnapshot snapshot)
+    {
+        if (_wholeAppOverlayMode || WindowState != WindowState.Normal || snapshot.RestoreState != WindowState.Normal) return;
+        var width = Math.Max(MinWidth, snapshot.Width);
+        var height = Math.Max(MinHeight, snapshot.Height);
+        if (Math.Abs(Width - width) <= 1 && Math.Abs(Height - height) <= 1 && Position == snapshot.Position) return;
+        _diagnostics.Write("window", "whole_app_overlay_exit_size_reapplied", new { Width, Height, width, height });
+        _applyingWholeAppOverlayPlacement = true;
+        try
+        {
+            Position = snapshot.Position;
+            Width = width;
+            Height = height;
+        }
+        finally { _applyingWholeAppOverlayPlacement = false; }
+        RememberNormalPlacementAfterOverlay(snapshot);
+    }
     private void UpdateWholeAppOverlayChromeHover(Point pointer)
     {
         if (!_wholeAppOverlayMode || !IsActive || _nativeSizeMoveActive) return;
@@ -383,6 +640,10 @@ public partial class MainWindow
         // Overlay chrome/glow belongs to the rendered pixels, not the transparent top-level window.
         // It appears only while the pointer is actually over visible image pixels.
         controls.IsVisible = overPixels;
+        // The top frame band is the move handle of Windowed interactions only. In Overlay interactions the press
+        // must reach the picture, so a zoomed picture pans there too (round 3 #20).
+        if (_wholeAppOverlayDragBand is { } band) band.IsHitTestVisible = _settings.WholeAppOverlayUseWindowedInteractions;
+        UpdateWholeAppOverlayDragStrip(overPixels);
     }
 
     private void ToggleAlwaysStartWholeAppOverlayMode()
@@ -396,8 +657,10 @@ public partial class MainWindow
     private void ToggleWholeAppOverlayInteractionMode()
     {
         _settings.WholeAppOverlayUseWindowedInteractions = !_settings.WholeAppOverlayUseWindowedInteractions;
+        // Narrow apply first so the click feels instant; the full ApplySettingsVisuals pass (tabs, chrome, status bar,
+        // image re-present) froze the UI noticeably and none of it depends on this toggle.
+        ApplyWholeAppOverlayInteractionSettings();
         SaveSettingsAndPublish();
-        ApplySettingsVisuals();
         if (_wholeAppOverlayControlsHost is { } controls)
             controls.ContextMenu = BuildWholeAppOverlayOnlyContextMenu();
         _diagnostics.Write("window", "whole_app_overlay_interaction_mode", new
@@ -407,7 +670,7 @@ public partial class MainWindow
         });
     }
 
-    private void AppendWholeAppOverlayMenuItems(List<MenuItem> items)
+    private void AppendWholeAppOverlayMenuItems(List<MenuItem> items, bool includeExit = true)
     {
         if (!_wholeAppOverlayMode)
         {
@@ -417,19 +680,43 @@ public partial class MainWindow
             return;
         }
 
+        // A plain on/off item: the tick means "windowed interactions on" and clicking flips it. The old
+        // header ticked both states ("Interaction: Overlay mode ✓" / "... Windowed mode ✓"), so a click
+        // looked like it did nothing (round 3 #27).
         var interactions = MenuActions.Tag(new MenuItem
         {
             Header = _settings.WholeAppOverlayUseWindowedInteractions
-                ? "Interaction: Windowed mode  ✓"
-                : "Interaction: Overlay mode  ✓",
+                ? "Use windowed interactions (drag pans, selection zoom)  ✓"
+                : "Use windowed interactions (drag pans, selection zoom)",
             Icon = MenuIcon("Mouse")
         }, "setting.overlay.wholeAppWindowedInteractions");
         interactions.Click += (_, _) => ToggleWholeAppOverlayInteractionMode();
         items.Add(interactions);
-        var sizeMenu = new MenuItem { Header = "Size", Icon = MenuIcon("Maximize") };
-        foreach (var percent in new[] { 25, 50, 75, 100, 125, 150, 200 })
+        var dragStrip = MenuActions.Tag(new MenuItem
         {
-            var choice = MenuActions.Context(new MenuItem { Header = $"{percent}%" }, "overlay.windowSizePercent");
+            Header = _settings.WholeAppOverlayShowDragStrip ? "Show drag strip  ✓" : "Show drag strip",
+            Icon = MenuIcon("Drag")
+        }, "setting.overlay.wholeAppShowDragStrip");
+        dragStrip.Click += (_, _) => ToggleWholeAppOverlayDragStrip();
+        items.Add(dragStrip);
+        var lockPosition = MenuActions.Tag(new MenuItem
+        {
+            Header = _settings.WholeAppOverlayLockPosition ? "Lock position  ✓" : "Lock position",
+            Icon = MenuIcon("Move")
+        }, "setting.overlay.wholeAppLockPosition");
+        lockPosition.Click += (_, _) => ToggleWholeAppOverlayLockPosition();
+        items.Add(lockPosition);
+        var sizeMenu = new MenuItem { Header = "Size", Icon = MenuIcon("Maximize") };
+        var (sourceWidth, sourceHeight) = WholeAppOverlaySourcePixels();
+        var windowBox = CurrentWindowPixelBox();
+        int? currentPercent = WindowState == WindowState.Normal && WholeAppOverlayScreenFor(windowBox) is { } sizeScreen
+            ? OverlayWindowSizing.CurrentPercent(windowBox, sourceWidth, sourceHeight, ToPixelBox(sizeScreen.WorkingArea),
+                RenderScaling > 0 ? RenderScaling : 1.0, _wholeAppOverlayChosenPercent)
+            : null;
+        foreach (var percent in OverlayWindowSizing.SizePercents)
+        {
+            // The size the window is at now is ticked (round 3 #25); a border-resized window ticks nothing.
+            var choice = MenuActions.Context(new MenuItem { Header = percent == currentPercent ? $"{percent}%  ✓" : $"{percent}%" }, "overlay.windowSizePercent");
             choice.Click += (_, _) => SetWholeAppOverlaySize(percent);
             sizeMenu.Items.Add(choice);
         }
@@ -446,36 +733,89 @@ public partial class MainWindow
         always.Click += (_, _) => ToggleAlwaysStartWholeAppOverlayMode();
         items.Add(always);
 
-        var topmost = MenuActions.Tag(new MenuItem { Header = _settings.OverlayAlwaysOnTop ? "Always on top  ✓" : "Always on top", Icon = MenuIcon("AlwaysOnTop") }, "window.alwaysTop");
-        topmost.Click += (_, _) => AlwaysOnTopClicked(null, new RoutedEventArgs());
+        var topmost = MenuActions.Tag(new MenuItem { Header = OverlayOptionsView.AlwaysOnTop ? "Always on top  ✓" : "Always on top", Icon = MenuIcon("AlwaysOnTop") }, "window.alwaysTop");
+        topmost.Click += (_, _) => ToggleAlwaysOnTopSetting();
         items.Add(topmost);
 
+        if (!includeExit) return;
         items.Add(new MenuItem { Header = "-" });
+        items.Add(CreateExitWholeAppOverlayMenuItem());
+    }
+
+    /// <summary>"Exit Overlay mode" with its registry shortcut (overlay.toggleMode). The viewer menu shows it top-level under "Exit Glide".</summary>
+    private MenuItem CreateExitWholeAppOverlayMenuItem()
+    {
         var exit = MenuActions.Tag(new MenuItem { Header = MenuActions.Header("Exit Overlay mode", ShortcutForAction("overlay.toggleMode")), Icon = MenuIcon("Close") }, "overlay.toggleMode");
         exit.Click += (_, _) => ExitWholeAppOverlayMode();
-        items.Add(exit);
+        return exit;
     }
 
     private void SetWholeAppOverlaySize(int percent)
     {
         if (!_wholeAppOverlayMode || WindowState != WindowState.Normal) return;
-        var screen = Screens.All.FirstOrDefault(s => s.WorkingArea.Contains(Position)) ?? Screens.Primary;
+        var current = CurrentWindowPixelBox();
+        var screen = WholeAppOverlayScreenFor(current);
         if (screen is null) return;
-        var scale = screen.Scaling > 0 ? screen.Scaling : 1.0;
-        var pixels = Viewport.Bitmap?.PixelSize;
-        var sourceWidth = Math.Max(1, _currentPixelWidth > 0 ? _currentPixelWidth : pixels?.Width ?? 1);
-        var sourceHeight = Math.Max(1, _currentPixelHeight > 0 ? _currentPixelHeight : pixels?.Height ?? 1);
-        var area = screen.WorkingArea;
-        var factor = Math.Min(percent / 100.0,
-            Math.Min(area.Width / (scale * sourceWidth), area.Height / (scale * sourceHeight)));
-        var width = sourceWidth * factor;
-        var height = sourceHeight * factor;
-        var x = Math.Clamp(Position.X + (int)Math.Round((Bounds.Width - width) * scale / 2), area.X, area.Right - (int)Math.Ceiling(width * scale));
-        var y = Math.Clamp(Position.Y + (int)Math.Round((Bounds.Height - height) * scale / 2), area.Y, area.Bottom - (int)Math.Ceiling(height * scale));
-        Position = new PixelPoint(x, y);
-        Width = width;
-        Height = height;
+        var scale = RenderScaling > 0 ? RenderScaling : (screen.Scaling > 0 ? screen.Scaling : 1.0);
+        var (sourceWidth, sourceHeight) = WholeAppOverlaySourcePixels();
+        // Sizes above 100 % are capped to the work area and the window is moved fully inside it, so the
+        // bottom button bar never ends up behind the taskbar (round 3 #26).
+        var box = OverlayWindowSizing.ForPercent(percent, sourceWidth, sourceHeight, ToPixelBox(screen.WorkingArea), scale, current);
+        _wholeAppOverlayChosenPercent = percent;
+        ApplyWholeAppOverlayPixelBox(box, scale);
         SaveCurrentWholeAppOverlayPlacement();
+    }
+
+    private int? _wholeAppOverlayChosenPercent;
+
+    private (int Width, int Height) WholeAppOverlaySourcePixels()
+    {
+        var pixels = Viewport.Bitmap?.PixelSize;
+        return (Math.Max(1, _currentPixelWidth > 0 ? _currentPixelWidth : pixels?.Width ?? 1),
+                Math.Max(1, _currentPixelHeight > 0 ? _currentPixelHeight : pixels?.Height ?? 1));
+    }
+
+    private static PixelBox ToPixelBox(PixelRect rect) => new(rect.X, rect.Y, rect.Width, rect.Height);
+
+    private PixelBox CurrentWindowPixelBox()
+    {
+        var scale = RenderScaling > 0 ? RenderScaling : 1.0;
+        var width = double.IsNaN(Width) ? Bounds.Width : Width;
+        var height = double.IsNaN(Height) ? Bounds.Height : Height;
+        return new PixelBox(Position.X, Position.Y, (int)Math.Round(width * scale), (int)Math.Round(height * scale));
+    }
+
+    /// <summary>The screen the window overlaps most (its centre's screen when it overlaps none).</summary>
+    private Screen? WholeAppOverlayScreenFor(PixelBox window)
+    {
+        Screen? best = null;
+        long bestArea = 0;
+        foreach (var screen in Screens.All)
+        {
+            var a = screen.WorkingArea;
+            long w = Math.Max(0, Math.Min(window.Right, a.Right) - Math.Max(window.X, a.X));
+            long h = Math.Max(0, Math.Min(window.Bottom, a.Bottom) - Math.Max(window.Y, a.Y));
+            if (w * h > bestArea) { bestArea = w * h; best = screen; }
+        }
+        return best ?? Screens.ScreenFromPoint(new PixelPoint(window.X + window.Width / 2, window.Y + window.Height / 2)) ?? Screens.Primary;
+    }
+
+    private void ApplyWholeAppOverlayPixelBox(PixelBox box, double scale)
+    {
+        Position = new PixelPoint(box.X, box.Y);
+        Width = box.Width / scale;
+        Height = box.Height / scale;
+    }
+
+    /// <summary>Moves (and if needed shrinks) the Overlay window so it lies fully inside its monitor's work area.</summary>
+    private void KeepWholeAppOverlayInsideWorkArea()
+    {
+        if (!_wholeAppOverlayMode || WindowState != WindowState.Normal) return;
+        var current = CurrentWindowPixelBox();
+        if (WholeAppOverlayScreenFor(current) is not { } screen) return;
+        var inside = OverlayWindowSizing.KeepInside(current, ToPixelBox(screen.WorkingArea));
+        if (inside == current) return;
+        ApplyWholeAppOverlayPixelBox(inside, RenderScaling > 0 ? RenderScaling : 1.0);
     }
 
     private ContextMenu BuildWholeAppOverlayOnlyContextMenu()

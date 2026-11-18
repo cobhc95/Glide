@@ -57,7 +57,7 @@ public partial class MainWindow
         var sinceLast = string.Equals(_explorerLastClickPath, entry.Path, StringComparison.OrdinalIgnoreCase) ? now - _explorerLastClickTick : long.MaxValue;
         _explorerLastClickPath = entry.Path;
         _explorerLastClickTick = now;
-        if (!_settings.ExplorerClickToRename || !wasSoleSelected || e.ClickCount != 1 || e.KeyModifiers != KeyModifiers.None) return;
+        if (!ExplorerOptionsView.ClickToRename || !wasSoleSelected || e.ClickCount != 1 || e.KeyModifiers != KeyModifiers.None) return;
         if (sinceLast < (long)ExplorerDoubleClickTime().TotalMilliseconds) return; // too soon: that is a double-click's pace
         if (!IsOnExplorerNameText(e)) return;
         _explorerClickRenameArmed = entry;
@@ -90,7 +90,7 @@ public partial class MainWindow
             timer.Stop();
             var entry = _explorerClickRenamePending;
             _explorerClickRenamePending = null;
-            if (entry is null || !_settings.ExplorerClickToRename) return; // window deactivation already cancelled it
+            if (entry is null || !ExplorerOptionsView.ClickToRename) return; // window deactivation already cancelled it
             if (_workspace.Active is not BrowserTabState browser || browser.Id != _explorerClickRenameTab ||
                 !string.Equals(browser.Folder, _explorerClickRenameFolder, StringComparison.OrdinalIgnoreCase)) return;
             if (_browserSelection.Count != 1 || !_browserSelection.Contains(entry.Path)) return;

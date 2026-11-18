@@ -1,11 +1,12 @@
 
 namespace Glide.Core.Tests;
 
+[Trait("Area", "Explorer")]
 public sealed class FolderWatchTests : IDisposable
 {
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "GlideWatch_" + Guid.NewGuid().ToString("N"));
     public FolderWatchTests() => Directory.CreateDirectory(_dir);
-    public void Dispose() { try { Directory.Delete(_dir, true); } catch { } }
+    public void Dispose() { TempDir.TryDelete(_dir); }
     private string P(string name) => Path.Combine(_dir, name);
 
     private ImageNavigator Nav(string current, params string[] names)
@@ -133,8 +134,7 @@ public sealed class FolderWatchTests : IDisposable
         svc.Watch(_dir);
         File.WriteAllBytes(P("new.part"), new byte[] { 1, 2, 3 });
         File.Move(P("new.part"), P("new.png"));
-        var done = await Task.WhenAny(tcs.Task, Task.Delay(5000));
-        Assert.Same(tcs.Task, done);
-        Assert.Contains(P("new.png"), tcs.Task.Result.Added, StringComparer.OrdinalIgnoreCase);
+        var change = await Wait.ForAsync(tcs.Task, "folder change event", 5000);
+        Assert.Contains(P("new.png"), change.Added, StringComparer.OrdinalIgnoreCase);
     }
 }

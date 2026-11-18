@@ -11,6 +11,7 @@ namespace Glide.Core.Tests;
 /// The HTTP side of the update check, against a fake <see cref="HttpMessageHandler"/> (no socket is ever opened): exactly what is
 /// requested, what is refused (size, content type, redirects) and how failures map to statuses.
 /// </summary>
+[Trait("Area", "Update")]
 public sealed class GitHubUpdateFeedTests
 {
     private sealed class FakeHandler : HttpMessageHandler

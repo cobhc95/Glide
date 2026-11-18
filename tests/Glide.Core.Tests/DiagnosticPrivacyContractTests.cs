@@ -6,6 +6,7 @@ namespace Glide.Core.Tests;
 /// investigations with --diagnostic-trace or GLIDE_DIAGNOSTIC_TRACE=1.
 /// </summary>
 // Source-text contract kept: this asserts on production source (UI code-behind, native/installer files or a repo-wide scan) that cannot be run headlessly; behavioural coverage lives in the other test files.
+[Trait("Area", "Diagnostics")]
 public sealed class DiagnosticPrivacyContractTests
 {
     [Fact]

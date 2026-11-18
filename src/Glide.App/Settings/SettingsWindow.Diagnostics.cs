@@ -40,7 +40,7 @@ public partial class SettingsWindow
         try
         {
             var customDir = targetDir ?? Environment.GetEnvironmentVariable("GLIDE_DIAGNOSTICS_DIR") ?? Environment.GetEnvironmentVariable("GLIDE_DIAGNOSTICS_EXPORT_DIR");
-            var stamp = DateTime.Now.ToString("yyyy-MM-dd_HHmmss");
+            var stamp = DateTime.Now.ToString("yyyy-MM-dd_HHmmss", System.Globalization.CultureInfo.InvariantCulture);
             string reportFolder;
             string zipPath;
             bool keepFolder = false;
@@ -628,7 +628,7 @@ public partial class SettingsWindow
                     : control.IsEnabled ? "current enabled editor; value participates in Settings state/effect path"
                     : ConditionallyDisabledSettingIds.Contains(definition.Id) ? "current editor disabled by current state" : "current editor unexpectedly disabled";
             lines.Add(string.Join("\t",
-                Sanitize(definition.Id), Sanitize(definition.Category), definition.Kind.ToString(), Sanitize(definition.Label), definition.FuturePhase?.ToString() ?? "",
+                Sanitize(definition.Id), Sanitize(definition.Category), definition.Kind.ToString(), Sanitize(definition.Label), definition.FuturePhase?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "",
                 Sanitize(control?.Name ?? ""), control?.GetType().Name ?? "", (control?.IsEnabled ?? false).ToString(), Sanitize(status)));
         }
         File.WriteAllLines(path, lines);

@@ -14,12 +14,19 @@ public sealed class FolderChangeBatcher
     private readonly Dictionary<string, bool> _pending = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, int> _attempts = new(StringComparer.OrdinalIgnoreCase);
     private bool _rescan;
+    private readonly Func<string, bool> _relevant;
     public int MaxReadAttempts { get; init; } = 40;
+
+    /// <summary><paramref name="relevant"/> picks the paths that count (default: supported images, see <see cref="IsRelevant"/>).</summary>
+    public FolderChangeBatcher(Func<string, bool>? relevant = null) => _relevant = relevant ?? IsRelevant;
+
+    /// <summary>Explorer tabs: every entry counts (files of any type and folders, as Explorer lists them).</summary>
+    public static bool IsRelevantForExplorer(string path) => !string.IsNullOrEmpty(Path.GetFileName(path));
 
     public static bool IsIgnoredName(string path)
     {
         var name = Path.GetFileName(path);
-        if (string.IsNullOrEmpty(name) || name.StartsWith('~') || name.StartsWith(".~")) return true;
+        if (string.IsNullOrEmpty(name) || name.StartsWith('~') || name.StartsWith(".~", StringComparison.Ordinal)) return true;
         var ext = Path.GetExtension(name).ToLowerInvariant();
         return ext is ".crdownload" or ".part" or ".partial" or ".tmp" or ".temp" or ".download" or ".opdownload" or ".!ut";
     }
@@ -30,13 +37,13 @@ public sealed class FolderChangeBatcher
 
     public void OnCreatedOrChanged(string path)
     {
-        if (!IsRelevant(path)) return;
+        if (!_relevant(path)) return;
         lock (_sync) _pending[path] = true;
     }
 
     public void OnDeleted(string path)
     {
-        if (!IsRelevant(path)) return;
+        if (!_relevant(path)) return;
         lock (_sync) { _pending[path] = false; _attempts.Remove(path); }
     }
 
@@ -89,6 +96,21 @@ public sealed class FolderChangeBatcher
         return new FolderChangeSet(added, removed, false);
     }
 
+    /// <summary>Explorer listing: a folder is always ready; a file once it can be opened (empty files included).</summary>
+    public static bool IsEntryReady(string path)
+    {
+        if (Directory.Exists(path)) return true;
+        try
+        {
+            using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            return true;
+        }
+        catch (IOException) { return false; }
+        catch (UnauthorizedAccessException) { return true; } // listed anyway (Explorer shows it); retrying would not help
+    }
+
+    public static bool EntryExists(string path) => File.Exists(path) || Directory.Exists(path);
+
     public static bool IsFileReadable(string path)
     {
         try
@@ -110,16 +132,22 @@ public sealed class FolderWatchService : IDisposable
     private readonly object _sync = new();
     private readonly Action<string, FolderChangeSet> _onChanges;
     private readonly TimeSpan _debounce;
+    private readonly bool _explorer;
     private FileSystemWatcher? _watcher;
     private FolderChangeBatcher _batcher = new();
     private Timer? _timer;
     private string? _folder;
     private bool _disposed;
 
-    public FolderWatchService(Action<string, FolderChangeSet> onChanges, TimeSpan? debounce = null)
+    /// <param name="explorer">
+    /// Explorer-tab mode: folders and files of every type are reported (not only images), folder creation /
+    /// deletion / rename included, and a file counts once it can be opened.
+    /// </param>
+    public FolderWatchService(Action<string, FolderChangeSet> onChanges, TimeSpan? debounce = null, bool explorer = false)
     {
         _onChanges = onChanges;
         _debounce = debounce ?? TimeSpan.FromMilliseconds(400);
+        _explorer = explorer;
     }
 
     public string? Folder { get { lock (_sync) return _folder; } }
@@ -135,14 +163,15 @@ public sealed class FolderWatchService : IDisposable
             StopCore();
             if (string.IsNullOrWhiteSpace(folder) || !Directory.Exists(folder)) return;
             _folder = folder;
-            _batcher = new FolderChangeBatcher();
+            _batcher = _explorer ? new FolderChangeBatcher(FolderChangeBatcher.IsRelevantForExplorer) : new FolderChangeBatcher();
             var batcher = _batcher;
             try
             {
                 var w = new FileSystemWatcher(folder)
                 {
                     IncludeSubdirectories = false,
-                    NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.Size,
+                    NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.Size
+                        | (_explorer ? NotifyFilters.DirectoryName | NotifyFilters.Attributes : 0),
                     InternalBufferSize = 64 * 1024,
                 };
                 w.Created += (_, e) => { batcher.OnCreatedOrChanged(e.FullPath); Kick(batcher); };
@@ -189,7 +218,12 @@ public sealed class FolderWatchService : IDisposable
         }
         if (folder is null) return;
         FolderChangeSet set;
-        try { set = batcher.Flush(File.Exists, FolderChangeBatcher.IsFileReadable); }
+        try
+        {
+            set = _explorer
+                ? batcher.Flush(FolderChangeBatcher.EntryExists, FolderChangeBatcher.IsEntryReady)
+                : batcher.Flush(File.Exists, FolderChangeBatcher.IsFileReadable);
+        }
         catch { return; }
         if (set.RescanRequired || set.Added.Count > 0 || set.Removed.Count > 0)
         {

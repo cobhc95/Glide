@@ -3,6 +3,7 @@ using Glide.Imaging;
 
 namespace Glide.Core.Tests;
 
+[Trait("Area", "Regression")]
 public sealed class Glide22BoundaryTests
 {
     [Fact]
@@ -58,7 +59,7 @@ public sealed class Glide22BoundaryTests
             Assert.Equal(2, workspace.Tabs.Count);
             Assert.Equal(first, Assert.IsType<Glide.Core.Workspace.ImageTabState>(workspace.Active).Path);
         }
-        finally { try { Directory.Delete(root, true); } catch { } }
+        finally { TempDir.TryDelete(root); }
     }
 
     [Fact]

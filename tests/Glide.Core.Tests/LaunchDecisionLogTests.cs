@@ -2,6 +2,7 @@ using Glide.App.Services;
 
 namespace Glide.Core.Tests;
 
+[Trait("Area", "Diagnostics")]
 public sealed class LaunchDecisionLogTests
 {
     [Fact]

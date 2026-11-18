@@ -24,6 +24,7 @@ namespace Glide.Core.Tests;
 /// folder to also write the frames as PNG files for a visual check.
 /// </summary>
 [Collection(AvaloniaHeadlessCollection.Name)]
+[Trait("Area", "Gestures")]
 public sealed class GestureDropdownRenderTests
 {
     public GestureDropdownRenderTests(AvaloniaHeadlessFixture fixture) => _ = fixture;

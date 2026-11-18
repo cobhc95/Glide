@@ -6,6 +6,7 @@ namespace Glide.Core.Tests;
 /// taskbar button; the old single-representative suppression must not come back.
 /// </summary>
 // Source-text contract kept: this asserts on production source (UI code-behind, native/installer files or a repo-wide scan) that cannot be run headlessly; behavioural coverage lives in the other test files.
+[Trait("Area", "Window")]
 public sealed class TaskbarWindowContractTests
 {
     [Fact]

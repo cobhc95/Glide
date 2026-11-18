@@ -54,6 +54,15 @@ internal static class ToolTipGuard
         AvaloniaProperty.RegisterAttached<Control, bool>("KeepsOwnPlacement", typeof(ToolTipGuard));
 
     internal static bool GetKeepsOwnPlacement(Control control) => control.GetValue(KeepsOwnPlacementProperty);
+
+    /// <summary>
+    /// A control whose open tooltip uses some wheel ticks itself (round 3 #5: the resize key + wheel over a tab resizes
+    /// its hover preview). When the predicate is true for a tick, the guard leaves that control's tooltip open.
+    /// </summary>
+    internal static readonly AttachedProperty<Func<PointerWheelEventArgs, bool>?> KeepsOpenOnWheelProperty =
+        AvaloniaProperty.RegisterAttached<Control, Func<PointerWheelEventArgs, bool>?>("KeepsOpenOnWheel", typeof(ToolTipGuard));
+
+    internal static void SetKeepsOpenOnWheel(Control control, Func<PointerWheelEventArgs, bool>? value) => control.SetValue(KeepsOpenOnWheelProperty, value);
     internal static void SetKeepsOwnPlacement(Control control, bool value) => control.SetValue(KeepsOwnPlacementProperty, value);
 
     /// <summary>Anchoring for a tooltip: the control's edge, or beside the pointer for rows of a scrolling list.</summary>
@@ -100,10 +109,10 @@ internal static class ToolTipGuard
 
         // Tunnel + handledEventsToo: runs before the list/scroll viewer consumes the tick, so a tooltip that
         // is open when the wheel turns is gone before the content moves underneath it.
-        InputElement.PointerWheelChangedEvent.AddClassHandler<Control>((control, _) =>
+        InputElement.PointerWheelChangedEvent.AddClassHandler<Control>((control, e) =>
         {
             s_lastWheelTicks = Environment.TickCount64;
-            CloseOpenToolTips(control);
+            CloseOpenToolTips(control, e);
         }, Avalonia.Interactivity.RoutingStrategies.Tunnel, handledEventsToo: true);
 
         // Each tooltip opens in a new native popup window: make that window transparent to the mouse once it is shown.
@@ -222,10 +231,11 @@ internal static class ToolTipGuard
     private static extern bool PostMessage(IntPtr hWnd, uint message, IntPtr wParam, IntPtr lParam);
 
     /// <summary>Closes the tooltip of <paramref name="source"/> and of every visual parent that has one open.</summary>
-    internal static void CloseOpenToolTips(Visual? source)
+    internal static void CloseOpenToolTips(Visual? source, PointerWheelEventArgs? wheel = null)
     {
         for (var current = source; current is not null; current = current.GetVisualParent())
-            if (current is Control control && ToolTip.GetIsOpen(control))
+            if (current is Control control && ToolTip.GetIsOpen(control)
+                && !(wheel is not null && control.GetValue(KeepsOpenOnWheelProperty) is { } keep && keep(wheel)))
                 ToolTip.SetIsOpen(control, false);
     }
 }

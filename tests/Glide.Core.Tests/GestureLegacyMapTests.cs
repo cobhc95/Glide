@@ -9,6 +9,7 @@ namespace Glide.Core.Tests;
 /// other than the documented 4.8.0 validity rules (one-shots are not offered on wheels or drags,
 /// drag-only actions are not offered on clicks, overlay rows offer only overlay-capable actions).
 /// </summary>
+[Trait("Area", "Gestures")]
 public sealed class GestureLegacyMapTests
 {
     /// <summary>The 23 pre-4.8.0 actions: id -> (label, command).</summary>

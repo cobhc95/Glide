@@ -49,7 +49,7 @@ Rules:
 | Back (`nav.back`, `GlideCommand.NavigateBack`) | **Alt+Left**; mouse back button (XButton1); title-bar Back button |
 | Forward (`nav.forward`, `GlideCommand.NavigateForward`) | **Shift+Backspace**, **Alt+Right**; mouse forward button (XButton2); title-bar Forward button |
 | Backspace (`nav.backOrPrevious`, `GlideCommand.BackOrPrevious`) | **Back, or Previous image**: Back when the tab has a step back (also in the Explorer list and Home), else Previous image in an image tab, else nothing |
-| Explorer toolbar Back / Forward, history dropdown, `explorer.back` / `explorer.forward` | the same history (the dropdown also lists images and Home) |
+| Explorer toolbar Back / Forward, history dropdown, `explorer.back` / `explorer.forward` | the same history (the dropdown also lists images and Home; full paths, most recently visited place first, each place once: `NavigationHistory.RecentOrder`) |
 | Up one folder | Alt+Up (fixed Explorer key, unchanged) and the toolbar Up button: a new history step |
 
 - **Backspace is one composite action, `nav.backOrPrevious` ("Back, or Previous image").** `MainWindow.BackOrPreviousAsync`:
@@ -72,9 +72,8 @@ Rules:
   and Shift+Backspace are stopped by the text-input guard, Alt+Left / Alt+Right (and any rebound key) by an explicit check in
   `RouteHotkeyAsync`. Settings and dialogs are separate windows and never reach the main window's keys.
 - **Mouse side buttons:** the gesture rows `windowed.` / `fullscreen.backButtonImage`, `tabs.backButton`,
-  `explorer.backButton` (and the forward rows) show "Default (back)" / "Default (forward)": Default runs
-  `GestureCatalog.DefaultActionFor(slot)` = `nav.back` / `nav.forward`. "Do nothing" or any other action the user picks
-  (row or custom gesture) wins. Over a tab the active tab goes Back / Forward. The Welcome page has no gesture rows; it
+  `explorer.backButton` (and the forward rows) show "Default (not used by Glide)" (5.0.8): Default leaves the
+  press unhandled for Windows / mouse software. Bind `nav.back` / `nav.forward` (or anything) to use them; "Do nothing" blocks. Over a tab the active tab goes Back / Forward. The Welcome page has no gesture rows; it
   follows the Windowed image rows.
 - **Title bar:** `TitleBarButtonCatalog.DefaultButtonIds` starts with Back, Forward (then Previous / Next folder, Open,
   Show in Explorer, Always on top, Settings). Previous / Next image remain optional buttons (the status bar and the

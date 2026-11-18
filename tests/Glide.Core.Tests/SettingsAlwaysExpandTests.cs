@@ -16,6 +16,7 @@ namespace Glide.Core.Tests;
 /// a profile, a backup) that turned the switch on was skipped by the loading guard.
 /// </summary>
 [Collection(AvaloniaHeadlessCollection.Name)]
+[Trait("Area", "Settings")]
 public sealed class SettingsAlwaysExpandTests
 {
     public SettingsAlwaysExpandTests(AvaloniaHeadlessFixture fixture) { _ = fixture; }

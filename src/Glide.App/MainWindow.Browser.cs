@@ -27,8 +27,8 @@ namespace Glide.App;
 /// </summary>
 public partial class MainWindow
 {
-    private const double ExplorerGridSpacing = 6;
-    private const double ExplorerScrollPadding = 10;
+    private const double ExplorerGridSpacing = ExplorerLayout.GridSpacing;
+    private const double ExplorerScrollPadding = ExplorerLayout.ScrollPadding;
 
     /// <summary>Per-tab Explorer view state: survives switching to another tab and back.</summary>
     private sealed class ExplorerTabView
@@ -54,6 +54,8 @@ public partial class MainWindow
     private string? _explorerLoadedFolder;
     private Guid _explorerDisplayedTabId;
     private Task _explorerRefreshTask = Task.CompletedTask;
+    // Round 3 #17: true while a folder is being read; the empty-folder text waits for the listing instead of flashing.
+    private bool _explorerListing;
     private long _explorerViewVersion;
     private bool _explorerApplyingState;
     private List<string>? _explorerPendingSelection;
@@ -122,7 +124,7 @@ public partial class MainWindow
             }
             else
             {
-                _browserViewMode = ExplorerViewModes.IndexOf(_settings.ExplorerDefaultView);
+                _browserViewMode = ExplorerViewModes.IndexOf(ExplorerOptionsView.DefaultView);
                 _explorerSortKey = ExplorerSortKey.Name;
                 _explorerSortAscending = true;
                 _explorerFoldersFirst = true;
@@ -161,6 +163,16 @@ public partial class MainWindow
     {
         // A folder change or reload cancels a pending click-to-rename.
         CancelExplorerClickRename();
+        // Round 3 #15: a reload of the folder already shown (after paste / delete / rename / new folder / F5, or an
+        // outside change reported by the folder watcher) is applied in place: removed tiles disappear, new ones are
+        // inserted where the sort puts them, and every other tile keeps its element, thumbnail, selection and the
+        // scroll position. Only a different folder (or a pending scroll restore) rebuilds the list.
+        if (string.Equals(_explorerLoadedFolder, folder, StringComparison.OrdinalIgnoreCase) && _explorerPendingScrollY is null &&
+            _explorerPendingEnsureVisiblePath is null && _browserSurface is not null && ReferenceEquals(BrowserRepeater.ItemsSource, _browserEntries))
+        {
+            await ReloadExplorerFolderInPlaceAsync(folder);
+            return;
+        }
         _browserThumbnailCts?.Cancel();
         _browserThumbnailCts?.Dispose();
         _browserThumbnailCts = CancellationTokenSource.CreateLinkedTokenSource(_windowLifetimeCts.Token);
@@ -181,13 +193,20 @@ public partial class MainWindow
             _explorerFilterText = "";
             SetExplorerFilterBoxText("");
         }
-        _browserSelection.Clear();
-        _browserSelectionAnchor = -1;
-        _browserCurrentIndex = -1;
-        // Never mutate the list currently owned by ItemsRepeater (see ApplyExplorerViewAsync).
-        _browserEntries = new List<ExplorerEntry>();
-        ApplyManagedExplorerTheme();
-        BrowserRepeater.ItemsSource = _browserEntries;
+        if (!sameFolder)
+        {
+            _browserSelection.Clear();
+            _browserSelectionAnchor = -1;
+            _browserCurrentIndex = -1;
+            // Never mutate the list currently owned by ItemsRepeater (see ApplyExplorerViewAsync).
+            _browserEntries = new ExplorerEntryList();
+            ApplyManagedExplorerTheme();
+            BrowserRepeater.ItemsSource = _browserEntries;
+        }
+        // Round 3 #15: a reload of the folder that is shown (after copy / paste / delete / rename / F5) keeps the current
+        // tiles, selection and status until the new listing is ready and then swaps it in, instead of emptying the pane
+        // first (which showed the dark empty viewport for a moment).
+        _explorerListing = true;
         UpdateExplorerStatus();
         try
         {
@@ -198,18 +217,32 @@ public partial class MainWindow
             if (generation != Volatile.Read(ref _browserGeneration) ||
                 _workspace.Active is not BrowserTabState current || current.Id != activeTabId ||
                 !string.Equals(current.Folder, folder, StringComparison.OrdinalIgnoreCase)) return;
-            var showHidden = _settings.ExplorerShowHiddenFiles;
-            var onlyImages = _settings.ExplorerShowOnlyImages;
+            var showHidden = ExplorerOptionsView.ShowHiddenFiles;
+            var onlyImages = ExplorerOptionsView.ShowOnlyImages;
             // Enumeration/sorting is the only O(N) folder operation. UI controls, context menus,
             // tooltips and thumbnail decoders are created strictly by ItemsRepeater realization.
-            var entries = await Task.Run(() => ExplorerModel.Enumerate(folder, showHidden, onlyImages, token), token);
+            var probeDimensions = ExplorerSortFields.IsDimension(_explorerSortKey);
+            // 5.1.0 instant tab switching: a recently shown Explorer tab is rebuilt from its kept listing at once and
+            // reconciled in place afterwards, instead of waiting for the folder to be read again.
+            var warmListing = TakeWarmExplorerListing(activeTabId, folder);
+            var entries = warmListing is not null && !probeDimensions ? warmListing.ToList() : await Task.Run(() =>
+            {
+                var listed = ExplorerModel.Enumerate(folder, showHidden, onlyImages, token);
+                if (probeDimensions) ExplorerModel.ProbeDimensions(listed, token); // a dimension sort reads headers here, not on the UI thread
+                return listed;
+            }, token);
+            var reconcileWarm = warmListing is not null && !probeDimensions;
             token.ThrowIfCancellationRequested();
             if (generation != Volatile.Read(ref _browserGeneration) ||
                 _workspace.Active is not BrowserTabState active || active.Id != activeTabId ||
                 !string.Equals(active.Folder, folder, StringComparison.OrdinalIgnoreCase)) return;
             _explorerAllEntries = entries;
             _explorerLoadedFolder = folder;
-            _browserEntries = ComputeExplorerDisplayList();
+            _explorerListing = false;
+            _browserSelection.Clear();
+            _browserSelectionAnchor = -1;
+            _browserCurrentIndex = -1;
+            _browserEntries = new ExplorerEntryList(ComputeExplorerDisplayList());
             if (carried is not null)
                 foreach (var path in carried)
                     if (_browserEntries.Any(e => string.Equals(e.Path, path, StringComparison.OrdinalIgnoreCase))) _browserSelection.Add(path);
@@ -253,11 +286,18 @@ public partial class MainWindow
                     }
                 }
             }
-            _diagnostics.Write("browser", "managed_population_complete", new { folder, count = entries.Count, virtualized = true, generation });
+            _diagnostics.Write("browser", "managed_population_complete", new { folder, count = entries.Count, virtualized = true, generation, warm = reconcileWarm });
+            EnsureExplorerFolderWatch(folder);
+            if (reconcileWarm && generation == Volatile.Read(ref _browserGeneration)) _ = ReloadExplorerFolderInPlaceAsync(folder);
         }
         catch (OperationCanceledException) { /* cancellation is the expected way to stop this work */ }
         catch (UnauthorizedAccessException ex) { ShowExplorerMessage($"Can't open this folder: {ex.Message}", isError: true); }
         catch (IOException ex) { ShowExplorerMessage($"Can't read this folder: {ex.Message}", isError: true); }
+        finally
+        {
+            // Only the newest reload owns the flag (a superseded one must not clear it under its successor).
+            if (generation == Volatile.Read(ref _browserGeneration)) _explorerListing = false;
+        }
     }
 
     private List<ExplorerEntry> ComputeExplorerDisplayList() =>
@@ -279,7 +319,15 @@ public partial class MainWindow
         BrowserRepeater.ItemsSource = null;
         await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Render);
         if (version != Volatile.Read(ref _explorerViewVersion) || generation != Volatile.Read(ref _browserGeneration)) return;
-        _browserEntries = ComputeExplorerDisplayList();
+        if (ExplorerSortFields.IsDimension(_explorerSortKey))
+        {
+            // Read the pictures' pixel sizes in the background (once per entry), then sort.
+            var all = _explorerAllEntries.ToList();
+            try { await Task.Run(() => ExplorerModel.ProbeDimensions(all, CancellationToken.None)); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* unknown sizes sort first */ }
+            if (version != Volatile.Read(ref _explorerViewVersion) || generation != Volatile.Read(ref _browserGeneration)) return;
+        }
+        _browserEntries = new ExplorerEntryList(ComputeExplorerDisplayList());
         // Keep only the selection that is still listed.
         var listed = new HashSet<string>(_browserEntries.Select(e => e.Path), StringComparer.OrdinalIgnoreCase);
         _browserSelection.RemoveWhere(p => !listed.Contains(p));
@@ -319,6 +367,7 @@ public partial class MainWindow
     private sealed class ExplorerTile : Border
     {
         public int BuiltMode = -1;
+        public ExplorerTileInfo BuiltInfo;
     }
 
     private Border CreateExplorerTile(ExplorerEntry entry)
@@ -343,11 +392,7 @@ public partial class MainWindow
     private void PopulateExplorerTile(Border tile, ExplorerEntry entry)
     {
         if (_browserRealizationCts.Remove(tile, out var previousLifetime)) { previousLifetime.Cancel(); previousLifetime.Dispose(); }
-        foreach (var image in tile.GetVisualDescendants().OfType<Image>())
-        {
-            if (image.Source is IDisposable disposable) disposable.Dispose();
-            image.Source = null;
-        }
+        ReleaseExplorerTileImages(tile);
         tile.Classes.Set("selected", false);
         tile.Classes.Set("focused", false);
         tile.Classes.Set("cut", false);
@@ -357,7 +402,8 @@ public partial class MainWindow
         var lifetime = CancellationTokenSource.CreateLinkedTokenSource(_browserThumbnailCts?.Token ?? CancellationToken.None);
         var token = lifetime.Token;
         var mode = _browserViewMode;
-        var (tileWidth, tileHeight) = ExplorerViewModes.TileSize(mode);
+        var tileInfo = ExplorerViewModes.IsIconMode(mode) ? ExplorerTileInfoView : default;
+        var (tileWidth, tileHeight) = ExplorerViewModes.TileSize(mode, tileInfo.Lines);
         var muted = BrowserBrush("muted");
 
         Image? thumbnailTarget = null;
@@ -426,7 +472,17 @@ public partial class MainWindow
             }
             else previewBorder.Child = glyph;
             panel.Children.Add(previewBorder);
-            panel.Children.Add(nameHost);
+            if (tileInfo.Lines > 0)
+            {
+                // Round 3 #6: the caption keeps its reserved lines so the info lines sit at the same height on every tile,
+                // inside the tile height (ExplorerViewModes.IconTileHeight) and so inside the selection fill.
+                nameHost.MinHeight = ExplorerViewModes.CaptionLineHeight * ExplorerViewModes.CaptionLines;
+                var captionAndInfo = new StackPanel { HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center };
+                captionAndInfo.Children.Add(nameHost);
+                captionAndInfo.Children.Add(BuildExplorerTileInfo(entry, tileInfo, previewWidth, generation));
+                panel.Children.Add(captionAndInfo);
+            }
+            else panel.Children.Add(nameHost);
             content = panel;
         }
         else if (mode == ExplorerViewModes.Small)
@@ -531,7 +587,7 @@ public partial class MainWindow
         root.Children.Add(outline);
         root.Children.Add(focusRing);
         tile.Tag = entry;
-        if (tile is ExplorerTile built) built.BuiltMode = mode;
+        if (tile is ExplorerTile built) { built.BuiltMode = mode; built.BuiltInfo = tileInfo; }
         tile.Child = root;
         tile.Padding = compact ? new Thickness(5, 2) : new Thickness(7);
         tile.Height = tileHeight;
@@ -539,16 +595,21 @@ public partial class MainWindow
         _browserRealizationCts[tile] = lifetime;
         // The listing already carries size and modified time: build the tooltip here instead of one
         // thread-pool FileInfo query plus one UI-thread post per realized tile (70+ per screen).
-        ToolTip.SetTip(tile, BrowserTooltipText(entry));
-        ToolTip.SetShowDelay(tile, 500);
+        ToolTip.SetTip(tile, ExplorerOptionsView.ItemInfoTooltip ? BrowserTooltipText(entry) : null);
         UpdateExplorerTileVisual(tile);
 
-        if (thumbnailTarget is not null)
+        if (thumbnailTarget is not null && TakeParkedExplorerThumbnail(entry, mode) is { } parked)
+        {
+            // Round 3 #15: an in-place update re-realized this tile; its decoded thumbnail is shown again at once.
+            thumbnailTarget.Source = parked;
+            if (thumbnailFallback is not null) thumbnailFallback.IsVisible = false;
+        }
+        else if (thumbnailTarget is not null)
             _ = LoadBrowserThumbnailAsync(path, thumbnailTarget, thumbnailFallback, thumbnailWidth, token, generation);
     }
 
     private IBrush BrowserFolderBrush() => new SolidColorBrush(Color.Parse(
-        string.Equals(_settings.ExplorerThemeChoice == "Follow Glide theme" ? _settings.ThemeChoice : _settings.ExplorerThemeChoice, "Dark", StringComparison.OrdinalIgnoreCase)
+        string.Equals(ExplorerOptionsView.ThemeChoice == "Follow Glide theme" ? _settings.ThemeChoice : ExplorerOptionsView.ThemeChoice, "Dark", StringComparison.OrdinalIgnoreCase)
             ? "#E8B84A" : "#C8921E"));
 
     private void UpdateExplorerTileVisual(Border tile)
@@ -579,15 +640,65 @@ public partial class MainWindow
     }
 
     private int _explorerAppliedLayoutMode = -1;
+    private ExplorerTileInfo _explorerAppliedTileInfo;
+
+    /// <summary>Round 3 #6: the extra info lines under thumbnails chosen in Settings (date / resolution / file size).</summary>
+    private ExplorerTileInfo ExplorerTileInfoView => new(ExplorerOptionsView.InfoDate, ExplorerOptionsView.InfoResolution, ExplorerOptionsView.InfoFileSize);
+
+    /// <summary>Extra info lines every icon tile reserves (0 in Small, List and Details, which never show them).</summary>
+    private int ExplorerInfoLines => ExplorerViewModes.IsIconMode(_browserViewMode) ? ExplorerTileInfoView.Lines : 0;
+
+    /// <summary>Settings applied: tiles are rebuilt (and resized) when the chosen info lines changed.</summary>
+    private void ApplyExplorerTileInfo()
+    {
+        if (_browserSurface is null || ExplorerTileInfoView == _explorerAppliedTileInfo) return;
+        // Like a view-mode change: retire the realized tiles and rebuild them at the new height.
+        _explorerRefreshTask = ApplyExplorerViewAsync();
+    }
+
+    /// <summary>
+    /// Round 3 #6: the extra info lines of one icon tile (muted, one line each, centred, as wide as the thumbnail). The
+    /// resolution is read from the picture's header off the UI thread and filled in when it arrives.
+    /// </summary>
+    private Control BuildExplorerTileInfo(ExplorerEntry entry, ExplorerTileInfo info, double width, long generation)
+    {
+        var host = new StackPanel { Width = width, Tag = "tileinfo", IsHitTestVisible = false };
+        var lines = info.Text(entry, pixels: null);
+        TextBlock? resolutionLine = null;
+        for (var i = 0; i < lines.Count; i++)
+        {
+            var line = new TextBlock
+            {
+                Text = lines[i], FontSize = 11, Height = ExplorerViewModes.InfoLineHeight, LineHeight = ExplorerViewModes.InfoLineHeight,
+                TextAlignment = TextAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis, MaxLines = 1
+            };
+            line.Classes.Add("exMuted");
+            line.Classes.Add("exInfo");
+            host.Children.Add(line);
+            if (info.Resolution && i == (info.Date ? 1 : 0)) resolutionLine = line;
+        }
+        if (resolutionLine is not null && entry.IsImage) _ = FillExplorerTileResolutionAsync(entry, resolutionLine, generation);
+        return host;
+    }
+
+    private async Task FillExplorerTileResolutionAsync(ExplorerEntry entry, TextBlock line, long generation)
+    {
+        Glide.Imaging.ImageDimensions pixels;
+        try { pixels = await Task.Run(() => entry.PixelDimensions); }
+        catch { return; /* unreadable: the line stays empty */ }
+        if (generation != Volatile.Read(ref _browserGeneration) || !pixels.IsValid) return;
+        line.Text = new ExplorerTileInfo(false, true, false).Text(entry, pixels)[0];
+    }
 
     private void ConfigureBrowserRepeaterLayout()
     {
         if (_browserSurface is null) return;
-        var (width, height) = ExplorerViewModes.TileSize(_browserViewMode);
+        var (width, height) = ExplorerViewModes.TileSize(_browserViewMode, ExplorerInfoLines);
         var details = _browserViewMode == ExplorerViewModes.Details;
         // Replacing the layout makes ItemsRepeater re-realize every tile (and drops focus from an inline editor).
-        if (_explorerAppliedLayoutMode == _browserViewMode) { UpdateExplorerDetailsHeader(); return; }
+        if (_explorerAppliedLayoutMode == _browserViewMode && _explorerAppliedTileInfo == ExplorerTileInfoView) { UpdateExplorerDetailsHeader(); return; }
         _explorerAppliedLayoutMode = _browserViewMode;
+        _explorerAppliedTileInfo = ExplorerTileInfoView;
         if (details)
         {
             BrowserRepeater.Layout = new StackLayout { Orientation = Orientation.Vertical, Spacing = 0 };
@@ -630,6 +741,7 @@ public partial class MainWindow
         if (BrowserRepeater.ItemsSourceView is { } source && (uint)e.Index < (uint)source.Count &&
             source.GetAt(e.Index) is ExplorerEntry entry &&
             (!ReferenceEquals(tile.Tag, entry) || tile is not ExplorerTile { BuiltMode: var builtMode } || builtMode != _browserViewMode ||
+             ((ExplorerTile)tile).BuiltInfo != (ExplorerViewModes.IsIconMode(_browserViewMode) ? ExplorerTileInfoView : default) ||
              !_browserRealizationCts.ContainsKey(tile)))
             PopulateExplorerTile(tile, entry);
         UpdateExplorerTileVisual(tile);
@@ -647,11 +759,7 @@ public partial class MainWindow
             cts.Cancel();
             cts.Dispose();
         }
-        foreach (var image in e.Element.GetVisualDescendants().OfType<Image>())
-        {
-            if (image.Source is IDisposable disposable) disposable.Dispose();
-            image.Source = null;
-        }
+        ReleaseExplorerTileImages(e.Element);
     }
 
     private static bool CanUseBrowserThumbnailDecoder(string path) =>
@@ -712,22 +820,16 @@ public partial class MainWindow
     private int ExplorerColumnCount()
     {
         if (ExplorerIsDetails) return 1;
-        var (width, _) = ExplorerViewModes.TileSize(_browserViewMode);
         var available = _browserSurface is { } s && s.Repeater.Bounds.Width > 0 ? s.Repeater.Bounds.Width
             : Math.Max(1, BrowserScrollViewer.Bounds.Width - ExplorerScrollPadding * 2);
-        return Math.Max(1, (int)Math.Floor((available + ExplorerGridSpacing) / (width + ExplorerGridSpacing)));
+        return ExplorerLayout.ColumnCount(_browserViewMode, available);
     }
 
     /// <summary>Rectangle of a tile in ItemsRepeater coordinates (the coordinate space rubber-band selection uses).</summary>
     private Rect ExplorerTileRect(int index)
     {
-        var (width, height) = ExplorerViewModes.TileSize(_browserViewMode);
-        if (ExplorerIsDetails)
-            return new Rect(0, index * height, _explorerColumnWidths.Sum() + 24, height);
-        var columns = ExplorerColumnCount();
-        var row = index / columns;
-        var column = index % columns;
-        return new Rect(column * (width + ExplorerGridSpacing), row * (height + ExplorerGridSpacing), width, height);
+        var (x, y, w, h) = ExplorerLayout.TileRect(_browserViewMode, index, ExplorerIsDetails ? 1 : ExplorerColumnCount(), _explorerColumnWidths.Sum() + 24, ExplorerInfoLines);
+        return new Rect(x, y, w, h);
     }
 
     private void EnsureExplorerIndexVisible(int index)
@@ -735,13 +837,7 @@ public partial class MainWindow
         if ((uint)index >= (uint)_browserEntries.Count || _browserSurface is null) return;
         var scroll = _browserSurface.ScrollViewer;
         var rect = ExplorerTileRect(index);
-        var top = rect.Top + ExplorerScrollPadding;
-        var bottom = rect.Bottom + ExplorerScrollPadding;
-        var viewport = scroll.Viewport.Height;
-        if (viewport <= 0) return;
-        var y = scroll.Offset.Y;
-        if (top < y) y = Math.Max(0, top - ExplorerScrollPadding);
-        else if (bottom > y + viewport) y = bottom - viewport + ExplorerScrollPadding;
+        var y = ExplorerLayout.ScrollToShow(rect.Top, rect.Bottom, scroll.Offset.Y, scroll.Viewport.Height);
         if (Math.Abs(y - scroll.Offset.Y) > 0.5) scroll.Offset = new Vector(scroll.Offset.X, y);
     }
 
@@ -806,20 +902,12 @@ public partial class MainWindow
     {
         if (_browserSurface is not { } surface) return;
         var count = _browserEntries.Count;
-        surface.ItemCountText.Text = count == 1 ? "1 item" : $"{count:N0} items";
-        var selected = SelectedExplorerEntries();
-        if (selected.Count == 0) surface.SelectionText.Text = "";
-        else
-        {
-            var files = selected.Where(e => !e.IsDirectory).ToList();
-            var size = files.Count > 0 && files.Count == selected.Count ? "   " + ExplorerModel.FormatSize(files.Sum(f => f.Size)) : "";
-            surface.SelectionText.Text = (selected.Count == 1 ? "1 item selected" : $"{selected.Count:N0} items selected") + size;
-        }
-        var empty = count == 0 && _explorerLoadedFolder is not null;
-        surface.EmptyText.IsVisible = empty;
-        if (empty)
-            surface.EmptyText.Text = !string.IsNullOrWhiteSpace(_explorerFilterText) ? "No items match your filter."
-                : _settings.ExplorerShowOnlyImages ? "No folders or images in this folder." : "This folder is empty.";
+        surface.ItemCountText.Text = ExplorerLayout.ItemCountText(count);
+        surface.SelectionText.Text = ExplorerLayout.SelectionText(SelectedExplorerEntries());
+        var empty = ExplorerLayout.EmptyText(count, _explorerLoadedFolder is not null && !_explorerListing,
+            !string.IsNullOrWhiteSpace(_explorerFilterText), ExplorerOptionsView.ShowOnlyImages);
+        surface.EmptyText.IsVisible = empty is not null;
+        if (empty is not null) surface.EmptyText.Text = empty;
     }
 
     private void ShowExplorerMessage(string text, bool isError = false)
@@ -845,9 +933,47 @@ public partial class MainWindow
     // Navigation pane (Quick access, This PC)
     // ------------------------------------------------------------------------------------------
 
+    // 5.1.0: the Quick access / drive list is probed off the UI thread (a slow or offline drive no longer stalls a tab
+    // switch) and the pane is only rebuilt when that list changed; otherwise only the highlight follows the folder.
+    private (IReadOnlyList<ExplorerLocation> Quick, IReadOnlyList<ExplorerLocation> Drives)? _explorerNavLocations;
+    private string? _explorerNavRenderedSignature;
+    private int _explorerNavProbeRunning;
+
+    private static string ExplorerNavSignature(IReadOnlyList<ExplorerLocation> quick, IReadOnlyList<ExplorerLocation> drives) =>
+        string.Join("\n", quick.Concat(drives).Select(l => $"{l.Name}|{l.Path}|{l.Icon}")) + $"#{quick.Count}";
+
     private void BuildExplorerNavPane()
     {
+        if (_browserSurface is null) return;
+        if (_explorerNavLocations is null)
+            _explorerNavLocations = (ExplorerLocations.QuickAccess(), ExplorerLocations.Drives()); // first show only
+        RenderExplorerNavPane(_explorerNavLocations.Value.Quick, _explorerNavLocations.Value.Drives);
+        _ = RefreshExplorerNavLocationsAsync();
+    }
+
+    private async Task RefreshExplorerNavLocationsAsync()
+    {
+        if (Interlocked.Exchange(ref _explorerNavProbeRunning, 1) == 1) return;
+        try
+        {
+            var probed = await Task.Run(() => (ExplorerLocations.QuickAccess(), ExplorerLocations.Drives()));
+            _explorerNavLocations = probed;
+            RenderExplorerNavPane(probed.Item1, probed.Item2);
+        }
+        catch (Exception ex) { _diagnostics.Write("browser", "nav_pane_probe_failed", new { error = ex.GetType().Name }); }
+        finally { Volatile.Write(ref _explorerNavProbeRunning, 0); }
+    }
+
+    private void RenderExplorerNavPane(IReadOnlyList<ExplorerLocation> quick, IReadOnlyList<ExplorerLocation> drives)
+    {
         if (_browserSurface is not { } surface) return;
+        var signature = ExplorerNavSignature(quick, drives);
+        if (string.Equals(signature, _explorerNavRenderedSignature, StringComparison.Ordinal) && surface.NavHost.Children.Count > 0)
+        {
+            if (_workspace.Active is BrowserTabState shown) RefreshExplorerNavPaneSelection(shown.Folder);
+            return;
+        }
+        _explorerNavRenderedSignature = signature;
         var host = surface.NavHost;
         host.Children.Clear();
         void Header(string text)
@@ -872,9 +998,7 @@ public partial class MainWindow
             AttachExplorerDropTarget(button, () => location.Path, "drop");
             host.Children.Add(button);
         }
-        var quick = ExplorerLocations.QuickAccess();
         if (quick.Count > 0) { Header("Quick access"); foreach (var location in quick) Item(location); }
-        var drives = ExplorerLocations.Drives();
         if (drives.Count > 0) { Header("This PC"); foreach (var drive in drives) Item(drive); }
         if (_workspace.Active is BrowserTabState b) RefreshExplorerNavPaneSelection(b.Folder);
     }
@@ -930,19 +1054,19 @@ public partial class MainWindow
         else if (key == _explorerSortKey) _explorerSortAscending = !_explorerSortAscending;
         else _explorerSortAscending = true;
         _explorerSortKey = key;
-        _explorerRefreshTask = ApplyExplorerViewAsync(revealCurrent: _settings.ExplorerKeepSelectionInView);
+        _explorerRefreshTask = ApplyExplorerViewAsync(revealCurrent: ExplorerOptionsView.KeepSelectionInView);
     }
 
     private void SetExplorerFoldersFirst(bool value)
     {
         _explorerFoldersFirst = value;
-        _explorerRefreshTask = ApplyExplorerViewAsync(revealCurrent: _settings.ExplorerKeepSelectionInView);
+        _explorerRefreshTask = ApplyExplorerViewAsync(revealCurrent: ExplorerOptionsView.KeepSelectionInView);
     }
 
     /// <summary>Sort menu toggle for the explorer.keepSelectionInView setting (saved like a Settings change).</summary>
     private void ToggleExplorerKeepSelectionInView()
     {
-        _settings.ExplorerKeepSelectionInView = !_settings.ExplorerKeepSelectionInView;
+        _settings.ExplorerKeepSelectionInView = !ExplorerOptionsView.KeepSelectionInView;
         SaveSettingsAndPublish();
     }
 
@@ -980,7 +1104,7 @@ public partial class MainWindow
         if (!ExplorerIsDetails) return;
         var grid = new Grid { Margin = new Thickness(11, 0, 0, 0), Width = _explorerColumnWidths.Sum() + 12, HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Left };
         for (var i = 0; i < 4; i++) grid.ColumnDefinitions.Add(new ColumnDefinition(_explorerColumnWidths[i] + (i == 0 ? 4 : 0), GridUnitType.Pixel));
-        var names = ExplorerSortFields.All.Select(f => f.Label).ToArray();
+        var names = ExplorerSortFields.All.Select(f => ExplorerSortFields.ColumnLabel(f.Key)).ToArray();
         var keys = ExplorerSortFields.All.Select(f => f.Key).ToArray();
         for (var i = 0; i < 4; i++)
         {
@@ -989,7 +1113,7 @@ public partial class MainWindow
             var label = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
             label.Children.Add(new TextBlock { Text = names[i], FontSize = 12 });
             if (sorted)
-                label.Children.Add(new GlideIconView { Kind = _explorerSortAscending ? "Up" : "Down", Width = 10, Height = 10, StrokeWidth = 1.6, VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center });
+                label.Children.Add(new TextBlock { Text = ExplorerSortFields.Triangle(_explorerSortAscending), FontSize = 11, VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center });
             var button = new Button { Content = label, Tag = keys[i], Name = "SortHeader" + names[i].Replace(" ", "") };
             button.Classes.Add("exHeader");
             if (i == 3) button.HorizontalContentAlignment = Avalonia.Layout.HorizontalAlignment.Right;
@@ -1047,7 +1171,7 @@ public partial class MainWindow
     private void BrowserWindowsExplorerClicked(object? sender, RoutedEventArgs e) =>
         _ = ExecuteCommandAsync(GlideCommand.ShowFolderInWindowsExplorer);
 
-    private bool HasAlternativeFileManager => !string.IsNullOrWhiteSpace(_settings.AlternativeFileManagerPath);
+    private bool HasAlternativeFileManager => !string.IsNullOrWhiteSpace(ExplorerOptionsView.AlternativeFileManagerPath);
 
     /// <summary>The item to preselect when revealing an Explorer tab's folder: the current / a selected item of that folder.</summary>
     private string? ExplorerRevealSelection(BrowserTabState browser)
@@ -1070,7 +1194,7 @@ public partial class MainWindow
         if (_workspace.Active is BrowserTabState browser) path = ExplorerRevealSelection(browser) ?? browser.Folder;
         else if (!string.IsNullOrWhiteSpace(_currentPath) && File.Exists(_currentPath)) path = _currentPath;
         if (path is null) return;
-        var ok = ExplorerShell.OpenInAlternative(_settings.AlternativeFileManagerPath, _settings.AlternativeFileManagerArguments, path);
+        var ok = ExplorerShell.OpenInAlternative(ExplorerOptionsView.AlternativeFileManagerPath, ExplorerOptionsView.AlternativeFileManagerArguments, path);
         _diagnostics.Write("explorer", ok ? "alternative_file_manager_opened" : "alternative_file_manager_failed", new { path });
         if (!ok && _workspace.Active is BrowserTabState) ShowExplorerMessage("The alternative file manager could not be started. Check its path in Settings.", isError: true);
     }
@@ -1088,30 +1212,28 @@ public partial class MainWindow
     /// "Explorer: open images with" setting; <paramref name="alternate"/> (middle-click) does the
     /// other. Folders navigate in place, or open in a new Explorer tab as the alternate action.
     /// An image opened in the current tab replaces the Explorer tab; one opened in a new tab is placed and activated
-    /// as "New tabs open at" / "Open new tabs in the foreground" say (by default next to it in the background, so several can be
-    /// queued up), with Shift / Alt held flipping them when "Shift and Alt change how a new tab opens" is on (NewTabPolicy). Menu items read the keys held when they run.
+    /// as "New tabs open" / "Open new tabs in the" say, with each one's chosen "Key to open … instead" held flipping it for
+    /// that tab (NewTabPolicy). Menu items read the keys held when they run.
     /// </summary>
     private async Task OpenBrowserEntryAsync(string path, bool alternate, KeyModifiers modifiers = KeyModifiers.None, bool fromMenu = false)
     {
         if (fromMenu && modifiers == KeyModifiers.None) modifiers = ModifierKeyState.Current();
         // Explorer gesture rows (4.8.0): the double-click row (also Enter / "Open") and the
         // middle-click row. Default = current tab for double-click, new tab for middle-click.
-        var action = ResolveGestureSlot(alternate ? "explorer.middleClick" : "explorer.doubleClick", modifiers);
-        if (action == GestureCatalog.Default) action = alternate ? GestureCatalog.OpenInNewTab : GestureCatalog.OpenInCurrentTab;
+        // The context menu's explicit Open items always open (GestureResolver.ForExplorerOpen).
+        var action = GestureResolver.ForExplorerOpen(
+            ResolveGestureSlot(alternate ? "explorer.middleClick" : "explorer.doubleClick", modifiers), alternate, fromMenu);
         if (action is not (GestureCatalog.OpenInCurrentTab or GestureCatalog.OpenInNewTab))
         {
-            if (!fromMenu)
-            {
-                await ExecuteGestureActionAsync(action);
-                return;
-            }
-            // The context menu's explicit Open items always open.
-            action = alternate ? GestureCatalog.OpenInNewTab : GestureCatalog.OpenInCurrentTab;
+            await ExecuteGestureActionAsync(action);
+            return;
         }
+        // 5.1.0: a real middle-click uses its own side / position settings; menu items and double-click the general ones.
+        var opening = alternate && !fromMenu ? ResolveMiddleClickOpening(modifiers) : ResolveNewTabOpening(modifiers);
         if (Directory.Exists(path))
         {
             if (!alternate) { NavigateBrowserTo(path, addHistory: true); return; }
-            await OpenFolderInNewTabAsync(path, modifiers, fromMenu ? "explorer_menu" : "explorer_middle_click");
+            await OpenFolderInNewTabAsync(path, opening, fromMenu ? "explorer_menu" : "explorer_middle_click");
             return;
         }
         if (!File.Exists(path)) return;
@@ -1120,7 +1242,7 @@ public partial class MainWindow
         _diagnostics.Write("browser", "open_image", new { path, newTab, alternate });
         if (newTab)
         {
-            await OpenImageInNewTabAsync(path, modifiers, fromMenu ? "explorer_menu" : alternate ? "explorer_middle_click" : "explorer_double_click");
+            await OpenImageInNewTabAsync(path, opening, fromMenu ? "explorer_menu" : alternate ? "explorer_middle_click" : "explorer_double_click");
             return;
         }
         if (_workspace.Active is BrowserTabState browser)
@@ -1134,19 +1256,25 @@ public partial class MainWindow
 
     // The Explorer toolbar Back / Forward buttons (and explorer.back / explorer.forward) step through the same per-tab
     // history as the title-bar buttons, Alt+Left / Alt+Right and the mouse side buttons, including an image opened here.
-    private async void BrowserBackClicked(object? sender, RoutedEventArgs e)
+    private async void BrowserBackClicked(object? sender, RoutedEventArgs e) => await BrowserBackAsync();
+
+    private async Task BrowserBackAsync()
     {
         if (_workspace.Active is not BrowserTabState) return;
         await NavigateBackAsync();
     }
 
-    private async void BrowserForwardClicked(object? sender, RoutedEventArgs e)
+    private async void BrowserForwardClicked(object? sender, RoutedEventArgs e) => await BrowserForwardAsync();
+
+    private async Task BrowserForwardAsync()
     {
         if (_workspace.Active is not BrowserTabState) return;
         await NavigateForwardAsync();
     }
 
-    private void BrowserUpClicked(object? sender, RoutedEventArgs e)
+    private void BrowserUpClicked(object? sender, RoutedEventArgs e) => NavigateBrowserUp();
+
+    private void NavigateBrowserUp()
     {
         if (_workspace.Active is not BrowserTabState browser) return;
         var child = browser.Folder;

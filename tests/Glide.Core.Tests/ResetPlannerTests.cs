@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Text.RegularExpressions;
 using Glide.App.Printing;
 using Glide.App.Settings;
+using Glide.Core.Data;
 using Glide.Core.Reset;
 using Glide.Core.Settings;
 
@@ -9,6 +10,7 @@ namespace Glide.Core.Tests;
 
 /// <summary>Reset Glide: which concrete files, folders and registry values each item removes (nothing is deleted here).</summary>
 [Collection(StoreStaticsCollection.Name)]
+[Trait("Area", "Data")]
 public sealed class ResetPlannerTests
 {
     private static IReadOnlyList<ResetTarget> Targets(ResetScratch s, ResetItemId id) => ResetPlanner.TargetsFor(s.Environment, id);

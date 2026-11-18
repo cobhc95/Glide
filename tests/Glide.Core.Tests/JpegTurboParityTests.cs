@@ -11,10 +11,12 @@ namespace Glide.Core.Tests;
 /// sizes, banded multi-threaded decode, EXIF orientations 2-8); CMYK and damaged files are declined and keep
 /// the WIC result. Reference = GlideDecodeImageW(path, 0) (WIC only); tested = GlideDecodeImageIntoW (turbo first).
 /// First view: the camera's MPF large preview is used only when present, a large-thumbnail entry, the same
-/// aspect ratio and at least half the requested size; otherwise WIC's scaled first view as before.
-/// Fixtures\Jpeg\*.jpg are synthetic (tools/bench-507/make_jpeg_fixtures.py).
+/// aspect ratio and large enough to cover the request alone; otherwise a libjpeg-turbo DCT-scaled decode (1/2, 1/4,
+/// 1/8) of the main image (progressive: only for the unstaged prefetch decode; the staged first view stays on WIC).
+/// Fixtures\Jpeg\*.jpg are synthetic (tools/bench-507/make_jpeg_fixtures.py, make_large_jpeg_fixtures.py).
 /// </summary>
 [Collection(AvaloniaHeadlessCollection.Name)]
+[Trait("Area", "Decode")]
 public sealed class JpegTurboParityTests
 {
     private static string Fixture(string name) => Path.Combine(AppContext.BaseDirectory, "Fixtures", "Jpeg", name);
@@ -132,10 +134,89 @@ public sealed class JpegTurboParityTests
     }
 
     [Fact]
-    public void FirstView_WithoutMpf_IsTheWindowsScaledView()
+    public void FirstView_WithoutMpf_IsTheDctScaledDecode()
     {
-        // No turbo first view: a plain JPEG's bounded decode stays on WIC (the 5.0.6 path).
+        // 2048 x 2000 into 1024 x 1024: needs 1024 x 1000, exactly the 1/2 DCT scale.
         var p = Bounded("base420-2048x2000.jpg", 1024, 1024);
-        Assert.True(p.W <= 1024 && p.H <= 1024 || p.W < 2048);
+        Assert.Equal((1024, 1000), (p.W, p.H));
+    }
+
+    [Fact]
+    public void FirstView_PrefersTheScaledDecodeWhenTheMpfPreviewIsTooSmall()
+    {
+        // The 1200 x 800 red preview cannot cover a 1300 px request: the main image (blue) is decoded instead.
+        var p = Bounded("mpf-present-2400x1600.jpg", 1300, 1300);
+        Assert.False(IsRed(p), $"expected the main image, got {p}");
+        Assert.True(p.W >= 1300, $"output {p.W}x{p.H} must cover the request");
+    }
+
+    // Decision table: sizes are physical; need = the source fitted into the request box.
+    [Theory]
+    [InlineData(4480, 6720, 960u, 1440u, 0u, true, 2, 4)]      // no preview: 1/4 (1120 x 1680) is the smallest covering scale
+    [InlineData(4480, 6720, 480u, 720u, 0u, true, 2, 8)]       // 1/8 = 560 x 840
+    [InlineData(4480, 6720, 1600u, 2400u, 0u, true, 2, 2)]     // 1/4 = 1680 is short: 1/2
+    [InlineData(4480, 6720, 3000u, 4500u, 0u, true, 2, 1)]     // needs more than half: full scale
+    [InlineData(4480, 6720, 960u, 1440u, 1620u, true, 1, 4)]   // preview long side 1620 >= 1440: embedded (cheaper)
+    [InlineData(4480, 6720, 960u, 1440u, 1440u, true, 1, 4)]   // exactly covers: embedded
+    [InlineData(4480, 6720, 1600u, 2400u, 1620u, true, 2, 2)]  // preview too small for the request: sharper scaled decode
+    [InlineData(4480, 6720, 960u, 1440u, 0u, false, 0, 4)]     // scaling not allowed (staged progressive): WIC
+    [InlineData(4480, 6720, 4480u, 6720u, 1620u, true, 0, 1)]  // request covers the image: no reduced first view
+    [InlineData(4001, 2999, 501u, 375u, 0u, true, 2, 8)]       // odd size: 1/8 rounds up to 501 x 375, covers
+    public void FirstViewPlan_PicksSourceAndSmallestCoveringScale(int w, int h, uint needW, uint needH, uint preview, bool scaled, int choice, int denom)
+    {
+        var plan = NativeImageDecoder.JpegPlanFirstViewForTests(w, h, needW, needH, preview, scaled);
+        Assert.Equal(choice, plan.Choice);
+        Assert.Equal(denom, plan.ScaleDenom);
+    }
+
+    [Theory]
+    [InlineData(4480, 6720, 1120, 1681, 2)] // one pixel over 1/4: 1/2
+    [InlineData(1, 1, 1, 1, 8)]             // TJSCALED rounds up: 1/8 of 1 px is 1 px
+    [InlineData(17, 9, 3, 2, 8)]            // ceil(17/8)=3, ceil(9/8)=2
+    [InlineData(17, 9, 4, 2, 4)]
+    public void ScaleDenom_IsTheSmallestPowerOfTwoScaleThatCovers(int w, int h, uint needW, uint needH, int denom)
+        => Assert.Equal(denom, NativeImageDecoder.JpegPlanFirstViewForTests(w, h, needW, needH, 0, true).ScaleDenom);
+
+    private static (int W, int H, byte[] Px) Decode(string name, int longest)
+    {
+        // GlideDecodeImageW: the unstaged bounded decode used by neighbour prefetch (and progressive files' scaled view).
+        Assert.True(NativeImageDecoder.TryDecode(Fixture(name), longest, out var bitmap));
+        using (bitmap) return (bitmap.PixelSize.Width, bitmap.PixelSize.Height, Pixels(bitmap));
+    }
+
+    private static bool RedAt((int W, int H, byte[] Px) d, int x, int y)
+    {
+        var i = (y * d.W + x) * 4;
+        return d.Px[i + 2] > 200 && d.Px[i + 1] < 60 && d.Px[i] < 60;
+    }
+
+    [Theory]
+    [InlineData("big-base420-4480x6720.jpg")]
+    [InlineData("big-progressive420-4480x6720.jpg")]
+    public void LargeJpeg_DecodesAtTheQuarterDctScale(string name)
+    {
+        // 30 MP, no EXIF, into 1440 x 1440: needs 960 x 1440, so 1/4 = 1120 x 1680. The red block is the stored top-left.
+        var d = Decode(name, 1440);
+        Assert.Equal((1120, 1680), (d.W, d.H));
+        Assert.True(RedAt(d, 100, 100), "stored top-left marker must stay top-left");
+        Assert.False(RedAt(d, 1000, 1600));
+    }
+
+    [Fact]
+    public void LargeJpeg_FirstViewBaselineUsesTheScaledDecode()
+    {
+        var p = Bounded("big-base420-4480x6720.jpg", 2560, 1440);
+        Assert.Equal((1120, 1680), (p.W, p.H));
+    }
+
+    [Fact]
+    public void LargeJpeg_ScaledDecodeAppliesExifOrientation()
+    {
+        // Orientation 6 (rotate 90 clockwise): stored top-left lands top-right, output is landscape.
+        var d = Decode("big-exif6-4480x6720.jpg", 1440);
+        Assert.Equal((1680, 1120), (d.W, d.H));
+        Assert.True(RedAt(d, d.W - 100, 100), "stored top-left must land top-right");
+        Assert.False(RedAt(d, 100, 100));
+        Assert.False(RedAt(d, d.W - 100, d.H - 100));
     }
 }

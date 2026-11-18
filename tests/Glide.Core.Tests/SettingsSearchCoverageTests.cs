@@ -15,6 +15,7 @@ namespace Glide.Core.Tests;
 /// mapped editor and every action setting an actionable companion. Also writes a full audit TSV.
 /// </summary>
 [Collection(AvaloniaHeadlessCollection.Name)]
+[Trait("Area", "Settings")]
 public sealed class SettingsSearchCoverageTests
 {
     public SettingsSearchCoverageTests(AvaloniaHeadlessFixture fixture)

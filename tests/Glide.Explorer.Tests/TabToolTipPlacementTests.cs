@@ -12,6 +12,7 @@ namespace Glide.Explorer.Tests;
 /// time a tooltip opened, so side tab tooltips covered the neighbouring tabs.
 /// </summary>
 [Collection(ExplorerHeadlessCollection.Name)]
+[Trait("Area", "Tabs")]
 public sealed class TabToolTipPlacementTests
 {
     private static Border TabBorder(ExplorerHarness h, Guid id) =>

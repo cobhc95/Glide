@@ -22,7 +22,7 @@ public static class SettingsStore
     /// </summary>
     private const int LaunchPolicySchema = 4;
     // 9 (5.0.0 Back / Forward): the one-time title-bar default migration below is gated on it.
-    internal const int CurrentSettingsSchema = 16;
+    internal const int CurrentSettingsSchema = 19;
     /// <summary>
     /// Settings schema that made "Previously used tab" the default of "After closing a tab, activate" (5.0.6). Files
     /// from an older schema that store the old default "Match Ctrl+Tab order" move to the new default once.
@@ -48,6 +48,19 @@ public static class SettingsStore
     /// status-bar list from an older schema gets it inserted once (after "nav"); users can remove it again.
     /// </summary>
     internal const int LoopFolderStatusButtonSchema = 16;
+    /// <summary>
+    /// Settings schema (5.0.8) that made "Ask me each time" the default of "When the last image is reached" (was "Move to
+    /// the next folder") and made the mouse side buttons pass-through by default. Older files on the old end-of-folder
+    /// default move to Ask once; side-button rows stored as "default" become pass-through by themselves.
+    /// </summary>
+    internal const int AskEndOfFolderSchema = 17;
+    /// <summary>
+    /// Settings schema (round 3 #18) that replaced the "Shift and Alt change how a new tab opens" checkbox (NewTabModifiers)
+    /// with a chosen key per new-tab option (NewTabPositionKey / NewTabForegroundKey). Older files: on = Shift (position) / Alt (foreground), off = None.
+    /// </summary>
+    internal const int NewTabKeysSchema = 18;
+    /// <summary>The JSON name of the retired checkbox, read only by the schema 18 migration.</summary>
+    internal const string LegacyNewTabModifiersProperty = "NewTabModifiers";
     /// <summary>The JSON name of the retired checkbox, read only by the schema 15 migration.</summary>
     internal const string LegacyContinueSiblingFoldersProperty = "ContinueSiblingFolders";
     /// <summary>The navigation minimum interval default before 5.0.6.</summary>
@@ -344,6 +357,8 @@ public static class SettingsStore
         HotkeyDefaultMigrations.MigrateExploreParent(state.Hotkeys, sourceSchema);
         // Schema 11: Backspace moves from "Previous image" to "Back, or Previous image" (only an untouched old default; nobody's binding is taken).
         HotkeyDefaultMigrations.MigrateBackspaceToBackOrPrevious(state.Hotkeys, sourceSchema);
+        // Schema 19: "Enter / exit Overlay mode" gains Alt+O (only where unassigned and the key is free).
+        HotkeyDefaultMigrations.MigrateOverlayToggle(state.Hotkeys, sourceSchema);
         if (sourceSchema >= HotkeyDefaultMigrations.StatusToggleMovedSchema) return;
         if (state.ViewportZoomStepPercent == 10) state.ViewportZoomStepPercent = Glide.Core.ZoomStepPolicy.DefaultStepPercent;
         HotkeyDefaultMigrations.MigrateStatusToggle(state.Hotkeys, sourceSchema);
@@ -370,6 +385,17 @@ public static class SettingsStore
         sourceSchema < ForegroundNewTabsSchema || value;
 
     /// <summary>
+    /// Schema 18: the "Shift and Alt change how a new tab opens" checkbox became two "Key to open … instead" choices. A file
+    /// from an older schema keeps what the checkbox did: on = Shift for the other position and Alt for the other of
+    /// foreground / background (the user-approved round 3 mapping), off or missing = None for both. From schema 18 the stored keys are kept.
+    /// </summary>
+    internal static (string PositionKey, string ForegroundKey) MigrateNewTabKeys(int sourceSchema, bool? legacyModifiersOn,
+        string? positionKey, string? foregroundKey) =>
+        sourceSchema < NewTabKeysSchema
+            ? Glide.Core.Workspace.NewTabPolicy.MigrateLegacyModifiers(legacyModifiersOn == true)
+            : (Glide.Core.Workspace.NewTabKeys.Normalize(positionKey), Glide.Core.Workspace.NewTabKeys.Normalize(foregroundKey));
+
+    /// <summary>
     /// Schema 14: "Navigation minimum interval" defaults to 120 ms (laptop keyboards often bounce, so one press skipped
     /// several pictures at 80 ms). A file from an older schema that stores exactly the old default 80 (saved explicitly with
     /// every settings write) moves to 120 once; any other value, and any value saved from schema 14 on, is kept.
@@ -383,10 +409,16 @@ public static class SettingsStore
     /// 5.0.7: "When the last image is reached". A file older than schema 15 has no EndOfFolderAction; its old checkbox
     /// decides (missing = its default, on = next folder). From schema 15 on the stored choice is kept (normalised).
     /// </summary>
-    internal static string MigrateEndOfFolderAction(int sourceSchema, bool? legacyContinueSiblingFolders, string? stored) =>
-        sourceSchema < EndOfFolderActionSchema
+    internal static string MigrateEndOfFolderAction(int sourceSchema, bool? legacyContinueSiblingFolders, string? stored)
+    {
+        var value = sourceSchema < EndOfFolderActionSchema
             ? Glide.Core.Navigation.EndOfFolderActions.FromLegacyContinueSiblingFolders(legacyContinueSiblingFolders ?? true)
             : Glide.Core.Navigation.EndOfFolderActions.Normalize(stored);
+        // Schema 17: the old default "Move to the next folder" becomes the new default "Ask me each time" once.
+        return sourceSchema < AskEndOfFolderSchema && value == Glide.Core.Navigation.EndOfFolderActions.NextFolder
+            ? Glide.Core.Navigation.EndOfFolderActions.Ask
+            : value;
+    }
 
     /// <summary>
     /// Schema 16: the Loop this folder button joins the default status bar. An empty list (the default layout) picks it up
@@ -432,8 +464,8 @@ public static class SettingsStore
     /// The settings loader proper: parses glide.settings.json text and runs every migration for the schema it records, then
     /// stamps <see cref="CurrentSettingsSchema"/>. <see cref="Load"/> uses it for the settings file; a Glide backup import
     /// runs its settings entries through it too, so an older backup migrates exactly like an older settings file.
-    /// <paramref name="isSettingsFile"/> false skips the process-wide side effects of loading the real file (the active sort
-    /// order and the diagnostics' skipped-defaults list). Throws on text that is not a settings object.
+    /// <paramref name="isSettingsFile"/> false skips the process-wide side effect of loading the real file (the diagnostics'
+    /// skipped-defaults list). Throws on text that is not a settings object.
     /// </summary>
     internal static GlideSettingsState MigrateFromJson(string json, bool isSettingsFile)
     {
@@ -473,11 +505,25 @@ public static class SettingsStore
             loaded.LightTheme = string.Equals(loaded.ThemeChoice, "Light", StringComparison.OrdinalIgnoreCase);
             loaded.ExplorerOpenImagesWith = string.Equals(loaded.ExplorerOpenImagesWith, LegacyMouseToggles.ExplorerNewTab, StringComparison.OrdinalIgnoreCase)
                 ? LegacyMouseToggles.ExplorerNewTab : LegacyMouseToggles.ExplorerCurrentTab;
-            loaded.TabToolTipTextSize = loaded.TabToolTipTextSize is "Small" or "Large" ? loaded.TabToolTipTextSize : "Medium";
+            loaded.TabPreviewSizePercent = Glide.Core.Workspace.TabPreviewSize.Clamp(loaded.TabPreviewSizePercent);
+            loaded.ExplorerNavPaneWidth = Glide.App.Explorer.ExplorerLayout.ClampNavPaneWidth(loaded.ExplorerNavPaneWidth);
+        loaded.TabPreviewResizeModifier = Glide.Core.Workspace.TabPreviewSize.NormalizeModifier(loaded.TabPreviewResizeModifier);
+        loaded.TabToolTipTextSize = loaded.TabToolTipTextSize is "Small" or "Large" ? loaded.TabToolTipTextSize : "Medium";
             loaded.NewTabPosition = Glide.Core.Workspace.NewTabPositions.Normalize(loaded.NewTabPosition);
+            loaded.AfterTabCloseCustomTarget = Glide.Core.Workspace.TabCloseCustomTargets.Normalize(loaded.AfterTabCloseCustomTarget);
+            foreach (var area in Glide.Core.Settings.TooltipAreas.All)
+                Glide.Core.Settings.TooltipAreas.SetDelayMs(loaded, area.Id, Glide.Core.Settings.TooltipAreas.DelayMs(loaded, area.Id));
+            loaded.MiddleClickNewTabSide = Glide.Core.Workspace.MiddleClickSides.Normalize(loaded.MiddleClickNewTabSide);
+            loaded.MiddleClickNewTabPosition = Glide.Core.Workspace.MiddleClickPositions.Normalize(loaded.MiddleClickNewTabPosition);
             loaded.AfterTabCloseActivate = MigrateAfterTabCloseActivate(sourceSchema,
                 Glide.Core.Workspace.TabCloseActivation.Normalize(loaded.AfterTabCloseActivate));
             loaded.SwitchToNewTabs = MigrateSwitchToNewTabs(sourceSchema, loaded.SwitchToNewTabs);
+            bool? legacyNewTabModifiers =
+                document.RootElement.TryGetProperty(LegacyNewTabModifiersProperty, out var legacyModifiers) &&
+                legacyModifiers.ValueKind is JsonValueKind.True or JsonValueKind.False
+                    ? legacyModifiers.GetBoolean() : null;
+            (loaded.NewTabPositionKey, loaded.NewTabForegroundKey) =
+                MigrateNewTabKeys(sourceSchema, legacyNewTabModifiers, loaded.NewTabPositionKey, loaded.NewTabForegroundKey);
             bool? legacyContinueSiblingFolders =
                 document.RootElement.TryGetProperty(LegacyContinueSiblingFoldersProperty, out var legacyContinue) &&
                 legacyContinue.ValueKind is JsonValueKind.True or JsonValueKind.False
@@ -573,9 +619,7 @@ public static class SettingsStore
             loaded.StatusRevealZoneExpand = Glide.Core.StatusBarAutoHide.NormalizeRevealZoneExpand(loaded.StatusRevealZoneExpand);
             loaded.SlideshowLeftClickAction = Glide.Core.Settings.SlideshowLeftClickActions.Normalize(loaded.SlideshowLeftClickAction);
             loaded.NavigationSortOrder = Glide.Core.ImageSortOrder.NormalizeDisplayName(loaded.NavigationSortOrder);
-            // Activate the chosen order before any folder is enumerated.
-            if (isSettingsFile)
-                Glide.Core.ImageSortOrder.Current = new Glide.Core.ImageSortSpec(Glide.Core.ImageSortOrder.ParseKey(loaded.NavigationSortOrder), loaded.NavigationSortDescending);
+            // Stage B: loading no longer activates the sort order (a persistence side effect); Program does it explicitly.
             loaded.SelectionBufferWindowedPercent = Math.Clamp(loaded.SelectionBufferWindowedPercent, 0, 100);
             loaded.SelectionBufferMaximizedPercent = Math.Clamp(loaded.SelectionBufferMaximizedPercent, 0, 100);
             loaded.Hotkeys ??= HotkeyCatalog.CreateDefaultMap();

@@ -11,6 +11,7 @@ namespace Glide.Core.Tests;
 /// suffixes the bundled managed decoders own.
 /// </summary>
 [Collection(AvaloniaHeadlessCollection.Name)]
+[Trait("Area", "Decode")]
 public sealed class ManagedFormatRoutingTests : IDisposable
 {
     private readonly List<string> _files = new();
@@ -34,7 +35,7 @@ public sealed class ManagedFormatRoutingTests : IDisposable
             Assert.True(BuiltInRasterDecoder.CanDecode("sample" + extension), extension);
             Assert.True(ImageFormatRegistry.IsSupported("sample" + extension), extension);
         }
-        Assert.Equal(40, CodecCapabilityRegistry.CameraRawPreviewExtensions.Count);
+        Assert.Equal(CodecCapabilityRegistry.CameraRawPreviewExtensions.Count, CodecCapabilityRegistry.CameraRawPreviewExtensions.Distinct(StringComparer.OrdinalIgnoreCase).Count());
     }
 
     [Theory]

@@ -4,6 +4,7 @@ using Glide.App.Services;
 namespace Glide.Core.Tests;
 
 [Collection(AvaloniaHeadlessCollection.Name)]
+[Trait("Area", "Window")]
 public sealed class PresentationFenceTests
 {
     [Fact]

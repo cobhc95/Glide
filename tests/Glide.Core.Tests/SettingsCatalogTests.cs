@@ -3,6 +3,7 @@ using Glide.App.Settings;
 
 namespace Glide.Core.Tests;
 
+[Trait("Area", "Settings")]
 public sealed class SettingsCatalogTests
 {
     [Fact]
@@ -26,10 +27,12 @@ public sealed class SettingsCatalogTests
     }
 
     [Fact]
-    public void Glide_catalog_has_248_current_and_no_future_entries()
+    public void Glide_catalog_has_only_current_entries_each_with_an_effect_row()
     {
-        Assert.Equal(306, SettingsCatalog.All.Count);
-        Assert.Equal(306, SettingsCatalog.All.Count(x => x.FuturePhase is null));
+        Assert.NotEmpty(SettingsCatalog.All);
+        Assert.Equal(SettingsCatalog.All.Count, SettingsCatalog.All.Count(x => x.FuturePhase is null));
+        var effectIds = SettingEffectRegistry.All.Select(x => x.SettingId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        Assert.Empty(SettingsCatalog.All.Where(x => !effectIds.Contains(x.Id)).Select(x => x.Id));
         Assert.Empty(SettingsCatalog.All.Where(x => x.FuturePhase is not null));
         Assert.Contains(SettingsCatalog.All, x => x.Id == "performance.speedBoost" && x.FuturePhase is null && (bool)x.DefaultValue);
         Assert.Contains(SettingsCatalog.All, x => x.Id == "performance.startWithWindowsInBackground" && x.FuturePhase is null && !(bool)x.DefaultValue);
@@ -111,6 +114,7 @@ public sealed class SettingsCatalogTests
     }
 }
 
+[Trait("Area", "Settings")]
 public sealed class SettingEffectRegistryTests
 {
     [Fact]

@@ -28,7 +28,6 @@
     <PublishReadyToRunComposite>false</PublishReadyToRunComposite>
     <!-- Size: this DLL runs inside Explorer's thumbnail host and ships in every install. -->
     <OptimizationPreference>Size</OptimizationPreference>
-    <IlcOptimizationPreference>Size</IlcOptimizationPreference>
     <InvariantGlobalization>true</InvariantGlobalization>
     <UseSystemResourceKeys>true</UseSystemResourceKeys>
     <StackTraceSupport>false</StackTraceSupport>
@@ -44,8 +43,8 @@
          (XmlUrlResolver), which alone is ~1.5 MB of the DLL. -->
     <XmlResolverIsNetworkingEnabledByDefault>false</XmlResolverIsNetworkingEnabledByDefault>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
-    <!-- Linked Glide.Imaging sources keep their own analyzer baseline; do not re-report them here. -->
-    <NoWarn>$(NoWarn);CA1305;CA1307;CA1309;CA1310;CA1822;CA1859;CA1860;CA1861;CA1865;CA1866;CA2101;IDE0005</NoWarn>
+    <!-- Stage B: no private NoWarn list any more. The linked Glide.Imaging sources get the same severities as in
+         Glide.Imaging (Glide.globalconfig), so a warning there is a warning here. -->
   </PropertyGroup>
   <ItemGroup>
     <!-- Hard ceiling for the managed heap inside the thumbnail host (the export also refuses frames over

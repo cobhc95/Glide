@@ -30,7 +30,7 @@ public partial class MainWindow
     /// <summary>What reaching the end in direction <paramref name="delta"/> does now (setting + this tab's loop override).</summary>
     private EndOfFolderStep EndOfFolderStepFor(int delta) =>
         EndOfFolderPolicy.Decide(
-            EndOfFolderPolicy.Effective(EndOfFolderActions.Parse(_settings.EndOfFolderAction), LoopFolderOverride),
+            EndOfFolderPolicy.Effective(EndOfFolderActions.Parse(NavigationOptionsView.EndOfFolderAction), LoopFolderOverride),
             Math.Sign(delta));
 
     private Task<bool> ExecuteEndOfFolderStepSerializedAsync(EndOfFolderStep step, int direction) =>
@@ -159,13 +159,13 @@ public partial class MainWindow
     }
 
     private SiblingFolderNavigationOptions SiblingFolderOptions(int direction, bool forceDirectionalEdge = false) => new(
-        _settings.FolderNavIncludeHidden,
-        _settings.FolderNavWrap,
-        _settings.FolderNavSkipEmpty,
-        forceDirectionalEdge ? direction > 0 : _settings.FolderNavOpenFirstImage,
-        _settings.HierarchicalFolderTraversal,
-        _settings.FolderNavOrder,
-        string.Equals(_settings.HierarchicalPreviousFolderEntry, "First image", StringComparison.OrdinalIgnoreCase));
+        NavigationOptionsView.FolderNavIncludeHidden,
+        NavigationOptionsView.FolderNavWrap,
+        NavigationOptionsView.FolderNavSkipEmpty,
+        forceDirectionalEdge ? direction > 0 : NavigationOptionsView.FolderNavOpenFirstImage,
+        NavigationOptionsView.HierarchicalFolderTraversal,
+        NavigationOptionsView.FolderNavOrder,
+        string.Equals(NavigationOptionsView.HierarchicalPreviousFolderEntry, "First image", StringComparison.OrdinalIgnoreCase));
 
     // ---- "Loop this folder" per-tab override -------------------------------------------------------------------
 

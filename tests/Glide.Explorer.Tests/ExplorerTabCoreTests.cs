@@ -16,6 +16,7 @@ namespace Glide.Explorer.Tests;
 /// the headless platform, over generated temp folders. (Owner report: the tab looked like a still image.)
 /// </summary>
 [Collection(ExplorerHeadlessCollection.Name)]
+[Trait("Area", "Explorer")]
 public sealed class ExplorerTabCoreTests
 {
     public ExplorerTabCoreTests() { }
@@ -120,7 +121,7 @@ public sealed class ExplorerTabCoreTests
             h.Click("Alpha");
             h.Click("a.png", modifiers: RawInputModifiers.Shift);
             Assert.Equal(new[] { "a.png", "Alpha", "Beta", "Gamma" }, h.SelectedNames);
-            Assert.Equal("4 items selected", h.Surface.SelectionText.Text);
+            Assert.StartsWith("4 items selected   ", h.Surface.SelectionText.Text);
             h.Click(h.EmptySpotInList());
             Assert.Empty(h.SelectedNames);
             return Task.CompletedTask;
@@ -177,6 +178,23 @@ public sealed class ExplorerTabCoreTests
             Assert.Equal(new[] { "c.png" }, h.SelectedNames);
             h.Key(Key.PageUp);
             Assert.Equal(new[] { "Alpha" }, h.SelectedNames);
+            return Task.CompletedTask;
+        });
+    }
+
+    /// <summary>
+    /// Round 3 #7: Ctrl+A (or any selection that includes folders) showed only "6 items selected" and no size. The status
+    /// line now always shows the total size of the selected files.
+    /// </summary>
+    [Fact]
+    public async Task Select_all_with_folders_shows_the_total_size_of_the_selected_files()
+    {
+        await ExplorerHarness.Run(h =>
+        {
+            h.FocusList();
+            h.Key(Key.A, RawInputModifiers.Control);
+            var total = new[] { "a.png", "b.png", "c.png" }.Sum(n => new FileInfo(Path.Combine(h.Root, n)).Length);
+            Assert.Equal("6 items selected   " + ExplorerModel.FormatSize(total), h.Surface.SelectionText.Text);
             return Task.CompletedTask;
         });
     }
@@ -332,11 +350,11 @@ public sealed class ExplorerTabCoreTests
             Assert.True(h.Surface.BackButton.IsEnabled);
             Assert.False(h.Surface.ForwardButton.IsEnabled);
             // One browser-style history per tab (5.0.0): the folders are its Explorer entries.
-            var histories = h.Get<Dictionary<Guid, Glide.Core.Navigation.NavigationHistory>>("_tabHistories");
-            var history = histories[h.Workspace.Active!.Id];
+            var histories = h.Window.TabHistories;
+            var history = histories.Find(h.Workspace.Active!.Id)!;
             Assert.Equal(new[] { h.Root, Path.Combine(h.Root, "Alpha") }, history.Entries.Select(e => e.Path));
             // The breadcrumb ends in the opened folder.
-            Assert.Equal("Alpha", h.Surface.AddressBar.Segments.Last().Content);
+            Assert.Equal("Alpha", ((TextBlock)h.Surface.AddressBar.Segments.Last().Content!).Text);
         });
     }
 
@@ -427,11 +445,17 @@ public sealed class ExplorerTabCoreTests
             Assert.True(menu!.IsOpen);
             var items = menu.Items.OfType<MenuItem>().ToList();
             Assert.Equal(3, items.Count);
-            Assert.Equal(new[] { "Deep  ✓", "Alpha", Path.GetFileName(h.Root) }, items.Select(i => i.Header!.ToString()).ToArray());
+            // Round 3 #13: full paths, most recently visited first.
+            var alpha = Path.Combine(h.Root, "Alpha");
+            var deep = Path.Combine(alpha, "Deep");
+            Assert.Equal(new[] { deep + "  ✓", alpha, h.Root }, items.Select(i => i.Header!.ToString()).ToArray());
             items[2].RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
             await h.SettleAsync();
             Assert.Equal(h.Root, h.CurrentFolder);
             Assert.True(h.Surface.ForwardButton.IsEnabled);
+            h.Call("CloseActiveOwnedMenu", new object?[] { null });
+            h.ClickButton(h.Surface.HistoryButton);
+            Assert.Equal(new[] { h.Root + "  ✓", deep, alpha }, h.ActiveMenu!.Items.OfType<MenuItem>().Select(i => i.Header!.ToString()).ToArray());
         });
     }
 
@@ -444,9 +468,9 @@ public sealed class ExplorerTabCoreTests
             await h.NavigateAsync(deep);
             var bar = h.Surface.AddressBar;
             var segments = bar.Segments;
-            Assert.Equal("Deep", segments.Last().Content);
+            Assert.Equal("Deep", ((TextBlock)segments.Last().Content!).Text);
             // Click the "Alpha" segment.
-            var alpha = segments.First(s => (string?)s.Content == "Alpha");
+            var alpha = segments.First(s => (s.Content as TextBlock)?.Text == "Alpha");
             h.ClickButton(alpha);
             await h.SettleAsync();
             Assert.Equal(Path.Combine(h.Root, "Alpha"), h.CurrentFolder);
@@ -586,29 +610,31 @@ public sealed class ExplorerTabCoreTests
     }
 
     [Fact]
-    public async Task Middle_click_opens_an_image_in_a_new_foreground_tab_by_default()
+    public async Task Middle_click_opens_an_image_in_a_new_background_tab_at_the_end_by_default()
     {
         await ExplorerHarness.Run(async h =>
         {
+            Assert.True(h.Settings.SwitchToNewTabs); // the general setting stays foreground; middle-click has its own (5.1.0)
             var explorerId = h.Workspace.Active!.Id;
             h.Click("b.png", MouseButton.Middle);
-            await h.WaitUntil(() => h.Workspace.Active is ImageTabState, "switched to the new image tab"); // 5.0.6: foreground by default
-            Assert.Contains(h.Workspace.Tabs, t => t.Id == explorerId && t is BrowserTabState);
+            await h.WaitUntil(() => h.Workspace.Tabs.OfType<ImageTabState>().Any(), "new image tab");
+            Assert.Equal(explorerId, h.Workspace.Active!.Id); // the Explorer stays in front, like a web browser
+            Assert.IsType<ImageTabState>(h.Workspace.Tabs[^1]);
             Assert.Equal(Path.Combine(h.Root, "b.png"), h.Workspace.Tabs.OfType<ImageTabState>().Single().Path);
         });
     }
 
     [Fact]
-    public async Task Middle_click_opens_an_image_in_a_new_background_tab_when_foreground_is_off()
+    public async Task Middle_click_opens_an_image_in_the_foreground_when_its_setting_says_so()
     {
         await ExplorerHarness.Run(async h =>
         {
-            h.Settings.SwitchToNewTabs = false;
+            h.Settings.SwitchToNewTabs = false; // the general setting does not apply to middle-click
+            h.Settings.MiddleClickNewTabSide = MiddleClickSides.Foreground;
             var explorerId = h.Workspace.Active!.Id;
             h.Click("b.png", MouseButton.Middle);
-            await h.WaitUntil(() => h.Workspace.Tabs.OfType<ImageTabState>().Any(), "new image tab");
-            Assert.Equal(explorerId, h.Workspace.Active!.Id); // the Explorer stays in front
-            Assert.IsType<BrowserTabState>(h.Workspace.Active);
+            await h.WaitUntil(() => h.Workspace.Active is ImageTabState, "switched to the new image tab");
+            Assert.Contains(h.Workspace.Tabs, t => t.Id == explorerId && t is BrowserTabState);
             Assert.Equal(Path.Combine(h.Root, "b.png"), h.Workspace.Tabs.OfType<ImageTabState>().Single().Path);
         });
     }

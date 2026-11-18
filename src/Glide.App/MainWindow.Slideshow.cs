@@ -21,18 +21,18 @@ public partial class MainWindow
 
     private async Task<bool> ConfirmSlideshowSessionOptionsAsync()
     {
-        var interval = new NumericUpDown { Minimum = 250, Maximum = 600000, Increment = 250, Value = _settings.SlideshowIntervalMs, MinWidth = 150 };
-        var loop = new CheckBox { Content = "Loop slideshow", IsChecked = _settings.SlideshowLoop };
-        var cross = new CheckBox { Content = "Continue across sibling folders", IsChecked = _settings.SlideshowCrossFolders };
-        var shuffle = new CheckBox { Content = "Shuffle images", IsChecked = _settings.SlideshowShuffle };
+        var interval = new NumericUpDown { Minimum = 250, Maximum = 600000, Increment = 250, Value = SlideshowOptionsView.IntervalMs, MinWidth = 150 };
+        var loop = new CheckBox { Content = "Loop slideshow", IsChecked = SlideshowOptionsView.Loop };
+        var cross = new CheckBox { Content = "Continue across sibling folders", IsChecked = SlideshowOptionsView.CrossFolders };
+        var shuffle = new CheckBox { Content = "Shuffle images", IsChecked = SlideshowOptionsView.Shuffle };
         var direction = new ComboBox
         {
             ItemsSource = new[] { "Forward", "Backward" },
-            SelectedItem = string.Equals(_settings.SlideshowDirection, "Backward", StringComparison.OrdinalIgnoreCase) ? "Backward" : "Forward",
+            SelectedItem = string.Equals(SlideshowOptionsView.Direction, "Backward", StringComparison.OrdinalIgnoreCase) ? "Backward" : "Forward",
             MinWidth = 150
         };
-        var startFullscreen = new CheckBox { Content = "Start slideshow in fullscreen", IsChecked = _settings.SlideshowStartFullscreen };
-        var pauseInactive = new CheckBox { Content = "Pause while Glide is not the active window", IsChecked = _settings.SlideshowPauseWhenInactive };
+        var startFullscreen = new CheckBox { Content = "Start slideshow in fullscreen", IsChecked = SlideshowOptionsView.StartFullscreen };
+        var pauseInactive = new CheckBox { Content = "Pause while Glide is not the active window", IsChecked = SlideshowOptionsView.PauseWhenInactive };
         var rightAction = _inputRouter.ResolveGesture("slideshow.rightClick", _settings.Gestures);
         var rightClickStops = new CheckBox { Content = "Right-click stops an active slideshow", IsChecked = rightAction == GestureCatalog.Default };
         var leftAction = _inputRouter.ResolveGesture("slideshow.leftClick", _settings.Gestures);
@@ -50,7 +50,7 @@ public partial class MainWindow
             SelectedItem = currentLeft,
             MinWidth = 190
         };
-        var qualityIndicator = new CheckBox { Content = "Show slideshow playing indicator", IsChecked = _settings.SlideshowShowQualityIndicator };
+        var qualityIndicator = new CheckBox { Content = "Show slideshow playing indicator", IsChecked = SlideshowOptionsView.ShowQualityIndicator };
         var start = new Button { Content = "Start slideshow", MinWidth = 130 };
         var cancel = new Button { Content = "Cancel", MinWidth = 90 };
         var buttons = new StackPanel { Orientation = Avalonia.Layout.Orientation.Horizontal, Spacing = 10, HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right };
@@ -162,7 +162,7 @@ public partial class MainWindow
             Viewport.SlideshowRunning = running;
         }
         if (SlideshowQualityIndicator is not null)
-            SlideshowQualityIndicator.IsVisible = running && _settings.SlideshowShowQualityIndicator;
+            SlideshowQualityIndicator.IsVisible = running && SlideshowOptionsView.ShowQualityIndicator;
         if (SlideshowIcon is not null) SlideshowIcon.Kind = running ? "Pause" : "Play";
         if (SlideshowStopButton is not null) SlideshowStopButton.IsVisible = active;
         if (SlideshowButton is not null)
@@ -177,12 +177,10 @@ public partial class MainWindow
 
             var verb = !active ? "Start slideshow" : running ? "Pause slideshow" : "Resume slideshow";
             ToolTip.SetTip(SlideshowButton, $"{verb} ({ShortcutFor(GlideCommand.StartPauseSlideshow)})");
-            ToolTip.SetShowDelay(SlideshowButton, 650);
         }
         if (SlideshowStopButton is not null)
         {
             ToolTip.SetTip(SlideshowStopButton, $"Stop slideshow session ({ShortcutFor(GlideCommand.StopSlideshow)})");
-            ToolTip.SetShowDelay(SlideshowStopButton, 650);
         }
     }
 
@@ -522,7 +520,7 @@ public partial class MainWindow
     private void FinishFullscreenTransition()
     {
         Viewport.IsFullscreen = WindowState == WindowState.FullScreen;
-        ApplyStatusVisibility();
+        NotifyStatusChromeChanged();
         UpdateCaptionButtonState();
         // A final render-queue clear protects against a queued pointer/selection invalidation from the
         // double-click event that initiated the transition without changing legacy selection logic.

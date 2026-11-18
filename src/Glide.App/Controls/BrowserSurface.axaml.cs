@@ -31,11 +31,11 @@ public partial class BrowserSurface : UserControl
         BrowserViewModeCombo.SelectedIndex = ExplorerViewModes.Large;
     }
 
-    /// <summary>Shows the current sort on the Sort button: field label, direction arrow and a describing tooltip.</summary>
+    /// <summary>Shows the current sort on the Sort button: field label, direction triangle (▲/▼) and a describing tooltip.</summary>
     public void ShowSort(string label, bool ascending, string tip)
     {
         BrowserSortText.Text = label;
-        BrowserSortDirection.Kind = ascending ? "Up" : "Down";
+        BrowserSortDirection.Text = ExplorerSortFields.Triangle(ascending);
         ToolTip.SetTip(BrowserSortButton, tip);
     }
 
@@ -49,10 +49,18 @@ public partial class BrowserSurface : UserControl
     public TextBox FilterBox => BrowserFilterBox;
     public ComboBox ViewModeCombo => BrowserViewModeCombo;
     public Button SortButton => BrowserSortButton;
-    public Grid NativeHostSurface => NativeExplorerHostSurface;
     public ScrollViewer ScrollViewer => BrowserScrollViewer;
     public ItemsRepeater Repeater => BrowserRepeater;
     public StackPanel NavHost => BrowserNavHost;
+    public Border NavSplitter => BrowserNavSplitter;
+    public Grid Body => BrowserBody;
+
+    /// <summary>The drive bar (navigation pane) width in pixels: column 0 of the body grid.</summary>
+    public double NavPaneWidth
+    {
+        get => BrowserBody.ColumnDefinitions[0].Width.Value;
+        set => BrowserBody.ColumnDefinitions[0].Width = new GridLength(value);
+    }
     public Border DetailsHeader => BrowserDetailsHeader;
     public Canvas RubberLayer => BrowserRubberLayer;
     public Border RubberRect => BrowserRubberRect;

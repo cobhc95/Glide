@@ -26,6 +26,7 @@ namespace Glide.Core.Tests;
 /// bar's box: Left / Center / Right, every Size, narrow windows, collapsed, Auto-hide reveal area, reserved fit space, Home.
 /// </summary>
 [Collection(AvaloniaHeadlessCollection.Name)]
+[Trait("Area", "StatusBar")]
 public sealed class StatusStackInfoLineTests
 {
     public StatusStackInfoLineTests(AvaloniaHeadlessFixture fixture) { _ = fixture; }
@@ -659,7 +660,7 @@ public sealed class StatusStackInfoLineTests
         finally
         {
             SettingsStore.SettingsDirectoryOverrideForTests.Value = previous;
-            try { Directory.Delete(root, true); } catch { }
+            TempDir.TryDelete(root);
         }
     }
 
@@ -701,7 +702,7 @@ public sealed class StatusStackInfoLineTests
                 SettingsStore.SettingsDirectoryOverrideForTests.Value = previousStore;
             }
         });
-        try { Directory.Delete(root, true); } catch { }
+        TempDir.TryDelete(root);
     }
 
     private static long _clockMs;

@@ -5,8 +5,8 @@ namespace Glide.App.Controls;
 
 /// <summary>
 /// Layout of the tab hover tooltip card (5.0.6, approved mockup docs/mockups/tab-hover-preview-5.0.6.md): the preview
-/// runs edge to edge across the top, scaled to the card width and cropped rather than letterboxed (at most
-/// <see cref="MaxPictureHeight"/> tall), with the text block under it. With a preview the card is
+/// runs edge to edge across the top, scaled to the card width (at most
+/// <see cref="MaxPictureHeight"/> tall), with the text block under it. A picture is always shown whole (round 3 #4: a\r\n/// portrait cropped to the slot showed only a band of it); one narrower than the card is centred in the slot. With a preview the card is
 /// <see cref="PreferredPictureWidth"/> wide (wider only when the one-line mouse hint needs it); without one it hugs its
 /// text, up to <see cref="MaxTextWidth"/>. No text is ever trimmed: the name and the folder path wrap and the card
 /// grows as tall as they need.
@@ -19,6 +19,20 @@ internal sealed class TabHoverCard : Panel
     public const double MaxTextWidth = 420;
 
     private double _pictureAspect;
+    private double _scale = 1;
+
+    /// <summary>"Tab preview size (%)" / 100: scales the picture slot (not the text).</summary>
+    public double Scale
+    {
+        get => _scale;
+        set
+        {
+            value = double.IsFinite(value) && value > 0 ? value : 1;
+            if (_scale.Equals(value)) return;
+            _scale = value;
+            InvalidateMeasure();
+        }
+    }
 
     public TabHoverCard(Border pictureHost, Control text, TextBlock hint)
     {
@@ -51,12 +65,12 @@ internal sealed class TabHoverCard : Panel
     }
 
     /// <summary>About 260 DIP for a landscape preview; a portrait one is narrower so it stays under the height cap.</summary>
-    internal static double PreferredPictureWidth(double aspect) =>
-        aspect >= 1 ? LandscapeWidth : Math.Max(MinPortraitWidth, MaxPictureHeight * aspect);
+    internal static double PreferredPictureWidth(double aspect, double scale = 1) =>
+        aspect >= 1 ? LandscapeWidth * scale : Math.Max(MinPortraitWidth * scale, MaxPictureHeight * scale * aspect);
 
     private bool ShowsPicture => PictureHost.IsVisible && _pictureAspect > 0;
 
-    private double PictureHeight(double width) => ShowsPicture ? Math.Min(width / _pictureAspect, MaxPictureHeight) : 0;
+    private double PictureHeight(double width) => ShowsPicture ? Math.Min(width / _pictureAspect, MaxPictureHeight * _scale) : 0;
 
     protected override Size MeasureOverride(Size availableSize)
     {
@@ -64,7 +78,7 @@ internal sealed class TabHoverCard : Panel
         Hint.Measure(Size.Infinity);
         var hintWidth = Hint.DesiredSize.Width + horizontalMargin;
         double width;
-        if (ShowsPicture) width = Math.Max(PreferredPictureWidth(_pictureAspect), hintWidth);
+        if (ShowsPicture) width = Math.Max(PreferredPictureWidth(_pictureAspect, _scale), hintWidth);
         else
         {
             Text.Measure(new Size(MaxTextWidth + horizontalMargin, double.PositiveInfinity));

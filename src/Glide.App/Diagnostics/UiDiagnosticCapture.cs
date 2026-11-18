@@ -42,8 +42,8 @@ internal static class UiDiagnosticCapture
         var sb = new StringBuilder();
         var top = TopLevel.GetTopLevel(root);
         var scale = top?.RenderScaling ?? 1.0;
-        sb.AppendLine($"renderScaling={scale:F3}");
-        sb.AppendLine($"root={root.GetType().Name} logical={Format(root.Bounds)} physical={FormatPhysical(root.Bounds, scale)}");
+        sb.AppendLine(System.Globalization.CultureInfo.InvariantCulture, $"renderScaling={scale:F3}");
+        sb.AppendLine(System.Globalization.CultureInfo.InvariantCulture, $"root={root.GetType().Name} logical={Format(root.Bounds)} physical={FormatPhysical(root.Bounds, scale)}");
         foreach (var control in NamedControls(root))
         {
             var bounds = RelativeBounds(control, root);

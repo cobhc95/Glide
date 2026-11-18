@@ -8,6 +8,7 @@ namespace Glide.Core.Tests;
 /// Guard rails for the master action registry (5.0.x): every command, hotkey row, gesture action, setting toggle
 /// and fixed shortcut comes from AppActionRegistry, and the historical ids / defaults keep loading unchanged.
 /// </summary>
+[Trait("Area", "Hotkeys")]
 public sealed class AppActionRegistryTests
 {
     [Fact]

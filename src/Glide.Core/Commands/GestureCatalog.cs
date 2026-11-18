@@ -81,9 +81,9 @@ public static class GestureInputs
     public const string Wheel = "wheel";
     public const string RightWheel = "rightWheel";
     /// <summary>Mouse side button 1 (XButton1, "Back"). Added in 5.0.0; saved bindings of older files simply have no such slot.
-    /// Default: Back (<see cref="GestureCatalog.DefaultActionFor"/>).</summary>
+    /// Default (5.0.8): pass-through, not used by Glide.</summary>
     public const string BackButton = "backButton";
-    /// <summary>Mouse side button 2 (XButton2, "Forward"). Default: Forward.</summary>
+    /// <summary>Mouse side button 2 (XButton2, "Forward"). Default (5.0.8): pass-through, not used by Glide.</summary>
     public const string ForwardButton = "forwardButton";
 
     public static readonly string[] All = [LeftClick, RightClick, MiddleClick, DoubleLeft, DoubleRight, LeftDrag, RightDrag, MiddleDrag, Wheel, RightWheel, BackButton, ForwardButton];
@@ -250,12 +250,9 @@ public static class GestureCatalog
     /// mouse side buttons (XButton1 / XButton2) go Back / Forward in every area that has them (5.0.0; the first 5.0
     /// build left them unbound). Null for every other slot, whose Default is handled by the surface itself.
     /// </summary>
-    public static string? DefaultActionFor(string? slotId) => FindSlot(slotId) switch
-    {
-        { Input: GestureInputs.BackButton } => NavigateBack,
-        { Input: GestureInputs.ForwardButton } => NavigateForward,
-        _ => null
-    };
+    /// Since 5.0.8 the side buttons are pass-through by default ("Default (not used by Glide)"): Glide leaves them entirely
+    /// to Windows / the mouse software, so this returns null for every slot. Kept as the hook for future registry defaults.
+    public static string? DefaultActionFor(string? slotId) => null;
 
     public static IReadOnlyList<GestureAreaDefinition> Areas { get; } = new GestureAreaDefinition[]
     {
@@ -399,8 +396,8 @@ public static class GestureCatalog
         ["windowed.middleClickImage"] = "nothing",
         ["windowed.doubleLeftImage"] = "enter fullscreen",
         ["windowed.doubleRightImage"] = "nothing",
-        ["windowed.backButtonImage"] = "back",
-        ["windowed.forwardButtonImage"] = "forward",
+        ["windowed.backButtonImage"] = "not used by Glide",
+        ["windowed.forwardButtonImage"] = "not used by Glide",
         ["drag.leftImage"] = "draw a selection",
         ["drag.rightImage"] = "per right-drag mode",
         ["drag.middleImage"] = "nothing",
@@ -413,8 +410,8 @@ public static class GestureCatalog
         ["fullscreen.rightClickImage"] = "previous image",
         ["fullscreen.middleClickImage"] = "nothing",
         ["fullscreen.doubleLeftImage"] = "nothing",
-        ["fullscreen.backButtonImage"] = "back",
-        ["fullscreen.forwardButtonImage"] = "forward",
+        ["fullscreen.backButtonImage"] = "not used by Glide",
+        ["fullscreen.forwardButtonImage"] = "not used by Glide",
         ["wheel.fullscreen"] = "previous / next",
         ["wheel.fullscreenCtrl"] = "zoom",
         ["wheel.fullscreenShift"] = "as wheel",
@@ -436,8 +433,8 @@ public static class GestureCatalog
         ["tabs.rightClick"] = "tab menu",
         ["tabs.middleClick"] = "close tab",
         ["tabs.doubleClick"] = "close tab",
-        ["tabs.backButton"] = "back",
-        ["tabs.forwardButton"] = "forward",
+        ["tabs.backButton"] = "not used by Glide",
+        ["tabs.forwardButton"] = "not used by Glide",
         ["tabs.wheel"] = "scroll the tab strip",
         ["titleBar.rightClick"] = "menu in fullscreen / overlay mode",
         ["titleBar.middleClick"] = "new tab",
@@ -445,8 +442,8 @@ public static class GestureCatalog
         ["titleBar.wheel"] = "nothing",
         ["explorer.middleClick"] = "open in new tab",
         ["explorer.doubleClick"] = "open in current tab",
-        ["explorer.backButton"] = "back",
-        ["explorer.forwardButton"] = "forward",
+        ["explorer.backButton"] = "not used by Glide",
+        ["explorer.forwardButton"] = "not used by Glide",
         ["explorer.wheel"] = "scroll the list"
     };
 

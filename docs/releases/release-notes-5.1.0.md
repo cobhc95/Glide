@@ -1,0 +1,128 @@
+# Glide 5.1.0
+
+Released 2026-11-18. A feature release: much faster and lighter browsing of large photos, instant tab switching, Explorer tabs that follow changes made outside Glide, an optional address bar over pictures, new tooltip and Overlay settings, and browser-style middle-click and new-tab behaviour. 5.0.8 was never published; its changes (new defaults for the mouse side buttons and the end of a folder) are included here. Settings from 5.0.x load unchanged apart from the one-time migrations listed under **Defaults and migration**. The full list is in [CHANGELOG.md](../../CHANGELOG.md).
+
+## Highlights
+
+- **Browsing 30 MP JPEGs with a held arrow key: about 11â€“14 ms per picture** (was 28 ms median, 214 ms p95), with **0.3â€“1.0 GB of memory instead of 2.2â€“3.2 GB**.
+- **Instant tab switching**: going back to a recent picture or Explorer tab shows it at once instead of loading it again.
+- **Explorer tabs update live** when files are added, deleted or renamed outside Glide.
+- **Address bar over pictures** (optional), **tooltip delays per area**, **Overlay mode can be moved** by dragging, with a drag strip, Lock position and **Alt+O**.
+- **Middle-click opens in a background tab at the end**, Ctrl+T and + open at the far right, and more choices for which tab activates after closing one.
+
+## Faster browsing and lower memory
+
+- **Display-sized neighbours.** The next and previous pictures are prepared at window size instead of full resolution. Full detail is decoded for the picture you stop on (after a short idle) or as soon as you zoom in, so nothing is lost when you look closely.
+- **Per-preset decode sizes** (Settings > Performance): new **First view decode size**, **Prefetch decode size** and **Decode full resolution** (Immediately / When idle / On zoom only). Each browsing quality preset sets per-format defaults from one table; *Maximum quality* decodes full detail after a short idle and on zoom.
+- **Reduced-size JPEG decoding.** Large JPEGs without a usable camera preview use libjpeg-turbo's 1/2, 1/4 or 1/8 decoding for the first view and prefetch, choosing the smallest scale that still fills the window. Progressive JPEGs prefetch about 2x faster.
+- **Instant tab switching.** The last 5 picture tabs keep their picture, zoom and folder position; the folder is re-checked in the background. Returning to an Explorer tab keeps its tiles, thumbnails, selection and scroll, and the last 3 Explorer tabs reopen from their kept listing. Switching to an Explorer tab no longer saves settings, and drives / Quick access are read in the background.
+- **Opening from Windows File Explorer with Speed Boost standby**: the window now appears straight away (title bar, tabs, background) and the picture fills in when ready, instead of staying invisible for about a second with only a taskbar button showing. The forwarding launcher no longer decodes the image itself when a warm Glide is running.
+
+## Speed results
+
+All figures were measured on one development desktop, warm file cache, comparing 5.0.7 with 5.1.0 under the same conditions. Inputs are synthetic or generic files described by their specs only. These are single-machine measurements: expect different absolute numbers on other hardware, disks and window sizes.
+
+### Navigation through large JPEGs
+
+Ten 30 MP baseline JPEGs (4:2:0, no EXIF, no embedded preview), *Maximum quality* preset, the real release (AOT) app, viewport 912 x 545 at 175 % scaling. A scripted session of held-arrow runs and single taps.
+
+| Measure | 5.0.7 | 5.1.0 |
+|---|---:|---:|
+| Held arrow key, time per frame (median / p95) | 28 / 214 ms | 11â€“14 / â‰¤ 28 ms |
+| Held arrow key, throughput | â€” | about 70 frames/s |
+| Tap next / previous, cache hit (median / p95) | 5.4 / 8.5 ms | 6.0 / 16 ms |
+| Cache miss, input to first pixel (median / p95) | 76 / 81 ms | 79 / 83 ms |
+| Private memory while browsing | 2.2â€“3.2 GB | 0.3â€“1.0 GB |
+| Decoded-image cache | 933 MB | 23â€“71 MB |
+| Full-resolution 30 MP decodes during the script | 26 | 0 (only the picture you stop on, after 1.5 s idle) |
+| Prefetch hit rate | â€” | 100 % |
+
+Single taps on a cache hit are within noise of 5.0.7 (they were already fast); a cache miss costs about the same. The gains are in held-key browsing, memory and the amount of decoding work.
+
+### JPEG reduced-size (DCT-scaled) decode
+
+Synthetic 30 MP JPEG, 4480 x 6720, 4:2:0.
+
+| Measure | 5.0.7 | 5.1.0 |
+|---|---:|---:|
+| Baseline JPEG, first frame | 103 ms | 87 ms |
+| Baseline JPEG, prefetch | 105 ms | 86 ms |
+| Progressive JPEG, prefetch | 630 ms | 300 ms |
+| Progressive JPEG, first frame | ~81 ms | ~81 ms (Windows decoder kept; it was already the fastest) |
+
+### Tab switching
+
+Headless test harness, synthetic 3000 x 2000 PNGs and a folder of 1,500 files. Ranges cover the repeated runs.
+
+| Switch | 5.0.7 | 5.1.0 |
+|---|---:|---:|
+| Back to an Explorer tab from a picture tab | 65â€“101 ms | 13â€“42 ms |
+| Back to a picture tab from an Explorer tab | 51â€“107 ms | 16â€“19 ms |
+
+### Opening from File Explorer with Speed Boost
+
+No before/after figures were measured for this change. What changed is visible: the window is shown immediately instead of after the decode. Glide now writes timing marks to `startup-trace.log` (forward_send, broker_received, warm_window_shown, warm_first_composed_frame, warm_image_presented) so it can be measured later.
+
+### 5.0.7 for reference
+
+The 5.0.7 decoder gains (TIFF about 4x, JPEG full decode 1.3â€“1.8x, camera JPEG embedded preview 225 â†’ 39 ms, JPEG XL / HEIC / JPEG 2000 12â€“20 %) carry over unchanged; see [release-notes-5.0.7.md](release-notes-5.0.7.md) and [benchmark-report-5.0.7.md](../perf/benchmark-report-5.0.7.md).
+
+## New features
+
+### Explorer tab
+- **Live updates from outside Glide.** A file or folder added, deleted or renamed in Windows File Explorer (or by another program) shows up within a fraction of a second, updated in place with no reload or flicker.
+- **In-place updates after your own file operations.** Copy, paste, delete, rename, new folder and Refresh update the list like Windows Explorer: other items keep their thumbnails, the selection and the scroll position.
+- **Extra info under thumbnails**: Date, Resolution and File size, each optional (off by default), in the Extra large, Large and Medium views.
+- **Sort by image dimensions** (Width, Height, Total pixels). The Sort list names every field with â–² / â–¼, so one pick sets field and direction; *Size* is now *File size*.
+- **Resizable drive bar** (drag its edge, or *Drive bar width* in Settings, 120â€“600 px).
+- **Ctrl+drag** a selection rectangle to deselect; **Escape** clears the selection; Shift+Home / End select to the start / end of the row (Ctrl+Shift+Home / End for the whole folder).
+- **Recent locations** shows full paths, most recent first; the background menu says **Properties of {folder}**.
+
+### Address bar while viewing pictures
+Settings > Window & navigation > Explorer tab: *Show address bar while viewing pictures* (off by default; also on the right-click menu of the Explorer navigation row). Back, Forward, Recent locations, Up, Refresh and the address bar stay above pictures in picture tabs, showing the picture's folder, on their own row so the picture is never covered. Clicking a folder, Up or Refresh opens it in the Explorer view of the same tab. Hidden in fullscreen and Overlay mode; hotkey-bindable.
+
+### Tooltips
+Settings > Appearance & viewing > **Tooltips**: a delay (0â€“5000 ms) for the Settings window, the main interface (title bar, tabs, status bar), Overlay mode and Explorer tab items, plus *Show info tooltip when hovering items* for the Explorer tab. The Explorer item tooltip now waits 1.5 s like Windows Explorer; the others wait 0.6 s.
+
+### Tabs
+- **Middle-click opens in a background tab at the end**, like a web browser. Two new settings for middle-click only: foreground / background and at the end / next to the current tab / same as new tabs. The *Key to open â€¦ instead* keys still flip one middle-click.
+- **Middle-click a Recent item on the Welcome page** opens it in a new tab (a folder as an Explorer tab).
+- **Ctrl+T and the + button** always open the new tab at the far right and switch to it.
+- **New-tab options redesigned**: *New tabs open [at the end / next to the current tab]* and *Open new tabs in the [foreground / background]*, each with its own *Key to open â€¦ instead* (None / Shift / Ctrl / Alt). They replace the old *Shift and Alt change how a new tab opens* checkbox.
+- **After closing a tab, activate** can now also be **First tab**, **Last tab** or **Customâ€¦** (Home, a new empty Explorer tab, or an Explorer tab with the closed picture's folder).
+- **Tab preview size** (50â€“250 %), also with Ctrl + wheel over the tab (key configurable). The hover card's mouse hint is a row of key chips that follow your bindings.
+
+### Overlay mode
+- **Move the window by dragging** the picture while it fits; when zoomed in, drag pans and the bottom bar or **Alt+drag** moves the window.
+- **Show drag strip** (a small rounded handle at the top) and **Lock position**, in the Overlay right-click menu and in Settings > Slideshow & overlays.
+- **Alt+O** enters and leaves Overlay mode; **Exit Overlay mode** sits under Exit Glide in the right-click menu; the opacity slider follows the mouse wheel (5 % per notch).
+
+## Fixes
+
+- **Glide sometimes did not open after using Overlay mode** (or right after an update). Shutdown now stops the background part, a new launch waits up to 8 s for an older Glide and then opens its own window.
+- **Move tab to new window** no longer leaves a stale tab behind, and the new window opens fully on screen.
+- **Overlay**: dragging no longer stops after a few pixels; Use windowed interactions and Lock position apply instantly; the drag handle no longer disappears; sizes above 100 % stay above the taskbar; the Size menu ticks the current size; the opacity slider follows the pointer down to 35 %; leaving Overlay restores the normal window size reliably; the Interaction item is now one clear on/off item.
+- **Prefetched JPEG neighbours** no longer look soft at 1/8 size, and releasing a held arrow key no longer re-decodes a picture that was already cached.
+- **Names with an underscore** display correctly in the Welcome page Recent list, the address bar and Explorer menus.
+- **Tab previews** show the whole picture for tall portraits; Ctrl + wheel resizes the preview instead of closing it.
+- **Explorer**: the selection size includes files when folders are selected; Enter confirms the Delete prompt; "No folders or images in this folder." no longer flashes while a folder loads; the pane no longer flashes dark after copy / paste / delete.
+- Sub-menus highlight the item under a still pointer as soon as they open; the Settings footer shows plain "Glide 5.1.0".
+
+## Defaults and migration
+
+- **Mouse side buttons are no longer claimed by Glide by default.** The *Mouse back / forward button* rows in every gesture area default to *Default (not used by Glide)*, so Windows and your mouse software keep them. Rows still on the old default become pass-through on upgrade; explicit choices are kept.
+- **When the last image is reached** now defaults to **Ask me each time**. Settings still on the old default (*Move to the next folder*) switch to Ask once (settings schema 17); other choices are kept.
+- **Alt+O** is added for Overlay mode once if that row is unassigned and Alt+O is free (settings schema 19).
+- The old *Shift and Alt change how a new tab opens* checkbox becomes Shift (position) and Alt (foreground / background) when on, None / None when off.
+
+## Internal
+
+A four-stage code audit and clean-up: one owner and one id table for settings, large window classes split into focused parts, native Windows calls gathered in one place, faster check tooling and architecture notes ([ARCHITECTURE.md](https://github.com/cobhc95/Glide)). No behaviour change intended. Test-setup and build-script hardening.
+
+Thanks to vertigo220 for round 3 of reports and ideas.
+
+## Downloads
+
+- `Glide.Setup.exe`: installer (Windows 10 1607 or later, x64)
+- `Glide-5.1.0-Portable.zip`: portable build
+- `Glide.Setup.sha256`: checksum (SHA256 `18eff9bdbec54e91cff22a065e9c6929e91f532dde2840a41e1ebd65cd27b170`)

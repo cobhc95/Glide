@@ -4,6 +4,7 @@ using Glide.App.Settings;
 namespace Glide.Core.Tests;
 
 [Collection(StoreStaticsCollection.Name)]
+[Trait("Area", "Settings")]
 public sealed class SettingsStoreRoundTripTests
 {
     [Theory]
@@ -28,6 +29,20 @@ public sealed class SettingsStoreRoundTripTests
             AssertMapsEqual(expectedHotkeys, loaded.Hotkeys);
             Assert.Equal(expectedGestures.OrderBy(x => x.Key), loaded.Gestures.OrderBy(x => x.Key));
             Assert.Equal(expectedInteraction, InteractionSnapshot(loaded));
+        });
+    }
+
+    [Fact]
+    public void Loading_settings_does_not_change_the_process_wide_sort_order()
+    {
+        WithIsolatedStore(() =>
+        {
+            var before = ImageSortOrder.Current;
+            SettingsStore.Save(new GlideSettingsState { NavigationSortOrder = ImageSortOrder.SizeDisplay, NavigationSortDescending = !before.Descending });
+            var loaded = SettingsStore.Load();
+            Assert.Equal(ImageSortOrder.SizeDisplay, loaded.NavigationSortOrder);
+            Assert.Equal(before, ImageSortOrder.Current);   // Stage B: activation is Program's explicit step, not a load side effect
+            Assert.Equal(new ImageSortSpec(ImageSortKey.Size, !before.Descending), ImageSortOrder.SpecFor(loaded.NavigationSortOrder, loaded.NavigationSortDescending));
         });
     }
 
@@ -210,7 +225,7 @@ public sealed class SettingsStoreRoundTripTests
         finally
         {
             Environment.SetEnvironmentVariable("GLIDE_SETTINGS_DIRECTORY", inherited);
-            try { Directory.Delete(envRoot, true); } catch { }
+            TempDir.TryDelete(envRoot);
         }
     }
 
@@ -410,7 +425,7 @@ public sealed class SettingsStoreRoundTripTests
         finally
         {
             SettingsStore.SettingsDirectoryOverrideForTests.Value = previous;
-            try { Directory.Delete(root, true); } catch { }
+            TempDir.TryDelete(root);
         }
     }
     [Fact]

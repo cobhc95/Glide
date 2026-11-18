@@ -12,6 +12,7 @@ namespace Glide.Explorer.Tests;
 /// explorer.clickToRename, on by default). Driven with real pointer input through the MainWindow.
 /// </summary>
 [Collection(ExplorerHeadlessCollection.Name)]
+[Trait("Area", "Explorer")]
 public sealed class ExplorerClickToRenameTests
 {
     private static TimeSpan DoubleClickTime(ExplorerHarness h) => (TimeSpan)h.Call("ExplorerDoubleClickTime")!;

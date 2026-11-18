@@ -12,6 +12,7 @@ namespace Glide.Core.Tests;
 /// current monitors, and uses the compact default only when nothing is saved.
 /// </summary>
 [Collection(AvaloniaHeadlessCollection.Name)]
+[Trait("Area", "Settings")]
 public sealed class SettingsWindowPlacementTests
 {
     public SettingsWindowPlacementTests(AvaloniaHeadlessFixture fixture) => _ = fixture;
@@ -138,7 +139,7 @@ public sealed class SettingsWindowPlacementTests
         finally
         {
             Glide.App.Settings.SettingsStore.SettingsDirectoryOverrideForTests.Value = previous;
-            try { Directory.Delete(root, true); } catch { }
+            TempDir.TryDelete(root);
         }
     }
 

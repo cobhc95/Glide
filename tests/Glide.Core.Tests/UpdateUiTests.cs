@@ -31,6 +31,7 @@ namespace Glide.Core.Tests;
 /// action, and PNG renders (set GLIDE_SAVE_RENDERS to a folder) to compare with the approved mockups.
 /// </summary>
 [Collection(AvaloniaHeadlessCollection.Name)]
+[Trait("Area", "Update")]
 public sealed class UpdateUiTests : IDisposable
 {
     public UpdateUiTests(AvaloniaHeadlessFixture fixture) => _ = fixture;
@@ -493,7 +494,7 @@ public sealed class UpdateUiTests : IDisposable
                 Assert.Equal("Checking...", Named<TextBlock>(window, "UpdateResultText").Text);
 
                 rig.Feed.Hold.SetResult(true);
-                for (var i = 0; i < 100 && rig.Service.IsChecking; i++) { await Task.Delay(20); Dispatcher.UIThread.RunJobs(); }
+                await Wait.UntilAsync(() => !rig.Service.IsChecking, "update check finished", pump: () => Dispatcher.UIThread.RunJobs());
                 Settle(window);
                 Assert.Equal(1, rig.Feed.Calls);
                 Assert.Equal("Check now", button.Content);
@@ -520,8 +521,8 @@ public sealed class UpdateUiTests : IDisposable
             {
                 Assert.False(Named<CheckBox>(window, "UpdateCheckDailyCheck").IsChecked);
                 Click(Named<Button>(window, "UpdateCheckNowButton"));
-                for (var i = 0; i < 100 && rig.Feed.Calls == 0; i++) { await Task.Delay(20); Dispatcher.UIThread.RunJobs(); }
-                for (var i = 0; i < 100 && rig.Service.IsChecking; i++) { await Task.Delay(20); Dispatcher.UIThread.RunJobs(); }
+                await Wait.UntilAsync(() => rig.Feed.Calls > 0, "feed called", pump: () => Dispatcher.UIThread.RunJobs());
+                await Wait.UntilAsync(() => !rig.Service.IsChecking, "update check finished", pump: () => Dispatcher.UIThread.RunJobs());
                 Settle(window);
                 Assert.Equal(1, rig.Feed.Calls);
                 Assert.Equal("Couldn't reach GitHub", Named<TextBlock>(window, "UpdateResultText").Text);

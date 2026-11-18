@@ -6,24 +6,10 @@ namespace Glide.Core.Tests;
 /// the session and, when configured, persist as the default view for future launches.
 /// </summary>
 // Source-text contract kept: this asserts on production source (UI code-behind, native/installer files or a repo-wide scan) that cannot be run headlessly; behavioural coverage lives in the other test files.
+// Stage B: the routing and scope checks moved to a behaviour test (HotkeyEndToEndTests.Status_bar_Fit_buttons_apply_their_mode_through_the_Fit_control_scope).
+[Trait("Area", "Navigation")]
 public sealed class FitScopeContractTests
 {
-    [Fact]
-    public void Status_bar_fit_controls_route_through_the_scoped_fit_helper()
-    {
-        var mainWindow = ReadSource("src", "Glide.App", "MainWindow.axaml.cs").Replace("\r\n", "\n");
-
-        Assert.Contains("ApplyStatusBarFit(\"Fit width\", Viewport.FitWidth)", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("ApplyStatusBarFit(\"Fit height\", Viewport.FitHeight)", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("ApplyStatusBarFit(\"Fit image\", Viewport.Fit)", mainWindow, StringComparison.Ordinal);
-
-        var helper = MethodBody(mainWindow, "private void ApplyStatusBarFit(");
-        Assert.Contains("Only the current image", helper, StringComparison.Ordinal);
-        Assert.Contains("This session and future sessions", helper, StringComparison.Ordinal);
-        Assert.Contains("_sessionDefaultViewMode = viewMode", helper, StringComparison.Ordinal);
-        Assert.Contains("_settings.DefaultViewMode = viewMode", helper, StringComparison.Ordinal);
-    }
-
     [Fact]
     public void New_images_use_the_effective_session_default_view_mode()
     {
@@ -48,16 +34,6 @@ public sealed class FitScopeContractTests
         Assert.Contains("Click=\"FitImageClicked\"", group, StringComparison.Ordinal);
         // The Fit image control must reuse the shared vector "Fit" glyph rather than a font/emoji.
         Assert.Contains("Kind=\"Fit\"", group, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void Fit_image_button_behaves_like_the_shift_w_fit_command()
-    {
-        var mainWindow = ReadSource("src", "Glide.App", "MainWindow.axaml.cs").Replace("\r\n", "\n");
-        // Both the click handler and the reliable pointer path must call Viewport.Fit(), the exact
-        // action bound to view.fit (Shift+W).
-        Assert.Contains("private void FitImageClicked(object? sender, RoutedEventArgs e) => ApplyStatusBarFit(\"Fit image\", Viewport.Fit);", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("ReferenceEquals(button, StatusFitImageButton)) ApplyStatusBarFit(\"Fit image\", Viewport.Fit)", mainWindow, StringComparison.Ordinal);
     }
 
     private static string MethodBody(string source, string signature)

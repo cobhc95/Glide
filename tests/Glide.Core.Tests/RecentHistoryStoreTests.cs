@@ -7,11 +7,12 @@ namespace Glide.Core.Tests;
 public sealed class RecentHistoryCollection { }
 
 [Collection("RecentHistory")]
+[Trait("Area", "Navigation")]
 public sealed class RecentHistoryStoreTests
 {
     private static string NewStorePath() => Path.Combine(Path.GetTempPath(), "glide-history-test", Guid.NewGuid().ToString("N"), "history.json");
     private static void Reset(string path) { RecentHistoryStore.ResetForTests(); RecentHistoryStore.TestStoragePathOverride = () => path; RecentHistoryStore.TestPathExistsOverride = _ => false; }
-    private static void Cleanup(string path) { RecentHistoryStore.ResetForTests(); RecentHistoryStore.TestStoragePathOverride = null; RecentHistoryStore.TestPathExistsOverride = null; try { Directory.Delete(Path.GetDirectoryName(path)!, true); } catch { } }
+    private static void Cleanup(string path) { RecentHistoryStore.ResetForTests(); RecentHistoryStore.TestStoragePathOverride = null; RecentHistoryStore.TestPathExistsOverride = null; TempDir.TryDelete(Path.GetDirectoryName(path)!); }
 
     [Fact]
     public void RecordIsImmediatelyVisibleWithoutFilesystemValidation()

@@ -3,11 +3,12 @@ using Glide.Imaging;
 
 namespace Glide.Core.Tests;
 
+[Trait("Area", "Decode")]
 public sealed class ImageSaveTests : IDisposable
 {
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "GlideSave_" + Guid.NewGuid().ToString("N"));
     public ImageSaveTests() => Directory.CreateDirectory(_dir);
-    public void Dispose() { try { Directory.Delete(_dir, true); } catch { } }
+    public void Dispose() { TempDir.TryDelete(_dir); }
 
     // 3x2 image, pixel value = index (one uint per pixel) for easy position checks.
     private static byte[] Grid(int w, int h)

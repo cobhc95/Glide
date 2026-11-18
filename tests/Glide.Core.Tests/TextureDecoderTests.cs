@@ -10,6 +10,7 @@ namespace Glide.Core.Tests;
 /// void-extent and a direct-RGB 4x4 block) inside KTX, KTX2 (plain and zlib), PVR v3 and .astc files.
 /// </summary>
 [Collection(AvaloniaHeadlessCollection.Name)]
+[Trait("Area", "Decode")]
 public sealed class TextureDecoderTests : IDisposable
 {
     private readonly List<string> _files = new();

@@ -4,6 +4,7 @@ using Glide.Imaging;
 namespace Glide.Core.Tests;
 
 // Source-text contract kept: this asserts on production source (UI code-behind, native/installer files or a repo-wide scan) that cannot be run headlessly; behavioural coverage lives in the other test files.
+[Trait("Area", "Video")]
 public sealed class VideoOverlayControlsTests
 {
     [Theory]
@@ -107,8 +108,7 @@ public sealed class VideoOverlayControlsTests
         player.SetLoop(false);
         Assert.Equal(VideoPlaybackState.Ready, (await player.WaitForReadyAsync(TimeSpan.FromSeconds(10), CancellationToken.None)).State);
         var frame = new byte[16 * 9 * 4];
-        var deadline = DateTime.UtcNow.AddSeconds(8);
-        while (!player.GetInfo().Ended && DateTime.UtcNow < deadline) { player.TryReadFrame(frame, 16, 9); await Task.Delay(20); }
+        await Wait.TryUntilAsync(() => player.GetInfo().Ended, 8000, pump: () => player.TryReadFrame(frame, 16, 9), pollMs: 20);
         var info = player.GetInfo();
         Assert.True(info.Ended, $"position {info.Position} of {info.Duration}");
         Assert.False(info.Loop);

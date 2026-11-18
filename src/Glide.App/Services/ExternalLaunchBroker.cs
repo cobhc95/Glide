@@ -28,11 +28,15 @@ internal static class ExternalLaunchBroker
     // A machine-global name let another account create "Glide3.ExternalOpen.v2" first and block this
     // user's single-instance forwarding (images then did not open); CurrentUserOnly (below) already
     // stopped it from receiving anything.
-    internal static readonly string PipeName = ProtocolNames.UserScoped(ProtocolNames.PipeName, CurrentUserKey());
+    // GLIDE_SETTINGS_DIRECTORY (an isolated profile) also scopes both names: see ProtocolNames.InstanceKey.
+    internal static readonly string PipeName = ProtocolNames.UserScoped(ProtocolNames.PipeName, InstanceKey());
     // v3+ is an EventWaitHandle sentinel rather than a thread-affine mutex. Creation is the process
     // election primitive; followers close their handle immediately, so the sentinel disappears when
     // the elected owner releases/exits and another live Glide process can take over.
-    private static readonly string PresenceName = ProtocolNames.UserScoped(ProtocolNames.PresenceName, CurrentUserKey());
+    private static readonly string PresenceName = ProtocolNames.UserScoped(ProtocolNames.PresenceName, InstanceKey());
+
+    private static string InstanceKey() =>
+        ProtocolNames.InstanceKey(CurrentUserKey(), Environment.GetEnvironmentVariable("GLIDE_SETTINGS_DIRECTORY"));
     private static string EffectivePresenceName =>
         AppContext.BaseDirectory.Contains("Glide.Core.Tests", StringComparison.OrdinalIgnoreCase)
             ? $"{PresenceName}.{Environment.ProcessId}"
@@ -70,7 +74,7 @@ internal static class ExternalLaunchBroker
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern bool AllowSetForegroundWindow(int dwProcessId);
     private static readonly object Gate = new();
-    private static readonly List<WeakReference<MainWindow>> Windows = new();
+    // The windows that receive externally opened paths live in GlideWindowRegistry (one window list per process).
     private static readonly Dictionary<Guid, ExternalLaunchItemResult> CompletedRequests = new();
     private static readonly Queue<ExternalLaunchRequest> PendingRequests = new();
     private static WeakReference<MainWindow>? _activeWindow;
@@ -302,9 +306,7 @@ internal static class ExternalLaunchBroker
     {
         lock (Gate)
         {
-            CleanupWindowsLocked();
-            if (!Windows.Any(reference => reference.TryGetTarget(out var existing) && ReferenceEquals(existing, window)))
-                Windows.Add(new WeakReference<MainWindow>(window));
+            Glide.App.Platform.GlideWindowRegistry.SetLaunchReceiver(window, true);
             _activeWindow = new WeakReference<MainWindow>(window);
 
             if (!_ownsPresence && !TryTakeOverPresenceLocked())
@@ -322,7 +324,7 @@ internal static class ExternalLaunchBroker
     {
         lock (Gate)
         {
-            Windows.RemoveAll(reference => !reference.TryGetTarget(out var target) || ReferenceEquals(target, window));
+            Glide.App.Platform.GlideWindowRegistry.SetLaunchReceiver(window, false);
             if (_activeWindow?.TryGetTarget(out var active) == true && ReferenceEquals(active, window))
                 _activeWindow = null;
             // Deliberately keep presence/server ownership. Requests remain queued until the next
@@ -334,8 +336,7 @@ internal static class ExternalLaunchBroker
     {
         lock (Gate)
         {
-            CleanupWindowsLocked();
-            if (Windows.Any(reference => reference.TryGetTarget(out var existing) && ReferenceEquals(existing, window)))
+            if (Glide.App.Platform.GlideWindowRegistry.LaunchReceivers().Any(existing => ReferenceEquals(existing, window)))
                 _activeWindow = new WeakReference<MainWindow>(window);
         }
     }
@@ -346,10 +347,10 @@ internal static class ExternalLaunchBroker
         Task? serverTask = null;
         lock (Gate)
         {
-            Windows.RemoveAll(reference => !reference.TryGetTarget(out var target) || ReferenceEquals(target, window));
+            Glide.App.Platform.GlideWindowRegistry.SetLaunchReceiver(window, false);
             if (_activeWindow?.TryGetTarget(out var active) == true && ReferenceEquals(active, window))
                 _activeWindow = null;
-            if (Windows.Count == 0)
+            if (Glide.App.Platform.GlideWindowRegistry.LaunchReceivers().Count == 0)
             {
                 _state = BrokerState.Stopping;
                 stop = _serverCts;
@@ -369,7 +370,7 @@ internal static class ExternalLaunchBroker
         Task? serverTask;
         lock (Gate)
         {
-            Windows.Clear();
+            Glide.App.Platform.GlideWindowRegistry.ClearLaunchReceivers();
             PendingRequests.Clear();
             _dispatchScheduled = false;
             _activeWindow = null;
@@ -410,8 +411,7 @@ internal static class ExternalLaunchBroker
                 await Task.Delay(250, token).ConfigureAwait(false);
                 lock (Gate)
                 {
-                    CleanupWindowsLocked();
-                    if (Windows.Count == 0 || _ownsPresence) return;
+                    if (Glide.App.Platform.GlideWindowRegistry.LaunchReceivers().Count == 0 || _ownsPresence) return;
                     if (!TryTakeOverPresenceLocked()) continue;
                     EnsureServerStartedLocked();
                     return;
@@ -453,9 +453,9 @@ internal static class ExternalLaunchBroker
     {
         lock (Gate)
         {
-            CleanupWindowsLocked();
-            for (var i = Windows.Count - 1; i >= 0; i--)
-                if (Windows[i].TryGetTarget(out var window) && window.ContainsOpenImage(path)) return window;
+            var receivers = Glide.App.Platform.GlideWindowRegistry.LaunchReceivers();
+            for (var i = receivers.Count - 1; i >= 0; i--)
+                if (receivers[i].ContainsOpenImage(path)) return receivers[i];
             return null;
         }
     }
@@ -464,17 +464,12 @@ internal static class ExternalLaunchBroker
     {
         lock (Gate)
         {
-            CleanupWindowsLocked();
-            if (_activeWindow?.TryGetTarget(out var active) == true &&
-                Windows.Any(reference => reference.TryGetTarget(out var item) && ReferenceEquals(item, active)))
+            var receivers = Glide.App.Platform.GlideWindowRegistry.LaunchReceivers();
+            if (_activeWindow?.TryGetTarget(out var active) == true && receivers.Any(item => ReferenceEquals(item, active)))
                 return active;
-            for (var i = Windows.Count - 1; i >= 0; i--)
-                if (Windows[i].TryGetTarget(out var window)) return window;
-            return null;
+            return receivers.Count > 0 ? receivers[^1] : null;
         }
     }
-
-    private static void CleanupWindowsLocked() => Windows.RemoveAll(reference => !reference.TryGetTarget(out _));
 
     private static async Task ServerLoopAsync(CancellationToken token)
     {
@@ -551,13 +546,23 @@ internal static class ExternalLaunchBroker
                 }
                 if (malformed || requests.Count != count) continue;
 
+                StartupTrace.Write("broker_received", $"items={requests.Count}");
                 var results = AcceptOwnership(requests);
+                if (results is null)
+                {
+                    // Shutting down: drop the connection without RESULTS so the launcher retries and
+                    // elects itself rather than trusting an owner that will never show a window.
+                    StartupTrace.Write("broker_refused_while_stopping", $"items={requests.Count}");
+                    continue;
+                }
                 await WriteLineAsync(writer, $"RESULTS\t{batchId:N}\t{requests.Count}", peerCts.Token).ConfigureAwait(false);
                 foreach (var result in results)
                 {
                     var message = Convert.ToBase64String(Encoding.UTF8.GetBytes(result.Message ?? string.Empty));
                     await WriteLineAsync(writer, $"{result.RequestId:N}\t{result.Status}\t{message}", peerCts.Token).ConfigureAwait(false);
                 }
+                StartupTrace.Write("broker_accepted", "kinds=" + new string(requests.Select(r => r.Kind).ToArray()) +
+                    " statuses=" + string.Join(",", results.Select(r => r.Status)));
                 SchedulePendingDispatch();
             }
             catch (OperationCanceledException) when (token.IsCancellationRequested) { break; }
@@ -572,11 +577,13 @@ internal static class ExternalLaunchBroker
 
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1859:Use concrete types when possible for improved performance",
         Justification = "Cold path (one call per forwarded launch batch); the read-only shapes document that the batch is not mutated.")]
-    private static IReadOnlyList<ExternalLaunchItemResult> AcceptOwnership(IReadOnlyList<ExternalLaunchRequest> requests)
+    internal static IReadOnlyList<ExternalLaunchItemResult>? AcceptOwnership(IReadOnlyList<ExternalLaunchRequest> requests)
     {
         var results = new List<ExternalLaunchItemResult>(requests.Count);
         lock (Gate)
         {
+            // A stopping broker must never take ownership of work: the process is exiting.
+            if (_state == BrokerState.Stopping) return null;
             foreach (var request in requests)
             {
                 if (CompletedRequests.TryGetValue(request.RequestId, out var previous))

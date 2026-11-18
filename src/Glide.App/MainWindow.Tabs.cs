@@ -50,7 +50,7 @@ public partial class MainWindow
             // vertical tabs use the full panel width; the panel scrolls instead of compressing tabs.
             preferred = SideTabPaneWidth - 14;
         }
-        if (_tabMruCycleSnapshot is null) TouchTabMru();
+        _tabStrip.TouchUnlessCycling(TabIds, _workspace.Active?.Id);
 
         var edgeHitTabs = !sideTabs && WindowState is WindowState.Maximized or WindowState.FullScreen;
         if (NewTabButton is not null)
@@ -177,16 +177,21 @@ public partial class MainWindow
             // animated GIF preview stops (and frees its frames) when it closes.
             container.AddHandler(ToolTip.ToolTipOpeningEvent, (_, _) =>
             {
-                tabToolTip.Hint.Text = TabMouseHint();
+                FillTabMouseHint(tabToolTip.Hint);
                 FillTabPreview(tab, tabToolTip);
             });
             container.PropertyChanged += (_, e) =>
             {
                 if (e.Property == ToolTip.IsOpenProperty && e.NewValue is false) StopTabGifPreview(tabToolTip.Card.PictureHost);
             };
-            ToolTip.SetShowDelay(container, 650);
+            // Round 3 #5: Ctrl (or the chosen key) + wheel over the tab resizes its open preview. Tunnel, so the tab strip's
+            // own wheel scrolling never sees those notches.
+            ToolTipGuard.SetKeepsOpenOnWheel(container, e => WheelResizesTabPreview(container, tabToolTip, e));
+            container.AddHandler(PointerWheelChangedEvent, (_, e) =>
+            {
+                if (TryResizeTabPreviewWithWheel(container, tabToolTip, e)) e.Handled = true;
+            }, Avalonia.Interactivity.RoutingStrategies.Tunnel);
             ToolTip.SetTip(close, "Close tab");
-            ToolTip.SetShowDelay(close, 650);
             TabStripPanel.Children.Add(container);
             if (active)
             {
@@ -231,7 +236,8 @@ public partial class MainWindow
             text.Children.Add(new TextBlock { Text = folder, FontSize = detailSize, Opacity = 0.7, TextWrapping = TextWrapping.Wrap });
         var details = new TextBlock { FontSize = detailSize, Opacity = 0.7, TextWrapping = TextWrapping.Wrap, IsVisible = false };
         text.Children.Add(details);
-        var hint = new TextBlock { Text = TabMouseHint(), FontSize = Math.Max(10, detailSize - 1), Opacity = 0.55, TextWrapping = TextWrapping.NoWrap, Margin = new Thickness(0, 3, 0, 0) };
+        var hint = new TextBlock { FontSize = Math.Max(10, detailSize - 1), TextWrapping = TextWrapping.NoWrap, Margin = new Thickness(0, 3, 0, 0) };
+        FillTabMouseHint(hint);
         text.Children.Add(hint);
         var card = new TabHoverCard(CreateTabPreviewHost(), text, hint);
         var toolTip = new ToolTip
@@ -296,36 +302,44 @@ public partial class MainWindow
         }, DispatcherPriority.Loaded);
     }
 
-    /// <summary>Tab tooltip hint that reflects which mouse actions are actually enabled (live settings, custom gestures included).</summary>
-    private string TabMouseHint() => BindingHints.TabMouseHint(_settings.Gestures, _settings.CustomGestures);
-
-    // ---- Ctrl+Tab most-recently-used cycling ---------------------------------------------------
-    private readonly List<Guid> _tabMru = new();
-    private List<Guid>? _tabMruCycleSnapshot;
-    private int _tabMruCycleIndex;
-    private bool _lastKeyDownHadCtrl;
-
-    /// <summary>Moves the active tab to the front of the MRU list (outside an in-progress Ctrl+Tab cycle).</summary>
-    private void TouchTabMru()
+    /// <summary>
+    /// Tab tooltip hint that reflects which mouse actions are actually enabled (live settings, custom gestures included)
+    /// and the chosen preview-resize key: one line of key chips (BindingHints.TabMouseHintChips), approved design B
+    /// (5.1.0): [Drag] move · [Middle] close · [Right] more · [Ctrl+Wheel] size.
+    /// </summary>
+    private void FillTabMouseHint(TextBlock hint)
     {
-        var ids = _workspace.Tabs.Select(t => t.Id).ToHashSet();
-        _tabMru.RemoveAll(id => !ids.Contains(id));
-        foreach (var tab in _workspace.Tabs)
-            if (!_tabMru.Contains(tab.Id)) _tabMru.Add(tab.Id);
-        if (_workspace.Active is { } active)
+        var chips = BindingHints.TabMouseHintChips(_settings.Gestures, _settings.CustomGestures, _settings.TabPreviewResizeModifier);
+        var muted = new SolidColorBrush(Color.FromArgb(0xB0, 0xA8, 0xA8, 0xA8));
+        var inlines = hint.Inlines ??= new Avalonia.Controls.Documents.InlineCollection();
+        inlines.Clear();
+        for (var i = 0; i < chips.Count; i++)
         {
-            _tabMru.Remove(active.Id);
-            _tabMru.Insert(0, active.Id);
+            if (i > 0) inlines.Add(new Avalonia.Controls.Documents.Run(" \u00b7 ") { Foreground = muted });
+            inlines.Add(new Avalonia.Controls.Documents.InlineUIContainer(new Border
+            {
+                BorderBrush = new SolidColorBrush(Color.FromRgb(0x66, 0x66, 0x66)),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(3),
+                Padding = new Thickness(4, 0),
+                Child = new TextBlock { Text = chips[i].Input, FontSize = hint.FontSize, Foreground = new SolidColorBrush(Color.FromRgb(0xDD, 0xDD, 0xDD)) },
+            }) { BaselineAlignment = BaselineAlignment.Center });
+            inlines.Add(new Avalonia.Controls.Documents.Run(" " + chips[i].Action) { Foreground = muted });
         }
     }
 
+    // ---- Ctrl+Tab most-recently-used cycling ---------------------------------------------------
+    // Stage D4: MRU, overflow, drag-slide and tear-off decisions live in Glide.Core.TabStripController.
+    private readonly TabStripController _tabStrip = new();
+    private bool _lastKeyDownHadCtrl;
+
+    private IEnumerable<Guid> TabIds => _workspace.Tabs.Select(t => t.Id);
+
+    /// <summary>Moves the active tab to the front of the MRU list.</summary>
+    private void TouchTabMru() => _tabStrip.Touch(TabIds, _workspace.Active?.Id);
+
     /// <summary>Releasing Ctrl ends an MRU cycle and commits the landed-on tab as most recent.</summary>
-    private void EndTabMruCycle()
-    {
-        if (_tabMruCycleSnapshot is null) return;
-        _tabMruCycleSnapshot = null;
-        TouchTabMru();
-    }
+    private void EndTabMruCycle() => _tabStrip.EndCycle(TabIds, _workspace.Active?.Id);
 
     private void TabOverflowLeftClicked(object? sender, RoutedEventArgs e)
     {
@@ -342,10 +356,8 @@ public partial class MainWindow
     private void ScrollTabStrip(int direction)
     {
         if (!_settings.TabOverflowArrows || direction == 0) return;
-        var viewport = Math.Max(1, TabStripScroll.Viewport.Width);
-        var maxOffset = Math.Max(0, TabStripScroll.Extent.Width - viewport);
-        var step = Math.Max(90, Math.Min(Math.Max(_settings.TabMaxWidth, 120) + 3, viewport * 0.65));
-        var next = Math.Clamp(TabStripScroll.Offset.X + direction * step, 0, maxOffset);
+        var next = TabStripController.ScrollOffset(TabStripScroll.Viewport.Width, TabStripScroll.Extent.Width,
+            TabStripScroll.Offset.X, direction, _settings.TabMaxWidth);
         TabStripScroll.Offset = new Vector(next, TabStripScroll.Offset.Y);
         Dispatcher.UIThread.Post(UpdateTabOverflowButtons, DispatcherPriority.Render);
     }
@@ -353,29 +365,13 @@ public partial class MainWindow
     private void UpdateTabOverflowButtons()
     {
         if (TabOverflowLeftButton is null || TabOverflowRightButton is null || TabStripScroll is null) return;
-        if (SideTabsActive)
-        {
-            TabOverflowLeftButton.IsVisible = false;
-            TabOverflowRightButton.IsVisible = false;
-            return;
-        }
         // At very small widths the three caption buttons and actual tab bodies outrank overflow
         // arrows. Hide the arrows and let the tabs compress/scroll rather than spending 56 DIP on
         // navigation chrome while the user is deliberately squeezing the window.
-        if (!_settings.TabsEnabled || !_settings.TabOverflowArrows || Bounds.Width < 330)
-        {
-            TabOverflowLeftButton.IsVisible = false;
-            TabOverflowRightButton.IsVisible = false;
-            return;
-        }
-
-        var viewport = TabStripScroll.Viewport.Width;
-        var extent = TabStripScroll.Extent.Width;
-        var maxOffset = Math.Max(0, extent - Math.Max(0, viewport));
-        var overflow = maxOffset > 1;
-        var x = Math.Clamp(TabStripScroll.Offset.X, 0, maxOffset);
-        TabOverflowLeftButton.IsVisible = overflow && x > 1;
-        TabOverflowRightButton.IsVisible = overflow && x < maxOffset - 1;
+        var allowed = TabStripController.OverflowArrowsAllowed(SideTabsActive, _settings.TabsEnabled, _settings.TabOverflowArrows, Bounds.Width);
+        var (left, right) = TabStripController.OverflowArrows(allowed, TabStripScroll.Viewport.Width, TabStripScroll.Extent.Width, TabStripScroll.Offset.X);
+        TabOverflowLeftButton.IsVisible = left;
+        TabOverflowRightButton.IsVisible = right;
     }
 
     private async void TabDragPointerPressed(object? sender, PointerPressedEventArgs e)
@@ -425,7 +421,7 @@ public partial class MainWindow
             case GestureCatalog.Nothing:
                 return;
             case GestureCatalog.DetachTab:
-                await DetachTabAsync(id, this.PointToScreen(new Point(Bounds.Width / 2, 48)));
+                await DetachTabAsync(id, this.PointToScreen(new Point(Bounds.Width / 2, 48)), fromMenu: true);
                 return;
             case GestureCatalog.DuplicateTab:
                 if (_workspace.Active?.Id != id) { CaptureActiveTabRuntimeState(); if (_workspace.Select(id)) await ActivateWorkspaceAsync(); }
@@ -473,37 +469,12 @@ public partial class MainWindow
         // physical feel much more closely while keeping the dragged tab exactly under the pointer.
         if (_tabAttach.Target is not null) return -1;
         var slot = Math.Max(1, (vertical ? moving.Bounds.Height : moving.Bounds.Width) + 3);
-        var slotsTravelled = draggedOffsetX / slot;
         // the slot the preview shows (a neighbour counts as swapped once it is half way across)
         // is exactly what release commits, so a drop never snaps back after tabs visibly swapped.
         var previewInsertIndex = Glide.Core.TabDragPolicy.PreviewInsertIndex(originalIndex, borders.Count, draggedOffsetX, slot);
-        static double Smooth(double t)
-        {
-            t = Math.Clamp(t, 0, 1);
-            return t * t * (3 - 2 * t);
-        }
-
-        if (slotsTravelled > 0)
-        {
-            for (var i = originalIndex + 1; i < borders.Count; i++)
-            {
-                var relative = i - originalIndex;
-                var progress = Smooth((slotsTravelled - (relative - 0.75)) / 0.5);
-                if (progress <= 0) continue;
-                borders[i].RenderTransform = Along(-slot * progress);
-            }
-        }
-        else if (slotsTravelled < 0)
-        {
-            var travelled = -slotsTravelled;
-            for (var i = originalIndex - 1; i >= 0; i--)
-            {
-                var relative = originalIndex - i;
-                var progress = Smooth((travelled - (relative - 0.75)) / 0.5);
-                if (progress <= 0) continue;
-                borders[i].RenderTransform = Along(slot * progress);
-            }
-        }
+        var offsets = TabStripController.NeighbourOffsets(originalIndex, borders.Count, draggedOffsetX, slot);
+        for (var i = 0; i < borders.Count; i++)
+            if (i != originalIndex && offsets[i] != 0) borders[i].RenderTransform = Along(offsets[i]);
         return previewInsertIndex;
     }
 
@@ -608,7 +579,7 @@ public partial class MainWindow
         var detached = new MainWindow(transferred, _settings.CloneState(), deferWorkspaceActivation: true);
         CopyWindowGeometryTo(detached);
         ShowSecondaryWindow(detached);
-        detached.Position = new PixelPoint(Math.Max(0, cursor.X - 120), Math.Max(0, cursor.Y - 22));
+        PlaceDetachedWindow(detached, cursor, grabX: 120, grabY: 22);
         RebuildTabStrip();
         _diagnostics.Write("tabs", "held_tearoff_started", new { id, screenX = cursor.X, screenY = cursor.Y, moveLoop = "native-windows" });
         await detached.RunNativeDetachedTabDragAsync(transferred.Id, this, cursor);
@@ -710,14 +681,14 @@ public partial class MainWindow
 
     private bool TryRunNativeWindowMoveLoop()
     {
-        if (!OperatingSystem.IsWindows() || (GetAsyncKeyState(VkLButton) & 0x8000) == 0) return false;
+        if (!OperatingSystem.IsWindows() || (Platform.Native.User32.GetAsyncKeyState(VkLButton) & 0x8000) == 0) return false;
         var platform = TryGetPlatformHandle();
         if (platform is null || platform.Handle == IntPtr.Zero) return false;
         try
         {
-            ReleaseNativeCapture();
+            Platform.Native.User32.ReleaseCapture();
             EnterNativeMoveLoopGuard();
-            try {            SendMessageW(platform.Handle, WmNcLButtonDown, (IntPtr)HtCaption, IntPtr.Zero);}
+            try {            Platform.Native.User32.SendMessage(platform.Handle, WmNcLButtonDown, (IntPtr)HtCaption, IntPtr.Zero);}
             finally { LeaveNativeMoveLoopGuard(); }
             return true;
         }
@@ -772,15 +743,11 @@ public partial class MainWindow
 
     private bool IsBeyondTabTearOffThreshold(PixelPoint point)
     {
-        if (!GetWindowScreenRect().Contains(point)) return true;
+        var inside = GetWindowScreenRect().Contains(point);
+        if (!inside) return true;
         var strip = GetTabStripScreenRect();
-        var scale = TopLevel.GetTopLevel(this)?.RenderScaling ?? 1.0;
-        if (scale <= 0) scale = 1.0;
-        // generous vertical slack so a slightly sloppy horizontal reorder never tears the tab off.
-        var verticalTolerance = Math.Max(48, (int)Math.Round(64 * scale));
-        // Vertical tabs tear off sideways: well to the right of (or left of) the side panel.
-        if (SideTabsActive) return point.X < strip.X - verticalTolerance || point.X > (strip.X + strip.Width) + verticalTolerance;
-        return point.Y < strip.Y - verticalTolerance || point.Y > (strip.Y + strip.Height) + verticalTolerance;
+        return TabStripController.BeyondTearOffThreshold(inside, SideTabsActive, point.X, point.Y,
+            strip.X, strip.Y, strip.Width, strip.Height, TopLevel.GetTopLevel(this)?.RenderScaling ?? 1.0);
     }
 
     private ScreenPixelRect GetWindowScreenRect()
@@ -809,34 +776,7 @@ public partial class MainWindow
     private const uint SwpNoOwnerZOrder = 0x0200;
     private const uint SwpNoSendChanging = 0x0400;
 
-    [StructLayout(LayoutKind.Sequential)]
-    private struct NativePoint
-    {
-        public int X;
-        public int Y;
-    }
-
-    [DllImport("user32.dll")]
-    private static extern short GetAsyncKeyState(int vKey);
-
-    [DllImport("user32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool GetCursorPos(out NativePoint lpPoint);
-
-    [DllImport("user32.dll", EntryPoint = "ReleaseCapture")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool ReleaseNativeCapture();
-
-    [DllImport("user32.dll", EntryPoint = "GetCapture")]
-    private static extern IntPtr GetNativeCapture();
-
-    [DllImport("user32.dll", EntryPoint = "SendMessageW")]
-    private static extern IntPtr SendMessageW(IntPtr hWnd, uint message, IntPtr wParam, IntPtr lParam);
-
-    [DllImport("user32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
-
+    // user32 entry points: Platform/Native/User32.cs (Stage D9).
 
     private static (bool Left, bool Right, bool Middle) PhysicalMouseButtons(PointerPoint point)
     {
@@ -850,7 +790,7 @@ public partial class MainWindow
 
     private static bool TryGetPhysicalCursor(out PixelPoint point)
     {
-        if (GetCursorPos(out var native))
+        if (Platform.Native.User32.GetCursorPos(out var native))
         {
             point = new PixelPoint(native.X, native.Y);
             return true;
@@ -988,19 +928,63 @@ public partial class MainWindow
         Activate();
     }
 
-    private async Task DetachTabAsync(Guid id, PixelPoint screenPoint)
+    private async Task DetachTabAsync(Guid id, PixelPoint screenPoint) => await DetachTabAsync(id, screenPoint, fromMenu: false);
+
+    /// <summary>
+    /// Moves a tab to a new window (tab menu, the detach command / gesture, a drag released outside the strip). Like a
+    /// drag-out, the tab leaves this window's strip at once and this window shows the tab that closing it would show
+    /// (or Home / closes when it was the last tab). The menu and command place the new window by
+    /// <see cref="DetachedWindowPlacement.ForMenuMove"/>, a drop at the pointer; both stay inside the work area.
+    /// </summary>
+    private async Task DetachTabAsync(Guid id, PixelPoint screenPoint, bool fromMenu)
     {
         if (!_settings.TabDetachEnabled) return;
+        var wasActive = _workspace.Active?.Id == id;
         CaptureTabRuntimeState(id);
         var transferred = RemoveTabForTransfer(id);
         if (transferred is null) return;
         var detached = new MainWindow(transferred, _settings.CloneState());
         CopyWindowGeometryTo(detached);
+        if (fromMenu)
+        {
+            detached.WindowState = WindowState.Normal;
+            if (_normalPlacementKnown && WindowState != WindowState.Normal)
+            {
+                detached.Width = Math.Max(detached.MinWidth, _lastNormalWindowSize.Width);
+                detached.Height = Math.Max(detached.MinHeight, _lastNormalWindowSize.Height);
+            }
+        }
+        PlaceDetachedWindow(detached, fromMenu ? null : screenPoint, grabX: 100, grabY: 24);
         ShowSecondaryWindow(detached);
-        detached.Position = new PixelPoint(Math.Max(0, screenPoint.X - 100), Math.Max(0, screenPoint.Y - 24));
-        _diagnostics.Write("tabs", "detached", new { id, screenX = screenPoint.X, screenY = screenPoint.Y });
+        _diagnostics.Write("tabs", "detached", new { id, fromMenu, screenX = screenPoint.X, screenY = screenPoint.Y });
         HandleSourceAfterTransfer();
-        await Task.CompletedTask;
+        if (IsVisible)
+        {
+            RebuildTabStrip();
+            if (wasActive || _workspace.Tabs.Count > 0) await ActivateWorkspaceAsync();
+        }
+    }
+
+    /// <summary>Positions a window opened for a moved tab inside the monitor's work area (pure math: DetachedWindowPlacement).</summary>
+    private void PlaceDetachedWindow(MainWindow detached, PixelPoint? pointer, int grabX, int grabY)
+    {
+        var anchor = pointer ?? (WindowState == WindowState.Normal || !_normalPlacementKnown ? Position : _lastNormalWindowPosition);
+        var screen = Screens.ScreenFromPoint(anchor) ?? Screens.ScreenFromWindow(this) ?? Screens.Primary;
+        if (screen is null)
+        {
+            detached.Position = pointer is { } p ? new PixelPoint(Math.Max(0, p.X - grabX), Math.Max(0, p.Y - grabY)) : anchor;
+            return;
+        }
+        var scale = screen.Scaling > 0 ? screen.Scaling : 1;
+        var work = new PixelBox(screen.WorkingArea.X, screen.WorkingArea.Y, screen.WorkingArea.Width, screen.WorkingArea.Height);
+        var width = (int)Math.Round((double.IsNaN(detached.Width) ? Bounds.Width : detached.Width) * scale);
+        var height = (int)Math.Round((double.IsNaN(detached.Height) ? Bounds.Height : detached.Height) * scale);
+        var box = pointer is { } at
+            ? DetachedWindowPlacement.ForDragOut(at.X, at.Y, (int)(grabX * scale), (int)(grabY * scale), width, height, work)
+            : DetachedWindowPlacement.ForMenuMove(new PixelBox(anchor.X, anchor.Y, width, height), work);
+        if (box.Width < width) detached.Width = box.Width / scale;
+        if (box.Height < height) detached.Height = box.Height / scale;
+        detached.Position = new PixelPoint(box.X, box.Y);
     }
 
     private void HandleSourceAfterTransfer(bool successfulCrossWindowTransfer = false)
@@ -1036,7 +1020,7 @@ public partial class MainWindow
         }
         items.Add(Item("Duplicate tab", "tab.duplicate", () => _ = DuplicateTabByIdAsync(tab.Id), true, "Copy"));
         items.Add(BuildTabPlacementMenuItem());
-        items.Add(Item("Move tab to new window", "tab.detach", () => _ = DetachTabAsync(tab.Id, this.PointToScreen(new Point(Bounds.Width / 2, 42))), _settings.TabDetachEnabled, "OpenWith"));
+        items.Add(Item("Move tab to new window", "tab.detach", () => _ = DetachTabAsync(tab.Id, this.PointToScreen(new Point(Bounds.Width / 2, 42)), fromMenu: true), _settings.TabDetachEnabled, "OpenWith"));
         if (tab is BrowserTabState browser)
             items.Add(Item("Open first image in folder", "tab.openFirstImage", () => _ = OpenFirstImageInFolderAsync(browser.Folder), true, "Image"));
         var tabFolder = tab switch
@@ -1070,8 +1054,20 @@ public partial class MainWindow
             _diagnostics.Write("tabs", "last_tab_close_refused", new { id, source });
             return;
         }
-        if (!_workspace.Close(id, ensureHome: false, TabCloseActivationMode, RecentlyUsedTabs())) return;
+        var closedIndex = _workspace.Tabs.ToList().FindIndex(t => t.Id == id);
+        var closedTab = closedIndex >= 0 ? _workspace.Tabs[closedIndex] : null;
+        var closedWasActive = _workspace.Active?.Id == id;
+        var activation = TabCloseActivationMode;
+        if (!_workspace.Close(id, ensureHome: false, activation, RecentlyUsedTabs())) return;
         _diagnostics.Write("tabs", "closed", new { id, source, remaining = _workspace.Tabs.Count });
+        // 5.1.0 "Custom…": a new tab of the chosen kind takes the closed active tab's place (only while other tabs remain;
+        // closing the last tab keeps the last-tab behaviour). If it cannot be made, the previously used tab stays active.
+        if (activation == Glide.Core.Workspace.TabCloseActivationMode.Custom && closedWasActive && closedTab is not null && _workspace.Tabs.Count > 0 &&
+            Glide.Core.Workspace.TabCloseCustomTargets.Create(_settings.AfterTabCloseCustomTarget, closedTab, LastExplorerFolderForNewTab(), Directory.Exists) is { } replacement)
+        {
+            _workspace.InsertTransferred(replacement, closedIndex, activate: true);
+            RebuildTabStrip();
+        }
         if (_workspace.Tabs.Count == 0)
         {
             if (string.Equals(_settings.LastTabCloseBehavior, "Close program", StringComparison.OrdinalIgnoreCase))
@@ -1180,6 +1176,12 @@ public partial class MainWindow
         return AddNewHomeTab();
     }
 
+    /// <summary>The folder a "new empty Explorer tab" opens at: the last folder new Explorer tabs used, else the usual fresh folder.</summary>
+    private string LastExplorerFolderForNewTab() =>
+        !string.IsNullOrWhiteSpace(_settings.LastNewExplorerTabDirectory) && Directory.Exists(_settings.LastNewExplorerTabDirectory)
+            ? Path.GetFullPath(_settings.LastNewExplorerTabDirectory)
+            : ResolveFreshExplorerFolder();
+
     private string ResolveFreshExplorerFolder()
     {
         if (!string.IsNullOrWhiteSpace(_settings.NewExplorerTabDefaultDirectory) && Directory.Exists(_settings.NewExplorerTabDefaultDirectory))
@@ -1275,9 +1277,10 @@ public partial class MainWindow
     {
         // Every Back / Forward control (title-bar buttons, Explorer toolbar) follows the active tab's history.
         UpdateHistoryNavigationState();
+        UpdatePictureAddressRow();
         if (TabNavBackButton is null || TabNavForwardButton is null) return;
-        var canBack = Glide.Core.Navigation.CrossTabHistory.CanGo(ActiveHistory, -1, _settings.ExplorerBackReturnsToImage);
-        var canForward = Glide.Core.Navigation.CrossTabHistory.CanGo(ActiveHistory, 1, _settings.ExplorerBackReturnsToImage);
+        var canBack = Glide.Core.Navigation.CrossTabHistory.CanGo(ActiveHistory, -1, ExplorerOptionsView.BackReturnsToImage);
+        var canForward = Glide.Core.Navigation.CrossTabHistory.CanGo(ActiveHistory, 1, ExplorerOptionsView.BackReturnsToImage);
         _titleNavCanBack = canBack;
         _titleNavCanForward = canForward;
         TabNavBackButton.Classes.Set("inactive", !canBack);
@@ -1387,12 +1390,13 @@ public partial class MainWindow
                 Tag = entry,
                 HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch,
                 HorizontalContentAlignment = Avalonia.Layout.HorizontalAlignment.Left,
-                Content = $"{(string.Equals(entry.Kind, "folder", StringComparison.OrdinalIgnoreCase) ? "Folder" : "Image")}   {entry.Path}"
+                // A TextBlock, not a string: a string Content becomes AccessText, which eats "_" in file names as a mnemonic.
+                Content = new TextBlock { Text = $"{(string.Equals(entry.Kind, "folder", StringComparison.OrdinalIgnoreCase) ? "Folder" : "Image")}   {entry.Path}" }
             };
             button.Classes.Add("recentItem");
             ToolTip.SetTip(button, entry.Path);
-            ToolTip.SetShowDelay(button, 650);
             button.Click += RecentHistoryItemClicked;
+            button.AddHandler(InputElement.PointerReleasedEvent, RecentHistoryItemMiddleReleased, Avalonia.Interactivity.RoutingStrategies.Bubble, true);
             _homeSurface.RecentHost.Children.Add(button);
         }
         _homeSurface.RecentPanel.IsVisible = entries.Count > 0;
@@ -1415,7 +1419,26 @@ public partial class MainWindow
         else RefreshRecentHistoryHome();
     }
 
-    private void ClearRecentHistoryClicked(object? sender, RoutedEventArgs e)
+    /// <summary>5.1.0: middle-click on a Recent row opens it in a new tab with the Explorer middle-click policy (default: background, at the end; held keys flip it).</summary>
+    private async void RecentHistoryItemMiddleReleased(object? sender, PointerReleasedEventArgs e)
+    {
+        if (e.InitialPressMouseButton != MouseButton.Middle || sender is not Button { Tag: RecentHistoryStore.Entry entry }) return;
+        e.Handled = true;
+        var opening = ResolveMiddleClickOpening(e.KeyModifiers);
+        if (string.Equals(entry.Kind, "folder", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!Directory.Exists(entry.Path)) { RefreshRecentHistoryHome(); return; }
+            await OpenFolderInNewTabAsync(entry.Path, opening, "home_recent_middle_click");
+            RecentHistoryStore.RecordFolder(entry.Path, _settings.HistorySize);
+            return;
+        }
+        if (File.Exists(entry.Path)) await OpenImageInNewTabAsync(entry.Path, opening, "home_recent_middle_click");
+        else RefreshRecentHistoryHome();
+    }
+
+    private void ClearRecentHistoryClicked(object? sender, RoutedEventArgs e) => ClearRecentHistoryList();
+
+    private void ClearRecentHistoryList()
     {
         RecentHistoryStore.Clear();
         RefreshRecentHistoryHome();
@@ -1429,7 +1452,9 @@ public partial class MainWindow
         RefreshRecentHistoryHome();
     }
 
-    private void ResizeRecentHistoryClicked(object? sender, RoutedEventArgs e)
+    private void ResizeRecentHistoryClicked(object? sender, RoutedEventArgs e) => CycleRecentHistoryTileSize();
+
+    private void CycleRecentHistoryTileSize()
     {
         _settings.WelcomeRecentSize = _settings.WelcomeRecentSize switch
         {
@@ -1533,18 +1558,9 @@ public partial class MainWindow
             return;
         }
 
-        if (_tabMruCycleSnapshot is null)
-        {
-            TouchTabMru();
-            _tabMruCycleSnapshot = _tabMru.ToList();
-            _tabMruCycleIndex = 0;
-        }
-        var snapshot = _tabMruCycleSnapshot;
-        _tabMruCycleIndex = ((_tabMruCycleIndex + delta) % snapshot.Count + snapshot.Count) % snapshot.Count;
-        var target = snapshot[_tabMruCycleIndex];
         // Without Ctrl held (a rebound shortcut or menu), each press is one complete MRU switch.
         var holdingCtrl = _lastKeyDownHadCtrl;
-        if (!holdingCtrl) _tabMruCycleSnapshot = null;
+        var target = _tabStrip.NextInCycle(TabIds, _workspace.Active?.Id, delta, holdingCtrl);
         if (_workspace.Select(target)) await ActivateWorkspaceAsync();
         if (!holdingCtrl) TouchTabMru();
     }

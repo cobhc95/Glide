@@ -13,6 +13,7 @@ namespace Glide.Explorer.Tests;
 /// pointer is hit-tested, and the tooltip service must actually open the tooltip. Covers the Settings footer change
 /// summary and the rows and category headings of the title-bar and status-bar customisers.
 /// </summary>
+[Trait("Area", "Explorer")]
 public sealed class HoverToolTipTests
 {
     private static async Task Settle(ExplorerHarness h, int rounds = 5)

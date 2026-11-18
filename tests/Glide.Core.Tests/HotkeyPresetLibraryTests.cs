@@ -6,6 +6,7 @@ using Glide.Core.Commands;
 namespace Glide.Core.Tests;
 
 /// <summary>Custom hotkey presets: save, apply, rename and delete next to the built-ins; persistence and profile export/import.</summary>
+[Trait("Area", "Hotkeys")]
 public sealed class HotkeyPresetLibraryTests
 {
     private static Dictionary<string, List<string>> Modified()
@@ -238,7 +239,7 @@ public sealed class HotkeyPresetLibraryTests
         finally
         {
             SettingsStore.SettingsDirectoryOverrideForTests.Value = previous;
-            try { Directory.Delete(root, true); } catch { }
+            TempDir.TryDelete(root);
         }
     }
 }

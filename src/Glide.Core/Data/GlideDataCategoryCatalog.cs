@@ -1,4 +1,3 @@
-using Glide.Core.Reset;
 
 namespace Glide.Core.Data;
 
@@ -98,8 +97,6 @@ public static class GlideDataCategoryCatalog
 
     public static GlideDataCategory Get(ResetItemId id) => All.First(x => x.Id == id);
 
-    public static GlideDataCategory? FromBackupEntryName(string name) =>
-        All.FirstOrDefault(x => x.BackupEntryName is not null && string.Equals(x.BackupEntryName, name, StringComparison.OrdinalIgnoreCase));
 
     public static string GroupTitle(ResetGroup group) => group switch
     {
@@ -117,17 +114,13 @@ public static class GlideDataCategoryCatalog
 
     /// <summary>
     /// Values of glide.settings.json that "All settings" never exports or imports: everything Reset Glide's "All settings"
-    /// keeps (<see cref="ResetCatalog.AllSettingsKeptProperties"/>: schema version, hotkeys and gestures, the last profile folder,
+    /// keeps (<see cref="GlideSettingsPropertyGroups.AllSettingsKeptProperties"/>: schema version, hotkeys and gestures, the last profile folder,
     /// window geometry, remembered folders, the Windows startup switches, the update checker's memory) EXCEPT the saved
     /// "User custom" performance preset, which is a preset the user saved and travels with the options. The Windows startup
     /// switches are never imported: an import must not add or remove the Windows Run entry.
     /// </summary>
-    // Computed on first use, not in the type initializer: ResetCatalog's initializer reads this catalogue, so reading
-    // ResetCatalog from ours could see its lists still unset.
-    public static IReadOnlyList<string> AllSettingsBackupExcludedProperties => _allSettingsBackupExcluded ??=
-        ResetCatalog.AllSettingsKeptProperties.Except(ResetCatalog.SavedPerformancePresetProperties, StringComparer.Ordinal).ToArray();
-
-    private static string[]? _allSettingsBackupExcluded;
+    public static IReadOnlyList<string> AllSettingsBackupExcludedProperties { get; } =
+        GlideSettingsPropertyGroups.AllSettingsKeptProperties.Except(GlideSettingsPropertyGroups.SavedPerformancePresetProperties, StringComparer.Ordinal).ToArray();
 
     /// <summary>
     /// The glide.settings.json properties a backup category carries, chosen from <paramref name="allProperties"/> (every
@@ -140,12 +133,12 @@ public static class GlideDataCategoryCatalog
         IEnumerable<string> chosen = id switch
         {
             ResetItemId.AllSettings => all.Where(p => !AllSettingsBackupExcludedProperties.Contains(p, StringComparer.OrdinalIgnoreCase)),
-            ResetItemId.HotkeysAndGestures => ResetCatalog.HotkeyGestureProperties,
-            ResetItemId.WindowPlacements => ResetCatalog.WindowPlacementProperties,
-            ResetItemId.LastSession => ResetCatalog.SessionLocationProperties,
+            ResetItemId.HotkeysAndGestures => GlideSettingsPropertyGroups.HotkeyGestureProperties,
+            ResetItemId.WindowPlacements => GlideSettingsPropertyGroups.WindowPlacementProperties,
+            ResetItemId.LastSession => GlideSettingsPropertyGroups.SessionLocationProperties,
             _ => [],
         };
-        return chosen.Where(p => !string.Equals(p, ResetCatalog.SettingsSchemaVersionProperty, StringComparison.OrdinalIgnoreCase))
+        return chosen.Where(p => !string.Equals(p, GlideSettingsPropertyGroups.SettingsSchemaVersionProperty, StringComparison.OrdinalIgnoreCase))
             .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
     }
 

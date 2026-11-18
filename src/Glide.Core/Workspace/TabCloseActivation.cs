@@ -9,6 +9,15 @@ public enum TabCloseActivationMode
     Left,
     /// <summary>The most recently used remaining tab.</summary>
     PreviouslyUsed,
+    /// <summary>5.1.0: the first tab.</summary>
+    First,
+    /// <summary>5.1.0: the last tab.</summary>
+    Last,
+    /// <summary>
+    /// 5.1.0: a new tab chosen by "Custom tab to show" (<see cref="TabCloseCustomTargets"/>), opened where the closed tab was.
+    /// Until it is added (or when it cannot be made) this picks like <see cref="PreviouslyUsed"/>.
+    /// </summary>
+    Custom,
 }
 
 /// <summary>Values of the "Ctrl+Tab switching order" setting (tabs.cycleOrder).</summary>
@@ -29,14 +38,20 @@ public static class TabCloseActivation
     public const string PreviouslyUsed = "Previously used tab";
     public const string Right = "Tab to the right";
     public const string Left = "Tab to the left";
+    // 5.1.0, appended so stored values never shift.
+    public const string FirstTab = "First tab";
+    public const string LastTab = "Last tab";
+    public const string Custom = "Custom…";
     // 5.0.6 release: Previously used tab (dev builds of 5.0.6 shipped Match Ctrl+Tab order; SettingsStore migrates that stored value once).
     public const string Default = PreviouslyUsed;
 
     /// <summary>In the Settings combo order.</summary>
-    public static IReadOnlyList<string> All { get; } = [MatchCycleOrder, PreviouslyUsed, Right, Left];
+    public static IReadOnlyList<string> All { get; } = [MatchCycleOrder, PreviouslyUsed, Right, Left, FirstTab, LastTab, Custom];
 
     public static string Normalize(string? value) =>
-        All.FirstOrDefault(v => string.Equals(v, value, StringComparison.OrdinalIgnoreCase)) ?? Default;
+        All.FirstOrDefault(v => string.Equals(v, value, StringComparison.OrdinalIgnoreCase))
+        // "Custom..." typed with three dots (a hand-edited settings file) is the same choice.
+        ?? (string.Equals(value?.Trim(), "Custom...", StringComparison.OrdinalIgnoreCase) ? Custom : Default);
 
     /// <summary>
     /// The mode in effect. "Match Ctrl+Tab order" is Previously used tab when Ctrl+Tab cycles in most-recently-used
@@ -47,6 +62,9 @@ public static class TabCloseActivation
         PreviouslyUsed => TabCloseActivationMode.PreviouslyUsed,
         Right => TabCloseActivationMode.Right,
         Left => TabCloseActivationMode.Left,
+        FirstTab => TabCloseActivationMode.First,
+        LastTab => TabCloseActivationMode.Last,
+        Custom => TabCloseActivationMode.Custom,
         MatchCycleOrder => TabCycleOrders.IsMostRecentlyUsed(cycleOrder)
             ? TabCloseActivationMode.PreviouslyUsed
             : TabCloseActivationMode.Right,
@@ -60,7 +78,9 @@ public static class TabCloseActivation
     public static int NextActiveIndex(IReadOnlyList<TabState> remaining, int closedIndex, TabCloseActivationMode mode, IReadOnlyList<Guid>? recentlyUsed)
     {
         if (remaining.Count == 0) return -1;
-        if (mode == TabCloseActivationMode.PreviouslyUsed && recentlyUsed is not null)
+        if (mode == TabCloseActivationMode.First) return 0;
+        if (mode == TabCloseActivationMode.Last) return remaining.Count - 1;
+        if (mode is TabCloseActivationMode.PreviouslyUsed or TabCloseActivationMode.Custom && recentlyUsed is not null)
         {
             foreach (var id in recentlyUsed)
             {
@@ -71,4 +91,37 @@ public static class TabCloseActivation
         var right = Math.Clamp(closedIndex, 0, remaining.Count - 1);
         return mode == TabCloseActivationMode.Left ? Math.Clamp(closedIndex - 1, 0, remaining.Count - 1) : right;
     }
+}
+
+/// <summary>
+/// Values of "Custom tab to show" (5.1.0), used when "After closing a tab, activate" is Custom…: the closed tab is replaced
+/// by a new tab of this kind, at its place. When that tab cannot be made (no Explorer folder known, the closed tab was not
+/// a picture, the folder is gone) Glide falls back to the previously used tab.
+/// </summary>
+public static class TabCloseCustomTargets
+{
+    public const string Home = "Home";
+    public const string NewExplorer = "New empty Explorer tab";
+    public const string PictureFolder = "Explorer tab with the closed picture's folder";
+    public const string Default = Home;
+
+    /// <summary>In the Settings combo order.</summary>
+    public static IReadOnlyList<string> All { get; } = [Home, NewExplorer, PictureFolder];
+
+    public static string Normalize(string? value) =>
+        All.FirstOrDefault(v => string.Equals(v, value?.Trim(), StringComparison.OrdinalIgnoreCase)) ?? Default;
+
+    /// <summary>
+    /// The new tab to show after closing <paramref name="closed"/>, or null to fall back. <paramref name="lastExplorerFolder"/>
+    /// is the folder a new Explorer tab opens at; <paramref name="folderExists"/> checks a folder.
+    /// </summary>
+    public static TabState? Create(string? target, TabState closed, string? lastExplorerFolder, Func<string, bool> folderExists) =>
+        Normalize(target) switch
+        {
+            NewExplorer => !string.IsNullOrWhiteSpace(lastExplorerFolder) && folderExists(lastExplorerFolder)
+                ? new BrowserTabState(Guid.NewGuid(), lastExplorerFolder) : null,
+            PictureFolder => closed is ImageTabState { Path: var path } && Path.GetDirectoryName(path) is { Length: > 0 } folder && folderExists(folder)
+                ? new BrowserTabState(Guid.NewGuid(), folder) : null,
+            _ => new HomeTabState(Guid.NewGuid()),
+        };
 }

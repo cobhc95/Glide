@@ -1,13 +1,14 @@
 namespace Glide.Core.Tests;
 
 // Source-text contract kept: this asserts on production source (UI code-behind, native/installer files or a repo-wide scan) that cannot be run headlessly; behavioural coverage lives in the other test files.
+[Trait("Area", "Window")]
 public sealed class TransitionRemovalContractTests
 {
     [Fact]
     public void Image_and_slideshow_transition_settings_are_removed()
     {
         var catalog = ReadSource("src", "Glide.Core", "Settings", "SettingsCatalog.cs");
-        var settings = ReadSource("src", "Glide.App", "Settings", "GlideSettingsState.cs");
+        var settings = ReadSource("src", "Glide.Core", "Settings", "GlideSettingsState.cs");
         var window = ReadSource("src", "Glide.App", "MainWindow.axaml.cs");
 
         Assert.DoesNotContain("\"view.transitionEnabled\"", catalog, StringComparison.Ordinal);

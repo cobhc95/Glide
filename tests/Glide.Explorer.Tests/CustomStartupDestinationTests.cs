@@ -12,6 +12,7 @@ namespace Glide.Explorer.Tests;
 /// non-blocking message, and "Open last session" / "Welcome tab" are unaffected by the custom path.
 /// </summary>
 [Collection(ExplorerHeadlessCollection.Name)]
+[Trait("Area", "Explorer")]
 public sealed class CustomStartupDestinationTests
 {
     private static string Beta(ExplorerHarness h) => Path.Combine(h.Root, "Beta");

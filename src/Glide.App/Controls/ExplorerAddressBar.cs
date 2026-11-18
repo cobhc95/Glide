@@ -193,7 +193,7 @@ public sealed class ExplorerAddressBar : UserControl
             var (text, path) = segments[i];
             var button = new Button
             {
-                Content = text,
+                Content = new TextBlock { Text = text }, // not a string: AccessText would eat "_" in folder names
                 Tag = path,
                 Padding = new Thickness(6, 2),
                 MinHeight = 24,

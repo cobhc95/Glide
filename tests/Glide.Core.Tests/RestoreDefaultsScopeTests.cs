@@ -4,6 +4,7 @@ using System.Text.Json.Nodes;
 using Glide.App;
 using Glide.App.Settings;
 using Glide.Core.Commands;
+using Glide.Core.Data;
 using Glide.Core.Reset;
 
 namespace Glide.Core.Tests;
@@ -14,6 +15,7 @@ namespace Glide.Core.Tests;
 /// Windows startup switches, saved presets and the update checker's memory are kept, and the schema never goes backwards.
 /// </summary>
 [Collection(AvaloniaHeadlessCollection.Name)]
+[Trait("Area", "Data")]
 public sealed class RestoreDefaultsScopeTests
 {
     public RestoreDefaultsScopeTests(AvaloniaHeadlessFixture fixture) => _ = fixture;

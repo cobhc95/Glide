@@ -47,7 +47,7 @@ internal sealed class ResetScratch : IDisposable
 
     public void Dispose()
     {
-        try { Directory.Delete(Root, true); } catch { }
+        TempDir.TryDelete(Root);
     }
 }
 

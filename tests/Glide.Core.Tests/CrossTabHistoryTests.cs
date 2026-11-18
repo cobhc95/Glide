@@ -3,6 +3,7 @@ using Glide.Core.Navigation;
 namespace Glide.Core.Tests;
 
 /// <summary>The pure policy behind Back / Forward across a jump from an image tab to an Explorer tab (Ctrl+E).</summary>
+[Trait("Area", "Navigation")]
 public sealed class CrossTabHistoryTests
 {
     private static readonly CrossTabLink Image = new(Guid.NewGuid(), NavigationEntryKind.Image, @"C:\Pics\4K Wallpapers 1 (1).jpg");

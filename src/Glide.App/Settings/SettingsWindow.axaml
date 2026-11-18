@@ -128,6 +128,17 @@
             <controls:SettingsCard CardId="general-settings-window" Title="Settings window" Subtitle="Search results and the discard-changes warning" Icon="Settings" IsExpanded="False">
               <StackPanel Classes="settingsCardBody" Spacing="10">
                 <CheckBox x:Name="SearchShowRelatedCheck" Content="Show related results in settings search (after the title matches)" ToolTip.Tip="Settings search always lists settings whose title matches first. When on, it also lists related settings that match only through a description, tooltip or search term, after the title matches. Turn off to see title matches only."/>
+                <!-- A link: the tooltip delays live on Appearance &amp; viewing > Tooltips. -->
+                <Button x:Name="SettingsTooltipLinkButton" Click="TooltipDelayLinkClicked" Background="Transparent" BorderThickness="0" CornerRadius="6" Padding="6,8" MinHeight="44"
+                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Center" Cursor="Hand">
+                  <Grid ColumnDefinitions="Auto,*">
+                    <controls:GlideIconView Kind="Info" Classes="settingsCardIcon" Margin="0,0,12,0" VerticalAlignment="Center"/>
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                      <TextBlock Classes="settingsCardTitle" Text="Tooltip delay →"/>
+                      <TextBlock Classes="settingsCardSubtitle" Margin="0,1,0,0" TextTrimming="CharacterEllipsis" Text="How long tooltips wait in this window. Opens Appearance &amp; viewing > Tooltips."/>
+                    </StackPanel>
+                  </Grid>
+                </Button>
                 <CheckBox x:Name="ConfirmDiscardSettingsCheck" Content="Warn before discarding unapplied Settings changes" ToolTip.Tip="Controls the discard confirmation shown by Cancel and window close when there are unapplied settings changes."/>
             </StackPanel>
           </controls:SettingsCard>
@@ -158,6 +169,8 @@
                 <Grid ColumnDefinitions="270,240,*" Margin="6,0,0,0"><TextBlock Text="Quality while dragging / panning" VerticalAlignment="Center"/><ComboBox x:Name="InteractivePanQualityCombo" Grid.Column="1" Width="240" ToolTip.Tip="The Balanced and Maximum quality presets default to Full quality while moving. Fast prefers the lightest available interaction preview. This control remains independently overridable."><ComboBoxItem Content="Fast"/><ComboBoxItem Content="Balanced"/><ComboBoxItem Content="Full quality"/></ComboBox></Grid>
                 <CheckBox x:Name="AdaptiveFastPreviewCheck" Content="Decoder-scaled first useful frame for large images"/>
                 <Grid ColumnDefinitions="270,150,*" Margin="6,0,0,0"><TextBlock Text="Full-resolution refinement delay (ms)" VerticalAlignment="Center"/><NumericUpDown x:Name="AdaptivePreviewDelayBox" Grid.Column="1" Minimum="5" Maximum="500"/></Grid>
+                <Grid ColumnDefinitions="270,150,*" Margin="6,0,0,0"><TextBlock Text="First view decode size (% of window, 0 = preset)" VerticalAlignment="Center"/><NumericUpDown x:Name="FirstViewScaleBox" Grid.Column="1" Minimum="0" Maximum="100" Increment="5" ToolTip.Tip="0 uses the preset value per format: Maximum quality 100, Balanced 75, Maximum speed 25."/></Grid>
+                <Grid ColumnDefinitions="270,240,*" Margin="6,0,0,0"><TextBlock Text="Decode full resolution" VerticalAlignment="Center"/><ComboBox x:Name="FullRefineCombo" Grid.Column="1" Width="240" ToolTip.Tip="Preset default: When idle for Maximum quality and Balanced, On zoom only for Maximum speed."><ComboBoxItem Content="Preset default"/><ComboBoxItem Content="Immediately"/><ComboBoxItem Content="When idle"/><ComboBoxItem Content="On zoom only"/></ComboBox></Grid>
                 <CheckBox x:Name="BackgroundRefinementCheck" Content="Refine preview to full resolution while idle"/>
                 <CheckBox x:Name="ProgressiveColorCheck" Content="Keep progressive JPEG first frame in colour" ToolTip.Tip="On: request an early progressive level that normally contains luminance and chroma, avoiding a black-and-white first-frame flash. All stock profiles keep this enabled by default; you can still disable it manually."/>
                 <TextBlock Classes="phaseNote" Text="All stock profiles, including Maximum speed, default to a colour first frame. This checkbox remains independently editable after choosing any profile; disabling it permits the earliest luminance-only progressive level when a codec exposes one. Settled refinement always restores final fidelity." TextWrapping="Wrap" Margin="6,-4,8,2"/>
@@ -167,6 +180,7 @@
               <StackPanel Classes="settingsCardBody" Spacing="10">
                 <CheckBox x:Name="PrefetchCheck" Content="Predictively prepare neighbouring images"/>
                 <Grid ColumnDefinitions="270,150,*" Margin="6,0,0,0"><TextBlock Text="Neighbour prefetch depth per direction" VerticalAlignment="Center"/><NumericUpDown x:Name="PrefetchDepthBox" Grid.Column="1" Minimum="1" Maximum="30" ToolTip.Tip="Images prefetched in each direction. Balanced and Maximum quality default to 5; Maximum speed defaults to 3. Changing it manually makes the performance profile User custom."/></Grid>
+                <Grid ColumnDefinitions="270,150,*" Margin="6,0,0,0"><TextBlock Text="Prefetch decode size (% of window, 0 = preset)" VerticalAlignment="Center"/><NumericUpDown x:Name="PrefetchScaleBox" Grid.Column="1" Minimum="0" Maximum="100" Increment="5" ToolTip.Tip="0 uses the preset value per format: Maximum quality 100, Balanced 50, Maximum speed 12."/></Grid>
                 <CheckBox x:Name="PrefetchSiblingFoldersCheck" Content="Prefetch surrounding sibling folders" ToolTip.Tip="Lightly warms only the chosen leading images from the nearest previous and next sibling folders."/>
                 <Grid ColumnDefinitions="270,150,*" Margin="6,0,0,0"><TextBlock Text="Pictures per surrounding folder" VerticalAlignment="Center"/><NumericUpDown x:Name="PrefetchSiblingFolderCountBox" Grid.Column="1" Minimum="1" Maximum="30"/></Grid>
                 <CheckBox x:Name="SequentialReadCheck" Content="Use sequential read hints for foreground image streams"/>
@@ -218,6 +232,15 @@
                 <CheckBox x:Name="ShowScrollbarsCheck" Content="Show slim scrollbars only when needed" ToolTip.Tip="Shows lightweight edge scrollbars only while a manually zoomed image exceeds the viewport."/>
             </StackPanel>
           </controls:SettingsCard>
+            <controls:SettingsCard CardId="appearance-tooltips" Title="Tooltips" Subtitle="How long the pointer rests before a tooltip shows, per area, and the Explorer item info tip" Icon="Info" IsExpanded="False">
+              <StackPanel Classes="settingsCardBody" Spacing="10">
+                <CheckBox x:Name="ExplorerItemInfoTooltipCheck" Content="Show info tooltip when hovering items in the Explorer tab" ToolTip.Tip="Resting the pointer on a file or folder in the Explorer tab shows its path, size and date."/>
+                <Grid ColumnDefinitions="260,150,*" Margin="6,0,0,0"><TextBlock Text="Settings window delay (ms)" VerticalAlignment="Center" TextWrapping="Wrap"/><NumericUpDown x:Name="TooltipDelaySettingsBox" Grid.Column="1" Minimum="0" Maximum="5000" Increment="100" FormatString="0" ToolTip.Tip="0 to 5000 ms; default 600, like Windows."/></Grid>
+                <Grid ColumnDefinitions="260,150,*" Margin="6,0,0,0"><TextBlock Text="Main interface delay (ms)" VerticalAlignment="Center" TextWrapping="Wrap"/><NumericUpDown x:Name="TooltipDelayMainBox" Grid.Column="1" Minimum="0" Maximum="5000" Increment="100" FormatString="0" ToolTip.Tip="Title bar, tabs, status bar and toolbar buttons. 0 to 5000 ms; default 600, like Windows."/></Grid>
+                <Grid ColumnDefinitions="260,150,*" Margin="6,0,0,0"><TextBlock Text="Overlay mode delay (ms)" VerticalAlignment="Center" TextWrapping="Wrap"/><NumericUpDown x:Name="TooltipDelayOverlayBox" Grid.Column="1" Minimum="0" Maximum="5000" Increment="100" FormatString="0" ToolTip.Tip="Controls while Glide runs in Overlay mode. 0 to 5000 ms; default 600."/></Grid>
+                <Grid ColumnDefinitions="260,150,*" Margin="6,0,0,0"><TextBlock Text="Explorer tab items delay (ms)" VerticalAlignment="Center" TextWrapping="Wrap"/><NumericUpDown x:Name="TooltipDelayExplorerBox" Grid.Column="1" Minimum="0" Maximum="5000" Increment="100" FormatString="0" ToolTip.Tip="Files and folders in the Explorer tab. 0 to 5000 ms; default 1500, about what Windows Explorer waits."/></Grid>
+              </StackPanel>
+            </controls:SettingsCard>
             <controls:SettingsCard CardId="appearance-text-overlay" Title="Text overlay" Subtitle="The picture counter over the image and the folder position line under it" Icon="Info" IsExpanded="False">
               <StackPanel Classes="settingsCardBody" Spacing="10">
                 <CheckBox x:Name="PictureCounterCheck" Content="Show text overlay"/>
@@ -251,6 +274,17 @@
           </controls:SettingsCard>
             <controls:SettingsCard CardId="window-fullscreen" Title="Fullscreen" Subtitle="Title and tab bar, cursor hiding and what happens on exit" Icon="Fullscreen" IsExpanded="False">
               <StackPanel Classes="settingsCardBody" Spacing="10">
+                <!-- A link: the tooltip delays live on Appearance &amp; viewing > Tooltips. -->
+                <Button x:Name="MainTooltipLinkButton" Click="TooltipDelayLinkClicked" Background="Transparent" BorderThickness="0" CornerRadius="6" Padding="6,8" MinHeight="44"
+                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Center" Cursor="Hand">
+                  <Grid ColumnDefinitions="Auto,*">
+                    <controls:GlideIconView Kind="Info" Classes="settingsCardIcon" Margin="0,0,12,0" VerticalAlignment="Center"/>
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                      <TextBlock Classes="settingsCardTitle" Text="Tooltip delay →"/>
+                      <TextBlock Classes="settingsCardSubtitle" Margin="0,1,0,0" TextTrimming="CharacterEllipsis" Text="How long title-bar, tab and status-bar tooltips wait. Opens Appearance &amp; viewing > Tooltips."/>
+                    </StackPanel>
+                  </Grid>
+                </Button>
                 <CheckBox x:Name="AutoHideFullscreenChromeCheck" Content="Auto-hide fullscreen title/tab bar"/>
                 <CheckBox x:Name="FullscreenKeepTabBarOpenCheck" Content="Keep title/tab bar open in fullscreen (resizes image below it)"/>
                 <CheckBox x:Name="FullscreenKeepTitleBarForExplorerCheck" Content="Keep title bar visible in full screen while Explorer is active" ToolTip.Tip="With an Explorer tab selected, the title/tab bar stays shown in fullscreen and the Explorer navigation row (Back, Forward, Up, address bar, filter) sits on its own line beneath it. Image and Welcome tabs keep the normal auto-hide."/>
@@ -289,7 +323,7 @@
                     <ComboBoxItem Content="Ask me each time"/>
                   </ComboBox>
                 </Grid>
-                <TextBlock Classes="phaseNote" Text="Default: move to the next folder." Margin="0,-4,0,0"/>
+                <TextBlock Classes="phaseNote" Text="Default: ask me each time." Margin="0,-4,0,0"/>
                 <Border x:Name="EndOfFolderFolderOptions" BorderBrush="#40FFFFFF" BorderThickness="1,0,0,0" Padding="14,2,0,2" Margin="8,0,0,0">
                   <StackPanel Spacing="10">
                     <TextBlock Text="Folder options" FontWeight="SemiBold" Opacity="0.85"/>
@@ -390,7 +424,18 @@
                 <CheckBox x:Name="ExplorerShowHiddenFilesCheck" Content="Show hidden files in Explorer tab"/>
                 <CheckBox x:Name="ExplorerClickToRenameCheck" Content="Click a selected item's name to rename it" ToolTip.Tip="On (default): click the name of the one selected item again, slowly (not a double-click), to rename it, as in Windows File Explorer. F2 and the Rename menu item always work."/>
                 <CheckBox x:Name="ExplorerKeepSelectionInViewCheck" Content="Keep selection in view when sorting" ToolTip.Tip="Off (default): changing the sort keeps the list where it was. On: the list scrolls to the selected item. Also in the Sort menu."/>
+                <CheckBox x:Name="AddressBarOverPicturesCheck" Content="Show address bar while viewing pictures" ToolTip.Tip="The Explorer tab's Back, Forward, Recent, Up, Refresh and address bar also show above pictures, with the picture's folder. Hidden in fullscreen and Overlay mode. Also on the row's right-click menu."/>
                 <CheckBox x:Name="ExplorerShowOnlyImagesCheck" Content="Explorer tab lists only folders and images (off: every file type)"/>
+                <StackPanel x:Name="ExplorerThumbnailInfoRow" Orientation="Horizontal" Spacing="16" Margin="6,0,0,0" ToolTip.Tip="Extra lines under each thumbnail in the Extra large, Large and Medium views. All off by default; tiles grow by one line for each item shown.">
+                  <TextBlock Text="Show under thumbnails:" VerticalAlignment="Center"/>
+                  <CheckBox x:Name="ExplorerInfoDateCheck" Content="Date"/>
+                  <CheckBox x:Name="ExplorerInfoResolutionCheck" Content="Resolution"/>
+                  <CheckBox x:Name="ExplorerInfoFileSizeCheck" Content="File size"/>
+                </StackPanel>
+                <Grid ColumnDefinitions="260,230,*" Margin="6,0,0,0">
+                  <TextBlock Text="Drive bar width (px)" VerticalAlignment="Center"/>
+                  <NumericUpDown x:Name="ExplorerNavPaneWidthBox" Grid.Column="1" Width="220" Minimum="120" Maximum="600" Increment="10" FormatString="0" ToolTip.Tip="Width of the Explorer tab's drive bar (120 to 600, default 208). You can also drag the line between the drive bar and the thumbnails."/>
+                </Grid>
                 <!-- Mouse-wheel scrolling: one group so "Explorer scroll speed and amount" on Mouse & keyboard reveals and highlights all of it. -->
                 <StackPanel x:Name="ExplorerScrollSettingsGroup" Spacing="10">
                 <Grid ColumnDefinitions="260,230,*" Margin="6,0,0,0">
@@ -425,6 +470,17 @@
                   <TextBlock Text="Alternative file manager arguments" VerticalAlignment="Center"/>
                   <TextBox x:Name="AlternativeFileManagerArgumentsBox" Grid.Column="1" ToolTip.Tip="{}{path} is replaced with the selected file, or the folder when nothing is selected."/>
                 </Grid>
+                <!-- A link: the tooltip delays live on Appearance &amp; viewing > Tooltips. -->
+                <Button x:Name="ExplorerTooltipLinkButton" Click="TooltipDelayLinkClicked" Background="Transparent" BorderThickness="0" CornerRadius="6" Padding="6,8" MinHeight="44"
+                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Center" Cursor="Hand">
+                  <Grid ColumnDefinitions="Auto,*">
+                    <controls:GlideIconView Kind="Info" Classes="settingsCardIcon" Margin="0,0,12,0" VerticalAlignment="Center"/>
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                      <TextBlock Classes="settingsCardTitle" Text="Tooltip delay →"/>
+                      <TextBlock Classes="settingsCardSubtitle" Margin="0,1,0,0" TextTrimming="CharacterEllipsis" Text="Explorer items, and turning their info tooltip off. Opens Appearance &amp; viewing > Tooltips."/>
+                    </StackPanel>
+                  </Grid>
+                </Button>
                 <!-- A link, not a copy: how pictures open in new tabs lives on Tabs & status bar > Tabs (NewTabSettingsGroup). -->
                 <Button x:Name="NewTabsLinkButton" Click="NewTabsLinkClicked" Background="Transparent" BorderThickness="0" CornerRadius="6" Padding="6,8" MinHeight="44"
                         HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Center" Cursor="Hand">
@@ -432,7 +488,7 @@
                     <controls:GlideIconView Kind="Tabs" Classes="settingsCardIcon" Margin="0,0,12,0" VerticalAlignment="Center"/>
                     <StackPanel Grid.Column="1" VerticalAlignment="Center">
                       <TextBlock Classes="settingsCardTitle" Text="Opening pictures in new tabs →"/>
-                      <TextBlock Classes="settingsCardSubtitle" Margin="0,1,0,0" TextTrimming="CharacterEllipsis" Text="Foreground or background, position, Shift and Alt. Opens Tabs &amp; status bar > Tabs."/>
+                      <TextBlock Classes="settingsCardSubtitle" Margin="0,1,0,0" TextTrimming="CharacterEllipsis" Text="Foreground or background, position, and the key to open the other way. Opens Tabs &amp; status bar > Tabs."/>
                     </StackPanel>
                   </Grid>
                 </Button>
@@ -464,27 +520,68 @@
                 <Grid ColumnDefinitions="225,150,*" Margin="6,0,0,0"><TextBlock Text="Recently closed tabs retained" VerticalAlignment="Center"/><NumericUpDown x:Name="ClosedHistoryBox" Grid.Column="1" Minimum="1" Maximum="100"/></Grid>
                 <Grid ColumnDefinitions="260,230,*" Margin="6,0,0,0">
                   <TextBlock Text="After closing a tab, activate" VerticalAlignment="Center"/>
-                  <ComboBox x:Name="AfterTabCloseActivateCombo" Grid.Column="1" Width="220" ToolTip.Tip="Previously used tab (default): the tab you were on before. Match Ctrl+Tab order: the previously used tab when Ctrl+Tab switching order is Most recently used, otherwise the tab to the right.">
+                  <ComboBox x:Name="AfterTabCloseActivateCombo" Grid.Column="1" Width="220" ToolTip.Tip="Previously used tab (default): the tab you were on before. Match Ctrl+Tab order: the previously used tab when Ctrl+Tab switching order is Most recently used, otherwise the tab to the right. Or the tab to the right / left, the first or the last tab. Custom: a new tab of the kind chosen below takes the closed tab's place.">
                     <ComboBoxItem Content="Match Ctrl+Tab order"/>
                     <ComboBoxItem Content="Previously used tab"/>
                     <ComboBoxItem Content="Tab to the right"/>
                     <ComboBoxItem Content="Tab to the left"/>
+                    <ComboBoxItem Content="First tab"/>
+                    <ComboBoxItem Content="Last tab"/>
+                    <ComboBoxItem Content="Custom…"/>
+                  </ComboBox>
+                </Grid>
+                <Grid x:Name="AfterTabCloseCustomRow" ColumnDefinitions="242,300,*" Margin="24,0,0,0">
+                  <TextBlock Text="Custom tab to show" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                  <ComboBox x:Name="AfterTabCloseCustomTargetCombo" Grid.Column="1" Width="290" ToolTip.Tip="After closing a tab, a new tab of this kind takes its place: Home (default), a new empty Explorer tab at the last Explorer folder, or an Explorer tab with the closed picture's folder. If that is not possible, the previously used tab comes to the front.">
+                    <ComboBoxItem Content="Home"/>
+                    <ComboBoxItem Content="New empty Explorer tab"/>
+                    <ComboBoxItem Content="Explorer tab with the closed picture's folder"/>
                   </ComboBox>
                 </Grid>
                 <!-- How a picture or folder opens in a new tab: one group so the Explorer tab card's "Opening pictures in new tabs" link reveals and highlights all of it. -->
                 <StackPanel x:Name="NewTabSettingsGroup" Spacing="10">
                 <Grid ColumnDefinitions="260,230,*" Margin="6,0,0,0">
-                  <TextBlock Text="New tabs open at" VerticalAlignment="Center"/>
-                  <ComboBox x:Name="NewTabPositionCombo" Grid.Column="1" Width="220" ToolTip.Tip="For every new tab: Ctrl+T and +, and pictures and folders opened in a new tab from inside Glide.">
-                    <ComboBoxItem Content="Next to the current tab"/>
-                    <ComboBoxItem Content="At the end"/>
+                  <TextBlock Text="New tabs open" VerticalAlignment="Center"/>
+                  <ComboBox x:Name="NewTabPositionCombo" Grid.Column="1" Width="220" ToolTip.Tip="For pictures and folders opened in a new tab from inside Glide. Ctrl+T and + always open at the end, like a web browser.">
+                    <ComboBoxItem Content="at the end"/>
+                    <ComboBoxItem Content="next to the current tab"/>
                   </ComboBox>
                 </Grid>
-                <CheckBox x:Name="SwitchToNewTabsCheck" Content="Open new tabs in the foreground" ToolTip.Tip="On (default): Glide switches to a picture or folder you open in a new tab. Off: it opens in the background. Ctrl+T and + always switch."/>
-                <CheckBox x:Name="NewTabModifiersCheck" Content="Shift and Alt change how a new tab opens" ToolTip.Tip="When on, hold Shift while opening a picture or folder in a new tab to do the opposite of Open new tabs in the foreground; hold Alt to use the other position."/>
+                <Grid ColumnDefinitions="242,230,*" Margin="24,0,0,0">
+                  <TextBlock x:Name="NewTabPositionKeyLabel" Text="Key to open at the end instead" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                  <ComboBox x:Name="NewTabPositionKeyCombo" Grid.Column="1" Width="140" ToolTip.Tip="Hold this key while opening a picture or folder in a new tab to put that one tab at the other position. None turns it off. Ctrl+T and + are not affected."><ComboBoxItem Content="None"/><ComboBoxItem Content="Shift"/><ComboBoxItem Content="Ctrl"/><ComboBoxItem Content="Alt"/></ComboBox>
+                </Grid>
+                <Grid ColumnDefinitions="260,230,*" Margin="6,0,0,0">
+                  <TextBlock Text="Open new tabs in the" VerticalAlignment="Center"/>
+                  <ComboBox x:Name="SwitchToNewTabsCombo" Grid.Column="1" Width="220" ToolTip.Tip="Foreground (default): Glide switches to a picture or folder you open in a new tab. Background: it opens behind the current tab. Ctrl+T and + always switch.">
+                    <ComboBoxItem Content="foreground"/>
+                    <ComboBoxItem Content="background"/>
+                  </ComboBox>
+                </Grid>
+                <Grid ColumnDefinitions="242,230,*" Margin="24,0,0,0">
+                  <TextBlock x:Name="NewTabForegroundKeyLabel" Text="Key to open in the background instead" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                  <ComboBox x:Name="NewTabForegroundKeyCombo" Grid.Column="1" Width="140" ToolTip.Tip="Hold this key while opening a picture or folder in a new tab to do the other of foreground and background for that one tab. None turns it off. Ctrl+T and + are not affected."><ComboBoxItem Content="None"/><ComboBoxItem Content="Shift"/><ComboBoxItem Content="Ctrl"/><ComboBoxItem Content="Alt"/></ComboBox>
+                </Grid>
+                <Grid ColumnDefinitions="260,230,*" Margin="6,0,0,0">
+                  <TextBlock Text="Middle-click opens in a new tab in the" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                  <ComboBox x:Name="MiddleClickSideCombo" Grid.Column="1" Width="220" ToolTip.Tip="Explorer middle-click on a picture or folder: open it in a background tab (default, like a web browser) or in the foreground. The keys above still flip it for one tab.">
+                    <ComboBoxItem Content="background"/>
+                    <ComboBoxItem Content="foreground"/>
+                  </ComboBox>
+                </Grid>
+                <Grid ColumnDefinitions="260,230,*" Margin="6,0,0,0">
+                  <TextBlock Text="Middle-click new tab position" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                  <ComboBox x:Name="MiddleClickPositionCombo" Grid.Column="1" Width="220" ToolTip.Tip="Where an Explorer middle-click puts the new tab: at the end (default), next to the current tab, or the same as New tabs open.">
+                    <ComboBoxItem Content="at the end"/>
+                    <ComboBoxItem Content="next to the current tab"/>
+                    <ComboBoxItem Content="same as new tabs"/>
+                  </ComboBox>
+                </Grid>
                 </StackPanel>
                 <CheckBox x:Name="TabHoverPreviewsCheck" Content="Show tab previews on hover" ToolTip.Tip="Hovering a background tab shows a small preview of its picture or folder in the tab tooltip."/>
                 <CheckBox x:Name="AnimateGifPreviewsCheck" Content="Animate GIF previews on hover" Margin="24,0,0,0" IsEnabled="{Binding #TabHoverPreviewsCheck.IsChecked}" ToolTip.Tip="An animated GIF tab's hover preview plays while the tooltip is open. Very large GIFs keep the still first frame. Needs Show tab previews on hover."/>
+                <Grid ColumnDefinitions="231,140,*" Margin="24,0,0,0" IsEnabled="{Binding #TabHoverPreviewsCheck.IsChecked}"><TextBlock Text="Tab preview size (%)" VerticalAlignment="Center"/><NumericUpDown x:Name="TabPreviewSizeBox" Grid.Column="1" Minimum="50" Maximum="250" Increment="10" FormatString="0" ToolTip.Tip="50 to 250 percent of the normal preview size (100). Also: hold the Resize preview key and turn the wheel over a tab while its preview shows."/></Grid>
+                <Grid ColumnDefinitions="231,140,*" Margin="24,0,0,0" IsEnabled="{Binding #TabHoverPreviewsCheck.IsChecked}"><TextBlock Text="Resize preview with wheel and" VerticalAlignment="Center"/><ComboBox x:Name="TabPreviewResizeModifierCombo" Grid.Column="1" Width="140" ToolTip.Tip="Hold this key and turn the mouse wheel over a tab to resize its open preview. None turns it off."><ComboBoxItem Content="Ctrl"/><ComboBoxItem Content="Shift"/><ComboBoxItem Content="Alt"/><ComboBoxItem Content="None"/></ComboBox></Grid>
             </StackPanel>
           </controls:SettingsCard>
             <controls:SettingsCard CardId="tabs-strip-look" Title="Tab strip look" Subtitle="Tab widths, overflow arrows and tooltip size" Icon="Tabs" IsExpanded="False">
@@ -703,6 +800,19 @@
                 <TextBlock Text="Whole-app Overlay mode removes ordinary Glide chrome and requests real transparent window composition. Transparent PNG regions can reveal the desktop where the platform compositor supports transparency. Normal Glide remains the default." Classes="phaseNote" TextWrapping="Wrap"/>
                 <CheckBox x:Name="WholeAppOverlayAlwaysStartCheck" Content="Always start Glide in Overlay / Window-in-Window mode" ToolTip.Tip="Off by default. You can also toggle this from the Overlay-mode context menu."/>
                 <CheckBox x:Name="WholeAppOverlayWindowedInteractionsCheck" Content="Use normal windowed image interactions while in Overlay mode" ToolTip.Tip="Off by default. Off = Window-in-Window behavior: left-drag moves the Overlay window. On = normal Glide selection/pan/click behavior. This can also be toggled from Overlay mode's right-click menu."/>
+                <CheckBox x:Name="WholeAppOverlayShowDragStripCheck" Content="Show a drag handle near the top" ToolTip.Tip="Off by default. A small rounded handle with a grip line, centred just below the top edge, shown while the mouse is over the Overlay and fading out when it leaves. Drag it to move the window, even when zoomed in. Also in Overlay mode's right-click menu."/>
+                <!-- A link: the tooltip delays live on Appearance &amp; viewing > Tooltips. -->
+                <Button x:Name="OverlayTooltipLinkButton" Click="TooltipDelayLinkClicked" Background="Transparent" BorderThickness="0" CornerRadius="6" Padding="6,8" MinHeight="44"
+                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Center" Cursor="Hand">
+                  <Grid ColumnDefinitions="Auto,*">
+                    <controls:GlideIconView Kind="Info" Classes="settingsCardIcon" Margin="0,0,12,0" VerticalAlignment="Center"/>
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                      <TextBlock Classes="settingsCardTitle" Text="Tooltip delay →"/>
+                      <TextBlock Classes="settingsCardSubtitle" Margin="0,1,0,0" TextTrimming="CharacterEllipsis" Text="How long tooltips wait in Overlay mode. Opens Appearance &amp; viewing > Tooltips."/>
+                    </StackPanel>
+                  </Grid>
+                </Button>
+                <CheckBox x:Name="WholeAppOverlayLockPositionCheck" Content="Lock the Overlay window position" ToolTip.Tip="Off by default. Dragging no longer moves the Overlay window (left-drag, Alt+drag, bottom bar, drag strip); panning a zoomed picture still works. Also in Overlay mode's right-click menu."/>
             </StackPanel>
           </controls:SettingsCard>
           </StackPanel>

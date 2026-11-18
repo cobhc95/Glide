@@ -4,6 +4,7 @@ using Avalonia.Media.Imaging;
 using Glide.App.Printing;
 using Glide.App.Services;
 using Glide.App.Settings;
+using Glide.Core.Data;
 using Glide.Core.Reset;
 
 namespace Glide.Core.Tests;
@@ -14,6 +15,7 @@ namespace Glide.Core.Tests;
 /// <c>new Window { ... }</c> dialog, fails here until it is registered.
 /// </summary>
 [Collection(AvaloniaHeadlessCollection.Name)]
+[Trait("Area", "Window")]
 public sealed class WindowPlacementGuardTests
 {
     public WindowPlacementGuardTests(AvaloniaHeadlessFixture fixture) => _ = fixture;

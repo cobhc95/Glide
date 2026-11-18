@@ -63,7 +63,7 @@ public partial class MainWindow
     private void OnNavigationSkipDetected(string rule, double timeMs)
     {
         var show = ShouldShowNavigationSkipHint(_settings, _navigationSkipHintLastShownMs, timeMs);
-        _diagnostics.Write("navigation", "skip_detected", new { rule, show, intervalMs = _settings.NavigationRateLimitMs, enabled = _settings.NavigationSkipHint });
+        _diagnostics.Write("navigation", "skip_detected", new { rule, show, intervalMs = NavigationOptionsView.RateLimitMs, enabled = NavigationOptionsView.SkipHint });
         if (!show) return;
         _navigationSkipHintLastShownMs = timeMs;
         ShowNavigationSkipHint();

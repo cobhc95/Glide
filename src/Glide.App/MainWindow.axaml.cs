@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Avalonia;
 using Avalonia.Controls;
@@ -132,7 +132,7 @@ public partial class MainWindow : Window
     // realization stays the single owner of per-tile CTS/bitmap lifetime.
     private readonly Dictionary<Control, CancellationTokenSource> _browserRealizationCts = new();
     private readonly HashSet<string> _browserSelection = new(StringComparer.OrdinalIgnoreCase);
-    private List<Glide.App.Explorer.ExplorerEntry> _browserEntries = new();
+    private Glide.App.Explorer.ExplorerEntryList _browserEntries = new();
     private int _browserSelectionAnchor = -1;
     private int _browserCurrentIndex = -1;
     private long _browserGeneration;
@@ -181,7 +181,6 @@ public partial class MainWindow : Window
     private Point _chromeMiddlePressPosition;
     private bool _chromeMiddlePressStartedOnEmptyChrome;
     private WindowsBrowserFrameController? _windowsBrowserFrame;
-    private WindowsExplorerHost? NativeExplorerHost;
     private PixelPoint _lastNormalWindowPosition;
     private Size _lastNormalWindowSize;
     // The ordinary (restored) window bounds captured when fullscreen is entered. Leaving fullscreen
@@ -214,7 +213,6 @@ public partial class MainWindow : Window
     private IBrush? _wholeAppOverlayPreviousTransparencyFallback;
     private Grid? _wholeAppOverlayControlsHost;
     private LegacyOverlayChrome? _wholeAppOverlayChromeVisual;
-    private Slider? _wholeAppOverlayOpacityHitTarget;
     private string? _wholeAppOverlayPlacementPath;
     private bool _applyingWholeAppOverlayPlacement;
 
@@ -372,10 +370,10 @@ public partial class MainWindow : Window
             if (e.Handled || IsInteractiveSource(e.Source)) return;
             if (e.Source is Visual sourceVisual && (ReferenceEquals(sourceVisual, TabStripScroll) ||
                 sourceVisual.GetVisualAncestors().Any(a => ReferenceEquals(a, TabStripScroll)))) return;
-            var configured = ResolveGestureSlot("titleBar.wheel", e.KeyModifiers);
-            if (string.Equals(configured, GestureCatalog.Default, StringComparison.OrdinalIgnoreCase)) return;
+            var decision = GestureResolver.ForBuiltInRow(ResolveGestureSlot("titleBar.wheel", e.KeyModifiers));
+            if (!decision.Runs) return;
             e.Handled = true;
-            await ExecuteGestureActionAsync(configured, ImageViewport.WheelNavigationStep(e.Delta.Y, _settings.InvertWheelDirection));
+            await ExecuteGestureActionAsync(decision.Action,ImageViewport.WheelNavigationStep(e.Delta.Y, _settings.InvertWheelDirection));
         }, RoutingStrategies.Bubble);
         StatusCollapseButton.AddHandler(InputElement.PointerReleasedEvent, StatusCollapseButtonRightReleased, RoutingStrategies.Tunnel, true);
         StatusCollapseButton.AddHandler(Control.ContextRequestedEvent, StatusCollapseButtonContextRequested, RoutingStrategies.Tunnel | RoutingStrategies.Bubble, true);
@@ -390,11 +388,11 @@ public partial class MainWindow : Window
         TabStripScroll.AddHandler(InputElement.PointerWheelChangedEvent, async (_, e) =>
         {
             // Tabs wheel row: Default scrolls an overflowing tab strip (unchanged).
-            var configuredTabWheel = ResolveGestureSlot("tabs.wheel", e.KeyModifiers);
-            if (!string.Equals(configuredTabWheel, GestureCatalog.Default, StringComparison.OrdinalIgnoreCase))
+            var tabWheel = GestureResolver.ForBuiltInRow(ResolveGestureSlot("tabs.wheel", e.KeyModifiers));
+            if (tabWheel.Runs)
             {
                 e.Handled = true;
-                await ExecuteGestureActionAsync(configuredTabWheel, ImageViewport.WheelNavigationStep(e.Delta.Y, _settings.InvertWheelDirection));
+                await ExecuteGestureActionAsync(tabWheel.Action,ImageViewport.WheelNavigationStep(e.Delta.Y, _settings.InvertWheelDirection));
                 return;
             }
             var maxOffset = Math.Max(0, TabStripScroll.Extent.Width - TabStripScroll.Viewport.Width);
@@ -519,13 +517,13 @@ public partial class MainWindow : Window
             ApplyChromeLayoutForWindowState();
             Viewport.IsFullscreen = WindowState == WindowState.FullScreen;
             ApplySelectionBuffer();
-            Viewport.RightDragWindowMoveAllowed = WindowState == WindowState.Normal;
-            Viewport.BackgroundWindowDragEnabled = IsLeftWindowMoveAllowedForCurrentState();
+            Viewport.RightDragWindowMoveAllowed = WindowState == WindowState.Normal && !WholeAppOverlayPositionLocked;
+            Viewport.BackgroundWindowDragEnabled = IsLeftWindowMoveAllowedForCurrentState() && !WholeAppOverlayPositionLocked;
             if (!_fullscreenTransitionActive)
             {
                 // Fullscreen enter/exit applies these once after the native change has settled.
                 ApplyStatusBarSize();
-                ApplyStatusVisibility();
+                NotifyStatusChromeChanged();
             }
             UpdateIntegratedTitleBarInset();
             UpdateCaptionButtonState();
@@ -557,12 +555,11 @@ public partial class MainWindow : Window
             // Windowed double-click on the image / the empty background default to entering
             // fullscreen; the fullscreen double-click row (4.8.0) defaults to nothing. These Defaults
             // equal the folded 4.7 "Double-click enters / exits fullscreen" toggles at stock values.
-            var slot = fullscreen ? "fullscreen.doubleLeftImage"
-                : Viewport.IsPointOverImage(position) ? "windowed.doubleLeftImage" : "background.doubleLeft";
-            var configured = ResolveGestureSlot(slot, e.KeyModifiers);
-            if (!string.Equals(configured, GestureCatalog.Default, StringComparison.OrdinalIgnoreCase))
+            var slot = GestureResolver.DoubleLeftSlot(fullscreen, Viewport.IsPointOverImage(position));
+            var decision = GestureResolver.ForBuiltInRow(ResolveGestureSlot(slot, e.KeyModifiers));
+            if (decision.Runs)
             {
-                await ExecuteGestureActionAsync(configured);
+                await ExecuteGestureActionAsync(decision.Action);
                 e.Handled = true;
                 return;
             }
@@ -585,8 +582,9 @@ public partial class MainWindow : Window
             BeginDeferredRightWindowDrag(pointer, Viewport.PointToScreen(press), Viewport.PointToScreen(current));
         Viewport.ViewChanged += (_, _) =>
         {
-            UpdateViewportScrollbars(); UpdateStatusStats(); UpdatePictureCounter(); UpdateWindowTitle();
+            UpdateViewportScrollbars(); NotifyViewerStatusChanged(); UpdateWindowTitle();
             PublishViewportDemand();
+            RequestFullDetailIfZoomNeedsIt();
         };
         ViewportHScroll.PropertyChanged += (_, args) =>
         {
@@ -609,8 +607,6 @@ public partial class MainWindow : Window
                 wholeChrome.OpacityValue = _sessionOpacity;
                 wholeChrome.InvalidateVisual();
             }
-            if (_wholeAppOverlayOpacityHitTarget is { } wholeSlider && Math.Abs(wholeSlider.Value - _sessionOpacity) > 0.0001)
-                wholeSlider.Value = _sessionOpacity;
             RefreshDynamicTooltips();
         };
         OverlayOpacitySlider.PropertyChanged += (_, args) => { if (args.Property == RangeBase.ValueProperty) _overlays?.SetSelectedOpacity(OverlayOpacitySlider.Value / 100.0); };
@@ -651,7 +647,7 @@ public partial class MainWindow : Window
             if (_deferredStartupSettingsAdopted)
             {
                 var automaticOverlayLayout = AutomaticOverlayLayoutPath();
-                if (_settings.OverlayPersistLayoutBetweenSessions)
+                if (OverlayOptionsView.PersistLayoutBetweenSessions)
                 {
                     try { if (_overlays is { } overlays) { Directory.CreateDirectory(Path.GetDirectoryName(automaticOverlayLayout)!); overlays.SaveLayout(automaticOverlayLayout, preserveViewState: true); } } catch { }
                 }
@@ -667,6 +663,7 @@ public partial class MainWindow : Window
             // cached or retired loader bitmap, which the loader then disposes exactly once.
             _loader.ReleaseBitmap(_interactionPreviewBitmap);
             _interactionPreviewBitmap = null;
+            ClearWarmTabs();
             _loader.Dispose();
             _overlayLoader?.Dispose();
             _decoderBackend.ProviderFailure -= _providerFailureHandler;
@@ -675,6 +672,7 @@ public partial class MainWindow : Window
             _hardTopmostTimer.Stop();
             _folderIndexCts?.Cancel(); _folderIndexCts?.Dispose(); _folderIndexCts = null;
             _folderWatch?.Dispose(); _folderWatch = null;
+            _explorerFolderWatch?.Dispose(); _explorerFolderWatch = null;
             _metadataCts?.Cancel(); _metadataCts?.Dispose(); _metadataCts = null;
             CancelPreviewQualityRecovery();
             CancelBrowserThumbnailWork();
@@ -700,7 +698,7 @@ public partial class MainWindow : Window
             if (WindowState == WindowState.FullScreen) ResetFullscreenCursorTimer();
             ExternalLaunchBroker.MarkActive(this);
             ReassertNativeTopmost();
-            if (_settings.SlideshowPauseWhenInactive) _slideshow?.ResumeFromInactivity();
+            if (SlideshowOptionsView.PauseWhenInactive) _slideshow?.ResumeFromInactivity();
             // Overlay glow/chrome is an active-window affordance. Do not leave a luminous frame
             // floating over another application while Glide is not the foreground window.
             if (_wholeAppOverlayMode && _wholeAppOverlayControlsHost is { } overlayControls)
@@ -713,9 +711,10 @@ public partial class MainWindow : Window
         Deactivated += (_, _) =>
         {
             StopFullscreenCursorAutoHide();
-            if (_settings.SlideshowPauseWhenInactive) _slideshow?.PauseForInactivity();
+            if (SlideshowOptionsView.PauseWhenInactive) _slideshow?.PauseForInactivity();
             if (_wholeAppOverlayMode && _wholeAppOverlayControlsHost is { } overlayControls)
                 overlayControls.IsVisible = false;
+            UpdateWholeAppOverlayDragStrip(false);
             EndManualWindowDrag();
             // A missed KeyUp while activation is lost must not leave the held-navigation producer
             // skipping images in the background (reported on laptop keyboards).
@@ -825,6 +824,7 @@ public partial class MainWindow : Window
             DisableDwmTransitions("opened");
             GlidePerformanceTrace.Mark("window_opened_start");
             GlideWindowRegistry.Register(this);
+            App.NoteWindowOpened();
             ExternalLaunchBroker.Start(this);
             App.UpdateTrayIconState();
             // Never wait for settings I/O/deserialization on first presentation. On a normal cold

@@ -5,6 +5,7 @@ namespace Glide.Core.Tests;
 
 /// <summary>The "Open last session" file: optional Explorer selection/scroll fields, old files, atomic writes.</summary>
 [Collection(StoreStaticsCollection.Name)]
+[Trait("Area", "Tabs")]
 public sealed class WorkspaceSessionStoreTests
 {
     private const string FileName = "glide.workspace-session.json";
@@ -19,7 +20,7 @@ public sealed class WorkspaceSessionStoreTests
         finally
         {
             SettingsStore.SettingsDirectoryOverrideForTests.Value = previous;
-            try { Directory.Delete(dir, true); } catch { }
+            TempDir.TryDelete(dir);
         }
     }
 

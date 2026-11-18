@@ -3,10 +3,12 @@
     <!-- 5.0.1: .NET 10 LTS (.NET 8 support ended 2026-11-10). One TFM for every project, including the
          tests and tools\perf\Glide.PerfBench. See docs\NET10-MIGRATION-PLAN.md. -->
     <TargetFramework>net10.0</TargetFramework>
-    <Version>5.0.7</Version>
+    <Version>5.1.0</Version>
     <AssemblyVersion>$(Version).0</AssemblyVersion>
     <FileVersion>$(Version).0</FileVersion>
     <InformationalVersion>$(Version)</InformationalVersion>
+    <!-- The folder became a git repo: stop the SDK appending "+<commit>" (it overflowed the Settings footer and backups). -->
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>12</LangVersion>
@@ -27,18 +29,29 @@
          and build time for less cross-assembly JIT/runtime work before first useful pixels. -->
     <PublishReadyToRunComposite Condition="'$(Configuration)' == 'Release' And '$(PublishAot)' != 'true'">true</PublishReadyToRunComposite>
     <!-- Release size. Exception messages and stack traces stay on so error text and crash reports remain useful.
-         Known follow-up (docs\NET10-MIGRATION-PLAN.md, WP7): the ILCompiler targets do not read
-         IlcOptimizationPreference (the real property is OptimizationPreference), so this line is a no-op and
-         the exe uses the default blended optimization. Left unchanged on purpose: switching it changes speed
-         and size and needs its own measured release. -->
-    <IlcOptimizationPreference Condition="'$(PublishAot)' == 'true'">Size</IlcOptimizationPreference>
+         The AOT exe uses the default blended optimization. OptimizationPreference (Size/Speed) is deliberately
+         unset until measured (docs\NET10-MIGRATION-PLAN.md, WP7); the old no-op IlcOptimizationPreference line was removed. -->
     <EventSourceSupport Condition="'$(PublishAot)' == 'true'">false</EventSourceSupport>
     <MetricsSupport Condition="'$(PublishAot)' == 'true'">false</MetricsSupport>
     <HttpActivityPropagationSupport Condition="'$(PublishAot)' == 'true'">false</HttpActivityPropagationSupport>
     <DebuggerSupport Condition="'$(PublishAot)' == 'true'">false</DebuggerSupport>
+    <!-- Stage B: nullable warnings were clean, so they are errors now (keeps them clean). -->
+    <WarningsAsErrors>$(WarningsAsErrors);nullable</WarningsAsErrors>
+    <!-- Stage B: the libraries are clean under the trim / AOT analyzers, so run those analyzers there and fail on any
+         new trim/AOT warning. (Analyzers only: no IsTrimmable metadata, so publish output is unchanged.) Glide.App is not
+         clean yet (Avalonia ReflectionBinding in SettingsWindow XAML, Svg.Custom / ExCSS), so it keeps them as warnings. -->
+    <_GlideAotCleanLibrary Condition="'$(MSBuildProjectName)' == 'Glide.Core' Or '$(MSBuildProjectName)' == 'Glide.Imaging' Or '$(MSBuildProjectName)' == 'Glide.Input' Or '$(MSBuildProjectName)' == 'Glide.Diagnostics' Or '$(MSBuildProjectName)' == 'Glide.ThumbnailCodecs'">true</_GlideAotCleanLibrary>
+    <EnableTrimAnalyzer Condition="'$(_GlideAotCleanLibrary)' == 'true'">true</EnableTrimAnalyzer>
+    <EnableAotAnalyzer Condition="'$(_GlideAotCleanLibrary)' == 'true'">true</EnableAotAnalyzer>
+    <WarningsAsErrors Condition="'$(_GlideAotCleanLibrary)' == 'true'">$(WarningsAsErrors);IL2026;IL2046;IL2050;IL2055;IL2057;IL2058;IL2059;IL2060;IL2062;IL2065;IL2067;IL2068;IL2069;IL2070;IL2072;IL2075;IL2077;IL2080;IL2087;IL2088;IL2089;IL2090;IL2091;IL2092;IL2093;IL2094;IL2095;IL2096;IL2104;IL3050;IL3051;IL3053;IL3058</WarningsAsErrors>
     <UseArtifactsOutput>true</UseArtifactsOutput>
     <ArtifactsPath>$(MSBuildThisFileDirectory).artifacts</ArtifactsPath>
   </PropertyGroup>
+  <!-- Analyzer severities (Stage B warning triage): Glide.globalconfig for all, plus test-only relaxations. -->
+  <ItemGroup>
+    <GlobalAnalyzerConfigFiles Include="$(MSBuildThisFileDirectory)Glide.globalconfig" />
+    <GlobalAnalyzerConfigFiles Include="$(MSBuildThisFileDirectory)tests\Glide.Tests.globalconfig" Condition="$(MSBuildProjectName.EndsWith('.Tests'))" />
+  </ItemGroup>
   <ItemGroup Condition="Exists('$(MSBuildThisFileDirectory)dist\Glide.Native.dll')">
     <None Include="$(MSBuildThisFileDirectory)dist\Glide.Native.dll">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>

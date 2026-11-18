@@ -15,71 +15,24 @@ namespace Glide.App;
 /// </summary>
 public partial class MainWindow
 {
-    private readonly Dictionary<Guid, NavigationHistory> _tabHistories = new();
+    // Stage D6: the per-tab histories live in Glide.Core.Navigation.TabHistoryStore.
+    private readonly TabHistoryStore _tabHistories = new();
     private bool _historyResolvedToParent;
     /// <summary>The last short message Back / Forward showed (a skipped image, a folder that fell back to its parent).</summary>
     internal string? LastHistoryNotice { get; private set; }
 
     /// <summary>The history of <paramref name="tab"/>, created on first use: from the copy that travelled with the tab
     /// (drag to another window), from a restored Explorer tab's folder history (session file), or empty.</summary>
-    internal NavigationHistory HistoryFor(TabState tab)
-    {
-        if (_tabHistories.TryGetValue(tab.Id, out var history)) return history;
-        history = tab.History is { } travelled ? NavigationHistory.FromState(travelled)
-            : tab is BrowserTabState { Navigation: { } navigation } browser ? FromBrowserNavigation(browser, navigation)
-            : new NavigationHistory();
-        _tabHistories[tab.Id] = history;
-        return history;
-    }
+    internal NavigationHistory HistoryFor(TabState tab) => _tabHistories.For(tab);
+
+    /// <summary>The per-tab histories (tests and session code read them through this).</summary>
+    internal TabHistoryStore TabHistories => _tabHistories;
 
     /// <summary>The active tab's history, or null when it has none yet (no Back / Forward).</summary>
-    internal NavigationHistory? ActiveHistory =>
-        _workspace.Active is { } active && _tabHistories.TryGetValue(active.Id, out var history) ? history : null;
-
-    /// <summary>
-    /// A restored Explorer tab (session file, older Glide) only knows its folders: they become Explorer entries
-    /// (folders that are gone are dropped) with their remembered highlight as the selection. A restored view of the
-    /// current folder is authoritative, so its older highlight is not used.
-    /// </summary>
-    private static NavigationHistory FromBrowserNavigation(BrowserTabState browser, BrowserNavigationState navigation)
-    {
-        var entries = new List<NavigationEntry>();
-        var index = -1;
-        for (var i = 0; i < navigation.History.Count; i++)
-        {
-            var folder = navigation.History[i];
-            try
-            {
-                if (string.IsNullOrWhiteSpace(folder) || !Directory.Exists(folder)) continue;
-                var highlight = navigation.Highlights is { } highlights && i < highlights.Count && !string.IsNullOrWhiteSpace(highlights[i]) ? highlights[i] : null;
-                if (i <= navigation.Index || index < 0) index = entries.Count;
-                entries.Add(NavigationEntry.Explorer(Path.GetFullPath(folder), highlight));
-            }
-            catch { /* a damaged entry only loses that step */ }
-        }
-        if (entries.Count == 0) return new NavigationHistory();
-        index = Math.Clamp(index, 0, entries.Count - 1);
-        if (browser.View is not null) entries[index] = entries[index] with { SelectedPath = null };
-        return NavigationHistory.FromState(new NavigationHistoryState(entries, index));
-    }
+    internal NavigationHistory? ActiveHistory => _workspace.Active is { } active ? _tabHistories.Find(active.Id) : null;
 
     /// <summary>The Explorer folder history of a tab for the session file (its Explorer entries, newest last).</summary>
-    private BrowserNavigationState? BrowserNavigationFor(Guid tabId)
-    {
-        if (!_tabHistories.TryGetValue(tabId, out var history) || history.Count == 0) return null;
-        var folders = new List<string>();
-        var highlights = new List<string?>();
-        var index = -1;
-        for (var i = 0; i < history.Entries.Count; i++)
-        {
-            var entry = history.Entries[i];
-            if (entry.Kind != NavigationEntryKind.Explorer || entry.Path is null) continue;
-            if (i <= history.Index) index = folders.Count;
-            folders.Add(entry.Path);
-            highlights.Add(entry.SelectedPath);
-        }
-        return folders.Count == 0 ? null : new BrowserNavigationState(folders, Math.Max(0, index), highlights);
-    }
+    private BrowserNavigationState? BrowserNavigationFor(Guid tabId) => _tabHistories.BrowserNavigationFor(tabId);
 
     /// <summary>What the tab shows now, as a history entry.</summary>
     private NavigationEntry? LiveEntryFor(TabState tab) => tab switch
@@ -116,7 +69,7 @@ public partial class MainWindow
     private void ResetActiveTabHistory(NavigationEntry? entry = null)
     {
         if (_workspace.Active is not { } active) return;
-        _tabHistories[active.Id] = new NavigationHistory();
+        _tabHistories.Reset(active.Id);
         RecordActiveTabLocation(entry);
     }
 
@@ -126,18 +79,14 @@ public partial class MainWindow
     /// </summary>
     private TabState? RemoveTabForTransfer(Guid id)
     {
-        var removed = _workspace.RemoveForTransfer(id);
+        // The source window then shows the tab that closing this one would show (tabs.afterCloseActivate).
+        var removed = _workspace.RemoveForTransfer(id, TabCloseActivationMode, RecentlyUsedTabs());
         if (removed is null) return null;
-        if (_tabHistories.Remove(id, out var history) && history.Count > 0) removed = removed with { History = history.Snapshot() };
+        if (_tabHistories.Take(id) is { } travelled) removed = removed with { History = travelled };
         return removed;
     }
 
-    private void PruneTabHistories()
-    {
-        if (_tabHistories.Count <= _workspace.Tabs.Count) return;
-        var live = _workspace.Tabs.Select(t => t.Id).ToHashSet();
-        foreach (var id in _tabHistories.Keys.Where(id => !live.Contains(id)).ToArray()) _tabHistories.Remove(id);
-    }
+    private void PruneTabHistories() => _tabHistories.Prune(_workspace.Tabs);
 
     /// <summary>
     /// Before the tab leaves its current entry: remember in it what is on screen now. Image: the image actually shown
@@ -191,7 +140,7 @@ public partial class MainWindow
     /// </summary>
     internal Task BackOrPreviousAsync()
     {
-        if (CrossTabHistory.CanGo(ActiveHistory, -1, _settings.ExplorerBackReturnsToImage)) return NavigateBackAsync();
+        if (CrossTabHistory.CanGo(ActiveHistory, -1, ExplorerOptionsView.BackReturnsToImage)) return NavigateBackAsync();
         if (_workspace.Active is ImageTabState && ImageView.IsVisible) return NavigateKeyboardAsync(-1);
         return Task.CompletedTask;
     }
@@ -223,7 +172,7 @@ public partial class MainWindow
             else
             {
                 // A jump from an image to an Explorer tab (Ctrl+E ...) is one chronological step (CrossTabHistory).
-                var decision = CrossTabHistory.Decide(history, direction, _settings.ExplorerBackReturnsToImage);
+                var decision = CrossTabHistory.Decide(history, direction, ExplorerOptionsView.BackReturnsToImage);
                 if (decision is { Kind: CrossTabStepKind.ToOtherTab, Link: { } link })
                 {
                     await CrossTabStepAsync(active, history, link, direction);
@@ -366,13 +315,16 @@ public partial class MainWindow
     /// </summary>
     private void PrepareExplorerViewForHistory(Guid tabId, string folder, string? selected, NavigationEntry entry)
     {
+        // 5.1.0 instant tab switching keeps the Explorer surface on this tab while a picture covers it; let go of it
+        // (its listing stays warm) so ApplyExplorerTabView applies the view prepared here instead of the stale one.
+        if (_explorerDisplayedTabId == tabId) RetireExplorerSurface();
         _explorerTabViews.TryGetValue(tabId, out var previous);
         var view = previous is not null && NavigationEntry.PathsEqual(previous.Folder, folder)
             ? previous
             : new ExplorerTabView
             {
                 Folder = folder,
-                ViewMode = previous?.ViewMode ?? Glide.App.Explorer.ExplorerViewModes.IndexOf(_settings.ExplorerDefaultView),
+                ViewMode = previous?.ViewMode ?? Glide.App.Explorer.ExplorerViewModes.IndexOf(ExplorerOptionsView.DefaultView),
                 SortKey = previous?.SortKey ?? Glide.App.Explorer.ExplorerSortKey.Name,
                 SortAscending = previous?.SortAscending ?? true,
                 FoldersFirst = previous?.FoldersFirst ?? true
@@ -391,7 +343,7 @@ public partial class MainWindow
     private void UpdateHistoryNavigationState()
     {
         var history = ActiveHistory;
-        var mode = _settings.ExplorerBackReturnsToImage;
+        var mode = ExplorerOptionsView.BackReturnsToImage;
         var canBack = CrossTabHistory.CanGo(history, -1, mode);
         var canForward = CrossTabHistory.CanGo(history, 1, mode);
         var backTip = HistoryTip(-1, CrossTabHistory.Decide(history, -1, mode));

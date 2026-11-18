@@ -3,6 +3,7 @@ using Glide.App.Controls;
 namespace Glide.Core.Tests;
 
 /// <summary>Scroll down must go to the next image and scroll up to the previous one, unless the user inverts it.</summary>
+[Trait("Area", "Gestures")]
 public sealed class WheelDirectionTests
 {
     [Theory]

@@ -1,4 +1,5 @@
 using Avalonia.Media.Imaging;
+using Glide.Core.Settings;
 
 namespace Glide.Imaging;
 
@@ -31,6 +32,25 @@ public sealed record ImagePerformancePolicy
     // Balanced browsing keeps neighbours as lightweight presentation-ready previews. Full neighbour
     // refinement competes with the user's foreground decode on large-photo folders.
     public int FullNeighbourPredecodeCount { get; init; } = 0;
+    // 5.1 per-preset decode scales (DecodeScaleCatalog). 0 / null = the preset's value for the file's family.
+    public int FirstViewPercentOverride { get; init; }
+    public int PrefetchPercentOverride { get; init; }
+    public string? RefineOverride { get; init; }
+
+    /// <summary>The catalogue row for <paramref name="path"/> with the Settings overrides applied.</summary>
+    public DecodeScaleProfile ScaleFor(string? path) =>
+        DecodeScaleCatalog.Resolve(Profile, DecodeScaleCatalog.FamilyOf(path), FirstViewPercentOverride, PrefetchPercentOverride, RefineOverride);
+
+    /// <summary>Full-resolution refine policy (file-independent part of the row: JPEG family decides).</summary>
+    public FullRefinePolicy RefinePolicyFor(string? path) => ScaleFor(path).Refine;
+
+    /// <summary>The first-view (or prefetch) decode box: the viewport box scaled by the catalogue, at least 160 px.</summary>
+    public (int Width, int Height) ScaledBox(string? path, bool prefetch)
+    {
+        var row = ScaleFor(path);
+        var scale = prefetch ? row.PrefetchScale : row.FirstViewScale;
+        return (Math.Max(160, (int)Math.Ceiling(PreviewMaxWidth * scale)), Math.Max(160, (int)Math.Ceiling(PreviewMaxHeight * scale)));
+    }
 
     public static ImagePerformancePolicy ForProfile(string? profile) => profile switch
     {

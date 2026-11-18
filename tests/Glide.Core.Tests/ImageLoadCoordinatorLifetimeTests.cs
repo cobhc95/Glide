@@ -11,6 +11,7 @@ namespace Glide.Core.Tests;
 /// full-decode-only formats settle in one decode with pixels identical to the full-resolution decode.
 /// </summary>
 [Collection(AvaloniaHeadlessCollection.Name)]
+[Trait("Area", "Decode")]
 public sealed class ImageLoadCoordinatorLifetimeTests : IDisposable
 {
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "glide-lifetime-" + Guid.NewGuid().ToString("N"));
@@ -19,7 +20,7 @@ public sealed class ImageLoadCoordinatorLifetimeTests : IDisposable
 
     public void Dispose()
     {
-        try { Directory.Delete(_dir, recursive: true); } catch { }
+        TempDir.TryDelete(_dir);
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -297,13 +298,13 @@ public sealed class ImageLoadCoordinatorLifetimeTests : IDisposable
         var backend = new CountingBackend();
         using var loader = new ImageLoadCoordinator(backend) { Policy = Policy(prefetch: true) with { PrefetchDepth = 5 } };
         loader.SchedulePrefetch(paths, 0, 1);
-        for (var i = 0; i < 200 && loader.GetCacheSnapshot().DecodedItems < 5; i++) await Task.Delay(10);
+        await Wait.UntilAsync(() => loader.GetCacheSnapshot().DecodedItems >= 5, "5 neighbours decoded");
         Assert.Equal(5, loader.GetCacheSnapshot().DecodedItems);
-        await Task.Delay(100);
+        await Task.Delay(100); // negative wait: let stray work settle before taking the baseline count
         var decodes = backend.FullDecodes + backend.PreviewDecodes;
 
         loader.SchedulePrefetch(paths, 0, 1); // the same neighbourhood again (e.g. a refresh)
-        await Task.Delay(300);
+        await Task.Delay(300); // negative wait: proves no re-decode happens
         Assert.Equal(decodes, backend.FullDecodes + backend.PreviewDecodes);
     }
 
@@ -314,7 +315,7 @@ public sealed class ImageLoadCoordinatorLifetimeTests : IDisposable
         var backend = new CountingBackend();
         using var loader = new ImageLoadCoordinator(backend) { Policy = Policy(prefetch: true) with { PrefetchDepth = 1 } };
         loader.SchedulePrefetch(paths, 0, 1); // starts decoding paths[1]
-        for (var i = 0; i < 100 && backend.FullDecodes + backend.PreviewDecodes == 0; i++) await Task.Delay(1);
+        await Wait.TryUntilAsync(() => backend.FullDecodes + backend.PreviewDecodes > 0, 100, pollMs: 1);
         var result = await loader.LoadForegroundAsync(paths[1], loader.Policy);
         Assert.NotNull(result);
         Assert.Equal(1, backend.FullDecodes + backend.PreviewDecodes); // one decode served both
@@ -440,7 +441,8 @@ public sealed class ImageLoadCoordinatorLifetimeTests : IDisposable
     {
         var jpeg = WriteImage("refine.jpg", 4000, 3000);
         var backend = new CountingBackend();
-        using var loader = new ImageLoadCoordinator(backend) { Policy = Policy(previewBox: 1900) with { PreviewLongestSide = 2400 } };
+        // "Immediately" full refine (the pre-5.1 policy); the idle/zoom policies are covered below.
+        using var loader = new ImageLoadCoordinator(backend) { Policy = Policy(previewBox: 1900) with { PreviewLongestSide = 2400, RefineOverride = "Immediately" } };
         loader.SetViewportDemand(jpeg, new ImageViewportDemand(1900, 1000));
         var first = (await loader.LoadForegroundAsync(jpeg, loader.Policy))!;
         Assert.True(first.IsPreview);
@@ -456,6 +458,25 @@ public sealed class ImageLoadCoordinatorLifetimeTests : IDisposable
         Assert.Equal(4000, refined.Bitmap.PixelSize.Width);
         Assert.Equal(1, backend.FullDecodes);
         refined.Bitmap.Dispose();
+    }
+
+    [Fact]
+    public async Task Jpeg_IdleRefinePolicy_RefinesToTheViewportOnly_NeverFull()
+    {
+        // 5.1 (DecodeScaleCatalog): "When idle" / "On zoom only" refine a too-small first frame to the size the
+        // view needs; full resolution is fetched later by the app (idle timer or zoom), not by this refinement.
+        var jpeg = WriteImage("refine-idle.jpg", 4000, 3000);
+        var backend = new CountingBackend();
+        using var loader = new ImageLoadCoordinator(backend) { Policy = Policy(previewBox: 1900) with { PreviewLongestSide = 2400, RefineOverride = "When idle" } };
+        var first = (await loader.LoadForegroundAsync(jpeg, loader.Policy))!;
+        loader.SetViewportDemand(jpeg, new ImageViewportDemand(3800, 2000));
+        var refined = await loader.RefineForegroundAsync(first);
+        if (refined is not null)
+        {
+            Assert.True(refined.IsPreview);
+            refined.Bitmap.Dispose();
+        }
+        Assert.Equal(0, backend.FullDecodes);
     }
 
     [Fact]

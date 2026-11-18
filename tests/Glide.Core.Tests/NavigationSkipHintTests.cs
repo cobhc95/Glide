@@ -15,6 +15,7 @@ namespace Glide.Core.Tests;
 /// <summary>
 /// 5.0.6: the sticky / bouncing key detector (pure) and the "Skipping several pictures at once?" toast (navigation.skipHint).
 /// </summary>
+[Trait("Area", "Navigation")]
 public sealed class NavigationSkipDetectorTests
 {
     private const int Right = 1;
@@ -132,6 +133,7 @@ public sealed class NavigationSkipDetectorTests
 }
 
 [Collection(AvaloniaHeadlessCollection.Name)]
+[Trait("Area", "Navigation")]
 public sealed class NavigationSkipHintWindowTests
 {
     public NavigationSkipHintWindowTests(AvaloniaHeadlessFixture fixture) { _ = fixture; }
@@ -255,9 +257,7 @@ public sealed class NavigationSkipHintWindowTests
             Bounce(window, 0);
             var hint = window.FindControl<Border>("NavigationSkipHint")!;
             Assert.True(hint.IsVisible);
-            var deadline = DateTime.UtcNow.AddMilliseconds(MainWindow.NavigationSkipHintVisibleMs + 3000);
-            while (hint.IsVisible && DateTime.UtcNow < deadline) { Dispatcher.UIThread.RunJobs(); await Task.Delay(50); }
-            Assert.False(hint.IsVisible);
+            await Wait.UntilAsync(() => !hint.IsVisible, "skip hint hidden", MainWindow.NavigationSkipHintVisibleMs + 3000, () => Dispatcher.UIThread.RunJobs(), 50);
         });
     }
 
@@ -339,7 +339,7 @@ public sealed class NavigationSkipHintWindowTests
                 await Settle();
             });
         }
-        finally { try { Directory.Delete(folder, true); } catch { } }
+        finally { TempDir.TryDelete(folder); }
     }
 
     // ---- helpers -------------------------------------------------------------------------------------------------
@@ -377,7 +377,7 @@ public sealed class NavigationSkipHintWindowTests
                 SettingsStore.SettingsDirectoryOverrideForTests.Value = previousStore;
             }
         });
-        try { Directory.Delete(root, true); } catch { }
+        TempDir.TryDelete(root);
     }
 
     private static async Task Settle()

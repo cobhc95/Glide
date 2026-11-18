@@ -18,6 +18,7 @@ namespace Glide.Core.Tests;
 /// The Explorer side (selection / scroll restore, Explorer keys and text boxes) is in Glide.Explorer.Tests.
 /// </summary>
 [Collection(AvaloniaHeadlessCollection.Name)]
+[Trait("Area", "Navigation")]
 public sealed class NavigationHistoryWindowTests
 {
     public NavigationHistoryWindowTests(AvaloniaHeadlessFixture fixture) { _ = fixture; }
@@ -91,7 +92,7 @@ public sealed class NavigationHistoryWindowTests
             Assert.Equal(new[] { "Alt+Right" }, loaded.Hotkeys["view.fit"]);
             Assert.Empty(loaded.Hotkeys["nav.previousBack"]);
             Assert.Equal(SettingsStore.CurrentSettingsSchema, loaded.SettingsSchemaVersion);
-            Assert.Equal(16, SettingsStore.CurrentSettingsSchema); // 16 (5.0.7): the Loop this folder status-bar button is shown by default
+            Assert.True(SettingsStore.CurrentSettingsSchema >= 11);   // the Back/Forward migration (schema 11) ran; no hard-coded current schema number
         });
     }
 
@@ -161,7 +162,7 @@ public sealed class NavigationHistoryWindowTests
                 Assert.IsType<ImageTabState>(Workspace(window).Active);
             });
         }
-        finally { try { Directory.Delete(folder, true); } catch { } }
+        finally { TempDir.TryDelete(folder); }
     }
 
     [Fact]
@@ -216,7 +217,7 @@ public sealed class NavigationHistoryWindowTests
                 Assert.IsType<ImageTabState>(Workspace(window).Active);
             });
         }
-        finally { try { Directory.Delete(folder, true); } catch { } }
+        finally { TempDir.TryDelete(folder); }
     }
 
     [Fact]
@@ -247,7 +248,7 @@ public sealed class NavigationHistoryWindowTests
                 Assert.False(History(window, tabId).CanGoForward);
             });
         }
-        finally { try { Directory.Delete(folder, true); } catch { } }
+        finally { TempDir.TryDelete(folder); }
     }
 
     [Fact]
@@ -272,7 +273,7 @@ public sealed class NavigationHistoryWindowTests
                 Assert.True(((NavigationHistory)Invoke(window, "HistoryFor", moved)!).CanGoBack);
             });
         }
-        finally { try { Directory.Delete(folder, true); } catch { } }
+        finally { TempDir.TryDelete(folder); }
     }
 
     // ---- Back / Forward across a jump from an image to an Explorer tab (Ctrl+E) --------------------------------------
@@ -331,7 +332,7 @@ public sealed class NavigationHistoryWindowTests
                 Assert.Equal(imageTab, Workspace(window).Active!.Id);
             });
         }
-        finally { try { Directory.Delete(folder, true); } catch { } }
+        finally { TempDir.TryDelete(folder); }
     }
 
     [Fact]
@@ -358,7 +359,7 @@ public sealed class NavigationHistoryWindowTests
                 Assert.Equal(imageTab, Workspace(window).Active!.Id);
             });
         }
-        finally { try { Directory.Delete(folder, true); } catch { } }
+        finally { TempDir.TryDelete(folder); }
     }
 
     [Fact]
@@ -392,7 +393,7 @@ public sealed class NavigationHistoryWindowTests
                 Assert.True(TitleButton(window, "nav.back").Classes.Contains("inactive"));
             });
         }
-        finally { try { Directory.Delete(folder, true); } catch { } }
+        finally { TempDir.TryDelete(folder); }
     }
 
     [Fact]
@@ -422,7 +423,7 @@ public sealed class NavigationHistoryWindowTests
                 Assert.Equal(reopened.Id, Workspace(window).Active!.Id);
             });
         }
-        finally { try { Directory.Delete(folder, true); } catch { } }
+        finally { TempDir.TryDelete(folder); }
     }
 
     // ---- "Open a picture's folder in" (explorer.locateOpensIn) ---------------------------------------------------------
@@ -468,7 +469,7 @@ public sealed class NavigationHistoryWindowTests
                 Assert.Equal(tabCount, Workspace(window).Tabs.Count);
             });
         }
-        finally { try { Directory.Delete(folder, true); } catch { } }
+        finally { TempDir.TryDelete(folder); }
     }
 
     [Fact]
@@ -498,7 +499,7 @@ public sealed class NavigationHistoryWindowTests
                 Assert.Equal(imageTab, Workspace(window).Active!.Id);
             });
         }
-        finally { try { Directory.Delete(folder, true); } catch { } }
+        finally { TempDir.TryDelete(folder); }
     }
 
     [Fact]
@@ -540,7 +541,7 @@ public sealed class NavigationHistoryWindowTests
                 }
             });
         }
-        finally { try { Directory.Delete(folder, true); } catch { } }
+        finally { TempDir.TryDelete(folder); }
     }
 
     [Fact]
@@ -568,7 +569,7 @@ public sealed class NavigationHistoryWindowTests
                 Assert.True(TitleButton(window, "nav.back").Classes.Contains("inactive"));
             });
         }
-        finally { try { Directory.Delete(folder, true); } catch { } }
+        finally { TempDir.TryDelete(folder); }
     }
 
     // ---- helpers ----------------------------------------------------------------------------------------------------
@@ -590,7 +591,7 @@ public sealed class NavigationHistoryWindowTests
         ((Dictionary<string, Button>)GetField(window, "_titleBarButtons")!)[id];
 
     private static NavigationHistory History(MainWindow window, Guid tabId) =>
-        ((Dictionary<Guid, NavigationHistory>)GetField(window, "_tabHistories")!)[tabId];
+        window.TabHistories.Find(tabId)!;
 
     private static string TempFolder(params string[] images)
     {
@@ -666,7 +667,7 @@ public sealed class NavigationHistoryWindowTests
         finally
         {
             SettingsStore.SettingsDirectoryOverrideForTests.Value = previous;
-            try { Directory.Delete(root, true); } catch { }
+            TempDir.TryDelete(root);
         }
     }
 
@@ -699,7 +700,7 @@ public sealed class NavigationHistoryWindowTests
                 SettingsStore.SettingsDirectoryOverrideForTests.Value = previousStore;
             }
         });
-        try { Directory.Delete(root, true); } catch { }
+        TempDir.TryDelete(root);
     }
 
     private static GlideSettingsState Settings(MainWindow window) => (GlideSettingsState)GetField(window, "_settings")!;

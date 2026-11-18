@@ -7,6 +7,7 @@ namespace Glide.Core.Tests;
 /// capabilities (paper/source names are never stored).
 /// </summary>
 [Collection(StoreStaticsCollection.Name)]
+[Trait("Area", "Print")]
 public sealed class PrintSettingsStoreTests
 {
     [Fact]
@@ -61,7 +62,7 @@ public sealed class PrintSettingsStoreTests
         finally
         {
             PrintSettingsStore.DirectoryOverrideForTests = null;
-            try { Directory.Delete(dir, true); } catch { }
+            TempDir.TryDelete(dir);
         }
     }
 
@@ -84,7 +85,7 @@ public sealed class PrintSettingsStoreTests
         finally
         {
             PrintSettingsStore.DirectoryOverrideForTests = null;
-            try { Directory.Delete(dir, true); } catch { }
+            TempDir.TryDelete(dir);
         }
     }
 }

@@ -111,24 +111,24 @@ public partial class MainWindow
 
     private void ApplyOverlaySettingsToManager(WindowInWindowOverlayManager overlays)
     {
-        overlays.DefaultOpacity = Math.Clamp(_settings.OverlayDefaultOpacity / 100.0, .1, 1.0);
+        overlays.DefaultOpacity = Math.Clamp(OverlayOptionsView.DefaultOpacity / 100.0, .1, 1.0);
         // 4.8.0: overlay wheel zoom, Ctrl+wheel zoom and right-drag pan are Window in Window gesture
         // rows ("Do nothing" = the old toggle off); the built-in defaults are on.
         overlays.WheelZoomEnabled = true;
         overlays.CtrlWheelZoomEnabled = true;
         overlays.RightDragPanEnabled = !string.Equals(_inputRouter.ResolveGesture("overlay.rightDrag", _settings.Gestures), GestureCatalog.Nothing, StringComparison.OrdinalIgnoreCase);
-        overlays.HighlightSelected = _settings.OverlaySelectedHighlight;
-        overlays.RememberZoom = _settings.OverlayRememberZoom;
-        overlays.ZoomStepPercent = Math.Clamp(_settings.OverlayZoomStepPercent, 1, 100);
-        overlays.AdaptivePositioningEnabled = !_settings.OverlayAbsoluteCoordinatesOnResize;
-        overlays.ScaleWithHostResize = _settings.OverlayScaleWithWindow;
-        overlays.AnimationRegion = _settings.OverlayAnimationRegion ?? "Anywhere";
-        overlays.AnimationSpeedDipsPerSecond = Math.Clamp(_settings.OverlayAnimationSpeedDipsPerSecond, 10, 2000);
-        overlays.AnimationTurnIntervalMs = Math.Clamp(_settings.OverlayAnimationTurnIntervalMs, 0, 60000);
-        overlays.AnimationTurnAngleDegrees = Math.Clamp(_settings.OverlayAnimationTurnAngleDegrees, 0, 180);
-        overlays.AnimationPauseWhileInteracting = _settings.OverlayAnimationPauseWhileInteracting;
-        overlays.AnimationAvoidOverlap = _settings.OverlayAnimationAvoidOverlap;
-        overlays.AnimationRefreshRateHz = Math.Clamp(_settings.OverlayAnimationRefreshRateHz, 60, 360);
+        overlays.HighlightSelected = OverlayOptionsView.SelectedHighlight;
+        overlays.RememberZoom = OverlayOptionsView.RememberZoom;
+        overlays.ZoomStepPercent = Math.Clamp(OverlayOptionsView.ZoomStepPercent, 1, 100);
+        overlays.AdaptivePositioningEnabled = !OverlayOptionsView.AbsoluteCoordinatesOnResize;
+        overlays.ScaleWithHostResize = OverlayOptionsView.ScaleWithWindow;
+        overlays.AnimationRegion = OverlayOptionsView.AnimationRegion ?? "Anywhere";
+        overlays.AnimationSpeedDipsPerSecond = Math.Clamp(OverlayOptionsView.AnimationSpeedDipsPerSecond, 10, 2000);
+        overlays.AnimationTurnIntervalMs = Math.Clamp(OverlayOptionsView.AnimationTurnIntervalMs, 0, 60000);
+        overlays.AnimationTurnAngleDegrees = Math.Clamp(OverlayOptionsView.AnimationTurnAngleDegrees, 0, 180);
+        overlays.AnimationPauseWhileInteracting = OverlayOptionsView.AnimationPauseWhileInteracting;
+        overlays.AnimationAvoidOverlap = OverlayOptionsView.AnimationAvoidOverlap;
+        overlays.AnimationRefreshRateHz = Math.Clamp(OverlayOptionsView.AnimationRefreshRateHz, 60, 360);
         overlays.AccentBrush = new SolidColorBrush(Color.Parse(CurrentAccentHex()));
         overlays.ResolveGesture = (slot, modifiers) => ResolveGestureSlot(slot, modifiers);
         overlays.RefreshTheme();
@@ -139,10 +139,10 @@ public partial class MainWindow
         if (_slideshow is { } existing) return existing;
         var slideshow = new SlideshowSessionController(
             new DispatcherTimer(), () => ImageView.IsVisible && !string.IsNullOrWhiteSpace(_currentPath),
-            () => _navigator.Count, () => _navigator.Index, () => _settings.SlideshowCrossFolders,
-            () => _settings.SlideshowLoop, () => _settings.SlideshowShuffle,
-            () => string.Equals(_settings.SlideshowDirection, "Backward", StringComparison.OrdinalIgnoreCase) ? -1 : 1,
-            () => _settings.SlideshowStartFullscreen, () => _settings.SlideshowIntervalMs,
+            () => _navigator.Count, () => _navigator.Index, () => SlideshowOptionsView.CrossFolders,
+            () => SlideshowOptionsView.Loop, () => SlideshowOptionsView.Shuffle,
+            () => string.Equals(SlideshowOptionsView.Direction, "Backward", StringComparison.OrdinalIgnoreCase) ? -1 : 1,
+            () => SlideshowOptionsView.StartFullscreen, () => SlideshowOptionsView.IntervalMs,
             ConfirmSlideshowSessionOptionsAsync, Viewport.CaptureViewState, Viewport.RestoreViewState,
             () => WindowState == WindowState.FullScreen, ToggleFullscreen,
             direction => RunSerializedNavigationResultAsync(() => TryNavigateSiblingFolderAsync(direction, forceDirectionalEdge: true)),
@@ -424,11 +424,16 @@ public partial class MainWindow
     {
         // Overlay mode is intentionally transient presentation geometry. Never let moving/resizing
         // the frameless overlay overwrite Glide's remembered ordinary-window placement.
-        if (_wholeAppOverlayMode || !_startupPlacementApplied || WindowState != WindowState.Normal || Bounds.Width < 100 || Bounds.Height < 100) return;
+        if (_wholeAppOverlayMode || _applyingWholeAppOverlayPlacement || !_startupPlacementApplied || WindowState != WindowState.Normal || Bounds.Width < 100 || Bounds.Height < 100) return;
         // Windows flips the native maximized/minimized state before Avalonia's cached WindowState catches
         // up, so a resize fired mid-maximize still reads "Normal" but carries the maximized geometry.
         // Trust the native state too, or the maximized rectangle overwrites the real normal bounds.
         if (TryGetNativeZoomed(out var nativeZoomed) && nativeZoomed) return;
+        // Same for minimize: Windows parks an iconic window at (-32000, -32000) and can raise a
+        // position change before Avalonia's WindowState reads Minimized. Saving that parking spot
+        // replaced the user's real placement (the next launch then fell back to centering).
+        if (TryGetNativeIconic(out var nativeIconic) && nativeIconic) return;
+        if (IsMinimizedParkingPosition(Position)) return;
         _lastNormalWindowPosition = Position;
         _lastNormalWindowSize = Bounds.Size;
         _normalPlacementKnown = true;
@@ -439,6 +444,9 @@ public partial class MainWindow
         _settings.WindowWasMaximized = false;
         App.PublishCurrentSettings(_settings);
     }
+
+    /// <summary>Windows' minimized-window parking coordinates (-32000, -32000); never a real placement.</summary>
+    internal static bool IsMinimizedParkingPosition(PixelPoint position) => position.X <= -32000 || position.Y <= -32000;
 
     private void SaveWindowPlacement()
     {

@@ -3,56 +3,37 @@ using Avalonia.Controls;
 using Avalonia.Media;
 using Glide.App.Services;
 using Glide.Core;
+using Glide.Core.Status;
 
 namespace Glide.App;
 
 /// <summary>Presentation chrome: counters, status stats, title, theme and accent palette. Split from MainWindow (4.5.2); behavior unchanged.</summary>
 public partial class MainWindow
 {
+    /// <summary>Stage D (C9): the one snapshot of what the status bar and the text overlay show.</summary>
+    private ViewerStatusModel CurrentViewerStatus(bool includeSelection = false)
+    {
+        (int, int)? selection = includeSelection && Viewport.TryGetSelectionPixelRect(out var rect) ? (rect.Width, rect.Height) : null;
+        return new ViewerStatusModel(_currentPath, _navigator.Index, _navigator.Count, _currentPixelWidth, _currentPixelHeight,
+            _currentFileSize, Viewport.ZoomPercent, selection);
+    }
+
+    /// <summary>Stage D (C9): the current image, its index or its dimensions changed; refresh both status surfaces.</summary>
+    private void NotifyViewerStatusChanged()
+    {
+        UpdatePictureCounter();
+        UpdateStatusStats();
+        UpdatePictureAddressRow();
+    }
+
     private void UpdatePictureCounter()
     {
         if (CornerCounterText is null || CornerCounterShadowText is null) return;
-
-        var path = _currentPath ?? string.Empty;
-        var file = string.IsNullOrWhiteSpace(path) ? string.Empty : Path.GetFileName(path);
-        var stem = string.IsNullOrWhiteSpace(path) ? string.Empty : Path.GetFileNameWithoutExtension(path);
-        var extension = string.IsNullOrWhiteSpace(path) ? string.Empty : Path.GetExtension(path).TrimStart('.');
-        var folderPath = string.IsNullOrWhiteSpace(path) ? string.Empty : Path.GetDirectoryName(path) ?? string.Empty;
-        var folder = string.IsNullOrWhiteSpace(folderPath)
-            ? string.Empty
-            : Path.GetFileName(folderPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
-        if (string.IsNullOrWhiteSpace(folder) && !string.IsNullOrWhiteSpace(folderPath)) folder = folderPath;
-        var width = Math.Max(0, _currentPixelWidth);
-        var height = Math.Max(0, _currentPixelHeight);
-        var megapixels = width > 0 && height > 0 ? (width * (double)height / 1_000_000d).ToString("0.##") : "0";
-        var format = string.IsNullOrWhiteSpace(path) ? string.Empty : CodecCapabilityRegistry.GetLongestExtension(path).TrimStart('.').ToUpperInvariant();
-        var template = string.IsNullOrWhiteSpace(_settings.PictureCounterTemplate) ? "[{index}/{total}]" : _settings.PictureCounterTemplate;
-        var replacements = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["{index}"] = _navigator.Count > 0 ? (_navigator.Index + 1).ToString() : "0",
-            ["{total}"] = _navigator.Count.ToString(),
-            ["{file}"] = file,
-            ["{filename}"] = file,
-            ["{stem}"] = stem,
-            ["{extension}"] = extension,
-            ["{format}"] = format,
-            ["{folder}"] = folder,
-            ["{folderpath}"] = folderPath,
-            ["{path}"] = path,
-            ["{width}"] = width.ToString(),
-            ["{height}"] = height.ToString(),
-            ["{dimensions}"] = width > 0 && height > 0 ? $"{width}×{height}" : string.Empty,
-            ["{megapixels}"] = megapixels,
-            ["{filesize}"] = _currentFileSize > 0 ? FormatFileSize(_currentFileSize) : "0 B",
-            ["{filesizebytes}"] = Math.Max(0, _currentFileSize).ToString(),
-            ["{zoom}"] = $"{Viewport.ZoomPercent}%"
-        };
-        var text = template;
-        foreach (var (token, value) in replacements) text = text.Replace(token, value, StringComparison.OrdinalIgnoreCase);
-        text = ApplyTextOverlayLineBreaks(text);
+        var model = CurrentViewerStatus();
+        var text = ApplyTextOverlayLineBreaks(ViewerStatusFormatter.CounterText(model, OverlayOptionsView.PictureCounterTemplate));
         CornerCounterText.Text = text;
         CornerCounterShadowText.Text = text;
-        UpdateFolderCounter(folderPath);
+        UpdateFolderCounter(ViewerStatusFormatter.FolderPathOf(model.Path));
     }
 
     /// <summary><c>&lt;br&gt;</c> (also <c>&lt;br/&gt;</c>, <c>&lt;br /&gt;</c>, any case) and the typed two-character
@@ -67,14 +48,14 @@ public partial class MainWindow
 
     private async void UpdateFolderCounter(string folderPath)
     {
-        if (!_settings.ShowFolderCounter || string.IsNullOrWhiteSpace(folderPath))
+        if (!NavigationOptionsView.Counter || string.IsNullOrWhiteSpace(folderPath))
         {
             FolderCounterText.IsVisible = false;
             return;
         }
-        var includeHidden = _settings.FolderNavIncludeHidden;
-        var order = _settings.FolderNavOrder;
-        var grandparent = _settings.FolderCounterIncludeGrandparent;
+        var includeHidden = NavigationOptionsView.FolderNavIncludeHidden;
+        var order = NavigationOptionsView.FolderNavOrder;
+        var grandparent = NavigationOptionsView.FolderCounterIncludeGrandparent;
         if (_folderCounterCache is { } cached && cached.Hidden == includeHidden && cached.Grandparent == grandparent &&
             string.Equals(cached.Order, order, StringComparison.Ordinal) && string.Equals(cached.Folder, folderPath, StringComparison.OrdinalIgnoreCase))
         {
@@ -105,7 +86,7 @@ public partial class MainWindow
             }
             catch { return ""; }
         });
-        if (!_settings.ShowFolderCounter || !string.Equals(Path.GetDirectoryName(_currentPath ?? ""), folderPath, StringComparison.OrdinalIgnoreCase) || grandparent != _settings.FolderCounterIncludeGrandparent || includeHidden != _settings.FolderNavIncludeHidden || order != _settings.FolderNavOrder) return;
+        if (!NavigationOptionsView.Counter || !string.Equals(Path.GetDirectoryName(_currentPath ?? ""), folderPath, StringComparison.OrdinalIgnoreCase) || grandparent != NavigationOptionsView.FolderCounterIncludeGrandparent || includeHidden != NavigationOptionsView.FolderNavIncludeHidden || order != NavigationOptionsView.FolderNavOrder) return;
         _folderCounterCache = (folderPath, includeHidden, order, grandparent, result);
         FolderCounterText.Text = result;
         FolderCounterText.IsVisible = result.Length > 0;
@@ -114,15 +95,15 @@ public partial class MainWindow
     private void ApplyPictureCounterVisuals()
     {
         if (CornerCounterHost is null) return;
-        var size = Math.Clamp(_settings.PictureCounterFontSize, 8, 48);
+        var size = Math.Clamp(OverlayOptionsView.PictureCounterFontSize, 8, 48);
         CornerCounterText.FontSize = size;
         CornerCounterShadowText.FontSize = size;
-        var weight = _settings.PictureCounterBold ? FontWeight.SemiBold : FontWeight.Normal;
+        var weight = OverlayOptionsView.PictureCounterBold ? FontWeight.SemiBold : FontWeight.Normal;
         CornerCounterText.FontWeight = weight;
         CornerCounterShadowText.FontWeight = weight;
-        CornerCounterText.Opacity = Math.Clamp(_settings.PictureCounterOpacity, 10, 100) / 100.0;
-        CornerCounterShadowText.Opacity = _settings.PictureCounterShadow ? CornerCounterText.Opacity * 0.85 : 0;
-        var colour = _settings.PictureCounterColor switch
+        CornerCounterText.Opacity = Math.Clamp(OverlayOptionsView.PictureCounterOpacity, 10, 100) / 100.0;
+        CornerCounterShadowText.Opacity = OverlayOptionsView.PictureCounterShadow ? CornerCounterText.Opacity * 0.85 : 0;
+        var colour = OverlayOptionsView.PictureCounterColor switch
         {
             "Soft gray" => IsDarkTheme() ? "#D2D8DE" : "#56616B",
             "Accent" => CurrentAccentHex(),
@@ -136,7 +117,7 @@ public partial class MainWindow
         FolderCounterText.Opacity = CornerCounterText.Opacity * 0.7;
         ApplyTextOverlayBorder();
 
-        var position = _settings.PictureCounterPosition ?? "Top right";
+        var position = OverlayOptionsView.PictureCounterPosition ?? "Top right";
         CornerCounterHost.HorizontalAlignment = position.Contains("left", StringComparison.OrdinalIgnoreCase)
             ? Avalonia.Layout.HorizontalAlignment.Left
             : position.Contains("center", StringComparison.OrdinalIgnoreCase)
@@ -147,7 +128,7 @@ public partial class MainWindow
             : Avalonia.Layout.VerticalAlignment.Top;
         CornerCounterHost.Margin = CornerCounterHost.VerticalAlignment == Avalonia.Layout.VerticalAlignment.Top
             ? new Thickness(15, 28, 15, 0)
-            : new Thickness(15, 0, 15, _settings.ShowStatusSurface ? 82 : 16);
+            : new Thickness(15, 0, 15, StatusBarOptionsView.ShowStatusSurface ? 82 : 16);
         UpdatePictureCounter();
     }
 
@@ -157,7 +138,7 @@ public partial class MainWindow
     /// </summary>
     private void ApplyTextOverlayBorder()
     {
-        if (!_settings.PictureCounterBorder)
+        if (!OverlayOptionsView.PictureCounterBorder)
         {
             CornerCounterHost.Background = null;
             CornerCounterHost.BorderBrush = null;
@@ -208,25 +189,9 @@ public partial class MainWindow
     {
         if (StatusStatsText is null) return;
         UpdateSaveButtons();
-        if (string.IsNullOrWhiteSpace(_currentPath) || _navigator.Count == 0)
-        {
-            StatusStatsText.Text = "Ready";
-            return;
-        }
-
-        var parts = new List<string>();
-        if (_settings.StatusStatFileName) parts.Add(_settings.FullPathInTitle ? _currentPath : Path.GetFileName(_currentPath));
-        if (_settings.StatusStatIndex) parts.Add($"{_navigator.Index + 1} / {_navigator.Count}");
-        if (_settings.StatusStatResolution && _currentPixelWidth > 0) parts.Add($"{_currentPixelWidth} × {_currentPixelHeight}");
-        if (_settings.StatusStatZoom) parts.Add($"{Viewport.ZoomPercent}%");
-        if (_settings.StatusStatFileSize && _currentFileSize > 0) parts.Add(FormatFileSize(_currentFileSize));
-        if (_settings.StatusStatFormat) parts.Add(CodecCapabilityRegistry.GetLongestExtension(_currentPath).TrimStart('.').ToUpperInvariant());
-        if (Viewport.TryGetSelectionPixelRect(out var selection)) parts.Add($"Sel {selection.Width} × {selection.Height}");
-        // Segments use non-breaking spaces so a wrapped stats line breaks only at the separators,
-        // never in the middle of a value such as "3744 × 5616".
-        StatusStatsText.Text = parts.Count == 0
-            ? Path.GetFileName(_currentPath)
-            : string.Join("  •  ", parts.Select(p => p.Replace(' ', ' ')));
+        var model = CurrentViewerStatus(includeSelection: true);
+        StatusStatsText.Text = ViewerStatusFormatter.StatsText(model, StatusBarOptionsView, _settings.FullPathInTitle);
+        if (!model.HasImage) return;
         ToolTip.SetTip(StatusStatsText, _currentPath);
         ScheduleStatusRearrangeForStats(StatusStatsText.Text?.Length ?? 0);
     }
@@ -245,12 +210,7 @@ public partial class MainWindow
             : AppVersion.ViewerTitle(prefix, display);
     }
 
-    private static string FormatFileSize(long bytes)
-    {
-        if (bytes < 1024) return $"{bytes} B";
-        if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} KB";
-        return $"{bytes / (1024.0 * 1024.0):F1} MB";
-    }
+    private static string FormatFileSize(long bytes) => ViewerStatusFormatter.FormatFileSize(bytes);
 
     private static void SetActiveClass(Control control, bool active)
     {

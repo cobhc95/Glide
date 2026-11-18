@@ -11,6 +11,7 @@ namespace Glide.Core.Tests;
 /// Settings search. These run on the real (now synchronously-awaited) headless UI thread.
 /// </summary>
 [Collection(AvaloniaHeadlessCollection.Name)]
+[Trait("Area", "Regression")]
 public sealed class Regression422Tests
 {
     public Regression422Tests(AvaloniaHeadlessFixture fixture)

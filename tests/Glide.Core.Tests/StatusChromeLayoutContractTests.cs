@@ -6,6 +6,7 @@ namespace Glide.Core.Tests;
 /// while an opt-in Auto-resize toggle is enabled.
 /// </summary>
 // Source-text contract kept: this asserts on production source (UI code-behind, native/installer files or a repo-wide scan) that cannot be run headlessly; behavioural coverage lives in the other test files.
+[Trait("Area", "StatusBar")]
 public sealed class StatusChromeLayoutContractTests
 {
     [Fact]
@@ -38,10 +39,8 @@ public sealed class StatusChromeLayoutContractTests
     {
         var statusChrome = ReadSource("src", "Glide.App", "MainWindow.StatusChrome.cs").Replace("\r\n", "\n");
         var visibility = MethodBody(statusChrome, "private void ApplyStatusVisibility()");
-        // Collapsed windowed bar stays visible as a collapsed-only surface, not a hidden bar
-        // restored by a separate corner arrow.
-        Assert.Contains("collapsedOnly", visibility, StringComparison.Ordinal);
-        Assert.Contains("(expanded || collapsedOnly) && ImageView.IsVisible", visibility, StringComparison.Ordinal);
+        // Collapsed windowed bar stays visible as a collapsed-only surface (behaviour pinned in StatusChromePolicyTests).
+        Assert.Contains("StatusChromePolicy.Decide", visibility, StringComparison.Ordinal);
         Assert.Contains("ApplyCollapsedStatusChrome()", visibility, StringComparison.Ordinal);
         var collapsed = MethodBody(statusChrome, "private void ApplyCollapsedStatusChrome()");
         // Corner mode: the collapsed bar is just the button (no empty strip), parked lower-right.
@@ -78,10 +77,10 @@ public sealed class StatusChromeLayoutContractTests
         var mainWindow = ReadSource("src", "Glide.App", "MainWindow.axaml.cs").Replace("\r\n", "\n");
         var menu = MethodBody(mainWindow, "internal ContextMenu BuildStatusSurfaceContextMenu()");
         Assert.Contains("Auto-resize", menu, StringComparison.Ordinal);
-        Assert.Contains("_settings.StatusBarAutoFit = !_settings.StatusBarAutoFit", menu, StringComparison.Ordinal);
+        Assert.Contains("_settings.StatusBarAutoFit = !StatusBarOptionsView.AutoFit", menu, StringComparison.Ordinal);
 
         var applySize = MethodBody(mainWindow, "private void ApplyStatusBarSize()");
-        Assert.Contains("_settings.StatusBarAutoFit && rowsAtConfiguredSize > 2", applySize, StringComparison.Ordinal);
+        Assert.Contains("StatusBarOptionsView.AutoFit && rowsAtConfiguredSize > 2", applySize, StringComparison.Ordinal);
     }
 
     private static string MethodBody(string source, string signature)

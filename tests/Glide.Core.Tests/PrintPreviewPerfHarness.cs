@@ -16,6 +16,7 @@ namespace Glide.Core.Tests;
 /// renders the preview headless; it never starts a print job. Without the variable every test returns at once.
 /// </summary>
 [Collection(AvaloniaHeadlessCollection.Name)]
+[Trait("Area", "Print")]
 public sealed class PrintPreviewPerfHarness
 {
     public PrintPreviewPerfHarness(AvaloniaHeadlessFixture fixture) => _ = fixture;
@@ -258,7 +259,7 @@ public sealed class PrintPreviewPerfHarness
         finally
         {
             PrintSettingsStore.DirectoryOverrideForTests = null;
-            try { Directory.Delete(settingsDir, true); } catch { }
+            TempDir.TryDelete(settingsDir);
         }
     }
 }

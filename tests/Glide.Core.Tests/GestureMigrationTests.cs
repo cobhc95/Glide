@@ -9,6 +9,7 @@ namespace Glide.Core.Tests;
 /// each folded toggle becomes the equivalent explicit binding, stock toggles change nothing, explicit
 /// bindings are never overwritten, and the result survives save / load.
 /// </summary>
+[Trait("Area", "Gestures")]
 public sealed class GestureMigrationTests
 {
     private static Dictionary<string, string> Migrate(LegacyMouseToggles toggles, Dictionary<string, string>? start = null)
@@ -202,7 +203,7 @@ public sealed class GestureMigrationTests
         finally
         {
             SettingsStore.SettingsDirectoryOverrideForTests.Value = previous;
-            try { Directory.Delete(dir, true); } catch { }
+            TempDir.TryDelete(dir);
         }
     }
 }

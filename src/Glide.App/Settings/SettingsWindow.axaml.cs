@@ -209,6 +209,10 @@ public partial class SettingsWindow : Window
         BuildResetSelector();
         BuildBackupSelector();
         BuildSettingControlMap();
+        // 5.1.0: this window's tooltips wait the Settings-window delay (live while the box changes).
+        Glide.App.Controls.TooltipDelayStyle.Apply(this, Glide.Core.Settings.TooltipAreas.DelayMs(current, Glide.Core.Settings.TooltipAreas.Settings));
+        TooltipDelaySettingsBox.ValueChanged += (_, e) =>
+            Glide.App.Controls.TooltipDelayStyle.Apply(this, Glide.Core.Settings.TooltipAreas.Clamp((int)(e.NewValue ?? 600)));
         InitializeResetCard();
         InitializeBackupCard();
         Glide.Core.GlidePerformanceTrace.Mark("settings_control_map_ready");
@@ -221,6 +225,9 @@ public partial class SettingsWindow : Window
         ExplorerScrollModeCombo.SelectionChanged += (_, _) => UpdateExplorerScrollModeRows();
         ExplorerLocateOpensInCombo.SelectionChanged += (_, _) => UpdateLocateDependentControls();
         EndOfFolderActionCombo.SelectionChanged += (_, _) => UpdateEndOfFolderDependentControls();
+        NewTabPositionCombo.SelectionChanged += (_, _) => UpdateNewTabKeyLabels();
+        AfterTabCloseActivateCombo.SelectionChanged += (_, _) => UpdateAfterTabCloseCustomRow();
+        SwitchToNewTabsCombo.SelectionChanged += (_, _) => UpdateNewTabKeyLabels();
         _searchDebounceTimer.Tick += (_, _) =>
         {
             _searchDebounceTimer.Stop();
@@ -411,26 +418,15 @@ public partial class SettingsWindow : Window
         _loadingControls = true;
         try
         {
-            RecentHistoryCheck.IsChecked = s.RecentHistoryEnabled;
-            SearchShowRelatedCheck.IsChecked = s.SearchShowRelatedResults;
+            // Every plain toggle (CheckBox / ToggleSwitch mapped in BuildSettingControlMap) loads from the one accessor table.
+            LoadMappedToggles(s);
             HistorySizeBox.Value = s.HistorySize;
-            RememberPlacementCheck.IsChecked = s.RememberWindowPlacement;
-            ReuseSingleInstanceCheck.IsChecked = s.ReuseSingleInstance;
             SelectByText(EndOfFolderActionCombo, Glide.Core.Navigation.EndOfFolderActions.Normalize(s.EndOfFolderAction));
             UpdateEndOfFolderDependentControls();
-            HierarchicalFolderTraversalCheck.IsChecked = s.HierarchicalFolderTraversal;
-            ConfirmHierarchicalFolderTraversalCheck.IsChecked = s.ConfirmHierarchicalFolderTraversal;
             SelectByText(HierarchicalPreviousFolderEntryCombo, string.IsNullOrWhiteSpace(s.HierarchicalPreviousFolderEntry) ? "First image" : s.HierarchicalPreviousFolderEntry);
             NavigationRateLimitMsBox.Value = Math.Clamp(s.NavigationRateLimitMs, 0, 600000);
             SelectByText(NavigationRateLimitInputCombo, string.IsNullOrWhiteSpace(s.NavigationRateLimitInput) ? "Both" : s.NavigationRateLimitInput);
-            NavigationRateLimitIndicatorCheck.IsChecked = s.NavigationRateLimitShowIndicator;
-            NavigationSkipHintCheck.IsChecked = s.NavigationSkipHint;
             SelectByText(NavigationRateLimitIndicatorPositionCombo, string.IsNullOrWhiteSpace(s.NavigationRateLimitIndicatorPosition) ? "Top left" : s.NavigationRateLimitIndicatorPosition);
-            NavigationRateLimitWindowedCheck.IsChecked = s.NavigationRateLimitWindowed;
-            NavigationRateLimitFullscreenCheck.IsChecked = s.NavigationRateLimitFullscreen;
-            NavigationRateLimitSlideshowCheck.IsChecked = s.NavigationRateLimitSlideshow;
-            RememberLastOpenCheck.IsChecked = s.RememberLastOpenLocation;
-            NewExplorerTabLastLocationCheck.IsChecked = s.NewExplorerTabsUseLastLocation;
             NewExplorerTabDefaultDirectoryBox.Text = s.NewExplorerTabDefaultDirectory;
             var theme = string.IsNullOrWhiteSpace(s.ThemeChoice) ? (s.LightTheme ? "Light" : "Dark") : s.ThemeChoice;
             SelectByText(ThemeCombo, theme);
@@ -442,25 +438,12 @@ public partial class SettingsWindow : Window
             _workingCustomMainBackgroundHex = string.IsNullOrWhiteSpace(s.CustomMainBackgroundHex) ? Glide.App.ThemePalette.FallbackBackground : s.CustomMainBackgroundHex;
             SelectByText(MainBackgroundCombo, string.IsNullOrWhiteSpace(s.MainBackgroundChoice) ? "Follow theme" : s.MainBackgroundChoice);
             GlowIntensityBox.Value = Math.Clamp(s.GlowIntensityPercent, 0, 100);
-            ShowRecentOnHomeCheck.IsChecked = s.ShowRecentOnHome;
-            ConfirmDiscardSettingsCheck.IsChecked = s.ConfirmDiscardSettingsChanges;
-            UpdateCheckDailyCheck.IsChecked = s.UpdateCheckDaily;
-            UpdateDontRemindCheck.IsChecked = s.UpdateDontRemind;
             SelectByText(StartupActionCombo, string.Equals(s.StartupAction, "Explorer tab", StringComparison.OrdinalIgnoreCase) || string.IsNullOrWhiteSpace(s.StartupAction) ? "Welcome tab" : s.StartupAction);
             StartupCustomPathBox.Text = s.StartupCustomPath ?? string.Empty;
             SelectByText(NewTabActionCombo, string.IsNullOrWhiteSpace(s.NewTabAction) ? "Welcome tab" : s.NewTabAction);
             NewTabCustomPathBox.Text = s.NewTabCustomPath ?? string.Empty;
 
-            StatusCheck.IsChecked = s.ShowStatusSurface;
-            StatusHoverWhenClosedCheck.IsChecked = s.StatusShowOnHoverWhenClosed;
-            ShowScrollbarsCheck.IsChecked = s.ShowScrollbars;
-            FullPathTitleCheck.IsChecked = s.FullPathInTitle;
-            HideCursorFullscreenCheck.IsChecked = s.HideCursorFullscreen;
-            AutoHideFullscreenChromeCheck.IsChecked = s.AutoHideFullscreenChrome;
-            TabsCheck.IsChecked = s.TabsEnabled;
             SelectByText(ShowInExplorerTargetCombo, ShowInExplorerTargets.Normalize(s.ShowInExplorerTarget));
-            TabBarBackButtonCheck.IsChecked = s.TabBarShowBackButton;
-            TabBarForwardButtonCheck.IsChecked = s.TabBarShowForwardButton;
             SelectByText(ExternalOpenBehaviorCombo, string.IsNullOrWhiteSpace(s.ExternalOpenBehavior) ? "Open in new tab" : s.ExternalOpenBehavior);
             var thumbnails = Glide.App.Platform.ThumbnailSettingsStore.Load();
             LoadThumbnailControls(thumbnails);
@@ -475,38 +458,19 @@ public partial class SettingsWindow : Window
             SelectByText(CaptionFullscreenMinimizeCombo, s.CaptionFullscreenMinimizeAction);
             SelectByText(CaptionFullscreenMaximizeCombo, s.CaptionFullscreenMaximizeAction);
             SelectByText(CaptionFullscreenCloseCombo, s.CaptionFullscreenCloseAction);
-            FullscreenStatusAlwaysCheck.IsChecked = s.FullscreenStatusAlwaysOn;
-            FullscreenKeepTabBarOpenCheck.IsChecked = s.FullscreenKeepTabBarOpen;
-            FullscreenKeepTitleBarForExplorerCheck.IsChecked = s.FullscreenKeepTitleBarForExplorer;
-            AlwaysOnTopCheck.IsChecked = s.AlwaysOnTop;
             SelectByText(AlwaysOnTopModeCombo, string.Equals(s.AlwaysOnTopMode, "Soft", StringComparison.OrdinalIgnoreCase) ? "Soft" : "Hard");
-            AutoCenterWindowOnRestoreCheck.IsChecked = s.AutoCenterWindowOnRestore;
             SelectByText(FullscreenExitBehaviorCombo, string.IsNullOrWhiteSpace(s.FullscreenExitBehavior) ? "Restore size and location" : s.FullscreenExitBehavior);
             SelectByText(DefaultViewCombo, s.DefaultViewMode);
-            AnimateGifsCheck.IsChecked = s.AnimateGifs;
-            PointerZoomCheck.IsChecked = s.PointerZoom;
-            PreserveZoomCheck.IsChecked = s.PreserveManualZoomOnNavigate;
             ViewportZoomStepBox.Value = Glide.Core.ZoomStepPolicy.Clamp(s.ViewportZoomStepPercent);
-            UpscaleSmallImagesCheck.IsChecked = s.UpscaleSmallImages;
-            SubpixelRenderingCheck.IsChecked = s.HighPrecisionSubpixelRendering;
-            ShowLoadingIndicatorCheck.IsChecked = s.ShowImageLoadingIndicator;
+            foreach (var (area, box) in TooltipDelayBoxes()) box.Value = Glide.Core.Settings.TooltipAreas.DelayMs(s, area.Id);
             FullscreenHideCursorDelayBox.Value = Math.Clamp(s.FullscreenHideCursorDelaySeconds, 1, 30);
-            TabFocusNavigationCheck.IsChecked = s.EnableTabFocusNavigation;
-            EscStopsSlideshowCheck.IsChecked = s.EscStopsSlideshow;
-            EscExitsFullscreenCheck.IsChecked = s.EscExitsFullscreen;
-            EscWindowedConfirmCheck.IsChecked = s.EscWindowedConfirm;
             _escRememberedChoice = string.IsNullOrWhiteSpace(s.EscWindowedRememberedChoice) ? "Ask" : s.EscWindowedRememberedChoice;
             ResetEscChoiceButton.IsEnabled = !string.Equals(_escRememberedChoice, "Ask", StringComparison.OrdinalIgnoreCase);
 
-            InvertWheelCheck.IsChecked = s.InvertWheelDirection;
             SelectByText(LeftWindowDragBehaviorCombo, string.IsNullOrWhiteSpace(s.LeftWindowDragBehavior) ? "Smart (normal window only)" : s.LeftWindowDragBehavior);
             SelectByText(RightDragBehaviorCombo, string.IsNullOrWhiteSpace(s.RightDragBehavior) ? "Smart (pan image / move window)" : s.RightDragBehavior);
-            SelectionBufferCheck.IsChecked = s.SelectionBufferEnabled;
             SelectionBufferWindowedBox.Value = Math.Clamp(s.SelectionBufferWindowedPercent, 0, 100);
             SelectionBufferMaximizedBox.Value = Math.Clamp(s.SelectionBufferMaximizedPercent, 0, 100);
-            SelectionBufferAllModesCheck.IsChecked = s.SelectionBufferAllModes;
-            ReverseSelectionZoomOutScaleCheck.IsChecked = s.ReverseSelectionZoomOutScale;
-            BackgroundDragCheck.IsChecked = s.BackgroundDragWindow;
             _workingGestures = (s.Gestures ?? GestureCatalog.CreateDefaultMap()).ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase);
             _workingCustomGestures = GestureCatalog.NormalizeCustomGestures(s.CustomGestures);
             UpdateGestureDependentTips();
@@ -515,141 +479,76 @@ public partial class SettingsWindow : Window
 
             SelectByText(InitialQualityCombo, s.InitialImageQuality);
             SelectByText(InteractivePanQualityCombo, string.IsNullOrWhiteSpace(s.InteractivePanQuality) ? "Full quality" : s.InteractivePanQuality);
-            SpeedBoostCheck.IsChecked = s.SpeedBoostEnabled;
             SelectByText(SpeedBoostTrayIconCombo, App.EffectiveTrayIconMode(s));
-            StartWithWindowsInBackgroundCheck.IsChecked = s.StartWithWindowsInBackground;
-            AdaptiveFastPreviewCheck.IsChecked = s.AdaptiveFastPreview;
             AdaptivePreviewDelayBox.Value = s.AdaptivePreviewDelayMs;
-            SequentialReadCheck.IsChecked = s.SequentialForegroundReads;
-            PrefetchCheck.IsChecked = s.PredictivePrefetch;
-            BackgroundRefinementCheck.IsChecked = s.BackgroundRefinement;
-            PurgeCacheCheck.IsChecked = s.PurgeCacheOnMinimize;
-            StartupDiagnosticsCheck.IsChecked = s.StartupDiagnostics;
+            FirstViewScaleBox.Value = Math.Clamp(s.FirstViewScalePercent, 0, 100);
+            PrefetchScaleBox.Value = Math.Clamp(s.PrefetchScalePercent, 0, 100);
+            SelectByText(FullRefineCombo, string.IsNullOrWhiteSpace(s.FullRefine) ? "Preset default" : s.FullRefine);
             PrefetchDepthBox.Value = Math.Clamp(s.PrefetchDepth, 1, 30);
-            PrefetchSiblingFoldersCheck.IsChecked = s.PrefetchSiblingFolders;
             PrefetchSiblingFolderCountBox.Value = Math.Clamp(s.PrefetchSiblingFolderImageCount, 1, 30);
             CacheItemsBox.Value = s.CacheItems;
             CompressedCacheMbBox.Value = s.CompressedCacheMegabytes;
             DecodedCacheMbBox.Value = s.DecodedCacheMegabytes;
             RapidPreviewBox.Value = s.RapidPreviewLongestSide;
             RapidBrowsePreviewBox.Value = Math.Clamp(s.RapidBrowsePreviewLongestSide, 640, 4096);
-            ProgressiveColorCheck.IsChecked = s.ProgressiveColorFirstPreview;
 
-            StatusNavigationCheck.IsChecked = s.StatusShowNavigation;
             SelectByText(StatusBarSizeCombo, string.IsNullOrWhiteSpace(s.StatusBarSize) ? "Small" : s.StatusBarSize);
             SelectByText(StatusBarAlignmentCombo, string.IsNullOrWhiteSpace(s.StatusBarAlignment) ? "Center" : s.StatusBarAlignment);
             StatusGlobalScaleBox.Value = Math.Clamp(s.StatusBarGlobalScalePercent, 60, 160);
-            StatusAutoFitCheck.IsChecked = s.StatusBarAutoFit;
             StatusMaximizedBoostBox.Value = Math.Clamp(s.StatusBarMaximizedBoostPercent, 0, 30);
-            OverlayAbsoluteCoordinatesCheck.IsChecked = s.OverlayAbsoluteCoordinatesOnResize;
-            StatusZoomCheck.IsChecked = s.StatusShowZoom;
-            StatusSlideshowCheck.IsChecked = s.StatusShowSlideshow;
-            StatusFitCheck.IsChecked = s.StatusShowFit;
             SelectByText(StatusFitScopeCombo, string.IsNullOrWhiteSpace(s.StatusFitScope) ? "This session and future sessions" : s.StatusFitScope);
-            StatusInfoCheck.IsChecked = s.StatusShowInfo;
-            StatusOptionsCheck.IsChecked = s.StatusShowOptions;
-            StatusCloseCheck.IsChecked = s.StatusShowClose;
-            StatusCollapsedCornerCheck.IsChecked = s.StatusCollapsedToCorner;
-            StatusAutoHideCheck.IsChecked = s.StatusAutoHide;
             StatusRevealZoneExpandBox.Value = Glide.Core.StatusBarAutoHide.NormalizeRevealZoneExpand(s.StatusRevealZoneExpand);
-            StatusReserveFitSpaceCheck.IsChecked = s.StatusReserveFitSpace;
-            StatusStackInfoLineCheck.IsChecked = s.StatusStackInfoLine;
-            StatusGifOnlyOnGifsCheck.IsChecked = s.StatusGifControlsOnlyOnGifs;
-            StatusFileNameClickActionsCheck.IsChecked = s.StatusFileNameClickActions;
-            SettingsAlwaysExpandSwitch.IsChecked = s.SettingsAlwaysExpand;
-            StatIndexCheck.IsChecked = s.StatusStatIndex;
-            StatResolutionCheck.IsChecked = s.StatusStatResolution;
-            StatZoomCheck.IsChecked = s.StatusStatZoom;
-            StatFileSizeCheck.IsChecked = s.StatusStatFileSize;
-            StatFormatCheck.IsChecked = s.StatusStatFormat;
-            StatFileNameCheck.IsChecked = s.StatusStatFileName;
 
             SlideshowIntervalBox.Value = s.SlideshowIntervalMs;
-            SlideshowLoopCheck.IsChecked = s.SlideshowLoop;
-            SlideshowCrossFoldersCheck.IsChecked = s.SlideshowCrossFolders;
-            SlideshowShuffleCheck.IsChecked = s.SlideshowShuffle;
             SelectByText(SlideshowDirectionCombo, string.IsNullOrWhiteSpace(s.SlideshowDirection) ? "Forward" : s.SlideshowDirection);
-            SlideshowStartFullscreenCheck.IsChecked = s.SlideshowStartFullscreen;
-            SlideshowPauseInactiveCheck.IsChecked = s.SlideshowPauseWhenInactive;
             SelectByText(NavigationSortOrderCombo, Glide.Core.ImageSortOrder.NormalizeDisplayName(s.NavigationSortOrder));
-            NavigationSortDescendingCheck.IsChecked = s.NavigationSortDescending;
-            SlideshowQualityIndicatorCheck.IsChecked = s.SlideshowShowQualityIndicator;
 
             TabMinWidthBox.Value = s.TabMinWidth;
             TabMaxWidthBox.Value = s.TabMaxWidth;
-            TabOverflowArrowsCheck.IsChecked = s.TabOverflowArrows;
-            TabDetachCheck.IsChecked = s.TabDetachEnabled;
-            TabAttachCheck.IsChecked = s.TabAttachEnabled;
             ClosedHistoryBox.Value = s.ClosedTabHistoryLimit;
-            CloseEmptyAfterDetachCheck.IsChecked = s.CloseEmptyWindowAfterDetach;
-            DetachedHomeTabCheck.IsChecked = s.DetachedWindowHomeTab;
             SelectByText(TabCycleOrderCombo, string.Equals(s.TabCycleOrder, "Most recently used", StringComparison.OrdinalIgnoreCase) ? "Most recently used" : "Tab order");
             SelectByText(AfterTabCloseActivateCombo, Glide.Core.Workspace.TabCloseActivation.Normalize(s.AfterTabCloseActivate));
+            SelectByText(AfterTabCloseCustomTargetCombo, Glide.Core.Workspace.TabCloseCustomTargets.Normalize(s.AfterTabCloseCustomTarget));
+            UpdateAfterTabCloseCustomRow();
             SelectByText(NewTabPositionCombo, Glide.Core.Workspace.NewTabPositions.Normalize(s.NewTabPosition));
-            SwitchToNewTabsCheck.IsChecked = s.SwitchToNewTabs;
-            NewTabModifiersCheck.IsChecked = s.NewTabModifiers;
-            TabHoverPreviewsCheck.IsChecked = s.TabHoverPreviews;
-            AnimateGifPreviewsCheck.IsChecked = s.AnimateGifPreviews;
+            SelectByText(NewTabPositionKeyCombo, Glide.Core.Workspace.NewTabKeys.Normalize(s.NewTabPositionKey));
+            SelectByText(SwitchToNewTabsCombo, Glide.Core.Workspace.NewTabSides.FromSwitch(s.SwitchToNewTabs));
+            SelectByText(NewTabForegroundKeyCombo, Glide.Core.Workspace.NewTabKeys.Normalize(s.NewTabForegroundKey));
+            SelectByText(MiddleClickSideCombo, Glide.Core.Workspace.MiddleClickSides.Normalize(s.MiddleClickNewTabSide));
+            SelectByText(MiddleClickPositionCombo, Glide.Core.Workspace.MiddleClickPositions.Normalize(s.MiddleClickNewTabPosition));
+            UpdateNewTabKeyLabels();
+            TabPreviewSizeBox.Value = Glide.Core.Workspace.TabPreviewSize.Clamp(s.TabPreviewSizePercent);
+            SelectByText(TabPreviewResizeModifierCombo, Glide.Core.Workspace.TabPreviewSize.NormalizeModifier(s.TabPreviewResizeModifier));
             SelectByText(TabToolTipTextSizeCombo, s.TabToolTipTextSize is "Small" or "Large" ? s.TabToolTipTextSize : "Medium");
             SelectByText(TabPositionCombo, s.TabStripPosition == "Side" ? "Side" : "Top");
-            TabSideAutoHideCheck.IsChecked = s.TabSideAutoHide;
-            TabTopAutoHideCheck.IsChecked = s.TabTopAutoHide;
             ExplorerDefaultViewCombo.SelectedIndex = Glide.App.Explorer.ExplorerViewModes.IndexOf(ExplorerDefaultViews.Normalize(s.ExplorerDefaultView));
             SelectByText(ExplorerLocateOpensInCombo, Glide.Core.Navigation.ExplorerLocateTargets.Normalize(s.ExplorerLocateOpensIn));
             UpdateLocateDependentControls();
             SelectByText(ExplorerBackReturnsToImageCombo, Glide.Core.Navigation.ExplorerBackReturnModes.Normalize(s.ExplorerBackReturnsToImage));
-            ExplorerShowHiddenFilesCheck.IsChecked = s.ExplorerShowHiddenFiles;
-            ExplorerKeepSelectionInViewCheck.IsChecked = s.ExplorerKeepSelectionInView;
-            ExplorerClickToRenameCheck.IsChecked = s.ExplorerClickToRename;
-            ExplorerShowOnlyImagesCheck.IsChecked = s.ExplorerShowOnlyImages;
             ExplorerScrollSpeedBox.Value = (decimal)Glide.App.Explorer.ExplorerWheelScroll.ClampSpeed(s.ExplorerScrollSpeed);
             SelectByText(ExplorerScrollModeCombo, Glide.App.Explorer.ExplorerScrollModes.Normalize(s.ExplorerScrollMode));
             ExplorerScrollRowsBox.Value = Glide.App.Explorer.ExplorerWheelScroll.ClampRows(s.ExplorerScrollRows);
             ExplorerScrollPixelsBox.Value = Glide.App.Explorer.ExplorerWheelScroll.ClampPixels(s.ExplorerScrollPixels);
+            ExplorerNavPaneWidthBox.Value = Glide.App.Explorer.ExplorerLayout.ClampNavPaneWidth(s.ExplorerNavPaneWidth);
             UpdateExplorerScrollModeRows();
             AlternativeFileManagerPathBox.Text = s.AlternativeFileManagerPath;
             AlternativeFileManagerArgumentsBox.Text = s.AlternativeFileManagerArguments;
             SelectByText(LastTabBehaviorCombo, string.IsNullOrWhiteSpace(s.LastTabCloseBehavior) ? "Open home page" : s.LastTabCloseBehavior);
-            ConfirmCloseMultipleTabsCheck.IsChecked = s.ConfirmCloseMultipleTabs;
             // Legacy "Browser page" (removed in 4.7.0) stays migrated to Welcome; 4.8.0 stores "Explorer page".
             SelectByText(HomePageCombo, string.Equals(s.HomePageMode, "Browser page", StringComparison.OrdinalIgnoreCase) ? "Welcome page" : s.HomePageMode);
-            ShowFolderCounterCheck.IsChecked = s.ShowFolderCounter;
-            FolderCounterGrandparentCheck.IsChecked = s.FolderCounterIncludeGrandparent;
-            FolderNavGroupCheck.IsChecked = s.FolderNavShowGroup;
-            FolderNavPreviousCheck.IsChecked = s.FolderNavShowPrevious;
-            FolderNavNextCheck.IsChecked = s.FolderNavShowNext;
-            FolderNavExploreCheck.IsChecked = s.FolderNavShowExplore;
-            FolderNavSkipEmptyCheck.IsChecked = s.FolderNavSkipEmpty;
-            FolderNavIncludeHiddenCheck.IsChecked = s.FolderNavIncludeHidden;
-            FolderNavWrapCheck.IsChecked = s.FolderNavWrap;
-            FolderNavFirstImageCheck.IsChecked = s.FolderNavOpenFirstImage;
             SelectByText(FolderNavOrderCombo, string.IsNullOrWhiteSpace(s.FolderNavOrder) ? "Alphabetical" : s.FolderNavOrder);
 
-            PictureCounterCheck.IsChecked = s.PictureCounterEnabled;
             PictureTemplateBox.Text = s.PictureCounterTemplate;
             PictureFontSizeBox.Value = s.PictureCounterFontSize;
-            PictureBoldCheck.IsChecked = s.PictureCounterBold;
             PictureOpacityBox.Value = s.PictureCounterOpacity;
             SelectByText(PicturePositionCombo, s.PictureCounterPosition);
             SelectByText(PictureColorCombo, s.PictureCounterColor);
-            PictureShadowCheck.IsChecked = s.PictureCounterShadow;
-            PictureBorderCheck.IsChecked = s.PictureCounterBorder;
             OverlayOpacityBox.Value = s.OverlayDefaultOpacity;
             OverlayZoomStepBox.Value = s.OverlayZoomStepPercent;
-            OverlayRememberFolderCheck.IsChecked = s.OverlayRememberFolder;
-            OverlayPersistSessionCheck.IsChecked = s.OverlayPersistLayoutBetweenSessions;
-            WholeAppOverlayAlwaysStartCheck.IsChecked = s.AlwaysStartWholeAppOverlayMode;
-            WholeAppOverlayWindowedInteractionsCheck.IsChecked = s.WholeAppOverlayUseWindowedInteractions;
-            OverlayKeyboardZoomCheck.IsChecked = s.OverlayKeyboardZoom;
-            OverlayHighlightCheck.IsChecked = s.OverlaySelectedHighlight;
-            OverlayRememberZoomCheck.IsChecked = s.OverlayRememberZoom;
-            OverlayScaleWithWindowCheck.IsChecked = s.OverlayScaleWithWindow;
             SelectByText(OverlayAnimationRegionCombo, s.OverlayAnimationRegion ?? "Anywhere");
             OverlayAnimationSpeedBox.Value = s.OverlayAnimationSpeedDipsPerSecond;
             OverlayAnimationTurnIntervalBox.Value = s.OverlayAnimationTurnIntervalMs;
             OverlayAnimationTurnAngleBox.Value = s.OverlayAnimationTurnAngleDegrees;
-            OverlayAnimationPauseCheck.IsChecked = s.OverlayAnimationPauseWhileInteracting;
-            OverlayAnimationAvoidOverlapCheck.IsChecked = s.OverlayAnimationAvoidOverlap;
             SelectByText(OverlayAnimationRefreshRateCombo, $"{s.OverlayAnimationRefreshRateHz} Hz");
             OpenFileDefaultDirectoryBox.Text = s.OpenFileDefaultDirectory ?? string.Empty;
             OverlayDefaultDirectoryBox.Text = s.OverlayDefaultDirectory ?? string.Empty;
@@ -712,8 +611,28 @@ public partial class SettingsWindow : Window
         UpdateExpandCollapseButtons();
     }
 
-    /// <summary>Test hook: whether a card is expanded.</summary>
-    internal bool IsCardExpandedForTests(string cardId) => _cardById.TryGetValue(cardId, out var c) && c.IsExpanded;
+
+    /// <summary>
+    /// Stage C (R9): the plain toggles. Each setting id in <see cref="SettingAccessors.Values"/> whose type is Bool and whose
+    /// mapped control is a ToggleButton (CheckBox or ToggleSwitch) is loaded and read here, so a new toggle needs no
+    /// LoadControls/ReadControls line: a catalogue entry, an accessor row, the XAML control and its M(id, control).
+    /// </summary>
+    private IEnumerable<(ToggleButton Toggle, SettingAccessors.ValueAccessor Accessor)> MappedToggles()
+    {
+        foreach (var (id, control) in _settingControls)
+            if (control is ToggleButton toggle && SettingAccessors.Values.TryGetValue(id, out var accessor) && accessor.Type == SettingAccessors.ValueKind.Bool)
+                yield return (toggle, accessor);
+    }
+
+    private void LoadMappedToggles(GlideSettingsState s)
+    {
+        foreach (var (toggle, accessor) in MappedToggles()) toggle.IsChecked = (bool)accessor.Get(s)!;
+    }
+
+    private void ReadMappedToggles(GlideSettingsState state)
+    {
+        foreach (var (toggle, accessor) in MappedToggles()) accessor.Set(state, toggle.IsChecked == true);
+    }
 
     /// <summary>How many times every editor was read into a state (tests: typing must not do it per keystroke).</summary>
     internal int ReadControlsCountForTests { get; private set; }
@@ -726,25 +645,14 @@ public partial class SettingsWindow : Window
         // After a staged backup import the values without a control come from that import (until the next commit).
         var baseline = _backupStagedBase ?? _committed;
         var state = _restoreDefaultsStaged ? SettingsDefaults.RestoreAllSettings(baseline) : baseline.CloneState();
-        state.RecentHistoryEnabled = RecentHistoryCheck.IsChecked == true;
-        state.SearchShowRelatedResults = SearchShowRelatedCheck.IsChecked == true;
+        // Every plain toggle is read through the accessor table; the code below handles combos, numbers and derived values.
+        ReadMappedToggles(state);
         state.HistorySize = (int)(HistorySizeBox.Value ?? 8);
-        state.RememberWindowPlacement = RememberPlacementCheck.IsChecked == true;
-        state.ReuseSingleInstance = ReuseSingleInstanceCheck.IsChecked == true;
         state.EndOfFolderAction = Glide.Core.Navigation.EndOfFolderActions.Normalize(SelectedText(EndOfFolderActionCombo, Glide.Core.Navigation.EndOfFolderActions.Default));
-        state.HierarchicalFolderTraversal = HierarchicalFolderTraversalCheck.IsChecked == true;
-        state.ConfirmHierarchicalFolderTraversal = ConfirmHierarchicalFolderTraversalCheck.IsChecked == true;
         state.HierarchicalPreviousFolderEntry = SelectedText(HierarchicalPreviousFolderEntryCombo, "First image");
         state.NavigationRateLimitMs = (int)(NavigationRateLimitMsBox.Value ?? 0);
         state.NavigationRateLimitInput = SelectedText(NavigationRateLimitInputCombo, "Both");
-        state.NavigationRateLimitShowIndicator = NavigationRateLimitIndicatorCheck.IsChecked == true;
-        state.NavigationSkipHint = NavigationSkipHintCheck.IsChecked == true;
         state.NavigationRateLimitIndicatorPosition = SelectedText(NavigationRateLimitIndicatorPositionCombo, "Top left");
-        state.NavigationRateLimitWindowed = NavigationRateLimitWindowedCheck.IsChecked == true;
-        state.NavigationRateLimitFullscreen = NavigationRateLimitFullscreenCheck.IsChecked == true;
-        state.NavigationRateLimitSlideshow = NavigationRateLimitSlideshowCheck.IsChecked == true;
-        state.RememberLastOpenLocation = RememberLastOpenCheck.IsChecked == true;
-        state.NewExplorerTabsUseLastLocation = NewExplorerTabLastLocationCheck.IsChecked == true;
         state.NewExplorerTabDefaultDirectory = NewExplorerTabDefaultDirectoryBox.Text?.Trim() ?? string.Empty;
         state.ThemeChoice = SelectedText(ThemeCombo, "Dark");
         state.ExplorerThemeChoice = SelectedText(ExplorerThemeCombo, "Follow Glide theme");
@@ -756,25 +664,12 @@ public partial class SettingsWindow : Window
         state.CustomGlowHex = _workingCustomGlowHex;
         state.CustomMainBackgroundHex = _workingCustomMainBackgroundHex;
         state.GlowIntensityPercent = (int)(GlowIntensityBox.Value ?? 55);
-        state.ShowRecentOnHome = ShowRecentOnHomeCheck.IsChecked == true;
-        state.ConfirmDiscardSettingsChanges = ConfirmDiscardSettingsCheck.IsChecked == true;
-        state.UpdateCheckDaily = UpdateCheckDailyCheck.IsChecked == true;
-        state.UpdateDontRemind = UpdateDontRemindCheck.IsChecked == true;
         state.StartupAction = SelectedText(StartupActionCombo, "Welcome tab") is "Explorer tab" ? "Welcome tab" : SelectedText(StartupActionCombo, "Welcome tab");
         state.StartupCustomPath = StartupCustomPathBox.Text?.Trim() ?? string.Empty;
         state.NewTabAction = SelectedText(NewTabActionCombo, "Welcome tab");
         state.NewTabCustomPath = NewTabCustomPathBox.Text?.Trim() ?? string.Empty;
 
-        state.ShowStatusSurface = StatusCheck.IsChecked == true;
-        state.StatusShowOnHoverWhenClosed = StatusHoverWhenClosedCheck.IsChecked == true;
-        state.ShowScrollbars = ShowScrollbarsCheck.IsChecked == true;
-        state.FullPathInTitle = FullPathTitleCheck.IsChecked == true;
-        state.HideCursorFullscreen = HideCursorFullscreenCheck.IsChecked == true;
-        state.AutoHideFullscreenChrome = AutoHideFullscreenChromeCheck.IsChecked == true;
-        state.TabsEnabled = TabsCheck.IsChecked == true;
         state.ShowInExplorerTarget = ShowInExplorerTargets.Normalize(SelectedText(ShowInExplorerTargetCombo, ShowInExplorerTargets.GlideTab));
-        state.TabBarShowBackButton = TabBarBackButtonCheck.IsChecked == true;
-        state.TabBarShowForwardButton = TabBarForwardButtonCheck.IsChecked == true;
         state.ExternalOpenBehavior = SelectedText(ExternalOpenBehaviorCombo, "Open in new tab");
         state.SameImageAlreadyOpenBehavior = SelectedText(SameImageBehaviorCombo, "Open new instance");
         state.TitleBarButtons = TitleBarButtonCatalog.Normalize(_workingTitleBarButtons).ToList();
@@ -786,38 +681,20 @@ public partial class SettingsWindow : Window
         state.CaptionFullscreenMaximizeAction = SelectedText(CaptionFullscreenMaximizeCombo, "Exit fullscreen (restore previous placement)");
         state.CaptionFullscreenCloseAction = SelectedText(CaptionFullscreenCloseCombo, "Exit fullscreen maximized");
         state.FullscreenXClosesApp = string.Equals(state.CaptionFullscreenCloseAction, "Close Glide", StringComparison.OrdinalIgnoreCase);
-        state.FullscreenStatusAlwaysOn = FullscreenStatusAlwaysCheck.IsChecked == true;
-        state.FullscreenKeepTabBarOpen = FullscreenKeepTabBarOpenCheck.IsChecked == true;
-        state.FullscreenKeepTitleBarForExplorer = FullscreenKeepTitleBarForExplorerCheck.IsChecked == true;
-        state.AlwaysOnTop = AlwaysOnTopCheck.IsChecked == true;
         state.AlwaysOnTopMode = SelectedText(AlwaysOnTopModeCombo, "Soft");
-        state.AutoCenterWindowOnRestore = AutoCenterWindowOnRestoreCheck.IsChecked == true;
         state.FullscreenExitBehavior = SelectedText(FullscreenExitBehaviorCombo, "Restore size and location");
         state.DefaultViewMode = SelectedText(DefaultViewCombo, "Fit image");
-        state.AnimateGifs = AnimateGifsCheck.IsChecked == true;
-        state.PointerZoom = PointerZoomCheck.IsChecked == true;
-        state.PreserveManualZoomOnNavigate = PreserveZoomCheck.IsChecked == true;
         state.ViewportZoomStepPercent = Glide.Core.ZoomStepPolicy.Clamp((int)(ViewportZoomStepBox.Value ?? Glide.Core.ZoomStepPolicy.DefaultStepPercent));
-        state.UpscaleSmallImages = UpscaleSmallImagesCheck.IsChecked == true;
-        state.HighPrecisionSubpixelRendering = SubpixelRenderingCheck.IsChecked == true;
-        state.ShowImageLoadingIndicator = ShowLoadingIndicatorCheck.IsChecked == true;
+        foreach (var (area, box) in TooltipDelayBoxes())
+            Glide.Core.Settings.TooltipAreas.SetDelayMs(state, area.Id, (int)(box.Value ?? area.DefaultMs));
         state.FullscreenHideCursorDelaySeconds = (int)(FullscreenHideCursorDelayBox.Value ?? 2);
-        state.EnableTabFocusNavigation = TabFocusNavigationCheck.IsChecked == true;
-        state.EscStopsSlideshow = EscStopsSlideshowCheck.IsChecked == true;
-        state.EscExitsFullscreen = EscExitsFullscreenCheck.IsChecked == true;
-        state.EscWindowedConfirm = EscWindowedConfirmCheck.IsChecked == true;
         state.EscWindowedRememberedChoice = _escRememberedChoice;
 
-        state.InvertWheelDirection = InvertWheelCheck.IsChecked == true;
         state.LeftWindowDragBehavior = SelectedText(LeftWindowDragBehaviorCombo, "Smart (normal window only)");
         state.RightDragBehavior = SelectedText(RightDragBehaviorCombo, "Smart (pan image / move window)");
         state.RightDragPan = !string.Equals(state.RightDragBehavior, "Do nothing", StringComparison.OrdinalIgnoreCase);
-        state.SelectionBufferEnabled = SelectionBufferCheck.IsChecked == true;
         state.SelectionBufferWindowedPercent = Math.Clamp((int)(SelectionBufferWindowedBox.Value ?? 33), 0, 100);
         state.SelectionBufferMaximizedPercent = Math.Clamp((int)(SelectionBufferMaximizedBox.Value ?? 100), 0, 100);
-        state.SelectionBufferAllModes = SelectionBufferAllModesCheck.IsChecked == true;
-        state.ReverseSelectionZoomOutScale = ReverseSelectionZoomOutScaleCheck.IsChecked == true;
-        state.BackgroundDragWindow = BackgroundDragCheck.IsChecked == true;
         state.Gestures = _workingGestures.ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase);
         state.CustomGestures = _workingCustomGestures.Select(x => x.Clone()).ToList();
         state.GestureRecentActions = _workingRecentGestureActions.ToList();
@@ -825,140 +702,73 @@ public partial class SettingsWindow : Window
         state.InitialImageQuality = SelectedText(InitialQualityCombo, "Maximum quality");
         state.PerformanceUserCustom = string.Equals(state.InitialImageQuality, "User custom", StringComparison.OrdinalIgnoreCase);
         state.InteractivePanQuality = SelectedText(InteractivePanQualityCombo, "Full quality");
-        state.SpeedBoostEnabled = SpeedBoostCheck.IsChecked == true;
         state.SpeedBoostTrayIcon = SelectedText(SpeedBoostTrayIconCombo, "Always");
         state.ShowTrayIcon = !string.Equals(state.SpeedBoostTrayIcon, "Never", StringComparison.OrdinalIgnoreCase);
-        state.StartWithWindowsInBackground = StartWithWindowsInBackgroundCheck.IsChecked == true;
-        state.AdaptiveFastPreview = AdaptiveFastPreviewCheck.IsChecked == true;
         state.AdaptivePreviewDelayMs = (int)(AdaptivePreviewDelayBox.Value ?? 20);
-        state.SequentialForegroundReads = SequentialReadCheck.IsChecked == true;
-        state.PredictivePrefetch = PrefetchCheck.IsChecked == true;
-        state.BackgroundRefinement = BackgroundRefinementCheck.IsChecked == true;
-        state.PurgeCacheOnMinimize = PurgeCacheCheck.IsChecked == true;
-        state.StartupDiagnostics = StartupDiagnosticsCheck.IsChecked == true;
+        state.FirstViewScalePercent = Math.Clamp((int)(FirstViewScaleBox.Value ?? 0), 0, 100);
+        state.PrefetchScalePercent = Math.Clamp((int)(PrefetchScaleBox.Value ?? 0), 0, 100);
+        state.FullRefine = SelectedText(FullRefineCombo, "Preset default");
         state.PrefetchDepth = Math.Clamp((int)(PrefetchDepthBox.Value ?? 5), 1, 30);
-        state.PrefetchSiblingFolders = PrefetchSiblingFoldersCheck.IsChecked == true;
         state.PrefetchSiblingFolderImageCount = Math.Clamp((int)(PrefetchSiblingFolderCountBox.Value ?? 3), 1, 30);
         state.CacheItems = (int)(CacheItemsBox.Value ?? 16);
         state.CompressedCacheMegabytes = (int)(CompressedCacheMbBox.Value ?? 256);
         state.DecodedCacheMegabytes = (int)(DecodedCacheMbBox.Value ?? 256);
         state.RapidPreviewLongestSide = (int)(RapidPreviewBox.Value ?? 3000);
         state.RapidBrowsePreviewLongestSide = Math.Clamp((int)(RapidBrowsePreviewBox.Value ?? 1440), 640, 4096);
-        state.ProgressiveColorFirstPreview = ProgressiveColorCheck.IsChecked == true;
 
-        state.StatusShowNavigation = StatusNavigationCheck.IsChecked == true;
         state.StatusBarSize = SelectedText(StatusBarSizeCombo, "Small");
         state.StatusBarAlignment = SelectedText(StatusBarAlignmentCombo, "Center");
         state.StatusBarGlobalScalePercent = Math.Clamp((int)(StatusGlobalScaleBox.Value ?? 100), 60, 160);
-        state.StatusBarAutoFit = StatusAutoFitCheck.IsChecked == true;
         state.StatusBarMaximizedBoostPercent = Math.Clamp((int)(StatusMaximizedBoostBox.Value ?? 15), 0, 30);
-        state.OverlayAbsoluteCoordinatesOnResize = OverlayAbsoluteCoordinatesCheck.IsChecked == true;
-        state.StatusShowZoom = StatusZoomCheck.IsChecked == true;
-        state.StatusShowSlideshow = StatusSlideshowCheck.IsChecked == true;
-        state.StatusShowFit = StatusFitCheck.IsChecked == true;
         state.StatusFitScope = SelectedText(StatusFitScopeCombo, "This session and future sessions");
-        state.StatusShowInfo = StatusInfoCheck.IsChecked == true;
-        state.StatusShowOptions = StatusOptionsCheck.IsChecked == true;
-        state.StatusShowClose = StatusCloseCheck.IsChecked == true;
-        state.StatusCollapsedToCorner = StatusCollapsedCornerCheck.IsChecked == true;
-        state.StatusAutoHide = StatusAutoHideCheck.IsChecked == true;
         state.StatusRevealZoneExpand = Glide.Core.StatusBarAutoHide.NormalizeRevealZoneExpand((int)(StatusRevealZoneExpandBox.Value ?? Glide.Core.StatusBarAutoHide.DefaultRevealZoneExpand));
-        state.StatusReserveFitSpace = StatusReserveFitSpaceCheck.IsChecked == true;
-        state.StatusStackInfoLine = StatusStackInfoLineCheck.IsChecked == true;
-        state.StatusGifControlsOnlyOnGifs = StatusGifOnlyOnGifsCheck.IsChecked == true;
-        state.StatusFileNameClickActions = StatusFileNameClickActionsCheck.IsChecked == true;
-        state.SettingsAlwaysExpand = SettingsAlwaysExpandSwitch.IsChecked == true;
-        state.StatusStatIndex = StatIndexCheck.IsChecked == true;
-        state.StatusStatResolution = StatResolutionCheck.IsChecked == true;
-        state.StatusStatZoom = StatZoomCheck.IsChecked == true;
-        state.StatusStatFileSize = StatFileSizeCheck.IsChecked == true;
-        state.StatusStatFormat = StatFormatCheck.IsChecked == true;
-        state.StatusStatFileName = StatFileNameCheck.IsChecked == true;
 
         state.SlideshowIntervalMs = (int)(SlideshowIntervalBox.Value ?? 3000);
-        state.SlideshowLoop = SlideshowLoopCheck.IsChecked == true;
-        state.SlideshowCrossFolders = SlideshowCrossFoldersCheck.IsChecked == true;
-        state.SlideshowShuffle = SlideshowShuffleCheck.IsChecked == true;
         state.SlideshowDirection = SelectedText(SlideshowDirectionCombo, "Forward");
-        state.SlideshowStartFullscreen = SlideshowStartFullscreenCheck.IsChecked == true;
-        state.SlideshowPauseWhenInactive = SlideshowPauseInactiveCheck.IsChecked == true;
         state.NavigationSortOrder = Glide.Core.ImageSortOrder.NormalizeDisplayName(SelectedText(NavigationSortOrderCombo, Glide.Core.ImageSortOrder.NameDisplay));
-        state.NavigationSortDescending = NavigationSortDescendingCheck.IsChecked == true;
-        state.SlideshowShowQualityIndicator = SlideshowQualityIndicatorCheck.IsChecked == true;
 
         state.TabMinWidth = (int)(TabMinWidthBox.Value ?? 120);
         state.TabMaxWidth = (int)(TabMaxWidthBox.Value ?? 240);
-        state.TabOverflowArrows = TabOverflowArrowsCheck.IsChecked == true;
-        state.TabDetachEnabled = TabDetachCheck.IsChecked == true;
-        state.TabAttachEnabled = TabAttachCheck.IsChecked == true;
         state.ClosedTabHistoryLimit = (int)(ClosedHistoryBox.Value ?? 20);
-        state.CloseEmptyWindowAfterDetach = CloseEmptyAfterDetachCheck.IsChecked == true;
-        state.DetachedWindowHomeTab = DetachedHomeTabCheck.IsChecked == true;
         state.TabCycleOrder = SelectedText(TabCycleOrderCombo, "Tab order");
+        state.TabPreviewSizePercent = Glide.Core.Workspace.TabPreviewSize.Clamp((int)(TabPreviewSizeBox.Value ?? Glide.Core.Workspace.TabPreviewSize.Default));
+        state.TabPreviewResizeModifier = Glide.Core.Workspace.TabPreviewSize.NormalizeModifier(SelectedText(TabPreviewResizeModifierCombo, Glide.Core.Workspace.TabPreviewSize.DefaultModifier));
         state.AfterTabCloseActivate = Glide.Core.Workspace.TabCloseActivation.Normalize(SelectedText(AfterTabCloseActivateCombo, Glide.Core.Workspace.TabCloseActivation.Default));
+        state.AfterTabCloseCustomTarget = Glide.Core.Workspace.TabCloseCustomTargets.Normalize(SelectedText(AfterTabCloseCustomTargetCombo, Glide.Core.Workspace.TabCloseCustomTargets.Default));
         state.NewTabPosition = Glide.Core.Workspace.NewTabPositions.Normalize(SelectedText(NewTabPositionCombo, Glide.Core.Workspace.NewTabPositions.Default));
-        state.SwitchToNewTabs = SwitchToNewTabsCheck.IsChecked == true;
-        state.NewTabModifiers = NewTabModifiersCheck.IsChecked == true;
-        state.TabHoverPreviews = TabHoverPreviewsCheck.IsChecked == true;
-        state.AnimateGifPreviews = AnimateGifPreviewsCheck.IsChecked == true;
+        state.NewTabPositionKey = Glide.Core.Workspace.NewTabKeys.Normalize(SelectedText(NewTabPositionKeyCombo, Glide.Core.Workspace.NewTabKeys.Default));
+        state.SwitchToNewTabs = Glide.Core.Workspace.NewTabSides.ToSwitch(SelectedText(SwitchToNewTabsCombo, Glide.Core.Workspace.NewTabSides.Foreground));
+        state.NewTabForegroundKey = Glide.Core.Workspace.NewTabKeys.Normalize(SelectedText(NewTabForegroundKeyCombo, Glide.Core.Workspace.NewTabKeys.Default));
+        state.MiddleClickNewTabSide = Glide.Core.Workspace.MiddleClickSides.Normalize(SelectedText(MiddleClickSideCombo, Glide.Core.Workspace.MiddleClickSides.Default));
+        state.MiddleClickNewTabPosition = Glide.Core.Workspace.MiddleClickPositions.Normalize(SelectedText(MiddleClickPositionCombo, Glide.Core.Workspace.MiddleClickPositions.Default));
         state.TabToolTipTextSize = SelectedText(TabToolTipTextSizeCombo, "Medium");
         state.TabStripPosition = SelectedText(TabPositionCombo, "Top");
-        state.TabSideAutoHide = TabSideAutoHideCheck.IsChecked == true;
-        state.TabTopAutoHide = TabTopAutoHideCheck.IsChecked == true;
         state.ExplorerDefaultView = ExplorerDefaultViews.Normalize((ExplorerDefaultViewCombo.SelectedItem as ComboBoxItem)?.Tag as string);
         state.ExplorerLocateOpensIn = Glide.Core.Navigation.ExplorerLocateTargets.Normalize(SelectedText(ExplorerLocateOpensInCombo, Glide.Core.Navigation.ExplorerLocateTargets.Default));
         state.ExplorerBackReturnsToImage = Glide.Core.Navigation.ExplorerBackReturnModes.Normalize(SelectedText(ExplorerBackReturnsToImageCombo, Glide.Core.Navigation.ExplorerBackReturnModes.Default));
-        state.ExplorerShowHiddenFiles = ExplorerShowHiddenFilesCheck.IsChecked == true;
-        state.ExplorerKeepSelectionInView = ExplorerKeepSelectionInViewCheck.IsChecked == true;
-        state.ExplorerClickToRename = ExplorerClickToRenameCheck.IsChecked == true;
-        state.ExplorerShowOnlyImages = ExplorerShowOnlyImagesCheck.IsChecked == true;
         state.ExplorerScrollSpeed = Glide.App.Explorer.ExplorerWheelScroll.ClampSpeed((double)(ExplorerScrollSpeedBox.Value ?? 1m));
         state.ExplorerScrollMode = Glide.App.Explorer.ExplorerScrollModes.Normalize(SelectedText(ExplorerScrollModeCombo, Glide.App.Explorer.ExplorerScrollModes.Default));
         state.ExplorerScrollRows = Glide.App.Explorer.ExplorerWheelScroll.ClampRows((int)(ExplorerScrollRowsBox.Value ?? 3m));
         state.ExplorerScrollPixels = Glide.App.Explorer.ExplorerWheelScroll.ClampPixels((int)(ExplorerScrollPixelsBox.Value ?? 100m));
+        state.ExplorerNavPaneWidth = Glide.App.Explorer.ExplorerLayout.ClampNavPaneWidth((double)(ExplorerNavPaneWidthBox.Value ?? 208m));
         state.AlternativeFileManagerPath = (AlternativeFileManagerPathBox.Text ?? string.Empty).Trim();
         state.AlternativeFileManagerArguments = AlternativeFileManagerArgumentsBox.Text ?? string.Empty;
         state.LastTabCloseBehavior = SelectedText(LastTabBehaviorCombo, "Open home page");
-        state.ConfirmCloseMultipleTabs = ConfirmCloseMultipleTabsCheck.IsChecked == true;
         if (state.ConfirmCloseMultipleTabs) state.RememberedMultiTabCloseChoice = "Ask";
         state.HomePageMode = SelectedText(HomePageCombo, "Welcome page") is "Browser page" ? "Welcome page" : SelectedText(HomePageCombo, "Welcome page");
-        state.ShowFolderCounter = ShowFolderCounterCheck.IsChecked == true;
-        state.FolderCounterIncludeGrandparent = FolderCounterGrandparentCheck.IsChecked == true;
-        state.FolderNavShowGroup = FolderNavGroupCheck.IsChecked == true;
-        state.FolderNavShowPrevious = FolderNavPreviousCheck.IsChecked == true;
-        state.FolderNavShowNext = FolderNavNextCheck.IsChecked == true;
-        state.FolderNavShowExplore = FolderNavExploreCheck.IsChecked == true;
-        state.FolderNavSkipEmpty = FolderNavSkipEmptyCheck.IsChecked == true;
-        state.FolderNavIncludeHidden = FolderNavIncludeHiddenCheck.IsChecked == true;
-        state.FolderNavWrap = FolderNavWrapCheck.IsChecked == true;
-        state.FolderNavOpenFirstImage = FolderNavFirstImageCheck.IsChecked == true;
         state.FolderNavOrder = SelectedText(FolderNavOrderCombo, "Alphabetical");
 
-        state.PictureCounterEnabled = PictureCounterCheck.IsChecked == true;
         state.PictureCounterTemplate = string.IsNullOrWhiteSpace(PictureTemplateBox.Text) ? "[{index}/{total}]" : PictureTemplateBox.Text!;
         state.PictureCounterFontSize = (int)(PictureFontSizeBox.Value ?? 13);
-        state.PictureCounterBold = PictureBoldCheck.IsChecked == true;
         state.PictureCounterOpacity = (int)(PictureOpacityBox.Value ?? 85);
         state.PictureCounterPosition = SelectedText(PicturePositionCombo, "Top right");
         state.PictureCounterColor = SelectedText(PictureColorCombo, "White");
-        state.PictureCounterShadow = PictureShadowCheck.IsChecked == true;
-        state.PictureCounterBorder = PictureBorderCheck.IsChecked == true;
         state.OverlayDefaultOpacity = (int)(OverlayOpacityBox.Value ?? 100);
         state.OverlayZoomStepPercent = (int)(OverlayZoomStepBox.Value ?? 10);
-        state.OverlayRememberFolder = OverlayRememberFolderCheck.IsChecked == true;
-        state.OverlayPersistLayoutBetweenSessions = OverlayPersistSessionCheck.IsChecked == true;
-        state.AlwaysStartWholeAppOverlayMode = WholeAppOverlayAlwaysStartCheck.IsChecked == true;
-        state.WholeAppOverlayUseWindowedInteractions = WholeAppOverlayWindowedInteractionsCheck.IsChecked == true;
-        state.OverlayKeyboardZoom = OverlayKeyboardZoomCheck.IsChecked == true;
-        state.OverlaySelectedHighlight = OverlayHighlightCheck.IsChecked == true;
-        state.OverlayRememberZoom = OverlayRememberZoomCheck.IsChecked == true;
-        state.OverlayScaleWithWindow = OverlayScaleWithWindowCheck.IsChecked == true;
         state.OverlayAnimationRegion = SelectedText(OverlayAnimationRegionCombo, "Anywhere");
         state.OverlayAnimationSpeedDipsPerSecond = Math.Clamp((int)(OverlayAnimationSpeedBox.Value ?? 90), 10, 2000);
         state.OverlayAnimationTurnIntervalMs = Math.Clamp((int)(OverlayAnimationTurnIntervalBox.Value ?? 2500), 0, 60000);
         state.OverlayAnimationTurnAngleDegrees = Math.Clamp((int)(OverlayAnimationTurnAngleBox.Value ?? 120), 0, 180);
-        state.OverlayAnimationPauseWhileInteracting = OverlayAnimationPauseCheck.IsChecked == true;
-        state.OverlayAnimationAvoidOverlap = OverlayAnimationAvoidOverlapCheck.IsChecked == true;
         state.OverlayAnimationRefreshRateHz = ParseChoiceNumber(OverlayAnimationRefreshRateCombo, 144);
         state.OpenFileDefaultDirectory = OpenFileDefaultDirectoryBox.Text?.Trim() ?? string.Empty;
         state.OverlayDefaultDirectory = OverlayDefaultDirectoryBox.Text?.Trim() ?? string.Empty;
@@ -987,6 +797,28 @@ public partial class SettingsWindow : Window
     /// <summary>Greys out the Rows / Pixels per notch rows unless their scroll amount mode is selected.</summary>
     /// <summary>"Back after opening a picture's folder" only matters when the folder opens in another tab or window.</summary>
     /// <summary>The "Folder options" under "When the last image is reached" apply only to the folder choices (and Ask).</summary>
+    /// <summary>Round 3 #18: each "Key to open … instead" label names the other choice, so it flips with its option.</summary>
+    /// <summary>"Custom tab to show" only appears while "After closing a tab, activate" is Custom… (5.1.0).</summary>
+    /// <summary>The Tooltips card's delay boxes, one per area of the master list (TooltipAreas).</summary>
+    private IEnumerable<(Glide.Core.Settings.TooltipArea Area, NumericUpDown Box)> TooltipDelayBoxes() =>
+        Glide.Core.Settings.TooltipAreas.All.Select(area => (area, area.Id switch
+        {
+            Glide.Core.Settings.TooltipAreas.Settings => TooltipDelaySettingsBox,
+            Glide.Core.Settings.TooltipAreas.Overlay => TooltipDelayOverlayBox,
+            Glide.Core.Settings.TooltipAreas.Explorer => TooltipDelayExplorerBox,
+            _ => TooltipDelayMainBox,
+        }));
+
+    private void UpdateAfterTabCloseCustomRow() =>
+        AfterTabCloseCustomRow.IsVisible = Glide.Core.Workspace.TabCloseActivation.Normalize(
+            SelectedText(AfterTabCloseActivateCombo, Glide.Core.Workspace.TabCloseActivation.Default)) == Glide.Core.Workspace.TabCloseActivation.Custom;
+
+    private void UpdateNewTabKeyLabels()
+    {
+        NewTabPositionKeyLabel.Text = Glide.Core.Workspace.NewTabPolicy.PositionKeyLabel(SelectedText(NewTabPositionCombo, Glide.Core.Workspace.NewTabPositions.Default));
+        NewTabForegroundKeyLabel.Text = Glide.Core.Workspace.NewTabPolicy.ForegroundKeyLabel(Glide.Core.Workspace.NewTabSides.ToSwitch(SelectedText(SwitchToNewTabsCombo, Glide.Core.Workspace.NewTabSides.Foreground)));
+    }
+
     private void UpdateEndOfFolderDependentControls() =>
         EndOfFolderFolderOptions.IsEnabled = Glide.Core.Navigation.EndOfFolderActions.UsesFolderOptions(
             Glide.Core.Navigation.EndOfFolderActions.Parse(SelectedText(EndOfFolderActionCombo, Glide.Core.Navigation.EndOfFolderActions.Default)));
@@ -1128,8 +960,7 @@ public partial class SettingsWindow : Window
         saved.UserCustomRapidBrowsePreviewSize = (int)(RapidBrowsePreviewBox.Value ?? 1440);
         saved.UserCustomProgressiveColor = ProgressiveColorCheck.IsChecked == true;
         _committed = saved;
-        WindowPlacementService.ApplyTo(_committed);
-        SettingsStore.Save(_committed);
+        SettingsService.SavePresetSnapshot(_committed);
 
         _loadingControls = true;
         try { SelectByText(InitialQualityCombo, "User custom"); } finally { _loadingControls = false; }
@@ -2140,7 +1971,6 @@ public partial class SettingsWindow : Window
             button.Classes.Add("searchOpen");
             button.Click += (_, _) => actionHandler();
             ToolTip.SetTip(button, tooltip);
-            ToolTip.SetShowDelay(button, 450);
             Grid.SetColumn(button, column);
             grid.Children.Add(button);
             return button;
@@ -2221,7 +2051,6 @@ public partial class SettingsWindow : Window
             companions.Add(openButton);
         }
         ToolTip.SetTip(openButton, $"Show in {location}");
-        ToolTip.SetShowDelay(openButton, 450);
         if (setting.FuturePhase is not null)
         {
             editor = new TextBlock
@@ -2407,7 +2236,8 @@ public partial class SettingsWindow : Window
         M("updates.checkDaily", UpdateCheckDailyCheck); M("updates.dontRemind", UpdateDontRemindCheck);
         M("general.startupAction", StartupActionCombo); M("general.startupCustomPath", StartupCustomPathBox); M("general.newTabAction", NewTabActionCombo); M("general.newTabCustomPath", NewTabCustomPathBox); M("titlebar.customize", CustomizeTitleBarButton); M("settings.alwaysExpand", SettingsAlwaysExpandSwitch); M("escape.resetRememberedClose", ResetEscChoiceButton);
         M("status.visible", StatusCheck); M("status.hoverWhenClosed", StatusHoverWhenClosedCheck); M("view.scrollbars", ShowScrollbarsCheck); M("window.fullPathTitle", FullPathTitleCheck); M("fullscreen.hideCursor", HideCursorFullscreenCheck); M("fullscreen.hideCursorDelay", FullscreenHideCursorDelayBox);
-        M("fullscreen.autoHideChrome", AutoHideFullscreenChromeCheck); M("fullscreen.keepTabBarOpen", FullscreenKeepTabBarOpenCheck); M("fullscreen.keepTitleBarForExplorer", FullscreenKeepTitleBarForExplorerCheck); M("tabs.enabled", TabsCheck); M("window.showInExplorerTarget", ShowInExplorerTargetCombo); M("explorer.defaultView", ExplorerDefaultViewCombo); M("explorer.locateOpensIn", ExplorerLocateOpensInCombo); M("explorer.backReturnsToImage", ExplorerBackReturnsToImageCombo); M("explorer.showHidden", ExplorerShowHiddenFilesCheck); M("explorer.keepSelectionInView", ExplorerKeepSelectionInViewCheck); M("explorer.clickToRename", ExplorerClickToRenameCheck); M("explorer.onlyImages", ExplorerShowOnlyImagesCheck); M("explorer.scrollSpeed", ExplorerScrollSpeedBox); M("explorer.scrollMode", ExplorerScrollModeCombo); M("explorer.scrollRows", ExplorerScrollRowsBox); M("explorer.scrollPixels", ExplorerScrollPixelsBox); M("explorer.altFileManagerPath", AlternativeFileManagerPathBox); M("explorer.altFileManagerArguments", AlternativeFileManagerArgumentsBox); M("tabs.showBackButton", TabBarBackButtonCheck); M("tabs.showForwardButton", TabBarForwardButtonCheck); M("fullscreen.statusAlways", FullscreenStatusAlwaysCheck);
+        M("explorer.itemInfoTooltip", ExplorerItemInfoTooltipCheck); M("explorer.addressBarOverPictures", AddressBarOverPicturesCheck); M("appearance.tooltipDelaySettings", TooltipDelaySettingsBox); M("appearance.tooltipDelayMain", TooltipDelayMainBox); M("appearance.tooltipDelayOverlay", TooltipDelayOverlayBox); M("appearance.tooltipDelayExplorer", TooltipDelayExplorerBox);
+        M("fullscreen.autoHideChrome", AutoHideFullscreenChromeCheck); M("fullscreen.keepTabBarOpen", FullscreenKeepTabBarOpenCheck); M("fullscreen.keepTitleBarForExplorer", FullscreenKeepTitleBarForExplorerCheck); M("tabs.enabled", TabsCheck); M("window.showInExplorerTarget", ShowInExplorerTargetCombo); M("explorer.defaultView", ExplorerDefaultViewCombo); M("explorer.locateOpensIn", ExplorerLocateOpensInCombo); M("explorer.backReturnsToImage", ExplorerBackReturnsToImageCombo); M("explorer.showHidden", ExplorerShowHiddenFilesCheck); M("explorer.keepSelectionInView", ExplorerKeepSelectionInViewCheck); M("explorer.clickToRename", ExplorerClickToRenameCheck); M("explorer.onlyImages", ExplorerShowOnlyImagesCheck); M("explorer.infoDate", ExplorerInfoDateCheck); M("explorer.infoResolution", ExplorerInfoResolutionCheck); M("explorer.infoFileSize", ExplorerInfoFileSizeCheck); M("explorer.scrollSpeed", ExplorerScrollSpeedBox); M("explorer.scrollMode", ExplorerScrollModeCombo); M("explorer.scrollRows", ExplorerScrollRowsBox); M("explorer.scrollPixels", ExplorerScrollPixelsBox); M("explorer.navPaneWidth", ExplorerNavPaneWidthBox); M("explorer.altFileManagerPath", AlternativeFileManagerPathBox); M("explorer.altFileManagerArguments", AlternativeFileManagerArgumentsBox); M("tabs.showBackButton", TabBarBackButtonCheck); M("tabs.showForwardButton", TabBarForwardButtonCheck); M("fullscreen.statusAlways", FullscreenStatusAlwaysCheck);
         M("caption.windowedMinimize", CaptionWindowedMinimizeCombo); M("caption.windowedMaximize", CaptionWindowedMaximizeCombo); M("caption.windowedClose", CaptionWindowedCloseCombo);
         M("caption.fullscreenMinimize", CaptionFullscreenMinimizeCombo); M("caption.fullscreenMaximize", CaptionFullscreenMaximizeCombo); M("caption.fullscreenClose", CaptionFullscreenCloseCombo);
         M("windows.alwaysOnTop", AlwaysOnTopCheck); M("windows.alwaysOnTopMode", AlwaysOnTopModeCombo); M("fullscreen.exitBehavior", FullscreenExitBehaviorCombo); M("windows.sameImageBehavior", SameImageBehaviorCombo); M("window.centerOnDisplay", AutoCenterWindowOnRestoreCheck); M("view.defaultMode", DefaultViewCombo); M("view.animateGifs", AnimateGifsCheck); M("view.pointerZoom", PointerZoomCheck); M("view.keepZoom", PreserveZoomCheck);
@@ -2419,13 +2249,14 @@ public partial class SettingsWindow : Window
         M("selection.bufferMaximizedPercent", SelectionBufferMaximizedBox); M("selection.bufferAllModes", SelectionBufferAllModesCheck);
         M("developer.reverseSelectionZoomOut", ReverseSelectionZoomOutScaleCheck); M("mouse.backgroundWindowDrag", BackgroundDragCheck);
         M("performance.initialQuality", InitialQualityCombo); M("performance.saveCustomPreset", SaveUserPerformancePresetButton); M("performance.adaptivePreview", AdaptiveFastPreviewCheck); M("performance.previewDelay", AdaptivePreviewDelayBox);
+        M("performance.firstViewScale", FirstViewScaleBox); M("performance.prefetchScale", PrefetchScaleBox); M("performance.fullRefine", FullRefineCombo);
         M("performance.interactivePanQuality", InteractivePanQualityCombo);
         M("performance.sequentialReads", SequentialReadCheck); M("performance.prefetch", PrefetchCheck); M("performance.backgroundRefinement", BackgroundRefinementCheck);
         M("performance.speedBoost", SpeedBoostCheck); M("performance.speedBoostTrayIcon", SpeedBoostTrayIconCombo); M("performance.startWithWindowsInBackground", StartWithWindowsInBackgroundCheck);
         M("performance.purgeOnMinimize", PurgeCacheCheck); M("developer.startupDiagnostics", StartupDiagnosticsCheck); M("performance.prefetchDepth", PrefetchDepthBox);
         M("performance.prefetchSiblingFolders", PrefetchSiblingFoldersCheck); M("performance.prefetchSiblingFolderCount", PrefetchSiblingFolderCountBox);
         M("performance.cacheItems", CacheItemsBox); M("performance.compressedCacheMb", CompressedCacheMbBox); M("performance.decodedCacheMb", DecodedCacheMbBox); M("performance.rapidPreviewSize", RapidPreviewBox); M("performance.rapidBrowsePreviewSize", RapidBrowsePreviewBox); M("performance.progressiveColor", ProgressiveColorCheck);
-        M("overlay.wholeAppAlwaysStart", WholeAppOverlayAlwaysStartCheck); M("overlay.wholeAppWindowedInteractions", WholeAppOverlayWindowedInteractionsCheck);
+        M("overlay.wholeAppAlwaysStart", WholeAppOverlayAlwaysStartCheck); M("overlay.wholeAppWindowedInteractions", WholeAppOverlayWindowedInteractionsCheck); M("overlay.wholeAppShowDragStrip", WholeAppOverlayShowDragStripCheck); M("overlay.wholeAppLockPosition", WholeAppOverlayLockPositionCheck);
         M("status.size", StatusBarSizeCombo); M("status.alignment", StatusBarAlignmentCombo); M("status.navigation", StatusNavigationCheck); M("status.zoom", StatusZoomCheck); M("status.slideshow", StatusSlideshowCheck); M("status.fit", StatusFitCheck);
         M("status.fitScope", StatusFitScopeCombo);
         M("status.autoResize", StatusAutoFitCheck);
@@ -2435,7 +2266,7 @@ public partial class SettingsWindow : Window
         M("slideshow.direction", SlideshowDirectionCombo); M("slideshow.startFullscreen", SlideshowStartFullscreenCheck); M("slideshow.pauseInactive", SlideshowPauseInactiveCheck);
         M("tabs.minWidth", TabMinWidthBox); M("tabs.maxWidth", TabMaxWidthBox); M("tabs.overflowArrows", TabOverflowArrowsCheck); M("tabs.detach", TabDetachCheck); M("tabs.attach", TabAttachCheck); M("tabs.closedHistory", ClosedHistoryBox);
         M("tabs.closeEmptyAfterDetach", CloseEmptyAfterDetachCheck); M("tabs.detachedHome", DetachedHomeTabCheck); M("tabs.cycleOrder", TabCycleOrderCombo); M("tabs.tooltipTextSize", TabToolTipTextSizeCombo); M("tabs.position", TabPositionCombo); M("tabs.sideAutoHide", TabSideAutoHideCheck); M("tabs.topAutoHide", TabTopAutoHideCheck);
-        M("tabs.newTabPosition", NewTabPositionCombo); M("tabs.switchToNewTabs", SwitchToNewTabsCheck); M("tabs.newTabModifiers", NewTabModifiersCheck); M("tabs.afterCloseActivate", AfterTabCloseActivateCombo); M("tabs.hoverPreview", TabHoverPreviewsCheck); M("tabs.animateGifPreviews", AnimateGifPreviewsCheck);
+        M("tabs.newTabPosition", NewTabPositionCombo); M("tabs.newTabPositionKey", NewTabPositionKeyCombo); M("tabs.switchToNewTabs", SwitchToNewTabsCombo); M("tabs.newTabForegroundKey", NewTabForegroundKeyCombo); M("tabs.middleClickSide", MiddleClickSideCombo); M("tabs.middleClickPosition", MiddleClickPositionCombo); M("tabs.afterCloseActivate", AfterTabCloseActivateCombo); M("tabs.afterCloseCustomTarget", AfterTabCloseCustomTargetCombo); M("tabs.hoverPreview", TabHoverPreviewsCheck); M("tabs.animateGifPreviews", AnimateGifPreviewsCheck); M("tabs.previewSize", TabPreviewSizeBox); M("tabs.previewResizeModifier", TabPreviewResizeModifierCombo);
         M("tabs.lastTabBehavior", LastTabBehaviorCombo); M("tabs.confirmCloseMultiple", ConfirmCloseMultipleTabsCheck); M("tabs.homePage", HomePageCombo); M("folderNav.group", FolderNavGroupCheck); M("folderNav.previous", FolderNavPreviousCheck);
         M("folderNav.showCounter", ShowFolderCounterCheck); M("folderNav.counterGrandparent", FolderCounterGrandparentCheck);
         M("folderNav.next", FolderNavNextCheck); M("folderNav.explore", FolderNavExploreCheck); M("folderNav.skipEmpty", FolderNavSkipEmptyCheck); M("folderNav.includeHidden", FolderNavIncludeHiddenCheck); M("folderNav.wrap", FolderNavWrapCheck); M("folderNav.openFirst", FolderNavFirstImageCheck); M("folderNav.order", FolderNavOrderCombo);
@@ -2466,13 +2297,11 @@ public partial class SettingsWindow : Window
             if (_settingControls.TryGetValue(definition.Id, out var control))
             {
                 ToolTip.SetTip(control, definition.Description);
-                ToolTip.SetShowDelay(control, 650);
             }
         }
         // Category buttons carry no tooltip: their label already says everything ("Open X settings" only repeated it).
         foreach (var nav in NavigationRail.Children.OfType<Button>()) ToolTip.SetTip(nav, null);
         ToolTip.SetTip(SearchBox, "Search Glide settings. Use the category filter to search everywhere or limit results to one section.");
-        ToolTip.SetShowDelay(SearchBox, 650);
         ToolTip.SetTip(ChangeShortcutButton, "Capture a replacement shortcut for the selected action. Double-click a hotkey row to do the same thing.");
         ToolTip.SetTip(AddShortcutButton, "Add another shortcut to the selected action without replacing existing shortcuts.");
         ToolTip.SetTip(RemoveShortcutButton, "Remove the selected shortcut from this action.");

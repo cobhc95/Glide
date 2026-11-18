@@ -13,6 +13,7 @@ namespace Glide.Explorer.Tests;
 /// (the "g" of "3m90fxiwwfo61.png") was drawn below the orange selection background.
 /// </summary>
 [Collection(ExplorerHeadlessCollection.Name)]
+[Trait("Area", "Explorer")]
 public sealed class ExplorerTileCaptionTests
 {
     private const string NoSpaces = "3m90fxiwwfo61.png";
@@ -268,13 +269,11 @@ public sealed class ExplorerTileCaptionTests
                 if (useReal)
                 {
                     // Real photos (up to 8K) take longer to thumbnail: wait until every realised tile has its picture.
-                    for (var i = 0; i < 150; i++)
+                    await Wait.TryUntilAsync(() =>
                     {
-                        h.Pump();
                         var images = h.Surface.Repeater.GetVisualDescendants().OfType<Image>().ToList();
-                        if (images.Count > 0 && images.All(img => img.Source is not null)) break;
-                        await Task.Delay(200);
-                    }
+                        return images.Count > 0 && images.All(img => img.Source is not null);
+                    }, 30_000, h.Pump, 200);
                 }
                 await Task.Delay(200);
                 h.Pump();

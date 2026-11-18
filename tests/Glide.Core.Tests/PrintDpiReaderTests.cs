@@ -7,6 +7,7 @@ namespace Glide.Core.Tests;
 /// or nonsensical falls back to the documented 96 DPI default (matching Glide's decode
 /// pipeline, which hard-codes 96 dpi vectors).
 /// </summary>
+[Trait("Area", "Print")]
 public sealed class PrintDpiReaderTests
 {
     [Fact]

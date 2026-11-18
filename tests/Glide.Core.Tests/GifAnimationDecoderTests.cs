@@ -6,6 +6,7 @@ namespace Glide.Core.Tests;
 /// Hand-built GIF fixtures for the managed animation decoder: frame compositing, disposal
 /// (restore-to-background), transparency, delay normalisation and interlaced row order.
 /// </summary>
+[Trait("Area", "Decode")]
 public sealed class GifAnimationDecoderTests
 {
     // Palette: 0 red, 1 green, 2 blue, 3 white.

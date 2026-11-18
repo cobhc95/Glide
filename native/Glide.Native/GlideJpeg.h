@@ -16,9 +16,12 @@ void GlideOrientIntoSurface(const std::uint8_t* source, std::uint32_t width, std
                             std::uint8_t* destination, std::uint32_t destinationStride);
 bool GlideWithinDecodeCap(std::uint64_t width, std::uint64_t height);
 
-// Bounded first view: only the camera's embedded MPF large preview (when big enough); every other JPEG returns
-// false and keeps WIC's scaled first view. Output is 32bpp BGRA (opaque) in CoTaskMem, EXIF orientation applied.
-bool GlideTurboDecodeBounded(const wchar_t* path, std::uint32_t maxWidth, std::uint32_t maxHeight, GlideDecodedImage* image);
+// Bounded first view (also the neighbour-prefetch decode): the camera's embedded MPF large preview when it alone
+// covers the requested size, otherwise a libjpeg-turbo DCT-scaled decode (1/2, 1/4 or 1/8, the smallest that still
+// covers the request) of the main image. Progressive files only when progressiveScaled (the caller is not asking
+// for WIC's staged first-scans preview, which is faster for a first view). Declined files return false and keep
+// WIC's scaled first view. Output is 32bpp BGRA (opaque) in CoTaskMem, EXIF orientation applied.
+bool GlideTurboDecodeBounded(const wchar_t* path, std::uint32_t maxWidth, std::uint32_t maxHeight, bool progressiveScaled, GlideDecodedImage* image);
 
 // Full-resolution decode into the caller's surface. Baseline: parallel horizontal bands; progressive: one
 // thread (banding a progressive file repeats the whole multi-scan decode per band and multiplies memory).
@@ -31,3 +34,11 @@ bool GlideIsJpegPath(const wchar_t* path);
 
 // Diagnostics/tests: true when the libjpeg-turbo path accepts this file's header (false = WIC decodes it).
 bool GlideTurboAccepts(const wchar_t* path);
+
+// First-view decision (pure; exported for tests through GlideJpegPlanFirstView). Sizes are physical (stored)
+// pixels; need = the source fitted into the request box. previewLongSide = 0 when no usable embedded preview.
+enum GlideJpegFirstView : int { GlideJpegFirstViewWic = 0, GlideJpegFirstViewEmbedded = 1, GlideJpegFirstViewScaled = 2 };
+GlideJpegFirstView GlideJpegChooseFirstView(int width, int height, std::uint32_t needW, std::uint32_t needH,
+                                            std::uint32_t previewLongSide, bool scaledAllowed);
+// Smallest power-of-two DCT scale denominator (1, 2, 4 or 8) whose output still covers needW x needH.
+int GlideJpegChooseScaleDenom(int width, int height, std::uint32_t needW, std::uint32_t needH);

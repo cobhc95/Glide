@@ -3,6 +3,7 @@ using Glide.Core.Commands;
 namespace Glide.Core.Tests;
 
 /// <summary>Hints that describe a configurable binding must follow the live bindings and vanish when the input does nothing.</summary>
+[Trait("Area", "Hotkeys")]
 public sealed class BindingHintsTests
 {
     private static Dictionary<string, string> Gestures(params (string Slot, string Action)[] overrides)
@@ -13,42 +14,52 @@ public sealed class BindingHintsTests
     }
 
     [Fact]
-    public void Default_tab_hint_is_one_short_line_with_the_close_gesture_and_the_menu()
+    public void Default_tab_hint_is_one_line_of_chips_with_the_close_gesture_the_menu_and_the_resize_key()
     {
-        var hint = BindingHints.TabMouseHint(Gestures(), null);
-        Assert.Equal("Drag to move · Middle-click to close · Right-click for more", hint);
+        var chips = BindingHints.TabMouseHintChips(Gestures(), null, "Ctrl");
+        Assert.Equal([new HintChip("Drag", "move"), new HintChip("Middle", "close"), new HintChip("Right", "more"), new HintChip("Ctrl+Wheel", "size")], chips);
+        Assert.Equal("[Drag] move · [Middle] close · [Right] more · [Ctrl+Wheel] size", BindingHints.TabMouseHint(Gestures(), null, "Ctrl"));
+    }
+
+    [Theory]
+    [InlineData("Shift", "Shift+Wheel")]
+    [InlineData("Alt", "Alt+Wheel")]
+    [InlineData("None", null)]
+    public void The_size_chip_names_the_chosen_resize_key_and_is_hidden_for_None(string modifier, string? chip)
+    {
+        var chips = BindingHints.TabMouseHintChips(Gestures(), null, modifier);
+        Assert.Equal(chip, chips.SingleOrDefault(c => c.Action == "size").Input);
     }
 
     [Fact]
     public void Tab_hint_names_double_click_when_middle_click_does_not_close()
     {
-        var hint = BindingHints.TabMouseHint(Gestures(("tabs.middleClick", GestureCatalog.DuplicateTab)), null);
-        Assert.DoesNotContain("Middle-click", hint);
-        Assert.Contains("Double-click to close", hint);
+        var chips = BindingHints.TabMouseHintChips(Gestures(("tabs.middleClick", GestureCatalog.DuplicateTab)), null, "None");
+        Assert.DoesNotContain(chips, c => c.Input == "Middle");
+        Assert.Contains(new HintChip("Double-click", "close"), chips);
     }
 
     [Fact]
-    public void Tab_hint_has_no_close_text_when_both_gestures_do_nothing_or_do_something_else()
+    public void Tab_hint_has_no_close_chip_when_both_gestures_do_nothing_or_do_something_else()
     {
-        var hint = BindingHints.TabMouseHint(Gestures(("tabs.doubleClick", GestureCatalog.Nothing), ("tabs.middleClick", GestureCatalog.DuplicateTab)), null);
-        Assert.DoesNotContain("close", hint);
-        Assert.DoesNotContain("click to", hint);
+        var chips = BindingHints.TabMouseHintChips(Gestures(("tabs.doubleClick", GestureCatalog.Nothing), ("tabs.middleClick", GestureCatalog.DuplicateTab)), null, "None");
+        Assert.DoesNotContain(chips, c => c.Action == "close");
     }
 
     [Fact]
     public void Tab_hint_follows_an_explicit_close_binding_and_a_disabled_menu()
     {
         var hint = BindingHints.TabMouseHint(Gestures(("tabs.middleClick", GestureCatalog.Nothing), ("tabs.doubleClick", GestureCatalog.CloseTab), ("tabs.rightClick", GestureCatalog.Nothing)), null);
-        Assert.Equal("Drag to move · Double-click to close", hint);
+        Assert.Equal("[Drag] move · [Double-click] close", hint);
     }
 
     [Fact]
     public void Tab_hint_sees_custom_gestures_on_the_same_input()
     {
         var custom = new List<CustomGesture> { new() { Area = GestureAreas.Tabs, Input = GestureInputs.MiddleClick, Action = GestureCatalog.Nothing } };
-        var hint = BindingHints.TabMouseHint(Gestures(), custom);
-        Assert.DoesNotContain("Middle-click", hint);
-        Assert.Contains("Double-click to close", hint);
+        var chips = BindingHints.TabMouseHintChips(Gestures(), custom, "None");
+        Assert.DoesNotContain(chips, c => c.Input == "Middle");
+        Assert.Contains(new HintChip("Double-click", "close"), chips);
     }
 
     [Fact]

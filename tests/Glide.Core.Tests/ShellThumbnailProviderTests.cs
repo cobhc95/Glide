@@ -22,6 +22,7 @@ namespace Glide.Core.Tests;
 /// </summary>
 // Source-text contract kept: this asserts on production source (UI code-behind, native/installer files or a repo-wide scan) that cannot be run headlessly; behavioural coverage lives in the other test files.
 [Collection("ShellThumbnailProvider")]
+[Trait("Area", "Thumbnails")]
 public sealed class ShellThumbnailProviderTests : IDisposable
 {
     private const int Fast = 0, Balanced = 1, High = 2;
@@ -32,7 +33,7 @@ public sealed class ShellThumbnailProviderTests : IDisposable
     public void Dispose()
     {
         try { Provider.Instance?.ClearOverrides(); } catch { }
-        try { Directory.Delete(_directory, recursive: true); } catch { }
+        TempDir.TryDelete(_directory);
     }
 
     // ------------------------------------------------------------------ preset wiring ----------

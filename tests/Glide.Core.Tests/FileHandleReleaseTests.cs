@@ -4,6 +4,7 @@ using Glide.Imaging;
 namespace Glide.Core.Tests;
 
 [Collection(AvaloniaHeadlessCollection.Name)]
+[Trait("Area", "Window")]
 public sealed class FileHandleReleaseTests
 {
     [Theory]
@@ -40,7 +41,7 @@ public sealed class FileHandleReleaseTests
         }
         finally
         {
-            try { Directory.Delete(dir, true); } catch { }
+            TempDir.TryDelete(dir);
         }
     }
 
@@ -60,7 +61,7 @@ public sealed class FileHandleReleaseTests
         }
         finally
         {
-            try { Directory.Delete(dir, true); } catch { }
+            TempDir.TryDelete(dir);
         }
     }
 

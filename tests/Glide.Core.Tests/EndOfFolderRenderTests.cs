@@ -24,6 +24,7 @@ namespace Glide.Core.Tests;
 /// notes (only synthetic, generated pictures are used).
 /// </summary>
 [Collection(AvaloniaHeadlessCollection.Name)]
+[Trait("Area", "Navigation")]
 public sealed class EndOfFolderRenderTests
 {
     public EndOfFolderRenderTests(AvaloniaHeadlessFixture fixture) => _ = fixture;
@@ -116,7 +117,7 @@ public sealed class EndOfFolderRenderTests
                 Settle(window);
                 var combo = Named<ComboBox>(window, "EndOfFolderActionCombo");
                 var options = Named<Border>(window, "EndOfFolderFolderOptions");
-                Assert.Equal(EndOfFolderActions.NextFolder, (combo.SelectedItem as ComboBoxItem)?.Content);
+                Assert.Equal(EndOfFolderActions.Ask, (combo.SelectedItem as ComboBoxItem)?.Content);   // 5.0.8 default: Ask me each time
                 Assert.True(options.IsEnabled);
                 combo.SelectedIndex = 1; // Loop this folder
                 Assert.False(options.IsEnabled);
@@ -153,7 +154,12 @@ public sealed class EndOfFolderRenderTests
             finally
             {
                 window.Close();
-                RemoveAppStyles(styles);
+                // Removing the styles restyles the closed SettingsWindow's cards; their transitions subscribe to the headless
+                // MediaContext clock, which throws "Call from invalid thread" here. Teardown only: the assertions above already ran.
+                foreach (var style in styles)
+                {
+                    try { Application.Current!.Styles.Remove(style); } catch (InvalidOperationException) { }
+                }
             }
             return Task.CompletedTask;
         });

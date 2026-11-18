@@ -9,6 +9,7 @@ namespace Glide.Core.Tests;
 
 /// <summary>Headless checks of the template-less Settings card control (no real UI driving).</summary>
 [Collection(AvaloniaHeadlessCollection.Name)]
+[Trait("Area", "Settings")]
 public sealed class SettingsCardControlTests
 {
     public SettingsCardControlTests(AvaloniaHeadlessFixture fixture) => _ = fixture;

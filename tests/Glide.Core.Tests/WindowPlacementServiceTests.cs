@@ -15,6 +15,7 @@ namespace Glide.Core.Tests;
 /// files) and the migration of the Settings window's older keys.
 /// </summary>
 [Collection(AvaloniaHeadlessCollection.Name)]
+[Trait("Area", "Window")]
 public sealed class WindowPlacementServiceTests : IDisposable
 {
     private static readonly ScreenWorkArea Full = new(0, 0, 1920, 1040, 1.0);
@@ -37,7 +38,7 @@ public sealed class WindowPlacementServiceTests : IDisposable
         WindowPlacementService.ScreensOverrideForTests = null;
         WindowPlacementService.ResetForTests();
         PrintSettingsStore.DirectoryOverrideForTests = null;
-        try { Directory.Delete(_printDir, true); } catch { }
+        TempDir.TryDelete(_printDir);
     }
 
     private static void Settle(Window window)
@@ -207,7 +208,7 @@ public sealed class WindowPlacementServiceTests : IDisposable
         finally
         {
             SettingsStore.SettingsDirectoryOverrideForTests.Value = previous;
-            try { Directory.Delete(root, true); } catch { }
+            TempDir.TryDelete(root);
         }
     }
 
@@ -266,7 +267,7 @@ public sealed class WindowPlacementServiceTests : IDisposable
         finally
         {
             SettingsStore.SettingsDirectoryOverrideForTests.Value = previous;
-            try { Directory.Delete(root, true); } catch { }
+            TempDir.TryDelete(root);
         }
     }
 

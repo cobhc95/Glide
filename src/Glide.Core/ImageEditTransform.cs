@@ -57,8 +57,6 @@ public static class ImageSavePolicy
         => Path.Combine(Path.GetDirectoryName(Path.GetFullPath(destination)) ?? ".",
             "~glide-save-" + Guid.NewGuid().ToString("N") + ".tmp");
 
-    public static string EnsureExtension(string destination, string fallbackExtension)
-        => string.IsNullOrEmpty(Path.GetExtension(destination)) ? destination + fallbackExtension : destination;
 
     /// <summary>
     /// Glide writes a single frame, so writing over a source with more than one page/frame would discard the rest:

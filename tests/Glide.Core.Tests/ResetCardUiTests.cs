@@ -15,6 +15,7 @@ using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Glide.App.Controls;
 using Glide.App.Settings;
+using Glide.Core.Data;
 using Glide.Core.Reset;
 
 namespace Glide.Core.Tests;
@@ -24,6 +25,7 @@ namespace Glide.Core.Tests;
 /// folders (never the real data), search, layout at the minimum width and PNG renders (set GLIDE_SAVE_RENDERS).
 /// </summary>
 [Collection(AvaloniaHeadlessCollection.Name)]
+[Trait("Area", "Data")]
 public sealed class ResetCardUiTests : IDisposable
 {
     public ResetCardUiTests(AvaloniaHeadlessFixture fixture) => _ = fixture;

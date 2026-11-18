@@ -139,7 +139,15 @@ internal static class SettingsChangeSet
                 var baseline = new GlideSettingsState();
                 var probe = baseline.CloneState();
                 if (accessor.GetBool is { } getBool && accessor.SetBool is { } setBool) setBool(probe, !getBool(probe));
-                else if (accessor.GetText is { } getText && accessor.SetText is { } setText) setText(probe, getText(probe) + "\u0001probe");
+                else if (accessor.GetText is { } getText && accessor.SetText is { } setText)
+                {
+                    // A choice stored in another form (Open new tabs in the [foreground / background] is a bool) ignores a
+                    // made-up value, so fall back to another of its listed options.
+                    var current = getText(probe);
+                    setText(probe, current + "\u0001probe");
+                    if (getText(probe) == current && Glide.Core.Settings.SettingActionCatalog.Choices.TryGetValue(id, out var options))
+                        setText(probe, options.FirstOrDefault(o => !string.Equals(o, current, StringComparison.OrdinalIgnoreCase)) ?? current);
+                }
                 else continue;
                 foreach (var property in properties)
                 {

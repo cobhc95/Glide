@@ -10,6 +10,7 @@ namespace Glide.Core.Tests;
 /// generic embedded-JPEG scan. Each asserts size, colour placement and EXIF/container orientation.
 /// </summary>
 [Collection(AvaloniaHeadlessCollection.Name)]
+[Trait("Area", "Decode")]
 public sealed class RawPreviewDecoderTests : IDisposable
 {
     private readonly List<string> _files = new();

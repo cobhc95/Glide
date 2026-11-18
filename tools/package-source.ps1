@@ -2,8 +2,8 @@ param([string]$Output = "Glide-Zero-Context-Handover.zip")
 $ErrorActionPreference = 'Stop'
 # This script lives in tools\; the project root is its parent folder.
 $project = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$handoff = Join-Path $project 'docs\GLIDE_MANIFESTO_AND_HANDOFF.md'
-if (-not (Test-Path $handoff)) { throw "Missing Glide Image Viewer\docs\GLIDE_MANIFESTO_AND_HANDOFF.md" }
+$handoff = Join-Path $project 'docs\history\GLIDE_MANIFESTO_AND_HANDOFF.md'
+if (-not (Test-Path $handoff)) { throw "Missing Glide Image Viewer\docs\history\GLIDE_MANIFESTO_AND_HANDOFF.md" }
 
 $temp = Join-Path $env:TEMP ("GlideSource_" + [guid]::NewGuid().ToString('N'))
 $stagedProject = Join-Path $temp 'Glide Image Viewer'
@@ -34,7 +34,7 @@ Get-ChildItem $stagedProject -File -Recurse | Where-Object {
     $_.Name -match '\.(bak|tmp|orig|prehelddrag|log|pdb|exe|dll|ilk|exp|lib|obj|pch|idb)$' -or $_.Name -like '*.zip' -or $_.Name -like 'build-output.txt' -or $_.Name -like 'installer-output.txt'
 } | Remove-Item -Force
 
-# Permanent transfer contract: exactly one handoff document (docs\GLIDE_MANIFESTO_AND_HANDOFF.md), inside Glide Image Viewer.
+# Permanent transfer contract: exactly one handoff document (docs\history\GLIDE_MANIFESTO_AND_HANDOFF.md), inside Glide Image Viewer.
 $handoffs = @(Get-ChildItem $stagedProject -File -Recurse | Where-Object {
     ($_.Name -match '(?i)handoff|hand-over|handover' -and $_.Extension -in @('.md','.txt')) -or $_.Name -eq 'GLIDE_LEGACY_COMPLETE_ZERO_CONTEXT_HANDOFF.txt'
 })

@@ -4,6 +4,7 @@ using static Glide.Core.Tests.UpdateTestSupport;
 namespace Glide.Core.Tests;
 
 /// <summary>Pure logic of the update checker (Glide.Core.Updates): versions, release parsing, URL validation, schedule, prompt rules, status text.</summary>
+[Trait("Area", "Update")]
 public sealed class UpdateLogicTests
 {
     // ================================================================ version comparison ========

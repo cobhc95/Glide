@@ -3,6 +3,7 @@ using Glide.App.Explorer;
 namespace Glide.Core.Tests;
 
 [Collection("ExplorerFileOperations")]
+[Trait("Area", "Explorer")]
 public sealed class ExplorerFileClipboardTests
 {
     [Fact]

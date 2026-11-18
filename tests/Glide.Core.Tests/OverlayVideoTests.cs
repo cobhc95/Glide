@@ -4,6 +4,7 @@ using Glide.Imaging;
 namespace Glide.Core.Tests;
 
 // Source-text contract kept: this asserts on production source (UI code-behind, native/installer files or a repo-wide scan) that cannot be run headlessly; behavioural coverage lives in the other test files.
+[Trait("Area", "Video")]
 public sealed class OverlayVideoTests
 {
     private static string FixturePath => Path.Combine(AppContext.BaseDirectory, "Fixtures", "overlay-video.mp4");
@@ -102,20 +103,15 @@ public sealed class OverlayVideoTests
         Assert.True(info.Loop);
 
         var frame = new byte[80 * 45 * 4];
-        var deadline = DateTime.UtcNow.AddSeconds(5);
-        var got = false;
-        while (!got && DateTime.UtcNow < deadline) { got = player.TryReadFrame(frame, 80, 45); await Task.Delay(10); }
-        Assert.True(got);
+        await Wait.UntilAsync(() => player.TryReadFrame(frame, 80, 45), "first video frame", 5000);
         Assert.Contains(frame.Where((_, i) => i % 4 != 3), b => b > 32); // not a black frame
         Assert.All(Enumerable.Range(0, 80 * 45), i => Assert.Equal(255, frame[i * 4 + 3])); // opaque
 
         player.Seek(1.5);
-        await Task.Delay(300);
-        Assert.True(player.GetInfo().Position >= 1.4);
+        await Wait.UntilAsync(() => player.GetInfo().Position >= 1.4, "seek to 1.5 s", 5000);
 
         player.SetPlaying(false);
-        await Task.Delay(200);
-        Assert.False(player.GetInfo().Playing);
+        await Wait.UntilAsync(() => !player.GetInfo().Playing, "paused", 5000);
         player.SetMuted(false);
         Assert.False(player.GetInfo().Muted);
         player.SetMuted(true);

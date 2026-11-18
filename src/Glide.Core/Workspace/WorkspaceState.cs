@@ -110,6 +110,23 @@ public sealed class WorkspaceState
         return true;
     }
 
+    /// <summary>
+    /// Remove for a move to another window (5.1.0): like <see cref="Close(Guid, bool, TabCloseActivationMode, IReadOnlyList{Guid}?)"/>
+    /// without the closed history and without a Home tab, so the source window activates the same tab that closing it would.
+    /// </summary>
+    public TabState? RemoveForTransfer(Guid id, TabCloseActivationMode activation, IReadOnlyList<Guid>? recentlyUsed)
+    {
+        var index = _tabs.FindIndex(t => t.Id == id);
+        if (index < 0) return null;
+        var tab = _tabs[index];
+        _tabs.RemoveAt(index);
+        if (_tabs.Count == 0) { ActiveIndex = -1; return tab; }
+        if (index < ActiveIndex) ActiveIndex--;
+        else if (index == ActiveIndex) ActiveIndex = TabCloseActivation.NextActiveIndex(_tabs, index, activation, recentlyUsed);
+        ActiveIndex = Math.Clamp(ActiveIndex, 0, _tabs.Count - 1);
+        return tab;
+    }
+
     /// <summary>Remove without adding to closed history. Used only for a successful tab transfer.</summary>
     public TabState? RemoveForTransfer(Guid id)
     {

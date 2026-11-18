@@ -1,0 +1,21 @@
+# Analyzer severities for the test projects only (wired in Directory.Build.props for projects named *.Tests).
+is_global = true
+# Must win over Glide.globalconfig for the same ids.
+global_level = 101
+
+# CA1707 "remove underscores from member names": test names are sentences (Method_does_X_when_Y) on purpose.
+dotnet_diagnostic.CA1707.severity = none
+# CA1711 "identifiers should not have incorrect suffix": test doubles are named after what they fake (FakeQueue...).
+dotnet_diagnostic.CA1711.severity = none
+# CA1305 / CA1307 / CA1310 culture rules: tests build expected strings and fixture names; the production rules stay on.
+dotnet_diagnostic.CA1305.severity = none
+dotnet_diagnostic.CA1307.severity = none
+dotnet_diagnostic.CA1310.severity = none
+# xUnit assertion-style suggestions (Assert.Contains vs Assert.True(x.Contains), etc.): style only, no correctness.
+dotnet_diagnostic.xUnit2009.severity = none
+dotnet_diagnostic.xUnit2010.severity = none
+dotnet_diagnostic.xUnit2013.severity = none
+dotnet_diagnostic.xUnit2017.severity = none
+dotnet_diagnostic.xUnit2029.severity = none
+dotnet_diagnostic.xUnit2031.severity = none
+# xUnit1031 (blocking task operations in tests) stays a warning: it can deadlock the headless UI thread.

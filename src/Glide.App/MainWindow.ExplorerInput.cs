@@ -22,6 +22,9 @@ public partial class MainWindow
     private bool _explorerRubberActive;
     private Point _explorerRubberStart;      // ItemsRepeater coordinates
     private bool _explorerRubberAdditive;
+    // Ctrl+drag (round 3 #8): items the band covers flip their state against the selection the drag started with,
+    // as in Windows File Explorer, so a Ctrl+drag over selected items deselects them. Shift+drag only adds.
+    private bool _explorerRubberToggle;
     private HashSet<string> _explorerRubberBase = new(StringComparer.OrdinalIgnoreCase);
     private ExplorerEntry? _explorerDragCandidate;
     private Point _explorerDragOrigin;
@@ -51,6 +54,57 @@ public partial class MainWindow
         DragDrop.SetAllowDrop(scroll, true);
         AttachExplorerDropTarget(scroll, () => (_workspace.Active as BrowserTabState)?.Folder, null);
         WireExplorerClickRenameCancellation(browser);
+    }
+
+    // ------------------------------------------------------------------------------------------
+    // Drive bar divider (round 3 #12): drag to resize; the width is remembered (explorer.navPaneWidth)
+    // ------------------------------------------------------------------------------------------
+
+    private bool _explorerNavResizing;
+    private double _explorerNavResizeStartX;
+    private double _explorerNavResizeStartWidth;
+
+    private void WireExplorerNavSplitter(BrowserSurface browser)
+    {
+        var grip = browser.NavSplitter;
+        grip.PointerPressed += (_, e) =>
+        {
+            if (!e.GetCurrentPoint(grip).Properties.IsLeftButtonPressed) return;
+            _explorerNavResizing = true;
+            _explorerNavResizeStartX = e.GetPosition(browser).X;
+            _explorerNavResizeStartWidth = browser.NavPaneWidth;
+            e.Pointer.Capture(grip);
+            e.Handled = true;
+        };
+        grip.PointerMoved += (_, e) =>
+        {
+            if (!_explorerNavResizing) return;
+            // Never wider than leaves 200 px for the thumbnails.
+            var max = Math.Max(ExplorerLayout.NavPaneMinWidth, browser.Bounds.Width - 200);
+            var width = Math.Min(ExplorerLayout.ClampNavPaneWidth(_explorerNavResizeStartWidth + e.GetPosition(browser).X - _explorerNavResizeStartX), max);
+            browser.NavPaneWidth = width;
+            e.Handled = true;
+        };
+        void Finish(bool save)
+        {
+            if (!_explorerNavResizing) return;
+            _explorerNavResizing = false;
+            var width = ExplorerLayout.ClampNavPaneWidth(browser.NavPaneWidth);
+            if (save && width != _settings.ExplorerNavPaneWidth)
+            {
+                _settings.ExplorerNavPaneWidth = width;
+                SaveSettingsAndPublish();
+            }
+        }
+        grip.PointerReleased += (_, e) => { Finish(save: true); e.Pointer.Capture(null); e.Handled = true; };
+        grip.PointerCaptureLost += (_, _) => Finish(save: true);
+        ApplyExplorerNavPaneWidth();
+    }
+
+    private void ApplyExplorerNavPaneWidth()
+    {
+        if (_browserSurface is not { } surface || _explorerNavResizing) return;
+        surface.NavPaneWidth = ExplorerLayout.ClampNavPaneWidth(_settings.ExplorerNavPaneWidth);
     }
 
     private void SetExplorerListFocus(bool focused)
@@ -127,6 +181,7 @@ public partial class MainWindow
         {
             // Empty space: start a rubber band (Ctrl/Shift keep the existing selection).
             _explorerRubberAdditive = ctrl || shift;
+            _explorerRubberToggle = ctrl;
             _explorerRubberBase = new HashSet<string>(_browserSelection, StringComparer.OrdinalIgnoreCase);
             if (!_explorerRubberAdditive) ClearBrowserSelection();
             _explorerRubberStart = e.GetPosition(surface.Repeater);
@@ -229,7 +284,8 @@ public partial class MainWindow
         for (var i = 0; i < _browserEntries.Count; i++)
         {
             if (!ExplorerTileRect(i).Intersects(rect)) continue;
-            selection.Add(_browserEntries[i].Path);
+            if (_explorerRubberToggle && _explorerRubberBase.Contains(_browserEntries[i].Path)) selection.Remove(_browserEntries[i].Path);
+            else selection.Add(_browserEntries[i].Path);
             if (first < 0) first = i;
         }
         _browserSelection.Clear();
@@ -309,6 +365,11 @@ public partial class MainWindow
             case Key.F4: surface.AddressBar.BeginEdit(); e.Handled = true; return;
             case Key.F2 when !ctrl && !shift: ExplorerBeginRenameSelection(); e.Handled = true; return;
             case Key.Delete when !ctrl: await ExplorerDeleteSelectionAsync(permanent: shift); e.Handled = true; return;
+            // Escape clears the selection (round 3 #9). With nothing selected it is left to the hotkey map.
+            case Key.Escape when !ctrl && !shift && _browserSelection.Count > 0:
+                EndExplorerRubberBand();
+                ClearBrowserSelection();
+                e.Handled = true; return;
             case Key.Apps:
             case Key.F10 when shift:
                 ShowExplorerContextMenuAtCurrent();
@@ -330,7 +391,7 @@ public partial class MainWindow
         var details = ExplorerIsDetails;
         var current = _browserCurrentIndex >= 0 ? _browserCurrentIndex : _browserSelectionAnchor >= 0 ? _browserSelectionAnchor : -1;
         var last = _browserEntries.Count - 1;
-        var visibleRows = Math.Max(1, (int)(surface.ScrollViewer.Viewport.Height / (ExplorerViewModes.TileSize(_browserViewMode).Height + (details ? 0 : ExplorerGridSpacing))));
+        var visibleRows = Math.Max(1, (int)(surface.ScrollViewer.Viewport.Height / (ExplorerViewModes.TileSize(_browserViewMode, ExplorerInfoLines).Height + (details ? 0 : ExplorerGridSpacing))));
         int next;
         switch (e.Key)
         {
@@ -338,6 +399,10 @@ public partial class MainWindow
             case Key.Right when !details: next = current < 0 ? 0 : Math.Min(last, current + 1); break;
             case Key.Up: next = current < 0 ? 0 : Math.Max(0, current - columns); break;
             case Key.Down: next = current < 0 ? 0 : Math.Min(last, current + columns); break;
+            // Shift+Home / Shift+End extend the selection to the start / end of the current row (round 3 #10);
+            // Ctrl+Shift+Home / End, plain Home / End and the one-column Details view go to the folder's first / last item.
+            case Key.Home when shift && !ctrl && !details && current >= 0: next = current - current % columns; break;
+            case Key.End when shift && !ctrl && !details && current >= 0: next = Math.Min(last, current - current % columns + columns - 1); break;
             case Key.Home: next = 0; break;
             case Key.End: next = last; break;
             case Key.PageUp: next = current < 0 ? 0 : Math.Max(0, current - visibleRows * columns); break;

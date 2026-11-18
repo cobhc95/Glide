@@ -22,6 +22,7 @@ namespace Glide.Core.Tests;
 /// (SettingsStore's test directory override; never the real profile).
 /// </summary>
 [Collection(AvaloniaHeadlessCollection.Name)]
+[Trait("Area", "Data")]
 public sealed class BackupCardUiTests : IDisposable
 {
     public BackupCardUiTests(AvaloniaHeadlessFixture fixture) => _ = fixture;
@@ -110,7 +111,7 @@ public sealed class BackupCardUiTests : IDisposable
                 var backupNames = backup.Categories.Select(c => AutomationProperties.GetName(backup.Checks[c.Id])).ToArray();
                 var resetNames = reset.Categories.Where(c => c.CanExport).Select(c => AutomationProperties.GetName(reset.Checks[c.Id])).ToArray();
                 Assert.Equal(resetNames, backupNames);
-                Assert.Equal(["All settings", "Hotkeys and mouse gestures", "Saved profiles and presets", "Window sizes and positions", "Recent files and Home list", "Last session"], backupNames);
+                Assert.Equal(["All settings", "Hotkeys and mouse gestures", "Saved profiles and presets", "Window sizes and positions", "Recent files and Home list", "Last session"], backupNames.OfType<string>());
                 Assert.Equal(9, reset.Checks.Count);
                 Assert.All(backup.Checks.Values, c => Assert.Contains("resetItem", c.Classes));
                 Assert.Equal("BackupAllSettingsCheck", backup.Checks[ResetItemId.AllSettings].Name);
@@ -247,7 +248,7 @@ public sealed class BackupCardUiTests : IDisposable
         public string Backups => Path.Combine(Root, "Glide backups");
         public string File => Path.Combine(Root, "move" + GlideBackupFormat.FileExtension);
         public Scratch() => Directory.CreateDirectory(Settings);
-        public void Dispose() { try { Directory.Delete(Root, true); } catch { } }
+        public void Dispose() { TempDir.TryDelete(Root); }
     }
 
     private static SettingsWindow Wire(SettingsWindow window, Scratch scratch)

@@ -16,6 +16,7 @@ namespace Glide.Explorer.Tests;
 /// the details line are shown in full (never trimmed), and "Animate GIF previews on hover" plays a GIF's preview.
 /// </summary>
 [Collection(ExplorerHeadlessCollection.Name)]
+[Trait("Area", "Tabs")]
 public sealed class TabHoverPreviewTests
 {
     private static Border TabBorder(ExplorerHarness h, Guid id) =>
@@ -65,7 +66,11 @@ public sealed class TabHoverPreviewTests
             Assert.DoesNotContain(texts, t => t.Text?.StartsWith("Name:", StringComparison.Ordinal) == true || t.Text?.StartsWith("Path:", StringComparison.Ordinal) == true);
             Assert.All(texts, t => Assert.Equal(TextTrimming.None, t.TextTrimming));
             await h.WaitUntil(() => TextBlocks(tip).Any(t => t.IsVisible && t.Text is { } s && s.Contains('×') && s.Contains(" · ")), "pixel and file size line");
-            Assert.Contains(texts, t => t.Text == "Drag to move · Middle-click to close · Right-click for more" && t.TextWrapping == TextWrapping.NoWrap);
+            // 5.1.0: the mouse hint is one line of key chips ([Drag] move · [Middle] close · [Right] more · [Ctrl+Wheel] size).
+            var hint = ((Glide.App.Controls.TabHoverCard)((ToolTip)tip).Content!).Hint;
+            Assert.Equal(TextWrapping.NoWrap, hint.TextWrapping);
+            Assert.Equal(["Drag", "Middle", "Right", "Ctrl+Wheel"],
+                hint.Inlines!.OfType<Avalonia.Controls.Documents.InlineUIContainer>().Select(c => ((TextBlock)((Border)c.Child).Child!).Text));
         });
     }
 
@@ -166,6 +171,96 @@ public sealed class TabHoverPreviewTests
             var card = (Glide.App.Controls.TabHoverCard)((ToolTip)tip).Content!;
             Assert.True(card.Bounds.Height >= card.Text.Bounds.Bottom - 0.5, "the card is shorter than its text");
         });
+    }
+
+    /// <summary>The share of the picture the preview slot actually shows (1 = the whole picture, smaller = cropped).</summary>
+    private static double VisibleFraction(Image image, Border host)
+    {
+        var source = ((Bitmap)image.Source!).Size;
+        double w = host.Bounds.Width, hh = host.Bounds.Height;
+        if (image.Stretch != Stretch.UniformToFill) return 1; // Uniform / Fill never cut anything off
+        var scale = Math.Max(w / source.Width, hh / source.Height);
+        return Math.Min(1, w / (source.Width * scale)) * Math.Min(1, hh / (source.Height * scale));
+    }
+
+    [Theory]
+    [InlineData(40, 200)]   // tall portrait (aspect 0.2)
+    [InlineData(120, 200)]  // mild portrait (aspect 0.6)
+    [InlineData(400, 100)]  // landscape (aspect 4)
+    public async Task Round3_4_the_tab_preview_shows_the_whole_picture_never_a_cropped_part(int width, int height)
+    {
+        await ExplorerHarness.Run(async h =>
+        {
+            h.Settings.SwitchToNewTabs = false;
+            var file = Path.Combine(h.Root, $"shape{width}x{height}.png");
+            File.WriteAllBytes(file, ExplorerHarness.Png(width, height, 200, 40, 40));
+            await (Task)h.Call("OpenImageInNewTabAsync", file, KeyModifiers.None, "test")!;
+            h.Pump();
+            var id = h.Workspace.Tabs.OfType<ImageTabState>().Single(t => t.Path == file).Id;
+            var tip = await HoverTabAsync(h, id);
+            await h.WaitUntil(() => PreviewImages(tip).Count == 1, "picture preview");
+            for (var i = 0; i < 5; i++) { h.Pump(); await Task.Delay(30); }
+            var card = (Glide.App.Controls.TabHoverCard)((ToolTip)tip).Content!;
+            var fraction = VisibleFraction(PreviewImages(tip)[0], card.PictureHost);
+            Assert.True(fraction > 0.98, $"only {fraction:P0} of a {width}x{height} picture is shown in the preview");
+        });
+    }
+
+    [Fact]
+    public async Task Round3_5_the_resize_key_and_wheel_over_the_tab_resize_the_open_preview_and_save_the_size()
+    {
+        await ExplorerHarness.Run(async h =>
+        {
+            // As at application start-up. Without it this test passed alone but failed after any test that had registered
+            // the guard: its wheel handler closed the tab's tooltip before the resize handler saw it open.
+            Glide.App.Services.ToolTipGuard.Register();
+            h.Settings.SwitchToNewTabs = false;
+            Assert.Equal(100, h.Settings.TabPreviewSizePercent);
+            Assert.Equal("Ctrl", h.Settings.TabPreviewResizeModifier);
+            var id = await OpenInBackgroundAsync(h, "b.png", 3);
+            var tip = await HoverTabAsync(h, id);
+            await h.WaitUntil(() => PreviewImages(tip).Count == 1, "picture preview");
+            var card = (Glide.App.Controls.TabHoverCard)((ToolTip)tip).Content!;
+            for (var i = 0; i < 5; i++) { h.Pump(); await Task.Delay(30); }
+            var before = card.PictureHost.Bounds.Width;
+            var tab = TabBorder(h, id);
+            var over = tab.TranslatePoint(new Point(tab.Bounds.Width / 3, tab.Bounds.Height / 2), h.Window)!.Value;
+
+            // Four notches: the picture then outgrows the hint line of key chips (5.1.0), which sets the card's minimum width.
+            for (var notch = 0; notch < 4; notch++) h.Window.MouseWheel(over, new Vector(0, 1), RawInputModifiers.Control);
+            for (var i = 0; i < 5; i++) { h.Pump(); await Task.Delay(30); }
+            Assert.Equal(140, h.Settings.TabPreviewSizePercent);
+            Assert.Equal(1.4, card.Scale, 3);
+            Assert.True(card.PictureHost.Bounds.Width > before + 1, $"the preview did not grow ({before} -> {card.PictureHost.Bounds.Width})");
+
+            h.Settings.TabPreviewResizeModifier = "Alt";
+            h.Window.MouseWheel(over, new Vector(0, -1), RawInputModifiers.Alt);
+            h.Pump();
+            Assert.Equal(130, h.Settings.TabPreviewSizePercent);
+
+            Assert.True(ToolTip.GetIsOpen(tab), "the resize ticks kept the preview open");
+            h.Window.MouseWheel(over, new Vector(0, 1), RawInputModifiers.Shift); // not the chosen key: nothing changes
+            h.Pump();
+            Assert.Equal(130, h.Settings.TabPreviewSizePercent);
+            Assert.False(ToolTip.GetIsOpen(tab), "a plain wheel tick still closes the tooltip");
+
+            h.Settings.TabPreviewResizeModifier = "None"; // off
+            h.Window.MouseWheel(over, new Vector(0, -1), RawInputModifiers.Alt);
+            h.Pump();
+            Assert.Equal(130, h.Settings.TabPreviewSizePercent);
+        });
+    }
+
+    [Fact]
+    public void Round3_5_preview_size_is_clamped_and_steps_by_ten()
+    {
+        Assert.Equal(250, Glide.Core.Workspace.TabPreviewSize.AfterWheel(250, 1));
+        Assert.Equal(50, Glide.Core.Workspace.TabPreviewSize.AfterWheel(50, -1));
+        Assert.Equal(110, Glide.Core.Workspace.TabPreviewSize.AfterWheel(100, 0.3));
+        Assert.Equal(100, Glide.Core.Workspace.TabPreviewSize.Clamp(0));
+        Assert.Equal("Ctrl", Glide.Core.Workspace.TabPreviewSize.NormalizeModifier("bogus"));
+        Assert.False(Glide.Core.Workspace.TabPreviewSize.ModifierMatches("Ctrl", true, true, false));
+        Assert.True(Glide.Core.Workspace.TabPreviewSize.ModifierMatches("shift", false, true, false));
     }
 
     // ---- "Animate GIF previews on hover" ---------------------------------------------------------------------------

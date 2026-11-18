@@ -77,6 +77,7 @@ internal sealed class FakePrintQueries : IPrintQueries
 /// clear "reading" / "Updating preview…" state; preview geometry is exactly what the spool path computes.
 /// </summary>
 [Collection(AvaloniaHeadlessCollection.Name)]
+[Trait("Area", "Print")]
 public sealed class PrintWindowResponsivenessTests : IDisposable
 {
     private readonly string _settingsDir = Path.Combine(Path.GetTempPath(), "Glide.PrintWindowTests", Guid.NewGuid().ToString("N"));
@@ -95,7 +96,7 @@ public sealed class PrintWindowResponsivenessTests : IDisposable
         PrintSettingsStore.DirectoryOverrideForTests = null;
         WindowPlacementService.PersistOverrideForTests = null;
         WindowPlacementService.ResetForTests();
-        try { Directory.Delete(_settingsDir, true); } catch { }
+        TempDir.TryDelete(_settingsDir);
     }
 
     internal static WriteableBitmap MakeBitmap(int w, int h)

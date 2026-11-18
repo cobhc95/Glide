@@ -8,6 +8,7 @@ namespace Glide.Core.Tests;
 
 /// <summary>PSD ZIP composites, OpenRaster, Krita, Paint.NET and GIMP XCF fixtures built in-test.</summary>
 [Collection(AvaloniaHeadlessCollection.Name)]
+[Trait("Area", "Decode")]
 public sealed class LayeredDocumentDecoderTests : IDisposable
 {
     private readonly List<string> _files = new();

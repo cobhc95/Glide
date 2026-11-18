@@ -4,6 +4,7 @@ using Glide.Core.Navigation;
 namespace Glide.Core.Tests;
 
 /// <summary>The framework-free per-tab Back / Forward history (5.0.0, docs/NAVIGATION-HISTORY.md).</summary>
+[Trait("Area", "Navigation")]
 public sealed class NavigationHistoryTests
 {
     private const string Folder = @"C:\Pictures";
@@ -415,5 +416,28 @@ public sealed class NavigationHistoryTests
         Assert.Equal(new[] { "Backspace" }, map["nav.previousBack"]);
         Assert.Single(map.Where(p => p.Value.Contains("Backspace")));
         Assert.Equal("nav.previous", new Glide.Input.InputRouter().ResolveShortcutAction("Backspace", map)!.Id);
+    }
+
+    /// <summary>Round 3 #13: the Recent locations dropdown lists places most recently visited first, each once.</summary>
+    [Fact]
+    public void Recent_order_is_most_recently_visited_first_with_each_place_once()
+    {
+        var history = new NavigationHistory();
+        var root = NavigationEntry.Explorer(@"C:\Root");
+        var alpha = NavigationEntry.Explorer(@"C:\Root\Alpha");
+        var deep = NavigationEntry.Explorer(@"C:\Root\Alpha\Deep");
+        history.Push(root); history.Push(alpha); history.Push(deep);
+        Assert.Equal(new[] { 2, 1, 0 }, history.RecentOrder());
+        history.GoTo(0); // jump back to Root from the dropdown
+        Assert.Equal(new[] { 0, 2, 1 }, history.RecentOrder());
+        history.Forward(); // Alpha
+        Assert.Equal(new[] { 1, 0, 2 }, history.RecentOrder());
+        history.Push(NavigationEntry.Explorer(@"C:\Other")); // drops Deep (Forward of Alpha)
+        history.Push(root); // Root again: listed once, at its newest visit
+        Assert.Equal(new[] { 3, 2, 1 }, history.RecentOrder());
+        Assert.Equal(new[] { 3, 2 }, history.RecentOrder(2));
+        // A restored history assumes nearer entries are more recent.
+        var restored = NavigationHistory.FromState(new NavigationHistoryState(new[] { root, alpha, deep }, 1));
+        Assert.Equal(new[] { 1, 0, 2 }, restored.RecentOrder());
     }
 }

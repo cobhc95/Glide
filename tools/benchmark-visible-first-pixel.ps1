@@ -150,7 +150,7 @@ function Measure-Route($case,$route,[int]$run,[int]$position,[string]$block){
     Prepare-Storage $case.Target
     [GlideVisibleFirstPixelObserver]::ConfigureReference($case.Reference)
     if($ForceFailureAtAttempt -gt 0 -and $script:attemptOrdinal -eq $ForceFailureAtAttempt){throw 'forced_mid_run_failure_for_raw_persistence_calibration'}
-    $args=Quote $case.Target;$startTicks=[Diagnostics.Stopwatch]::GetTimestamp();$row.launch_start_tick=$startTicks;$p=Start-Process -FilePath $route.Exe -ArgumentList $args -PassThru
+    $exeArgs=Quote $case.Target;$startTicks=[Diagnostics.Stopwatch]::GetTimestamp();$row.launch_start_tick=$startTicks;$p=Start-Process -FilePath $route.Exe -ArgumentList $exeArgs -PassThru
     $row.root_pid=$p.Id;$row.root_process_start_utc_ticks=$p.StartTime.ToUniversalTime().Ticks;Register-Owned $owned $p.Id;$deadline=[DateTime]::UtcNow.AddMilliseconds($TimeoutMs);$first=$null;$stable=$null
     while([DateTime]::UtcNow -lt $deadline){
       foreach($id in @(Get-Descendants $p.Id)){Register-Owned $owned ([int]$id)}

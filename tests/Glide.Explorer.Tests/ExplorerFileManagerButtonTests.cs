@@ -13,6 +13,7 @@ namespace Glide.Explorer.Tests;
 /// Launches go through the recording seams (ExplorerHost.RevealInWindows / LaunchAlternativeFileManager).
 /// </summary>
 [Collection(ExplorerHeadlessCollection.Name)]
+[Trait("Area", "Explorer")]
 public sealed class ExplorerFileManagerButtonTests
 {
     private static string HeaderText(MenuItem item) => item.Header switch

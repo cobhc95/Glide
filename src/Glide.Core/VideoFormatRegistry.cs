@@ -28,7 +28,7 @@ public static class VideoFormatRegistry
     public static string? Sibling(string current, IEnumerable<string> folderFiles, int direction, IComparer<string> order)
     {
         var videos = folderFiles.Where(IsVideo)
-            .OrderBy(Path.GetFileName, order)
+            .OrderBy(x => Path.GetFileName(x), order)
             .ThenBy(x => x, order)
             .ToList();
         if (videos.Count == 0) return null;

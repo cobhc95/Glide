@@ -21,6 +21,7 @@ namespace Glide.Explorer.Tests;
 /// </list>
 /// </summary>
 [Collection(ExplorerHeadlessCollection.Name)]
+[Trait("Area", "Explorer")]
 public sealed class TitleBarTopEdgeClickTests
 {
     [Theory]

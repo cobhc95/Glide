@@ -10,6 +10,7 @@ namespace Glide.Core.Tests;
 /// original. Covers the page/frame probe (crafted fixtures, no external files) and the save guard.
 /// </summary>
 [Collection("ImageFrameProbe")]
+[Trait("Area", "Decode")]
 public sealed class MultiFrameSaveGuardTests : IDisposable
 {
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "glide-frames-" + Guid.NewGuid().ToString("N"));
@@ -19,7 +20,7 @@ public sealed class MultiFrameSaveGuardTests : IDisposable
     public void Dispose()
     {
         ImageFrameProbe.NativeCountOverrideForTests = null;
-        try { Directory.Delete(_dir, recursive: true); } catch { }
+        TempDir.TryDelete(_dir);
     }
 
     private string Write(string name, byte[] bytes)

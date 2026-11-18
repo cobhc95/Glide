@@ -11,6 +11,7 @@ namespace Glide.Core.Tests;
 /// malformed input fails gracefully.
 /// </summary>
 [Collection(AvaloniaHeadlessCollection.Name)]
+[Trait("Area", "Decode")]
 public sealed class LegacyRasterDecoderTests : IDisposable
 {
     private readonly List<string> _files = new();

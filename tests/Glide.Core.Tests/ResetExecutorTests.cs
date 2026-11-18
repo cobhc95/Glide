@@ -1,11 +1,13 @@
 using System.Text.Json.Nodes;
 using Glide.App.Platform;
+using Glide.Core.Data;
 using Glide.Core.Reset;
 using Microsoft.Win32;
 
 namespace Glide.Core.Tests;
 
 /// <summary>Reset Glide executed against scratch folders and a fake / scratch-hive registry. The real user data is never touched.</summary>
+[Trait("Area", "Data")]
 public sealed class ResetExecutorTests
 {
     private static ResetReport Run(ResetScratch s, ResetItemId[] items, FakeRegistry? registry = null, IResetFileSystem? fs = null)

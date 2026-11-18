@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
+using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Threading;
@@ -67,6 +68,7 @@ public partial class MainWindow
         host.Child = null;
         host.IsVisible = false;
         card.PictureAspect = 0;
+        card.Scale = TabPreviewScale;
         _tabPreviewShown.Clear();
         _ = FillTabDetailsAsync(tab, parts.Details, host, fill);
         if (!_settings.TabHoverPreviews || _workspace.Active?.Id == tab.Id) return;
@@ -83,11 +85,15 @@ public partial class MainWindow
 
     private async Task ShowPicturePreviewAsync(string path, TabHoverCard card, object fill)
     {
-        const int width = TabPreviewCache.PictureWidth, height = TabPreviewCache.PictureHeight;
+        // Bigger previews (Tab preview size over 100 %) decode more pixels so they stay sharp; at most 100 % is the normal size.
+        var width = TabPreviewPixels(card.Scale);
+        var height = width;
         var bitmap = TabPreviews.TryGet(path, width, height) ?? await TabPreviews.GetAsync(path, width, height);
         var host = card.PictureHost;
         if (bitmap is null || !ReferenceEquals(host.Tag, fill)) return; // no preview, or the tooltip was refilled meanwhile
-        var image = PreviewImage();
+        // The whole picture, never a cropped part (round 3 #4): when the card is wider than a portrait picture at the
+        // height cap, the picture is centred with the card showing on its sides.
+        var image = PreviewImage(Stretch.Uniform);
         image.Source = bitmap;
         host.Child = image;
         host.IsVisible = true;
@@ -109,16 +115,49 @@ public partial class MainWindow
         card.PictureAspect = pictures.Count;
         foreach (var picture in pictures)
         {
-            var image = PreviewImage();
+            var image = PreviewImage(Stretch.UniformToFill); // square folder cells crop their thumbnails by design
             row.Children.Add(image);
             _ = SetFolderThumbnailAsync(image, host, fill, picture);
         }
     }
 
-    private static Image PreviewImage()
+    /// <summary>"Tab preview size (%)" as a factor.</summary>
+    private double TabPreviewScale => Glide.Core.Workspace.TabPreviewSize.Clamp(_settings.TabPreviewSizePercent) / 100.0;
+
+    /// <summary>The decode bound for a preview at <paramref name="scale"/>: the normal 300 px up to 100 %, then in 100 px steps.</summary>
+    internal static int TabPreviewPixels(double scale) =>
+        scale <= 1 ? TabPreviewCache.PictureWidth : (int)Math.Ceiling(TabPreviewCache.PictureWidth * scale / 100.0) * 100;
+
+    /// <summary>True when this wheel tick resizes the tab's open preview (ToolTipGuard then leaves the tooltip open).</summary>
+    private bool WheelResizesTabPreview(Control tab, TabToolTipParts parts, PointerWheelEventArgs e)
     {
-        // Fills its slot and crops the overflow (no letterboxing).
-        var image = new Image { Stretch = Stretch.UniformToFill, HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center, VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center };
+        if (!_settings.TabHoverPreviews || !ToolTip.GetIsOpen(tab) || !parts.Card.PictureHost.IsVisible) return false;
+        var mods = e.KeyModifiers;
+        return Glide.Core.Workspace.TabPreviewSize.ModifierMatches(_settings.TabPreviewResizeModifier,
+            mods.HasFlag(KeyModifiers.Control), mods.HasFlag(KeyModifiers.Shift), mods.HasFlag(KeyModifiers.Alt));
+    }
+
+    /// <summary>
+    /// Round 3 #5: the Resize preview key + mouse wheel over a tab whose preview is open makes the preview bigger (wheel
+    /// up) or smaller, saved as "Tab preview size (%)". Returns true when the wheel was used for that.
+    /// </summary>
+    private bool TryResizeTabPreviewWithWheel(Control tab, TabToolTipParts parts, PointerWheelEventArgs e)
+    {
+        if (!WheelResizesTabPreview(tab, parts, e)) return false;
+        var delta = Math.Abs(e.Delta.Y) >= Math.Abs(e.Delta.X) ? e.Delta.Y : e.Delta.X;
+        var next = Glide.Core.Workspace.TabPreviewSize.AfterWheel(_settings.TabPreviewSizePercent, delta);
+        if (next != _settings.TabPreviewSizePercent)
+        {
+            _settings.TabPreviewSizePercent = next;
+            parts.Card.Scale = next / 100.0;
+            SaveSettingsAndPublish();
+        }
+        return true;
+    }
+
+    private static Image PreviewImage(Stretch stretch)
+    {
+        var image = new Image { Stretch = stretch, HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center, VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center };
         RenderOptions.SetBitmapInterpolationMode(image, BitmapInterpolationMode.MediumQuality);
         return image;
     }
@@ -139,8 +178,8 @@ public partial class MainWindow
     {
         details.Text = null;
         details.IsVisible = false;
-        var showHidden = _settings.ExplorerShowHiddenFiles;
-        var onlyImages = _settings.ExplorerShowOnlyImages;
+        var showHidden = ExplorerOptionsView.ShowHiddenFiles;
+        var onlyImages = ExplorerOptionsView.ShowOnlyImages;
         string? text;
         try { text = await Task.Run(() => TabDetails(tab, showHidden, onlyImages)); }
         catch { text = null; /* unreadable: no details line */ }
@@ -170,14 +209,7 @@ public partial class MainWindow
         }
     }
 
-    private static ImageDimensions? ProbePixelSize(string path)
-    {
-        if (BuiltInRasterDecoder.TryProbeDimensions(path, out var raster) && raster.IsValid) return raster;
-        if (ImageHeaderProbe.TryProbe(path, out var header) && header.IsValid) return header;
-        if (NativeImageProbe.TryProbe(path, out var native) && native.Width > 0 && native.Height > 0)
-            return new ImageDimensions((int)Math.Min(native.Width, (uint)int.MaxValue), (int)Math.Min(native.Height, (uint)int.MaxValue));
-        return null;
-    }
+    private static ImageDimensions? ProbePixelSize(string path) => ExplorerModel.ProbePixelSize(path);
 
     // ---- animated GIF previews ----------------------------------------------------------------------------------
 

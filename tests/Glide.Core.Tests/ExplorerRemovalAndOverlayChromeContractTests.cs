@@ -1,6 +1,7 @@
 namespace Glide.Core.Tests;
 
 // Source-text contract kept: this asserts on production source (UI code-behind, native/installer files or a repo-wide scan) that cannot be run headlessly; behavioural coverage lives in the other test files.
+[Trait("Area", "Explorer")]
 public sealed class ExplorerRemovalAndOverlayChromeContractTests
 {
     [Fact]
@@ -8,7 +9,7 @@ public sealed class ExplorerRemovalAndOverlayChromeContractTests
     {
         var hotkeys = ReadSource("src", "Glide.Core", "Commands", "HotkeyCatalog.cs");
         var settings = ReadSource("src", "Glide.Core", "Settings", "SettingsCatalog.cs");
-        var titleButtons = ReadSource("src", "Glide.App", "Settings", "TitleBarButtonCatalog.cs");
+        var titleButtons = ReadSource("src", "Glide.Core", "Settings", "TitleBarButtonCatalog.cs");
 
         Assert.DoesNotContain("\"browser.back\"", hotkeys, StringComparison.Ordinal);
         Assert.DoesNotContain("\"browser.forward\"", hotkeys, StringComparison.Ordinal);

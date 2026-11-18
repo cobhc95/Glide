@@ -37,7 +37,7 @@ public partial class MainWindow
             : TitleActionLabel(id, definition);
         var tip = $"{label} ({ShortcutForTitleButton(definition)})";
         if (id != "file.locate") return tip;
-        var alternative = AlternativeFileManagerDisplayName(_settings.AlternativeFileManagerPath) is { } name
+        var alternative = AlternativeFileManagerDisplayName(ExplorerOptionsView.AlternativeFileManagerPath) is { } name
             ? "Show in " + name
             : AlternativeFileManagerSetUpLabel + " (set up)";
         return $"{tip}\nRight-click for more: other Show in targets, {alternative}";
@@ -73,7 +73,7 @@ public partial class MainWindow
     /// </summary>
     private Task LocateInExplorerAsync(string? path)
     {
-        var mode = ExplorerLocateTargets.Normalize(_settings.ExplorerLocateOpensIn);
+        var mode = ExplorerLocateTargets.Normalize(ExplorerOptionsView.LocateOpensIn);
         return mode switch
         {
             ExplorerLocateTargets.SameTab => ShowPathInSameTabAsync(path),

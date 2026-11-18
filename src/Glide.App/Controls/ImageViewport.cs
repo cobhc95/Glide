@@ -418,6 +418,8 @@ public sealed class ImageViewport : Control
         return rect.Width > 0 && rect.Height > 0;
     }
     public bool IsPointOverImage(Point point) => Bitmap is not null && _lastImageDest.Contains(point);
+    /// <summary>The drawn picture is larger than the viewport (zoomed in), so a left-drag has something to pan.</summary>
+    public bool ImageExceedsViewport => Bitmap is not null && (_lastImageDest.Width > Bounds.Width + 1 || _lastImageDest.Height > Bounds.Height + 1);
 
     /// <summary>Share (0..1) of the empty space on each side of the image that counts as selection
     /// buffer. 1 = the whole empty area, 0 = no buffer (strict image hit-test).</summary>
@@ -786,6 +788,9 @@ public sealed class ImageViewport : Control
         InvalidateVisual();
     }
 
+    /// <summary>On-screen width (DIPs) of the image at the last render; 0 before the first draw.</summary>
+    public double LastImageDestWidth => _lastImageDest.Width;
+
     public override void Render(DrawingContext context)
     {
         base.Render(context);
@@ -1072,32 +1077,13 @@ public sealed class ImageViewport : Control
         var ctrl = e.KeyModifiers.HasFlag(KeyModifiers.Control);
         var shift = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
         var alt = e.KeyModifiers.HasFlag(KeyModifiers.Alt);
-        var plainSlot = IsFullscreen ? "wheel.fullscreen" : "wheel.windowed";
-        var slot = ctrl ? (IsFullscreen ? "wheel.fullscreenCtrl" : "wheel.windowedCtrl")
-            : shift ? (IsFullscreen ? "wheel.fullscreenShift" : "wheel.windowedShift")
-            : alt ? (IsFullscreen ? "wheel.fullscreenAlt" : "wheel.windowedAlt")
-            : plainSlot;
-        var configured = ResolveGesture(slot);
-        // Shift / Alt + wheel default to "as wheel": exactly what the plain wheel does (4.7 ignored them).
-        if (!ctrl && (shift || alt) && string.Equals(configured, GestureCatalog.Default, StringComparison.OrdinalIgnoreCase))
-            configured = ResolveGesture(plainSlot);
-        if (SlideshowActive)
-        {
-            var slideshowWheel = ResolveGesture("slideshow.wheel");
-            if (!string.Equals(slideshowWheel, GestureCatalog.Default, StringComparison.OrdinalIgnoreCase)) configured = slideshowWheel;
-        }
-        if (e.GetCurrentPoint(this).Properties.IsRightButtonPressed)
-        {
-            // Any wheel turn while the right button is held is a right+wheel gesture: the release that
-            // ends it is never a right click (no context menu), on the image or on the background.
-            _rightWheelConsumed = true;
-            var rightHeld = ResolveGesture("wheel.rightHeld");
-            if (!string.Equals(rightHeld, GestureCatalog.Default, StringComparison.OrdinalIgnoreCase))
-            {
-                configured = rightHeld;
-                _rightWheelConsumed = true;
-            }
-        }
+        var rightHeld = e.GetCurrentPoint(this).Properties.IsRightButtonPressed;
+        // Any wheel turn while the right button is held is a right+wheel gesture: the release that
+        // ends it is never a right click (no context menu), on the image or on the background.
+        if (rightHeld) _rightWheelConsumed = true;
+        // Held-key row, Shift/Alt "as wheel" fallback, slideshow and right-held overrides: GestureResolver.WheelAction.
+        var slot = GestureResolver.WheelSlot(IsFullscreen, ctrl, shift, alt);
+        var configured = GestureResolver.WheelAction(ResolveGesture, IsFullscreen, ctrl, shift, alt, SlideshowActive, rightHeld);
         if (!string.Equals(configured, GestureCatalog.Default, StringComparison.OrdinalIgnoreCase))
         {
             var position = e.GetPosition(this);

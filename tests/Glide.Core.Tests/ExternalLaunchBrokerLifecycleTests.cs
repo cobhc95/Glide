@@ -2,6 +2,8 @@ using Glide.App.Services;
 
 namespace Glide.Core.Tests;
 
+[Trait("Area", "Window")]
+[Collection("ExternalLaunchBroker")]
 public sealed class ExternalLaunchBrokerLifecycleTests
 {
     [Fact]

@@ -13,7 +13,7 @@ try{
   $trace=Join-Path $root ("run-{0:D3}.tsv" -f $i); Remove-Item $trace -Force -ErrorAction SilentlyContinue
   $row=[ordered]@{Iteration=$i;Attempted=$true;ProcessWallMs=$null;CompositionRenderedMs=$null;BitmapAssignedMs=$null;DecodeReadyMs=$null;RequestId=$null;BackgroundContamination='';Failure=''}; $p=$null
   try{
-   $args=@('--perf-trace',$trace,'--benchmark-exit-after-first-frame',$Image); $sw=[Diagnostics.Stopwatch]::StartNew(); $p=Start-Process $Exe -ArgumentList (($args|%{Quote $_}) -join ' ') -PassThru
+   $exeArgs=@('--perf-trace',$trace,'--benchmark-exit-after-first-frame',$Image); $sw=[Diagnostics.Stopwatch]::StartNew(); $p=Start-Process $Exe -ArgumentList (($exeArgs|%{Quote $_}) -join ' ') -PassThru
    if(-not $p.WaitForExit($TimeoutMs)){throw "timeout_${TimeoutMs}ms"}; $sw.Stop(); $row.ProcessWallMs=[math]::Round($sw.Elapsed.TotalMilliseconds,3); if($p.ExitCode -ne 0){throw "exit_$($p.ExitCode)"}; if(-not(Test-Path $trace)){throw 'missing_trace'}
    $events=Import-Csv -Delimiter "`t" $trace; $assigned=$events|? event -eq 'bitmap_assigned'|select -First 1; $rendered=$events|? event -eq 'composition_batch_rendered'|select -First 1; $decode=$events|?{$_.event -in @('foreground_decode_ready','foreground_path_preview_ready')}|select -First 1
    if(-not $assigned){throw 'missing_bitmap_assigned'}; if(-not $rendered){throw 'missing_composition_batch_rendered'}

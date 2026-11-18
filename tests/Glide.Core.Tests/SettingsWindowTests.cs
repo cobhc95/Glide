@@ -3,6 +3,7 @@
 namespace Glide.Core.Tests;
 
 [Collection(AvaloniaHeadlessCollection.Name)]
+[Trait("Area", "Settings")]
 public sealed class SettingsWindowTests
 {
     public SettingsWindowTests(AvaloniaHeadlessFixture fixture)

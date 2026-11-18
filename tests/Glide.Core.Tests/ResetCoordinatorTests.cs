@@ -1,8 +1,10 @@
+using Glide.Core.Data;
 using Glide.Core.Reset;
 
 namespace Glide.Core.Tests;
 
 /// <summary>Backup, close-wipe-restart handover and the helper process, all on scratch folders with fake process and registry.</summary>
+[Trait("Area", "Data")]
 public sealed class ResetCoordinatorTests
 {
     private static void SeedUserData(ResetScratch s)

@@ -8,6 +8,7 @@ namespace Glide.Core.Tests;
 
 /// <summary>Esc cancels every dialog / secondary window (one shared class handler, see DialogEscape).</summary>
 [Collection(AvaloniaHeadlessCollection.Name)]
+[Trait("Area", "Window")]
 public sealed class DialogEscapeTests
 {
     public DialogEscapeTests(AvaloniaHeadlessFixture fixture) => _ = fixture;

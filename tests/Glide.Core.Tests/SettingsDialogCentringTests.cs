@@ -17,6 +17,7 @@ namespace Glide.Core.Tests;
 /// their owner (DPI-aware, kept inside the owner's monitor working area).
 /// </summary>
 [Collection(AvaloniaHeadlessCollection.Name)]
+[Trait("Area", "Settings")]
 public sealed class SettingsDialogCentringTests : IDisposable
 {
     private static readonly ScreenWorkArea Full = new(0, 0, 1920, 1040, 1.0);
@@ -182,7 +183,7 @@ public sealed class SettingsDialogCentringTests : IDisposable
         after.ShowFolderCounter = !after.ShowFolderCounter;
         var changes = SettingsChangeSet.Compute(before, after);
         var tabs = changes.Single(c => c.Name == "Switch To New Tabs");
-        Assert.Equal("Open new tabs in the foreground", tabs.Label);
+        Assert.Equal("Open new tabs in the", tabs.Label);
         foreach (var c in changes)
         {
             var words = c.Label.Split(' ');

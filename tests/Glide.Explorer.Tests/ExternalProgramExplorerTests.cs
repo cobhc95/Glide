@@ -11,6 +11,7 @@ namespace Glide.Explorer.Tests;
 /// of another tab or an earlier selection (owner decision O6). The process launch is replaced by a recording seam.
 /// </summary>
 [Collection(ExplorerHeadlessCollection.Name)]
+[Trait("Area", "Explorer")]
 public sealed class ExternalProgramExplorerTests
 {
     private const string Editor1 = @"C:\Tools\Editor1.exe";

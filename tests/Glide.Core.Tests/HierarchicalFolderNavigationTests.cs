@@ -2,6 +2,7 @@ using Glide.App.Services;
 
 namespace Glide.Core.Tests;
 
+[Trait("Area", "Explorer")]
 public sealed class HierarchicalFolderNavigationTests
 {
     [Fact]
@@ -274,6 +275,6 @@ public sealed class HierarchicalFolderNavigationTests
             File.WriteAllBytes(path, [0]);
             return path;
         }
-        public void Dispose() { try { Directory.Delete(Root, true); } catch { } }
+        public void Dispose() { TempDir.TryDelete(Root); }
     }
 }

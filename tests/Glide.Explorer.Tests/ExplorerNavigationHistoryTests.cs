@@ -16,6 +16,7 @@ namespace Glide.Explorer.Tests;
 /// scrolled as it was, Forward returns to the image. Real key presses go through the window's key handlers.
 /// </summary>
 [Collection(ExplorerHeadlessCollection.Name)]
+[Trait("Area", "Explorer")]
 public sealed class ExplorerNavigationHistoryTests
 {
     private static async Task OpenImageFromExplorerAsync(ExplorerHarness h, string name, string? folder = null)
@@ -33,7 +34,7 @@ public sealed class ExplorerNavigationHistoryTests
     }
 
     private static NavigationHistory History(ExplorerHarness h) =>
-        h.Get<Dictionary<Guid, NavigationHistory>>("_tabHistories")[h.Workspace.Active!.Id];
+        h.Window.TabHistories.Find(h.Workspace.Active!.Id)!;
 
     private static Control ImageViewport(ExplorerHarness h) => h.Get<Control>("Viewport");
 
@@ -80,7 +81,7 @@ public sealed class ExplorerNavigationHistoryTests
     }
 
     [Fact]
-    public async Task Back_after_arrow_navigation_selects_the_image_shown_now_and_the_side_buttons_go_Back_and_Forward()
+    public async Task Back_after_arrow_navigation_selects_the_image_shown_now_and_bound_side_buttons_go_Back_and_Forward()
     {
         await ExplorerHarness.Run(async h =>
         {
@@ -90,11 +91,17 @@ public sealed class ExplorerNavigationHistoryTests
             await h.WaitUntil(() => string.Equals(Path.GetFileName(h.Get<string?>("_currentPath")), ExplorerHarness.ImageB, StringComparison.OrdinalIgnoreCase), "next image");
             Assert.Equal(2, History(h).Count);
 
-            Assert.True(RaiseSideButton(h, ImageViewport(h), back: true));   // mouse back button: Back by default
+            // 5.0.8: side buttons are pass-through by default ("not used by Glide"): unhandled, nothing moves.
+            Assert.False(RaiseSideButton(h, ImageViewport(h), back: true));
+            Assert.Equal(2, History(h).Count);
+            Assert.True(h.Workspace.Active is ImageTabState);
+            h.Settings.Gestures["windowed.backButtonImage"] = Glide.Core.Commands.GestureCatalog.NavigateBack;
+            h.Settings.Gestures["explorer.forwardButton"] = Glide.Core.Commands.GestureCatalog.NavigateForward;
+            Assert.True(RaiseSideButton(h, ImageViewport(h), back: true));   // bound mouse back button: Back
             await WaitForExplorerAsync(h, h.Root);
             Assert.Equal(new[] { ExplorerHarness.ImageB }, h.SelectedNames);  // the image on screen when Back was pressed
 
-            Assert.True(RaiseSideButton(h, h.BrowserView, back: false));     // mouse forward button: Forward
+            Assert.True(RaiseSideButton(h, h.BrowserView, back: false));     // bound mouse forward button: Forward
             await h.WaitUntil(() => h.Workspace.Active is ImageTabState i && Path.GetFileName(i.Path) == ExplorerHarness.ImageB, "Forward restored the image shown when Back was pressed");
         });
     }
@@ -122,11 +129,11 @@ public sealed class ExplorerNavigationHistoryTests
             await h.SettleAsync();
             Assert.Equal(alpha, h.CurrentFolder);
 
-            // The history dropdown lists the image too (newest first) and jumps there.
+            // The history dropdown lists the image too (full paths, most recently visited first: round 3 #13) and jumps there.
             var menu = h.Window.BuildExplorerHistoryMenu();
             var items = menu.ItemsSource!.Cast<MenuItem>().ToList();
-            Assert.Equal(new[] { "inner.png", "Alpha  ✓", Path.GetFileName(h.Root) }, items.Select(i => i.Header?.ToString()));   // ✓ = current
-            items[0].RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            Assert.Equal(new[] { alpha + "  ✓", h.Root, Path.Combine(alpha, "inner.png") }, items.Select(i => i.Header?.ToString()));   // ✓ = current
+            items[2].RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
             await h.WaitUntil(() => h.Workspace.Active is ImageTabState i && Path.GetFileName(i.Path) == "inner.png", "dropdown opened the image");
 
             h.Key(Key.Left, RawInputModifiers.Alt);
@@ -293,7 +300,7 @@ public sealed class ExplorerNavigationHistoryTests
             // Only the synchronous part of opening runs here: the image load is still pending.
             var opening = (Task)h.Call("OpenImageInNewTabAsync", path, KeyModifiers.None, "test")!;
             Assert.IsType<ImageTabState>(h.Workspace.Active);
-            Assert.True(h.Get<Dictionary<Guid, NavigationHistory>>("_tabHistories").ContainsKey(h.Workspace.Active!.Id),
+            Assert.True(h.Window.TabHistories.Contains(h.Workspace.Active!.Id),
                 $"the new active tab has no history yet (open finished: {opening.IsCompleted})");
             Assert.False(History(h).CanGoBack);
             await opening;

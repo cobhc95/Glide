@@ -6,6 +6,7 @@ using Glide.Input;
 namespace Glide.Core.Tests;
 
 /// <summary>5.0.0 audit items O2 (zoom step), O3 (mouse side buttons), O7 (status bar hotkey default): pure logic.</summary>
+[Trait("Area", "Diagnostics")]
 public sealed class AuditItemsTests
 {
     // ---- O2 -----------------------------------------------------------------------------------------------
@@ -226,10 +227,9 @@ public sealed class AuditItemsTests
             Assert.Equal(GestureCatalog.Default, slot.DefaultActionId);          // saved "default" bindings keep meaning Default
             Assert.Equal(GestureInputKind.Click, slot.Kind);
             Assert.True(GestureCatalog.DefaultBehavior.ContainsKey(id));
-            // 5.0.0: Default is Back / Forward (the first 5.0 build left the side buttons unbound).
-            var back = slot.Input == GestureInputs.BackButton;
-            Assert.Equal(back ? "back" : "forward", GestureCatalog.DefaultBehavior[id]);
-            Assert.Equal(back ? GestureCatalog.NavigateBack : GestureCatalog.NavigateForward, GestureCatalog.DefaultActionFor(id));
+            // 5.0.8: Default is pass-through (Glide leaves the side buttons to Windows / the mouse software).
+            Assert.Equal("not used by Glide", GestureCatalog.DefaultBehavior[id]);
+            Assert.Null(GestureCatalog.DefaultActionFor(id));
             Assert.Same(slot, GestureCatalog.SlotFor(slot.Area, slot.Input));
             Assert.Equal(GestureCatalog.Default, GestureCatalog.CreateDefaultMap()[id]);
         }
@@ -374,7 +374,7 @@ public sealed class AuditItemsTests
             Assert.False(SettingsStore.Load().SwitchToNewTabs);
         });
         Assert.True(new GlideSettingsState().SwitchToNewTabs);
-        Assert.True((bool)Glide.Core.Settings.SettingsCatalog.All.Single(s => s.Id == "tabs.switchToNewTabs").DefaultValue);
+        Assert.Equal("foreground", Glide.Core.Settings.SettingsCatalog.All.Single(s => s.Id == "tabs.switchToNewTabs").DefaultValue); // a choice since round 3 #18
         Assert.True(SettingsDefaults.RestoreAllSettings(new GlideSettingsState { SwitchToNewTabs = false }).SwitchToNewTabs);
     }
 
@@ -447,7 +447,7 @@ public sealed class AuditItemsTests
         finally
         {
             SettingsStore.SettingsDirectoryOverrideForTests.Value = previous;
-            try { Directory.Delete(dir, true); } catch { }
+            TempDir.TryDelete(dir);
         }
     }
 }

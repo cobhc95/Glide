@@ -10,6 +10,7 @@ namespace Glide.Core.Tests;
 // Shares the non-parallel collection with the tests that register codec providers in the process-wide
 // CodecCapabilityRegistry, so the candidate list below is computed against a known registry state.
 [Collection(AvaloniaHeadlessCollection.Name)]
+[Trait("Area", "Shell")]
 public sealed class DefaultViewerClaimTests
 {
     private const string Glide = "Glide.Image";
@@ -180,7 +181,7 @@ public sealed class DefaultViewerClaimTests
             File.WriteAllBytes(Path.Combine(directory, "glidemanaged.dll"), new byte[] { 1 });
             Assert.Contains(".exr", BundledCodecLibraries.AvailableExtensions(directory));
         }
-        finally { try { Directory.Delete(directory, recursive: true); } catch { } }
+        finally { TempDir.TryDelete(directory); }
     }
 
     private static string RepositoryRoot()

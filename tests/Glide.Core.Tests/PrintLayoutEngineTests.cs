@@ -7,6 +7,7 @@ namespace Glide.Core.Tests;
 /// drives the Avalonia preview and the GDI spool path, so these tests guard WYSIWYG unity.
 /// All dimensions are hundredths of an inch unless noted.
 /// </summary>
+[Trait("Area", "Print")]
 public sealed class PrintLayoutEngineTests
 {
     // A4 portrait sheet, printable rect inset 0.5 in / 12.7 mm on every side (typical laser).

@@ -13,6 +13,7 @@ namespace Glide.Core.Tests;
 /// synthetic header; the decode seam throws before Skia could allocate anything.
 /// </summary>
 [Collection(AvaloniaHeadlessCollection.Name)]
+[Trait("Area", "Thumbnails")]
 public sealed class ThumbnailDecodeGuardTests : IDisposable
 {
     private const long GB = 1024L * 1024 * 1024;
@@ -39,7 +40,7 @@ public sealed class ThumbnailDecodeGuardTests : IDisposable
     {
         ThumbnailDecode.DecodingForTests = null;
         DecodeMemoryGuard.SnapshotOverrideForTests = null;
-        try { Directory.Delete(_dir, recursive: true); } catch { }
+        TempDir.TryDelete(_dir);
     }
 
     private static uint Crc32(ReadOnlySpan<byte> data)

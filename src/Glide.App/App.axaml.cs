@@ -19,14 +19,53 @@ public partial class App : Application
     // Diagnostic-only: open the Print window for one image, capture it, then exit.
     public static string? CapturePrintDialogImage { get; set; }
     public static string? CapturePrintDialogOutput { get; set; }
-    public static Task<Glide.App.Settings.GlideSettingsState>? StartupSettingsTask { get; set; }
+    public static Task<Glide.Core.Settings.GlideSettingsState>? StartupSettingsTask { get; set; }
     public static Glide.App.Settings.SettingsStore.FirstFramePolicy? StartupFirstFramePolicy { get; set; }
     public static bool StartHidden { get; set; }
     public static TrayIcon? TrayIconInstance { get; private set; }
-    private static readonly object SettingsGate = new();
-    private static Glide.App.Settings.GlideSettingsState? _currentSettings;
     private static int _pendingWindowCreation;
     private static int _standbyRetryScheduled;
+    private static int _shutdownBegun;
+    private static int _anyWindowOpened;
+
+    /// <summary>True once the application has started to exit (tray/menu Exit, whole-app Overlay X, OS
+    /// session end, or the UI lifetime ending). A window closing during shutdown must not enter Speed Boost
+    /// standby, and the launch broker no longer acknowledges launches.</summary>
+    internal static bool IsShuttingDown => Volatile.Read(ref _shutdownBegun) != 0;
+
+    /// <summary>True once any Glide window of this process has opened (startup-trace exit reason).</summary>
+    internal static bool AnyWindowEverOpened => Volatile.Read(ref _anyWindowOpened) != 0;
+
+    internal static void NoteWindowOpened()
+    {
+        if (Interlocked.Exchange(ref _anyWindowOpened, 1) == 0)
+            StartupTrace.Write("first_window_opened");
+    }
+
+    /// <summary>
+    /// The first step of every application exit. Stops the external-launch broker (releases the presence object
+    /// and the pipe) BEFORE windows are torn down, so a Glide launched while this process is dying elects itself
+    /// instead of forwarding to a process that acknowledges the request and then exits without showing anything
+    /// (the 5.0.7 silent-exit report; docs/audits/silent-exit-investigation.md). Idempotent.
+    /// </summary>
+    internal static void BeginApplicationShutdown(string reason)
+    {
+        if (Interlocked.Exchange(ref _shutdownBegun, 1) != 0) return;
+        StartupTrace.Write("shutdown_begin", "reason=" + reason);
+        try { ExternalLaunchBroker.Stop(); }
+        catch (Exception ex) { StartupTrace.Write("broker_stop_failed", ex.GetType().Name); }
+    }
+
+    /// <summary>Begins application shutdown (see <see cref="BeginApplicationShutdown"/>) and ends the desktop lifetime.</summary>
+    internal static void ShutdownApplication(string reason)
+    {
+        BeginApplicationShutdown(reason);
+        if (Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
+            desktop.Shutdown();
+    }
+
+    /// <summary>Test seam: resets the process-wide shutdown latch.</summary>
+    internal static void ResetShutdownStateForTests() => Volatile.Write(ref _shutdownBegun, 0);
 
     /// <summary>
     /// Rehydrates the render window when the process-level broker owns accepted work during
@@ -81,7 +120,9 @@ public partial class App : Application
                 Volatile.Write(ref _pendingWindowCreation, 0);
                 return;
             }
+            StartupTrace.Write("standby_window_construct_start");
             var window = new MainWindow();
+            StartupTrace.Write("standby_window_rehydrate");
             // This window exists only to receive work already accepted by the resident broker.
             // Treat it as an explicit external launch so the normal standalone Home destination
             // is not created before the queued image/folder request is dispatched.
@@ -90,28 +131,26 @@ public partial class App : Application
             window.Show();
             window.Activate();
         }
-        catch
+        catch (Exception ex)
         {
+            StartupTrace.Write("standby_window_rehydrate_failed", ex.GetType().Name + ": " + ex.Message);
             Volatile.Write(ref _pendingWindowCreation, 0);
             throw;
         }
         Volatile.Write(ref _pendingWindowCreation, 0);
     }
 
-    public static Glide.App.Settings.GlideSettingsState? TryGetStartupSettings()
+    public static Glide.Core.Settings.GlideSettingsState? TryGetStartupSettings()
     {
-        lock (SettingsGate)
-            if (_currentSettings is not null) return _currentSettings.CloneState();
+        if (Glide.App.Settings.SettingsService.Current is { } live) return live;
         var task = StartupSettingsTask;
         // Block-free by contract: Result is only touched when IsCompletedSuccessfully is already
         // true, so a still-running background load returns null instead of stalling the UI thread.
         return task is { IsCompletedSuccessfully: true } ? task.Result.CloneState() : null;
     }
 
-    public static void PublishCurrentSettings(Glide.App.Settings.GlideSettingsState settings)
-    {
-        lock (SettingsGate) _currentSettings = settings.CloneState();
-    }
+    /// <summary>Makes <paramref name="settings"/> the process-wide live settings (Stage C: forwards to SettingsService).</summary>
+    public static void PublishCurrentSettings(Glide.Core.Settings.GlideSettingsState settings) => Glide.App.Settings.SettingsService.Publish(settings);
 
     public override void Initialize()
     {
@@ -138,6 +177,9 @@ public partial class App : Application
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            // OS session end / programmatic TryShutdown, and the final Exit, both stop the broker first.
+            desktop.ShutdownRequested += (_, e) => { if (!e.Cancel) BeginApplicationShutdown("shutdown_requested"); };
+            desktop.Exit += (_, _) => BeginApplicationShutdown("lifetime_exit");
             InitializeTrayIcon();
 
             var paths = StartupPaths.Count > 0 ? StartupPaths : (!string.IsNullOrWhiteSpace(StartupPath) ? new[] { StartupPath! } : Array.Empty<string>());
@@ -213,7 +255,7 @@ public partial class App : Application
         try
         {
             if (TrayIconInstance is not null) return;
-            var settings = TryGetStartupSettings() ?? new Settings.GlideSettingsState();
+            var settings = TryGetStartupSettings() ?? new GlideSettingsState();
             var icon = new TrayIcon
             {
                 ToolTipText = "Glide Image Viewer (Speed Boost)",
@@ -259,7 +301,7 @@ public partial class App : Application
         catch { /* tray icon is optional; the app runs without it */ }
     }
 
-    public static void UpdateTrayIconState(Settings.GlideSettingsState? settings = null)
+    public static void UpdateTrayIconState(GlideSettingsState? settings = null)
     {
         if (TrayIconInstance is null) return;
         settings ??= TryGetStartupSettings();
@@ -268,7 +310,7 @@ public partial class App : Application
     }
 
     /// <summary>Tray icon mode, honouring the legacy ShowTrayIcon=false switch as "Never".</summary>
-    internal static string EffectiveTrayIconMode(Settings.GlideSettingsState settings)
+    internal static string EffectiveTrayIconMode(GlideSettingsState settings)
     {
         if (!settings.ShowTrayIcon) return "Never";
         return settings.SpeedBoostTrayIcon switch
@@ -278,7 +320,7 @@ public partial class App : Application
         };
     }
 
-    private static bool ShouldShowTrayIcon(Settings.GlideSettingsState settings)
+    private static bool ShouldShowTrayIcon(GlideSettingsState settings)
     {
         if (!settings.SpeedBoostEnabled) return false;
         return EffectiveTrayIconMode(settings) switch
@@ -345,7 +387,7 @@ public partial class App : Application
             }
             else
             {
-                desktop.Shutdown();
+                ShutdownApplication("tray_exit_standby");
             }
         }
     }

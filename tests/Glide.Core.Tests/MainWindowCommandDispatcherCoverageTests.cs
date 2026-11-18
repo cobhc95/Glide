@@ -4,6 +4,7 @@ using Glide.Core.Commands;
 namespace Glide.Core.Tests;
 
 [Collection(AvaloniaHeadlessCollection.Name)]
+[Trait("Area", "Hotkeys")]
 public sealed class MainWindowCommandDispatcherCoverageTests
 {
     [Fact]

@@ -59,6 +59,10 @@ public sealed class NavigationHistory
     public const int DefaultCapacity = 100;
 
     private readonly List<NavigationEntry> _entries = new();
+    // Round 3 #13: when each entry was last the current one (a counter, parallel to _entries), so the Recent locations
+    // dropdown can list places most recently visited first, independent of their Back / Forward position.
+    private readonly List<long> _visited = new();
+    private long _clock;
 
     public NavigationHistory(int capacity = DefaultCapacity) => Capacity = Math.Max(2, capacity);
 
@@ -79,19 +83,26 @@ public sealed class NavigationHistory
     public void Push(NavigationEntry entry)
     {
         ArgumentNullException.ThrowIfNull(entry);
-        if (Index < _entries.Count - 1) _entries.RemoveRange(Index + 1, _entries.Count - Index - 1);
+        if (Index < _entries.Count - 1)
+        {
+            _entries.RemoveRange(Index + 1, _entries.Count - Index - 1);
+            _visited.RemoveRange(Index + 1, _visited.Count - Index - 1);
+        }
         if (Current is { } current && current.SameLocation(entry))
         {
             _entries[Index] = KeepLinks(current, entry);
+            Touch();
             return;
         }
         _entries.Add(entry);
+        _visited.Add(0);
         Index = _entries.Count - 1;
         while (_entries.Count > Capacity)
         {
-            _entries.RemoveAt(0);
+            RemoveEntryAt(0);
             Index--;
         }
+        Touch();
     }
 
     /// <summary>Replaces the current entry (or adds the first one) without touching Back / Forward.</summary>
@@ -133,6 +144,7 @@ public sealed class NavigationHistory
     {
         if (index < 0 || index >= _entries.Count) return null;
         Index = index;
+        Touch();
         return _entries[index];
     }
 
@@ -148,12 +160,13 @@ public sealed class NavigationHistory
         if (resolved is null)
         {
             if (index == Index) return null;
-            _entries.RemoveAt(index);
+            RemoveEntryAt(index);
             if (index < Index) Index--;
             return null;
         }
         _entries[index] = resolved;
         Index = index;
+        Touch();
         RemoveAdjacentDuplicate();
         return Current;
     }
@@ -183,10 +196,11 @@ public sealed class NavigationHistory
             {
                 _entries[candidate] = resolved;
                 Index = candidate;
+                Touch();
                 RemoveAdjacentDuplicate();
                 return Current;
             }
-            _entries.RemoveAt(candidate);
+            RemoveEntryAt(candidate);
             skipped++;
             if (step < 0)
             {
@@ -206,10 +220,12 @@ public sealed class NavigationHistory
         var history = new NavigationHistory(capacity);
         if (state is null) return history;
         foreach (var entry in state.Entries)
-            if (entry is not null) history._entries.Add(entry);
-        while (history._entries.Count > history.Capacity) history._entries.RemoveAt(0);
+            if (entry is not null) { history._entries.Add(entry); history._visited.Add(0); }
+        while (history._entries.Count > history.Capacity) history.RemoveEntryAt(0);
         var dropped = state.Entries.Count(e => e is not null) - history._entries.Count;
         history.Index = history._entries.Count == 0 ? -1 : Math.Clamp(state.Index - dropped, 0, history._entries.Count - 1);
+        // Visit times are not part of the state: assume the nearer an entry is to the current one, the more recent.
+        for (var i = 0; i < history._entries.Count; i++) history._visited[i] = -Math.Abs(i - history.Index) * 2 - (i > history.Index ? 1 : 0);
         return history;
     }
 
@@ -221,17 +237,45 @@ public sealed class NavigationHistory
             ? entry with { ReturnTo = current.ReturnTo, ForwardTo = current.ForwardTo }
             : entry;
 
+    /// <summary>
+    /// Recent locations dropdown (round 3 #13): indexes of the entries, the most recently visited place first, each place
+    /// (same kind and folder / file) once, at most <paramref name="max"/>.
+    /// </summary>
+    public IReadOnlyList<int> RecentOrder(int max = int.MaxValue)
+    {
+        var order = Enumerable.Range(0, _entries.Count).OrderByDescending(i => _visited[i]).ThenByDescending(i => i);
+        var result = new List<int>();
+        foreach (var i in order)
+        {
+            if (result.Count >= max) break;
+            if (result.Any(r => _entries[r].SameLocation(_entries[i]))) continue;
+            result.Add(i);
+        }
+        return result;
+    }
+
+    private void Touch()
+    {
+        if (Index >= 0 && Index < _visited.Count) _visited[Index] = ++_clock;
+    }
+
+    private void RemoveEntryAt(int index)
+    {
+        _entries.RemoveAt(index);
+        _visited.RemoveAt(index);
+    }
+
     // A missing folder that resolved to its parent can land on the same place as its neighbour; keep one of them.
     private void RemoveAdjacentDuplicate()
     {
         if (Index > 0 && _entries[Index - 1].SameLocation(_entries[Index]))
         {
-            _entries.RemoveAt(Index - 1);
+            RemoveEntryAt(Index - 1);
             Index--;
         }
         else if (Index < _entries.Count - 1 && _entries[Index + 1].SameLocation(_entries[Index]))
         {
-            _entries.RemoveAt(Index + 1);
+            RemoveEntryAt(Index + 1);
         }
     }
 }

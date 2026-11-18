@@ -28,4 +28,19 @@ public static class ProtocolNames
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes((userKey ?? string.Empty).ToUpperInvariant()));
         return baseName + "." + Convert.ToHexString(hash, 0, 8);
     }
+
+    /// <summary>
+    /// The key that scopes one single-instance family: the user's SID, plus the settings directory when
+    /// GLIDE_SETTINGS_DIRECTORY isolates a profile. An isolated (test/diagnostic) profile therefore elects and
+    /// forwards only among processes that share that directory and can never forward to, or receive launches
+    /// from, the user's normal Glide. Without the override the key is exactly the user key (wire-compatible).
+    /// </summary>
+    public static string InstanceKey(string userKey, string? settingsDirectoryOverride)
+    {
+        if (string.IsNullOrWhiteSpace(settingsDirectoryOverride)) return userKey;
+        string normalized;
+        try { normalized = Path.GetFullPath(settingsDirectoryOverride).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar); }
+        catch { normalized = settingsDirectoryOverride.Trim(); }
+        return userKey + "|profile:" + normalized.ToUpperInvariant();
+    }
 }

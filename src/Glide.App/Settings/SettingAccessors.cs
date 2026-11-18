@@ -108,6 +108,11 @@ internal static class SettingAccessors
         ["tabs.closeEmptyAfterDetach"] = Bool(s => s.CloseEmptyWindowAfterDetach, (s, v) => s.CloseEmptyWindowAfterDetach = v),
         ["tabs.detachedHome"] = Bool(s => s.DetachedWindowHomeTab, (s, v) => s.DetachedWindowHomeTab = v),
         ["explorer.showHidden"] = Bool(s => s.ExplorerShowHiddenFiles, (s, v) => s.ExplorerShowHiddenFiles = v),
+        ["explorer.itemInfoTooltip"] = Bool(s => s.ExplorerItemInfoTooltip, (s, v) => s.ExplorerItemInfoTooltip = v),
+        ["explorer.addressBarOverPictures"] = Bool(s => s.ShowAddressBarOverPictures, (s, v) => s.ShowAddressBarOverPictures = v),
+        ["explorer.infoDate"] = Bool(s => s.ExplorerInfoDate, (s, v) => s.ExplorerInfoDate = v),
+        ["explorer.infoResolution"] = Bool(s => s.ExplorerInfoResolution, (s, v) => s.ExplorerInfoResolution = v),
+        ["explorer.infoFileSize"] = Bool(s => s.ExplorerInfoFileSize, (s, v) => s.ExplorerInfoFileSize = v),
         ["explorer.keepSelectionInView"] = Bool(s => s.ExplorerKeepSelectionInView, (s, v) => s.ExplorerKeepSelectionInView = v),
         ["explorer.clickToRename"] = Bool(s => s.ExplorerClickToRename, (s, v) => s.ExplorerClickToRename = v),
         ["explorer.onlyImages"] = Bool(s => s.ExplorerShowOnlyImages, (s, v) => s.ExplorerShowOnlyImages = v),
@@ -128,6 +133,8 @@ internal static class SettingAccessors
         ["overlay.persistSession"] = Bool(s => s.OverlayPersistLayoutBetweenSessions, (s, v) => s.OverlayPersistLayoutBetweenSessions = v),
         ["overlay.wholeAppAlwaysStart"] = Bool(s => s.AlwaysStartWholeAppOverlayMode, (s, v) => s.AlwaysStartWholeAppOverlayMode = v),
         ["overlay.wholeAppWindowedInteractions"] = Bool(s => s.WholeAppOverlayUseWindowedInteractions, (s, v) => s.WholeAppOverlayUseWindowedInteractions = v),
+        ["overlay.wholeAppShowDragStrip"] = Bool(s => s.WholeAppOverlayShowDragStrip, (s, v) => s.WholeAppOverlayShowDragStrip = v),
+        ["overlay.wholeAppLockPosition"] = Bool(s => s.WholeAppOverlayLockPosition, (s, v) => s.WholeAppOverlayLockPosition = v),
         ["overlay.keyboardZoom"] = Bool(s => s.OverlayKeyboardZoom, (s, v) => s.OverlayKeyboardZoom = v),
         ["overlay.highlightSelected"] = Bool(s => s.OverlaySelectedHighlight, (s, v) => s.OverlaySelectedHighlight = v),
         ["overlay.rememberZoom"] = Bool(s => s.OverlayRememberZoom, (s, v) => s.OverlayRememberZoom = v),
@@ -160,6 +167,7 @@ internal static class SettingAccessors
         ["mouse.rightDragPan"] = Text(s => s.RightDragBehavior, (s, v) => s.RightDragBehavior = v),
         ["performance.initialQuality"] = Text(s => s.InitialImageQuality, (s, v) => s.InitialImageQuality = v),
         ["performance.interactivePanQuality"] = Text(s => s.InteractivePanQuality, (s, v) => s.InteractivePanQuality = v),
+        ["performance.fullRefine"] = Text(s => s.FullRefine, (s, v) => s.FullRefine = v),
         ["performance.speedBoostTrayIcon"] = Text(s => s.SpeedBoostTrayIcon, (s, v) => s.SpeedBoostTrayIcon = v),
         ["status.size"] = Text(s => s.StatusBarSize, (s, v) => s.StatusBarSize = v),
         ["status.alignment"] = Text(s => s.StatusBarAlignment, (s, v) => s.StatusBarAlignment = v),
@@ -182,12 +190,111 @@ internal static class SettingAccessors
         ["overlay.pictureColor"] = Text(s => s.PictureCounterColor, (s, v) => s.PictureCounterColor = v),
         ["overlay.animationRegion"] = Text(s => s.OverlayAnimationRegion, (s, v) => s.OverlayAnimationRegion = v),
         ["tabs.newTabPosition"] = Text(s => s.NewTabPosition, (s, v) => s.NewTabPosition = v),
-        ["tabs.switchToNewTabs"] = Bool(s => s.SwitchToNewTabs, (s, v) => s.SwitchToNewTabs = v),
-        ["tabs.newTabModifiers"] = Bool(s => s.NewTabModifiers, (s, v) => s.NewTabModifiers = v),
+        ["tabs.switchToNewTabs"] = Text(s => Glide.Core.Workspace.NewTabSides.FromSwitch(s.SwitchToNewTabs), (s, v) => s.SwitchToNewTabs = Glide.Core.Workspace.NewTabSides.ToSwitch(v)),
+        ["tabs.newTabPositionKey"] = Text(s => s.NewTabPositionKey, (s, v) => s.NewTabPositionKey = v),
+        ["tabs.newTabForegroundKey"] = Text(s => s.NewTabForegroundKey, (s, v) => s.NewTabForegroundKey = v),
+        ["tabs.middleClickSide"] = Text(s => s.MiddleClickNewTabSide, (s, v) => s.MiddleClickNewTabSide = v),
+        ["tabs.middleClickPosition"] = Text(s => s.MiddleClickNewTabPosition, (s, v) => s.MiddleClickNewTabPosition = v),
         ["tabs.afterCloseActivate"] = Text(s => s.AfterTabCloseActivate, (s, v) => s.AfterTabCloseActivate = v),
+        ["tabs.afterCloseCustomTarget"] = Text(s => s.AfterTabCloseCustomTarget, (s, v) => s.AfterTabCloseCustomTarget = v),
         ["tabs.hoverPreview"] = Bool(s => s.TabHoverPreviews, (s, v) => s.TabHoverPreviews = v),
         ["tabs.animateGifPreviews"] = Bool(s => s.AnimateGifPreviews, (s, v) => s.AnimateGifPreviews = v),
+        ["tabs.previewResizeModifier"] = Text(s => s.TabPreviewResizeModifier, (s, v) => s.TabPreviewResizeModifier = v),
         ["overlay.pictureBorder"] = Bool(s => s.PictureCounterBorder, (s, v) => s.PictureCounterBorder = v),
+    };
+
+    /// <summary>
+    /// Stage C single source: every catalogued setting that is one plain GlideSettingsState property, typed, keyed by
+    /// SettingsCatalog id. It is <see cref="All"/> (the hotkey-bindable Toggle/Choice rows, unchanged) plus the number, text
+    /// and non-bindable toggle rows below. Consumers: SettingsWindow LoadControls/ReadControls load and read every mapped
+    /// CheckBox/ToggleSwitch from it (no hand-written line per toggle), and SettingsDelta turns a state change into the
+    /// changed setting ids that MainWindow routes to their SettingEffectRegistry owner. Settings that are several
+    /// properties, derived or stored elsewhere (thumbnail provider, hotkeys, gestures, title-bar buttons) are not here.
+    /// </summary>
+    public static IReadOnlyDictionary<string, ValueAccessor> Values { get; } = BuildValues();
+
+    internal enum ValueKind { Bool, Text, Int, Double }
+
+    internal sealed record ValueAccessor(string Id, ValueKind Type, Func<GlideSettingsState, object?> Get, Action<GlideSettingsState, object?> Set);
+
+    private static ValueAccessor Flag(Func<GlideSettingsState, bool> get, Action<GlideSettingsState, bool> set) => new("", ValueKind.Bool, s => get(s), (s, v) => set(s, (bool)v!));
+    private static ValueAccessor Int(Func<GlideSettingsState, int> get, Action<GlideSettingsState, int> set) => new("", ValueKind.Int, s => get(s), (s, v) => set(s, (int)v!));
+    private static ValueAccessor Double(Func<GlideSettingsState, double> get, Action<GlideSettingsState, double> set) => new("", ValueKind.Double, s => get(s), (s, v) => set(s, (double)v!));
+    private static ValueAccessor Str(Func<GlideSettingsState, string> get, Action<GlideSettingsState, string> set) => new("", ValueKind.Text, s => get(s), (s, v) => set(s, (string)v!));
+
+    private static Dictionary<string, ValueAccessor> BuildValues()
+    {
+        var values = new Dictionary<string, ValueAccessor>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (id, a) in All)
+        {
+            if (a.GetBool is { } gb && a.SetBool is { } sb) values[id] = new(id, ValueKind.Bool, s => gb(s), (s, v) => sb(s, (bool)v!));
+            else if (a.GetText is { } gt && a.SetText is { } st) values[id] = new(id, ValueKind.Text, s => gt(s), (s, v) => st(s, (string)v!));
+        }
+        foreach (var (id, v) in NonBindableRows()) values.Add(id, v with { Id = id });
+        return values;
+    }
+
+    /// <summary>Numbers, paths/text and toggles that are not hotkey-bindable (SettingActionCatalog.Excluded or Number/Text kind).</summary>
+    private static Dictionary<string, ValueAccessor> NonBindableRows() => new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["general.historySize"] = Int(s => s.HistorySize, (s, v) => s.HistorySize = v),
+        ["general.openFileDefaultDirectory"] = Str(s => s.OpenFileDefaultDirectory, (s, v) => s.OpenFileDefaultDirectory = v),
+        ["navigation.rateLimitMs"] = Int(s => s.NavigationRateLimitMs, (s, v) => s.NavigationRateLimitMs = v),
+        ["general.newExplorerTabLastLocation"] = Flag(s => s.NewExplorerTabsUseLastLocation, (s, v) => s.NewExplorerTabsUseLastLocation = v),
+        ["general.newExplorerTabDefaultDirectory"] = Str(s => s.NewExplorerTabDefaultDirectory, (s, v) => s.NewExplorerTabDefaultDirectory = v),
+        ["appearance.explorerTheme"] = Str(s => s.ExplorerThemeChoice, (s, v) => s.ExplorerThemeChoice = v),
+        ["explorer.navPaneWidth"] = Int(s => s.ExplorerNavPaneWidth, (s, v) => s.ExplorerNavPaneWidth = v),
+        ["appearance.tooltipDelaySettings"] = Int(s => s.TooltipDelaySettingsMs, (s, v) => s.TooltipDelaySettingsMs = v),
+        ["appearance.tooltipDelayMain"] = Int(s => s.TooltipDelayMainMs, (s, v) => s.TooltipDelayMainMs = v),
+        ["appearance.tooltipDelayOverlay"] = Int(s => s.TooltipDelayOverlayMs, (s, v) => s.TooltipDelayOverlayMs = v),
+        ["appearance.tooltipDelayExplorer"] = Int(s => s.TooltipDelayExplorerMs, (s, v) => s.TooltipDelayExplorerMs = v),
+        ["tabs.previewSize"] = Int(s => s.TabPreviewSizePercent, (s, v) => s.TabPreviewSizePercent = v),
+        ["appearance.glowIntensity"] = Int(s => s.GlowIntensityPercent, (s, v) => s.GlowIntensityPercent = v),
+        ["general.startupCustomPath"] = Str(s => s.StartupCustomPath, (s, v) => s.StartupCustomPath = v),
+        ["general.newTabCustomPath"] = Str(s => s.NewTabCustomPath, (s, v) => s.NewTabCustomPath = v),
+        ["fullscreen.hideCursorDelay"] = Int(s => s.FullscreenHideCursorDelaySeconds, (s, v) => s.FullscreenHideCursorDelaySeconds = v),
+        ["explorer.scrollSpeed"] = Double(s => s.ExplorerScrollSpeed, (s, v) => s.ExplorerScrollSpeed = v),
+        ["explorer.scrollRows"] = Int(s => s.ExplorerScrollRows, (s, v) => s.ExplorerScrollRows = v),
+        ["explorer.scrollPixels"] = Int(s => s.ExplorerScrollPixels, (s, v) => s.ExplorerScrollPixels = v),
+        ["explorer.altFileManagerPath"] = Str(s => s.AlternativeFileManagerPath, (s, v) => s.AlternativeFileManagerPath = v),
+        ["explorer.altFileManagerArguments"] = Str(s => s.AlternativeFileManagerArguments, (s, v) => s.AlternativeFileManagerArguments = v),
+        ["tabs.showBackButton"] = Flag(s => s.TabBarShowBackButton, (s, v) => s.TabBarShowBackButton = v),
+        ["tabs.showForwardButton"] = Flag(s => s.TabBarShowForwardButton, (s, v) => s.TabBarShowForwardButton = v),
+        ["view.zoomStep"] = Int(s => s.ViewportZoomStepPercent, (s, v) => s.ViewportZoomStepPercent = v),
+        ["selection.bufferWindowedPercent"] = Int(s => s.SelectionBufferWindowedPercent, (s, v) => s.SelectionBufferWindowedPercent = v),
+        ["selection.bufferMaximizedPercent"] = Int(s => s.SelectionBufferMaximizedPercent, (s, v) => s.SelectionBufferMaximizedPercent = v),
+        ["performance.previewDelay"] = Int(s => s.AdaptivePreviewDelayMs, (s, v) => s.AdaptivePreviewDelayMs = v),
+        ["performance.prefetchDepth"] = Int(s => s.PrefetchDepth, (s, v) => s.PrefetchDepth = v),
+        ["performance.firstViewScale"] = Int(s => s.FirstViewScalePercent, (s, v) => s.FirstViewScalePercent = v),
+        ["performance.prefetchScale"] = Int(s => s.PrefetchScalePercent, (s, v) => s.PrefetchScalePercent = v),
+        ["performance.prefetchSiblingFolderCount"] = Int(s => s.PrefetchSiblingFolderImageCount, (s, v) => s.PrefetchSiblingFolderImageCount = v),
+        ["performance.cacheItems"] = Int(s => s.CacheItems, (s, v) => s.CacheItems = v),
+        ["performance.compressedCacheMb"] = Int(s => s.CompressedCacheMegabytes, (s, v) => s.CompressedCacheMegabytes = v),
+        ["performance.decodedCacheMb"] = Int(s => s.DecodedCacheMegabytes, (s, v) => s.DecodedCacheMegabytes = v),
+        ["performance.rapidPreviewSize"] = Int(s => s.RapidPreviewLongestSide, (s, v) => s.RapidPreviewLongestSide = v),
+        ["performance.rapidBrowsePreviewSize"] = Int(s => s.RapidBrowsePreviewLongestSide, (s, v) => s.RapidBrowsePreviewLongestSide = v),
+        ["status.revealZoneExpand"] = Int(s => s.StatusRevealZoneExpand, (s, v) => s.StatusRevealZoneExpand = v),
+        ["slideshow.interval"] = Int(s => s.SlideshowIntervalMs, (s, v) => s.SlideshowIntervalMs = v),
+        ["tabs.minWidth"] = Int(s => s.TabMinWidth, (s, v) => s.TabMinWidth = v),
+        ["tabs.maxWidth"] = Int(s => s.TabMaxWidth, (s, v) => s.TabMaxWidth = v),
+        ["tabs.closedHistory"] = Int(s => s.ClosedTabHistoryLimit, (s, v) => s.ClosedTabHistoryLimit = v),
+        ["folderNav.explore"] = Flag(s => s.FolderNavShowExplore, (s, v) => s.FolderNavShowExplore = v),
+        ["overlay.pictureTemplate"] = Str(s => s.PictureCounterTemplate, (s, v) => s.PictureCounterTemplate = v),
+        ["overlay.pictureFontSize"] = Int(s => s.PictureCounterFontSize, (s, v) => s.PictureCounterFontSize = v),
+        ["overlay.pictureOpacity"] = Int(s => s.PictureCounterOpacity, (s, v) => s.PictureCounterOpacity = v),
+        ["overlay.defaultOpacity"] = Int(s => s.OverlayDefaultOpacity, (s, v) => s.OverlayDefaultOpacity = v),
+        ["overlay.zoomStep"] = Int(s => s.OverlayZoomStepPercent, (s, v) => s.OverlayZoomStepPercent = v),
+        ["overlay.animationSpeedDipsPerSecond"] = Int(s => s.OverlayAnimationSpeedDipsPerSecond, (s, v) => s.OverlayAnimationSpeedDipsPerSecond = v),
+        ["overlay.animationTurnIntervalMs"] = Int(s => s.OverlayAnimationTurnIntervalMs, (s, v) => s.OverlayAnimationTurnIntervalMs = v),
+        ["overlay.animationTurnAngleDegrees"] = Int(s => s.OverlayAnimationTurnAngleDegrees, (s, v) => s.OverlayAnimationTurnAngleDegrees = v),
+        ["overlay.animationRefreshRateHz"] = Int(s => s.OverlayAnimationRefreshRateHz, (s, v) => s.OverlayAnimationRefreshRateHz = v),
+        ["overlay.defaultDirectory"] = Str(s => s.OverlayDefaultDirectory, (s, v) => s.OverlayDefaultDirectory = v),
+        ["profiles.defaultDirectory"] = Str(s => s.ProfileDefaultDirectory, (s, v) => s.ProfileDefaultDirectory = v),
+        ["windows.external1"] = Str(s => s.ExternalProgram1, (s, v) => s.ExternalProgram1 = v),
+        ["windows.external2"] = Str(s => s.ExternalProgram2, (s, v) => s.ExternalProgram2 = v),
+        ["windows.external3"] = Str(s => s.ExternalProgram3, (s, v) => s.ExternalProgram3 = v),
+        ["developer.statusGlobalScale"] = Int(s => s.StatusBarGlobalScalePercent, (s, v) => s.StatusBarGlobalScalePercent = v),
+        ["developer.statusMaximizedBoost"] = Int(s => s.StatusBarMaximizedBoostPercent, (s, v) => s.StatusBarMaximizedBoostPercent = v),
     };
 
     public static Accessor? Find(string settingId) => All.TryGetValue(settingId, out var accessor) ? accessor : null;
@@ -227,8 +334,23 @@ internal static class SettingAccessors
             case "navigation.sortOrder":
                 state.NavigationSortOrder = Glide.Core.ImageSortOrder.NormalizeDisplayName(state.NavigationSortOrder);
                 break;
+            case "tabs.newTabPositionKey":
+                state.NewTabPositionKey = Glide.Core.Workspace.NewTabKeys.Normalize(state.NewTabPositionKey);
+                break;
+            case "tabs.newTabForegroundKey":
+                state.NewTabForegroundKey = Glide.Core.Workspace.NewTabKeys.Normalize(state.NewTabForegroundKey);
+                break;
             case "tabs.newTabPosition":
                 state.NewTabPosition = Glide.Core.Workspace.NewTabPositions.Normalize(state.NewTabPosition);
+                break;
+            case "tabs.middleClickSide":
+                state.MiddleClickNewTabSide = Glide.Core.Workspace.MiddleClickSides.Normalize(state.MiddleClickNewTabSide);
+                break;
+            case "tabs.middleClickPosition":
+                state.MiddleClickNewTabPosition = Glide.Core.Workspace.MiddleClickPositions.Normalize(state.MiddleClickNewTabPosition);
+                break;
+            case "tabs.afterCloseCustomTarget":
+                state.AfterTabCloseCustomTarget = Glide.Core.Workspace.TabCloseCustomTargets.Normalize(state.AfterTabCloseCustomTarget);
                 break;
             case "tabs.afterCloseActivate":
                 state.AfterTabCloseActivate = Glide.Core.Workspace.TabCloseActivation.Normalize(state.AfterTabCloseActivate);

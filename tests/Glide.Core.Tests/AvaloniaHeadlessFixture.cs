@@ -1,3 +1,4 @@
+using System.Reflection;
 using Avalonia;
 using Avalonia.Headless;
 
@@ -32,15 +33,31 @@ public sealed class AvaloniaHeadlessFixture
         lock (Gate)
         {
             if (_initialised) return;
+            // Root platform: decoder/export tests use Avalonia bitmaps directly on xUnit worker threads, so the
+            // root AvaloniaLocator needs the Skia/headless services. Setting it up on this worker thread also
+            // registers a ManagedDispatcherImpl bound to THIS (worker) thread in the root scope.
             AppBuilder.Configure<HeadlessTestApplication>()
                 .UseSkia()
                 .UseHeadless(new AvaloniaHeadlessPlatformOptions { UseHeadlessDrawing = false })
                 .SetupWithoutStarting();
-            try
+            var root = LocatorApi.CurrentMutable();
+
+            // Root cause of the intermittent "Call from invalid thread" (RenderLoop.Add during
+            // AvaloniaHeadlessPlatform.Initialize): for every dispatch the session runs EnsureIsolatedApplication,
+            // which enters a child locator scope, clears Dispatcher.s_uiThread, then re-initialises the platform.
+            // If any other thread (a parallel test class, or a continuation left over from an earlier UI test)
+            // reads Dispatcher.UIThread between that reset and Initialize binding the new IDispatcherImpl, the
+            // dispatcher is recreated from the ROOT impl, which belonged to the worker thread above, and the
+            // session thread's RenderLoop.Add then fails VerifyAccess. Fix: rebind the root impl to one owned by
+            // the session thread, so a dispatcher recreated in that window is still the session's. The session
+            // is started eagerly here (under the lock), and failures are no longer swallowed.
+            var session = HeadlessUnitTestSession.GetOrStartForAssembly(typeof(AvaloniaHeadlessFixture).Assembly);
+            session.Dispatch(() =>
             {
-                _session = HeadlessUnitTestSession.GetOrStartForAssembly(typeof(AvaloniaHeadlessFixture).Assembly);
-            }
-            catch { }
+                LocatorApi.RebindDispatcherImpl(from: LocatorApi.CurrentMutable(), to: root);
+                return true;
+            }, CancellationToken.None).GetAwaiter().GetResult();
+            _session = session;
             _initialised = true;
         }
     }
@@ -68,6 +85,32 @@ public sealed class AvaloniaHeadlessFixture
         else
         {
             await action();
+        }
+    }
+
+    /// <summary>
+    /// AvaloniaLocator and IDispatcherImpl are public at runtime but hidden from Avalonia 11's reference
+    /// assemblies, so the one rebinding above goes through reflection. Any API drift throws loudly.
+    /// </summary>
+    private static class LocatorApi
+    {
+        private static readonly Type LocatorType = typeof(AppBuilder).Assembly.GetType("Avalonia.AvaloniaLocator")
+            ?? typeof(Avalonia.Threading.Dispatcher).Assembly.GetType("Avalonia.AvaloniaLocator", throwOnError: true)!;
+        private static readonly Type DispatcherImplType = typeof(Avalonia.Threading.Dispatcher).Assembly
+            .GetType("Avalonia.Threading.IDispatcherImpl", throwOnError: true)!;
+
+        public static object CurrentMutable() =>
+            LocatorType.GetProperty("CurrentMutable", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)!
+                .GetValue(null) ?? throw new InvalidOperationException("AvaloniaLocator.CurrentMutable is null.");
+
+        public static void RebindDispatcherImpl(object from, object to)
+        {
+            var impl = LocatorType.GetMethod("GetService", BindingFlags.Public | BindingFlags.Instance, [typeof(Type)])!
+                .Invoke(from, [DispatcherImplType])
+                ?? throw new InvalidOperationException("Headless session has no dispatcher implementation.");
+            var helper = LocatorType.GetMethod("Bind", BindingFlags.Public | BindingFlags.Instance, Type.EmptyTypes)!
+                .MakeGenericMethod(DispatcherImplType).Invoke(to, null)!;
+            helper.GetType().GetMethod("ToConstant")!.MakeGenericMethod(DispatcherImplType).Invoke(helper, [impl]);
         }
     }
 

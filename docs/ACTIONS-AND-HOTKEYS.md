@@ -105,8 +105,8 @@ opened image or an earlier selection. Tests: `ExternalProgramExplorerTests` (Gli
   slots `windowed.` / `fullscreen.backButtonImage`, `tabs.backButton`, `explorer.backButton` and the matching forward
   slots), not hotkeys: the hotkey map never stores mouse buttons. `MainWindow.TryRouteSideButtonGesture` maps a press to
   the area under the pointer (the Welcome page follows the Windowed image rows) and runs the bound action. The
-  default is **Back / Forward** (`GestureCatalog.DefaultActionFor`, "Default (back)" / "Default (forward)"); the first
-  5.0 build left the press untouched. "Do nothing" or any other bound action (row or custom gesture) wins.
+  default (5.0.8) is pass-through, "Default (not used by Glide)": the press is not marked handled so Windows / mouse
+  software keep it (`GestureCatalog.DefaultActionFor` returns null). "Do nothing" blocks it; any other bound action runs.
 - Back / Forward (`nav.back` Alt+Left, `nav.forward` Shift+Backspace / Alt+Right) and "Back, or Previous image" (`nav.backOrPrevious`, Backspace, command `GlideCommand.BackOrPrevious`, appended last) are new hotkey rows. The composite runs Back when the tab can go back, else Previous image in an image tab, else nothing; `nav.back` is strict and never falls back; `nav.previousBack` ("Previous image (extra key)", legacy id kept) has no default key. Settings schema 11 (`HotkeyDefaultMigrations.MigrateBackspaceToBackOrPrevious`) moves Backspace once when `nav.previousBack` is bound to exactly Backspace and no other action uses it; rebound / removed / taken keys and schema >= 11 files are untouched, and `AddMissingRows` adds the composite row empty so a freed Backspace is never re-granted. The IrfanView, nomacs, FastStone and XnView MP presets assign Backspace to Previous image (the conflict logic unassigns the composite's Backspace). A saved map that
   lacks a row gets its defaults minus any key another row of that map already uses
   (`HotkeyDefaultMigrations.AddMissingRows`): a user binding is never taken away. They never fire from a text box.

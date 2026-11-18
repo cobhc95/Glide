@@ -25,6 +25,7 @@ namespace Glide.Core.Tests;
 /// trimmed customiser rows.
 /// </summary>
 [Collection(AvaloniaHeadlessCollection.Name)]
+[Trait("Area", "Regression")]
 public sealed class TesterRoundFixesTests : IDisposable
 {
     public TesterRoundFixesTests(AvaloniaHeadlessFixture fixture) => _ = fixture;
@@ -360,7 +361,7 @@ public sealed class TesterRoundFixesTests : IDisposable
             }
             return Task.CompletedTask;
         });
-        try { Directory.Delete(root, true); } catch { }
+        TempDir.TryDelete(root);
     }
 
     private static void Settle(Window window)

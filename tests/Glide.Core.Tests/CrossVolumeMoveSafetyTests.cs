@@ -10,6 +10,7 @@ namespace Glide.Core.Tests;
 /// inject changes through the operation's test seams.
 /// </summary>
 [Collection("ExplorerFileOperations")]
+[Trait("Area", "Explorer")]
 public sealed class CrossVolumeMoveSafetyTests : IDisposable
 {
     private readonly Action<string, string> _defaultCopier = ExplorerFileOperations.FileCopier;

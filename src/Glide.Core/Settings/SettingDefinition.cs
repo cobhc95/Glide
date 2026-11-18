@@ -12,7 +12,21 @@ public sealed record SettingDefinition(
     SettingKind Kind,
     object DefaultValue,
     string[] SearchTerms,
-    int? FuturePhase = null);
+    int? FuturePhase = null,
+    SettingPlatforms Platforms = SettingPlatforms.All);
+
+/// <summary>
+/// Where a setting can work (Stage C prep for a non-Windows build; nothing hides settings yet). Defaults to every platform;
+/// <see cref="SettingsCatalog.WindowsOnlyIds"/> marks the ones tied to the Windows shell, registry or startup.
+/// </summary>
+[Flags]
+public enum SettingPlatforms
+{
+    Windows = 1,
+    Linux = 2,
+    MacOS = 4,
+    All = Windows | Linux | MacOS
+}
 
 public enum SettingKind
 {

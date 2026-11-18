@@ -15,6 +15,7 @@ namespace Glide.Explorer.Tests;
 /// the view-mode labels.
 /// </summary>
 [Collection(ExplorerHeadlessCollection.Name)]
+[Trait("Area", "Explorer")]
 public sealed class ExplorerContextMenuPolishTests
 {
     private static void Raise(MenuItem item) => item.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
@@ -104,7 +105,7 @@ public sealed class ExplorerContextMenuPolishTests
             Assert.Contains("Properties of a.png", Headers(menu));
 
             Raise(Item(menu, "Copy 3 paths"));
-            await Task.Delay(20);
+            await h.WaitUntil(() => ExplorerHost.LastCopiedText?.Split(Environment.NewLine).Length == 3, "3 paths copied");
             Assert.Equal(3, ExplorerHost.LastCopiedText!.Split(Environment.NewLine).Length);
 
             h.Click("a.png", MouseButton.Right);
@@ -195,13 +196,13 @@ public sealed class ExplorerContextMenuPolishTests
             h.ClickButton(button);
             var menu = h.ActiveMenu!;
             Assert.Equal(sortBy, Headers(menu));
-            Raise(Item(menu, "Date modified"));
+            Raise(Item(menu, "Date modified ▲"));
             await h.SettleAsync();
             Assert.Contains("Date modified", ButtonText());
             Assert.Contains("Date modified", ToolTip.GetTip(button)?.ToString() ?? "");
 
             h.ClickButton(button);
-            Raise(Item(h.ActiveMenu!, "Descending"));
+            Raise(Item(h.ActiveMenu!, "Date modified ▼"));
             await h.SettleAsync();
             Assert.Contains("descending", ToolTip.GetTip(button)?.ToString() ?? "");
             Assert.Equal(ExplorerSortKey.Modified, h.Get<ExplorerSortKey>("_explorerSortKey"));

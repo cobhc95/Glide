@@ -4,6 +4,7 @@ using Glide.App.Printing;
 namespace Glide.Core.Tests;
 
 [Collection(AvaloniaHeadlessCollection.Name)]
+[Trait("Area", "Print")]
 public sealed class PrintWindowTests
 {
     public PrintWindowTests(AvaloniaHeadlessFixture fixture)

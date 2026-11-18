@@ -4,6 +4,7 @@ using Glide.Core.Settings;
 namespace Glide.Core.Tests;
 
 /// <summary>Explorer wheel scrolling by the scroll amount mode, the speed multiplier and the alternative file manager command line.</summary>
+[Trait("Area", "Explorer")]
 public sealed class ExplorerWheelScrollTests
 {
     private const double Spacing = 6;
@@ -112,7 +113,7 @@ public sealed class ExplorerWheelScrollTests
     [Fact]
     public void Scroll_settings_are_in_the_catalog_with_their_defaults()
     {
-        var s = new Glide.App.Settings.GlideSettingsState();
+        var s = new Glide.Core.Settings.GlideSettingsState();
         Assert.Equal(1.0, s.ExplorerScrollSpeed);
         Assert.Equal(ExplorerScrollModes.OneRow, s.ExplorerScrollMode);
         Assert.Equal(ExplorerScrollModes.Default, s.ExplorerScrollMode);

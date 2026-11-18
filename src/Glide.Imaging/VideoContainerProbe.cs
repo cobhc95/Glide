@@ -187,13 +187,6 @@ public static class VideoContainerProbe
             return read == length ? buffer : buffer[..read];
         }
 
-        public bool TryU8(long position, out byte value)
-        {
-            Span<byte> b = stackalloc byte[1];
-            var ok = TryRead(position, b);
-            value = b[0];
-            return ok;
-        }
     }
 
     // ===================================================================================== MP4 / MOV / 3GP

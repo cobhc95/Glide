@@ -43,4 +43,8 @@
   <Target Name="ValidateGlideApplicationIcon" BeforeTargets="CoreCompile">
     <Error Condition="!Exists('$(MSBuildProjectDirectory)\Assets\Glide.ico')" Text="Glide application icon is missing: Assets\Glide.ico" />
   </Target>
+  <ItemGroup>
+    <!-- Stage C: GlideSettingsState and its companions live in Glide.Core.Settings (Avalonia-free). -->
+    <Using Include="Glide.Core.Settings" />
+  </ItemGroup>
 </Project>

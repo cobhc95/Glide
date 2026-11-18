@@ -14,6 +14,7 @@ namespace Glide.Explorer.Tests;
 /// generated temp folders. Nothing touches the real Recycle Bin, clipboard, dialogs or explorer.exe (seams).
 /// </summary>
 [Collection(ExplorerHeadlessCollection.Name)]
+[Trait("Area", "Explorer")]
 public sealed class ExplorerTabOperationsTests
 {
     public ExplorerTabOperationsTests() { }
@@ -100,7 +101,7 @@ public sealed class ExplorerTabOperationsTests
             Assert.Equal(new[]
             {
                 "View", "Sort by", "Refresh", "-", "Paste", "-", "New folder", "Select all", "-",
-                "Show in Windows File Explorer", "Properties"
+                "Show in Windows File Explorer", "Properties of " + Path.GetFileName(h.Root) // round 3 #16
             }, Headers(menu));
             var view = Item(menu, "View").Items.OfType<MenuItem>().Select(i => i.Header!.ToString()).ToArray();
             Assert.Equal(new[] { "Thumbnails (XL)", "Thumbnails (L)  ✓", "Thumbnails (M)", "Thumbnails (S)", "List", "Details" }, view);
@@ -140,7 +141,7 @@ public sealed class ExplorerTabOperationsTests
 
             h.Click("a.png", MouseButton.Right);
             Raise(Item(h.ActiveMenu!, "Copy path"));
-            await Task.Delay(20);
+            await h.WaitUntil(() => ExplorerHostLastCopied() == a, "path copied");
             Assert.Equal(a, ExplorerHostLastCopied());
 
             h.Click("a.png", MouseButton.Right);
@@ -209,7 +210,7 @@ public sealed class ExplorerTabOperationsTests
             await h.SettleAsync();
             Assert.Contains("later.png", h.Names);
             h.Click(h.EmptySpotInList(), MouseButton.Right);
-            Raise(Item(h.ActiveMenu!, "Properties"));
+            Raise(Item(h.ActiveMenu!, "Properties of " + Path.GetFileName(h.Root)));
             Assert.Equal(new[] { h.Root }, h.Properties);
         });
     }

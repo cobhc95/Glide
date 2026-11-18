@@ -5,6 +5,7 @@ using Glide.Imaging;
 namespace Glide.Core.Tests;
 
 [Collection(AvaloniaHeadlessCollection.Name)]
+[Trait("Area", "Decode")]
 public sealed class SvgDecoderTests
 {
     public SvgDecoderTests(AvaloniaHeadlessFixture fixture) { _ = fixture; }

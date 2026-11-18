@@ -478,8 +478,6 @@ public static partial class NativeImageDecoder
         return failed;
     }
 
-    /// <summary>Tests: simulates an allocation failure on this thread.</summary>
-    internal static void MarkAllocationFailureForTests() => _allocationFailed = true;
 
     /// <summary>Native allocator callback: creates the presentation bitmap and hands WIC its locked pixels.</summary>
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(System.Runtime.CompilerServices.CallConvCdecl) })]
@@ -671,6 +669,16 @@ public static partial class NativeImageDecoder
 
     /// <summary>Tests: true when the 5.0.7 libjpeg-turbo path accepts this JPEG (false = WIC decodes it).</summary>
     internal static bool JpegTurboAcceptsForTests(string path) => GlideJpegTurboAcceptsW(path) == 1;
+
+    /// <summary>Tests: the native JPEG first-view decision (0 WIC, 1 embedded preview, 2 DCT-scaled) and scale denominator.</summary>
+    internal static (int Choice, int ScaleDenom) JpegPlanFirstViewForTests(int width, int height, uint needW, uint needH, uint previewLongSide, bool scaledAllowed)
+    {
+        var choice = GlideJpegPlanFirstView(width, height, needW, needH, previewLongSide, scaledAllowed ? 1 : 0, out var denom);
+        return (choice, denom);
+    }
+
+    [LibraryImport("Glide.Native", EntryPoint = "GlideJpegPlanFirstView")]
+    private static partial int GlideJpegPlanFirstView(int width, int height, uint needW, uint needH, uint previewLongSide, int scaledAllowed, out int scaleDenom);
 
     [LibraryImport("Glide.Native", EntryPoint = "GlideJpegTurboAcceptsW", StringMarshalling = StringMarshalling.Utf16)]
     private static partial int GlideJpegTurboAcceptsW(string path);

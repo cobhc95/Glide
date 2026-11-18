@@ -7,6 +7,7 @@ namespace Glide.Core.Tests;
 
 /// <summary>DICOM, NIfTI, FITS, PFM and gzip'd Radiance HDR fixtures written in-test.</summary>
 [Collection(AvaloniaHeadlessCollection.Name)]
+[Trait("Area", "Decode")]
 public sealed class ScientificDecoderTests : IDisposable
 {
     private readonly List<string> _files = new();

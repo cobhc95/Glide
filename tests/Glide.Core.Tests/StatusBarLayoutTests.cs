@@ -11,6 +11,7 @@ namespace Glide.Core.Tests;
 /// made the bar noticeably larger than its contents).
 /// </summary>
 [Collection(AvaloniaHeadlessCollection.Name)]
+[Trait("Area", "StatusBar")]
 public sealed class StatusBarLayoutTests
 {
     public StatusBarLayoutTests(AvaloniaHeadlessFixture fixture) { _ = fixture; }
@@ -124,7 +125,7 @@ public sealed class StatusBarLayoutTests
     private static void SingleLine(MainWindow window)
     {
         var field = typeof(MainWindow).GetField("_settings", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
-        ((Glide.App.Settings.GlideSettingsState)field.GetValue(window)!).StatusStackInfoLine = false;
+        ((Glide.Core.Settings.GlideSettingsState)field.GetValue(window)!).StatusStackInfoLine = false;
     }
 
     private static void ForceViewerStatusVisible(MainWindow window)

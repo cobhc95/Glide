@@ -10,6 +10,7 @@ namespace Glide.Core.Tests;
 /// "Don't remind me", live settings, manual Check now, persistence. No window and no network.
 /// </summary>
 [Collection("UpdateService process-wide state")]
+[Trait("Area", "Update")]
 public sealed class UpdateServiceTests
 {
     private static string Json(string tag = "v5.0.2", string published = "2026-11-13T12:00:00Z", string? url = "https://github.com/cobhc95/Glide/releases/tag/v5.0.2") =>

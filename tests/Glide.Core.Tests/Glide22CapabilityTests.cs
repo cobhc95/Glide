@@ -11,21 +11,24 @@ using System.Runtime.InteropServices;
 namespace Glide.Core.Tests;
 
 [Collection(AvaloniaHeadlessCollection.Name)]
+[Trait("Area", "Regression")]
 public sealed class Glide22CapabilityTests
 {
     [Fact]
-    public void LegacyRegistryContainsExactly196DistinctSuffixes()
+    public void LegacyRegistryHasDistinctSuffixesAndOneCapabilityRowEach()
     {
-        Assert.Equal(196, CodecCapabilityRegistry.Extensions.Count);
-        Assert.Equal(196, CodecCapabilityRegistry.Extensions.Distinct(StringComparer.OrdinalIgnoreCase).Count());
-        Assert.Equal(196, CodecCapabilityRegistry.All.Count);
+        Assert.NotEmpty(CodecCapabilityRegistry.Extensions);
+        Assert.Equal(CodecCapabilityRegistry.Extensions.Count, CodecCapabilityRegistry.Extensions.Distinct(StringComparer.OrdinalIgnoreCase).Count());
+        Assert.Equal(CodecCapabilityRegistry.Extensions.Count, CodecCapabilityRegistry.All.Count);
+        Assert.Equal(CodecCapabilityRegistry.Extensions.ToHashSet(StringComparer.OrdinalIgnoreCase), CodecCapabilityRegistry.All.Select(x => x.Extension).ToHashSet(StringComparer.OrdinalIgnoreCase));
     }
 
 
     [Fact]
-    public void FullRegistryRoutes196WhileCoreFastPathRemainsExactlyTen()
+    public void FullRegistryRoutesEveryCapabilityWhileCoreFastPathRemainsExactlyTen()
     {
-        Assert.Equal(196, ImageFormatRegistry.Extensions.Count);
+        Assert.Equal(CodecCapabilityRegistry.Extensions.ToHashSet(StringComparer.OrdinalIgnoreCase), ImageFormatRegistry.Extensions.ToHashSet(StringComparer.OrdinalIgnoreCase));
+        Assert.Subset(ImageFormatRegistry.Extensions.ToHashSet(StringComparer.OrdinalIgnoreCase), ImageFormatRegistry.CoreFastPathExtensions.ToHashSet(StringComparer.OrdinalIgnoreCase));
         Assert.Equal(10, ImageFormatRegistry.CoreFastPathExtensions.Count);
         Assert.Equal(".ome.tiff", ImageFormatRegistry.Match("slide.OME.TIFF"));
         Assert.Equal(".nii.gz", ImageFormatRegistry.Match("scan.NII.GZ"));
@@ -248,7 +251,7 @@ public sealed class Glide22CapabilityTests
             using var cts = new CancellationTokenSource(); cts.Cancel();
             await Assert.ThrowsAnyAsync<OperationCanceledException>(() => operations.RenameAsync(renamed!, "cancel.png", cts.Token));
         }
-        finally { try { Directory.Delete(folder, true); } catch { } }
+        finally { TempDir.TryDelete(folder); }
     }
 
     [Fact]
@@ -279,7 +282,7 @@ public sealed class Glide22CapabilityTests
             var gif = Path.Combine(folder, "fixture.gif"); File.WriteAllBytes(gif, payloads[".gif"]);
             Assert.Equal(1, ImageMetadataReader.Read(gif).FrameCount);
         }
-        finally { try { Directory.Delete(folder, true); } catch { } }
+        finally { TempDir.TryDelete(folder); }
     }
 
     [Fact]
@@ -352,7 +355,7 @@ public sealed class Glide22CapabilityTests
             var gif = ImageMetadataReader.Read(Path.Combine(root, "fixture.gif")); Assert.Equal(1, gif.FrameCount);
             var webp = ImageMetadataReader.Read(Path.Combine(root, "fixture.webp")); Assert.True(webp.Width > 0); Assert.True(webp.Height > 0); Assert.True(webp.FrameCount >= 1);
         }
-        finally { try { Directory.Delete(root, true); } catch { } }
+        finally { TempDir.TryDelete(root); }
     }
 
     [Fact]

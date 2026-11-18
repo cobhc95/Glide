@@ -1,6 +1,7 @@
 namespace Glide.Core.Tests;
 
 // Source-text contract kept: this asserts on production source (UI code-behind, native/installer files or a repo-wide scan) that cannot be run headlessly; behavioural coverage lives in the other test files.
+[Trait("Area", "Window")]
 public sealed class StandbyReceiverCreationContractTests
 {
     [Fact]
@@ -12,7 +13,7 @@ public sealed class StandbyReceiverCreationContractTests
         Assert.Contains("internal static bool HasPendingExternalRequests()", broker, StringComparison.Ordinal);
         Assert.True(Count(app, "ExternalLaunchBroker.HasPendingExternalRequests()") >= 3,
             "The entry point, delayed retry and post-gate creation path must all re-check broker work.");
-        Assert.Contains("if (!ExternalLaunchBroker.HasPendingExternalRequests())\n            {\n                Volatile.Write(ref _pendingWindowCreation, 0);\n                return;\n            }\n            var window = new MainWindow();",
+        Assert.Contains("if (!ExternalLaunchBroker.HasPendingExternalRequests())\n            {\n                Volatile.Write(ref _pendingWindowCreation, 0);\n                return;\n            }\n            StartupTrace.Write(\"standby_window_construct_start\");\n            var window = new MainWindow();",
             app.Replace("\r\n", "\n"), StringComparison.Ordinal);
     }
 

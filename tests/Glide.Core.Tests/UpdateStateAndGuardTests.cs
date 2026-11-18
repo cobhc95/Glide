@@ -14,6 +14,7 @@ namespace Glide.Core.Tests;
 /// </summary>
 // Source-text contract kept (tests reading src/): update-feed hardening and the "only HttpClient users" scan are security tripwires over source that no runtime test can enumerate.
 [Collection("UpdateService process-wide state")]
+[Trait("Area", "Update")]
 public sealed class UpdateStateAndGuardTests
 {
     private static void WithIsolatedStore(Action<string> action)
@@ -26,7 +27,7 @@ public sealed class UpdateStateAndGuardTests
         finally
         {
             SettingsStore.SettingsDirectoryOverrideForTests.Value = previous;
-            try { Directory.Delete(root, true); } catch { }
+            TempDir.TryDelete(root);
         }
     }
 

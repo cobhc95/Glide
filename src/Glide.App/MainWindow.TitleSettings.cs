@@ -10,6 +10,7 @@ using Avalonia.VisualTree;
 using Glide.App.Controls;
 using Glide.App.Settings;
 using Glide.Core;
+using Glide.Core.Settings;
 using Glide.App.Services;
 using Glide.App.Updates;
 using Glide.Core.Commands;
@@ -20,9 +21,11 @@ namespace Glide.App;
 /// <summary>Title strip, title actions, settings apply and explorer theming. Split from MainWindow (4.5.2).</summary>
 public partial class MainWindow
 {
-    private void AlwaysOnTopClicked(object? sender, RoutedEventArgs e)
+    private void AlwaysOnTopClicked(object? sender, RoutedEventArgs e) => ToggleAlwaysOnTopSetting();
+
+    private void ToggleAlwaysOnTopSetting()
     {
-        if (_wholeAppOverlayMode) _settings.OverlayAlwaysOnTop = !_settings.OverlayAlwaysOnTop;
+        if (_wholeAppOverlayMode) _settings.OverlayAlwaysOnTop = !OverlayOptionsView.AlwaysOnTop;
         else _settings.AlwaysOnTop = !_settings.AlwaysOnTop;
         SaveSettingsAndPublish();
         ApplyTopmostState(forceNative: true);
@@ -38,7 +41,7 @@ public partial class MainWindow
     private MenuItem BuildAlwaysOnTopMenuItem()
     {
         var item = MenuActions.Tag(new MenuItem { Header = ActiveAlwaysOnTop ? "Always on top  ✓" : "Always on top", Icon = MenuIcon("AlwaysOnTop") }, "window.alwaysTop");
-        item.Click += (_, _) => AlwaysOnTopClicked(null, new RoutedEventArgs());
+        item.Click += (_, _) => ToggleAlwaysOnTopSetting();
         return item;
     }
 
@@ -162,7 +165,6 @@ public partial class MainWindow
         {
             if (TitleBarButtonCatalog.Find(id) is not { } definition) continue;
             ToolTip.SetTip(button, TitleActionTip(id, definition));
-            ToolTip.SetShowDelay(button, 650);
         }
     }
 
@@ -191,7 +193,7 @@ public partial class MainWindow
                 RebuildTitleActionStrip();
             }
             string Tick(string text, bool on) => on ? $"{text}  ✓" : text;
-            items.Add(Item(Tick("Always on top", ActiveAlwaysOnTop), () => AlwaysOnTopClicked(null, new RoutedEventArgs()), "window.alwaysTop", true, "AlwaysOnTop"));
+            items.Add(Item(Tick("Always on top", ActiveAlwaysOnTop), () => ToggleAlwaysOnTopSetting(), "window.alwaysTop", true, "AlwaysOnTop"));
             items.Add(Item(Tick("Hard: stay above every window", HardAlwaysOnTop), () => SetMode("Hard"), "setting.windows.alwaysOnTopMode"));
             items.Add(Item(Tick("Soft: ordinary always on top", !HardAlwaysOnTop), () => SetMode("Soft"), "setting.windows.alwaysOnTopMode"));
             items.Add(new MenuItem { Header = "-" });
@@ -251,7 +253,7 @@ public partial class MainWindow
 
     private async Task ShowStatusBarCustomizerAsync()
     {
-        var dialog = new StatusBarCustomizerWindow(_settings.StatusBarGroups) { Icon = Icon, Topmost = Topmost };
+        var dialog = new StatusBarCustomizerWindow(StatusBarOptionsView.Groups) { Icon = Icon, Topmost = Topmost };
         var result = await ShowOwnedDialogAsync<string?>(dialog);
         if (result is null) return;
         _settings.StatusBarGroups = result;
@@ -259,7 +261,9 @@ public partial class MainWindow
         ApplyStatusBarSize();
     }
 
-    private async void SettingsClicked(object? sender, RoutedEventArgs e)
+    private async void SettingsClicked(object? sender, RoutedEventArgs e) => await OpenSettingsAsync();
+
+    private async Task OpenSettingsAsync()
     {
         try
         {
@@ -356,13 +360,9 @@ public partial class MainWindow
             _deferredStartupSettingsAdopted = true;
         }
 
-        // Dialog placements are saved by WindowPlacementService as each window closes; include the live store so this
-        // full save never writes back an older copy.
-        WindowPlacementService.ApplyTo(_settings);
-        // Same for the update checker's memory (last check time...): its live copy is authoritative.
-        UpdateService.Current?.ApplyTo(_settings);
-        SettingsStore.Save(_settings);
-        App.PublishCurrentSettings(_settings);
+        // SettingsService composes the live dialog placements and the update checker's memory (their stores are
+        // authoritative), persists and publishes, so this full save never writes back an older copy.
+        SettingsService.Save(_settings);
         _startupSettingsBaseline = _settings.CloneState();
     }
 
@@ -372,38 +372,37 @@ public partial class MainWindow
     /// </summary>
     private void ApplyNavigationSortOrder()
     {
-        var wanted = new ImageSortSpec(ImageSortOrder.ParseKey(_settings.NavigationSortOrder), _settings.NavigationSortDescending);
+        var wanted = new ImageSortSpec(ImageSortOrder.ParseKey(NavigationOptionsView.SortOrder), NavigationOptionsView.SortDescending);
         if (wanted == ImageSortOrder.Current) return;
         ImageSortOrder.Current = wanted;
         _navigator.Resort();
-        UpdatePictureCounter();
-        UpdateStatusStats();
+        NotifyViewerStatusChanged();
     }
 
     private void ApplySettingsFromDialog(GlideSettingsState state, bool commit)
     {
-        // a live preview that only changes the text overlay's look (font size spinner, opacity, colour...)
-        // restyles the overlay alone instead of re-applying every setting, so dragging a value never lags.
-        if (!commit && OnlyTextOverlayStyleDiffers(_settings, state))
-        {
-            var restyled = state.CloneState();
-            SettingsDefaults.KeepRuntimeOwnedValues(restyled, _settings);
-            _settings = restyled;
-            ApplyPictureCounterVisuals();
-            return;
-        }
         var previousTabToolTipSize = _settings.TabToolTipTextSize;
         var incoming = state.CloneState();
         // The main window's own geometry, overlay placements and schema version are live values Settings never edits;
         // its snapshot (or a loaded profile) must not replace them (an unset snapshot would forget the window position).
         SettingsDefaults.KeepRuntimeOwnedValues(incoming, _settings);
+        // Stage C (C3): which setting ids changed decides which subsystems re-apply (see MainWindow.SettingsEffects.cs).
+        var delta = SettingsDelta.Compute(_settings, incoming);
+        // a live preview that only changes the text overlay's look (font size spinner, opacity, colour...)
+        // restyles the overlay alone instead of re-applying every setting, so dragging a value never lags.
+        if (!commit && delta.OnlyTouches(TextOverlayStyleIds))
+        {
+            _settings = incoming;
+            ApplyPictureCounterVisuals();
+            return;
+        }
         _settings = incoming;
         // The Settings window works on a snapshot taken when it opened; the update checker's memory is not part of it.
         UpdateService.Current?.ApplyTo(_settings);
         UpdateService.Current?.SettingsChanged(_settings);
-        App.PublishCurrentSettings(_settings);
+        SettingsService.Publish(_settings, delta);
         ApplyNavigationSortOrder();
-        ApplySettingsVisuals();
+        if (!TryApplyRoutedSettingEffects(delta)) ApplySettingsVisuals();
         UpdateGifStatusUi();
         // changing the tab tooltip size in Settings shows the current tab's tooltip at the new size.
         if (!commit && !string.Equals(previousTabToolTipSize, _settings.TabToolTipTextSize, StringComparison.Ordinal))
@@ -411,12 +410,12 @@ public partial class MainWindow
             RebuildTabStrip();
             ShowActiveTabToolTipPreview();
         }
-        _diagnostics.Write("settings", commit ? "committed" : "previewed", new { theme = _settings.ThemeChoice, accent = _settings.AccentChoice, glow = _settings.GlowChoice, status = _settings.ShowStatusSurface, tabs = _settings.TabsEnabled });
+        _diagnostics.Write("settings", commit ? "committed" : "previewed", new { theme = _settings.ThemeChoice, accent = _settings.AccentChoice, glow = _settings.GlowChoice, status = StatusBarOptionsView.ShowStatusSurface, tabs = _settings.TabsEnabled });
         if (commit)
         {
             SaveSettingsAndPublish();
             App.UpdateTrayIconState();
-            if (!_settings.OverlayPersistLayoutBetweenSessions)
+            if (!OverlayOptionsView.PersistLayoutBetweenSessions)
             {
                 try
                 {
@@ -428,20 +427,8 @@ public partial class MainWindow
         }
     }
 
-    internal static bool OnlyTextOverlayStyleDiffers(GlideSettingsState current, GlideSettingsState next)
-    {
-        if (current.ContentEquals(next)) return false;
-        var b = next.CloneState();
-        b.PictureCounterTemplate = current.PictureCounterTemplate;
-        b.PictureCounterFontSize = current.PictureCounterFontSize;
-        b.PictureCounterBold = current.PictureCounterBold;
-        b.PictureCounterOpacity = current.PictureCounterOpacity;
-        b.PictureCounterPosition = current.PictureCounterPosition;
-        b.PictureCounterColor = current.PictureCounterColor;
-        b.PictureCounterShadow = current.PictureCounterShadow;
-        b.PictureCounterBorder = current.PictureCounterBorder;
-        return current.ContentEquals(b);
-    }
+    internal static bool OnlyTextOverlayStyleDiffers(GlideSettingsState current, GlideSettingsState next) =>
+        SettingsDelta.Compute(current, next).OnlyTouches(TextOverlayStyleIds);
 
     private ImagePerformancePolicy BuildPerformancePolicy()
     {
@@ -467,7 +454,12 @@ public partial class MainWindow
             SequentialForegroundReads = _settings.SequentialForegroundReads,
             PredictivePrefetch = _settings.PredictivePrefetch,
             PrefetchDepth = _settings.PrefetchDepth,
-            FullNeighbourPredecodeCount = 1,
+            // 5.1: full neighbour frames only for the "Immediately" refine policy (DecodeScaleCatalog);
+            // otherwise neighbours stay display-sized so a hit never uploads a 30 MP texture.
+            FirstViewPercentOverride = _settings.FirstViewScalePercent,
+            PrefetchPercentOverride = _settings.PrefetchScalePercent,
+            RefineOverride = _settings.FullRefine,
+            FullNeighbourPredecodeCount = (profile with { RefineOverride = _settings.FullRefine }).RefinePolicyFor(_navigator.Current) == FullRefinePolicy.Immediate ? 1 : 0,
             CompressedCacheItems = _settings.CacheItems,
             CompressedCacheMegabytes = _settings.CompressedCacheMegabytes,
             DecodedCacheMegabytes = _settings.DecodedCacheMegabytes
@@ -509,17 +501,11 @@ public partial class MainWindow
     private void ApplyEmbeddedExplorerTheme()
     {
         ApplyManagedExplorerTheme();
-        if (NativeExplorerHost is null) return;
-        var requested = _settings.ExplorerThemeChoice;
-        var effective = string.Equals(requested, "Follow Glide theme", StringComparison.OrdinalIgnoreCase)
-            ? _settings.ThemeChoice
-            : requested;
-        NativeExplorerHost.ApplyTheme(effective);
     }
 
     private SolidColorBrush BrowserBrush(string role)
     {
-        var requested = _settings.ExplorerThemeChoice;
+        var requested = ExplorerOptionsView.ThemeChoice;
         var follow = string.Equals(requested, "Follow Glide theme", StringComparison.OrdinalIgnoreCase);
         var effective = follow ? _settings.ThemeChoice : requested;
         var dark = string.Equals(effective, "Dark", StringComparison.OrdinalIgnoreCase);
@@ -537,7 +523,7 @@ public partial class MainWindow
     private void ApplyManagedExplorerTheme()
     {
         if (BrowserView is null) return;
-        var requested = _settings.ExplorerThemeChoice;
+        var requested = ExplorerOptionsView.ThemeChoice;
         if (string.Equals(requested, "Follow Glide theme", StringComparison.OrdinalIgnoreCase))
         {
             BrowserView.Resources.Clear();
@@ -574,9 +560,13 @@ public partial class MainWindow
         SettingsVisualsPassesForTests++;
         ThemePaletteApplier.Apply(_settings.ThemeChoice, _settings.AccentChoice, _settings.GlowChoice, _settings.GlowIntensityPercent, _settings.CustomAccentHex, _settings.CustomGlowHex, _settings.MainBackgroundChoice, _settings.CustomMainBackgroundHex);
         ApplyTopmostState(forceNative: true);
+        ApplyTooltipDelays();
+        UpdatePictureAddressRow();
         // GIF controls visibility depends on "Show GIF controls only on GIFs": re-evaluate on every settings change
         // (the XAML default is hidden, so this also gives the always-shown default its first layout at startup).
         UpdateGifStatusUi();
+        ApplyExplorerNavPaneWidth();
+        ApplyExplorerTileInfo();
         KeyboardNavigation.SetTabNavigation(this, _settings.EnableTabFocusNavigation ? KeyboardNavigationMode.Continue : KeyboardNavigationMode.None);
         // Window.Background is a compositor contract, not the normal theme surface. Keep the
         // top-level transparent for the lifetime of the HWND and paint the ordinary application
@@ -611,7 +601,7 @@ public partial class MainWindow
             "Do nothing" => RightImageDragMode.Disabled,
             _ => RightImageDragMode.Smart
         };
-        Viewport.RightDragWindowMoveAllowed = WindowState == WindowState.Normal;
+        Viewport.RightDragWindowMoveAllowed = WindowState == WindowState.Normal && !WholeAppOverlayPositionLocked;
         Viewport.CustomGestures = _settings.CustomGestures;
         // 4.8.0: middle-drag pan, windowed wheel zoom and Ctrl+wheel zoom are gesture rows now
         // (drag.middleImage, wheel.*); the viewport's built-in defaults equal the old stock toggles.
@@ -621,17 +611,19 @@ public partial class MainWindow
         Viewport.InvertWheelDirection = _settings.InvertWheelDirection;
         // This gate is specifically for a viewport left-drag becoming a native window move.
         // Empty-background dragging has its own user toggle and consults the same state policy below.
-        Viewport.BackgroundWindowDragEnabled = IsLeftWindowMoveAllowedForCurrentState();
+        Viewport.BackgroundWindowDragEnabled = IsLeftWindowMoveAllowedForCurrentState() && !WholeAppOverlayPositionLocked;
         var useOverlayInteractions = _wholeAppOverlayMode && !_settings.WholeAppOverlayUseWindowedInteractions;
         // Selection zoom on/off is the Selection rows ("Ignore here" = old toggle off).
-        Viewport.ForceLeftDragMoveWindow = useOverlayInteractions;
+        // Round 3 #20: Overlay left-drag is decided by WholeAppOverlayBodyPointerPressed (move while the picture
+        // fits, pan when zoomed in); presses it lets through pan.
+        Viewport.ForceLeftDragMoveWindow = false;
         Viewport.SelectionClickZoomEnabled = !useOverlayInteractions;
         Viewport.SelectionRightClickZoomOutEnabled = !useOverlayInteractions;
         Viewport.ReverseSelectionZoomOutScale = _settings.ReverseSelectionZoomOutScale;
         Viewport.ZoomStepPercent = Glide.Core.ZoomStepPolicy.Clamp(_settings.ViewportZoomStepPercent);
         Viewport.PreserveManualZoomOnBitmapChange = _settings.PreserveManualZoomOnNavigate;
         Viewport.LeftDragMode = useOverlayInteractions
-            ? LeftImageDragMode.MoveWindow
+            ? LeftImageDragMode.Pan
             : _inputRouter.ResolveGesture("drag.leftImage", _settings.Gestures) switch
             {
                 // The left-drag row replaces the old "Left-drag action" choice. The mode still
@@ -649,18 +641,18 @@ public partial class MainWindow
             is not (GestureCatalog.Default or GestureCatalog.Nothing or GestureCatalog.PassThrough);
         UpdateSlideshowUi();
 
-        NavigationGroup.IsVisible = _settings.StatusShowNavigation;
-        ZoomGroup.IsVisible = _settings.StatusShowZoom;
-        SlideshowGroup.IsVisible = _settings.StatusShowSlideshow;
-        FitGroup.IsVisible = _settings.StatusShowFit;
-        InfoGroup.IsVisible = _settings.StatusShowInfo;
+        NavigationGroup.IsVisible = StatusBarOptionsView.ShowNavigation;
+        ZoomGroup.IsVisible = StatusBarOptionsView.ShowZoom;
+        SlideshowGroup.IsVisible = StatusBarOptionsView.ShowSlideshow;
+        FitGroup.IsVisible = StatusBarOptionsView.ShowFit;
+        InfoGroup.IsVisible = StatusBarOptionsView.ShowInfo;
         OverlayGroup.IsVisible = true;
-        OptionsGroup.IsVisible = _settings.StatusShowOptions;
-        StatusCloseButton.IsVisible = _settings.StatusShowClose;
+        OptionsGroup.IsVisible = StatusBarOptionsView.ShowOptions;
+        StatusCloseButton.IsVisible = StatusBarOptionsView.ShowClose;
         UpdateOverlayStatusButtons();
         ApplyStatusBarSize();
         UpdateViewportStatusInset();
-        CornerCounterHost.IsVisible = _settings.PictureCounterEnabled && !_wholeAppOverlayMode;
+        CornerCounterHost.IsVisible = OverlayOptionsView.PictureCounterEnabled && !_wholeAppOverlayMode;
         ApplyPictureCounterVisuals();
 
         // Keep fullscreen overlay chrome in sync when its auto-hide setting changes live.
@@ -668,7 +660,7 @@ public partial class MainWindow
 
         if (deferSecondaryChrome)
         {
-            ApplyStatusVisibility();
+            NotifyStatusChromeChanged();
             UpdateStatusStats();
             UpdateWindowTitle();
             Dispatcher.UIThread.Post(() =>
@@ -677,7 +669,7 @@ public partial class MainWindow
                 RebuildTitleActionStrip();
                 ApplyTabUtilityButtonVisibility();
                 if (_titleBarButtons.TryGetValue("window.alwaysOnTop", out var topmostButton)) SetActiveClass(topmostButton, ActiveAlwaysOnTop);
-                ApplyStatusVisibility();
+                NotifyStatusChromeChanged();
                 UpdateViewportScrollbars();
                 RebuildTabStrip();
                 RefreshDynamicTooltips();
@@ -690,7 +682,7 @@ public partial class MainWindow
         RebuildTitleActionStrip();
         ApplyTabUtilityButtonVisibility();
         if (_titleBarButtons.TryGetValue("window.alwaysOnTop", out var topmostButton)) SetActiveClass(topmostButton, ActiveAlwaysOnTop);
-        ApplyStatusVisibility();
+        NotifyStatusChromeChanged();
         UpdateViewportScrollbars();
         RebuildTabStrip();
         RefreshDynamicTooltips();
@@ -718,7 +710,7 @@ public partial class MainWindow
     private void ApplyStatusBarSize()
     {
         if (ViewerStatusSurface is null || StatusStatsText is null) return;
-        var normalized = _settings.StatusBarSize switch
+        var normalized = StatusBarOptionsView.Size switch
         {
             "Tiny" => "Tiny",
             "Very small" => "Very small",
@@ -739,9 +731,9 @@ public partial class MainWindow
             _ => (Height: 58d, MaxWidth: 1080d, Icon: 46d, StatsWidth: 250d, Font: 13.5d)
         };
 
-        var scale = Math.Clamp(_settings.StatusBarGlobalScalePercent, 60, 160) / 100.0;
+        var scale = Math.Clamp(StatusBarOptionsView.GlobalScalePercent, 60, 160) / 100.0;
         if (WindowState is WindowState.Maximized or WindowState.FullScreen)
-            scale *= 1.0 + Math.Clamp(_settings.StatusBarMaximizedBoostPercent, 0, 30) / 100.0;
+            scale *= 1.0 + Math.Clamp(StatusBarOptionsView.MaximizedBoostPercent, 0, 30) / 100.0;
         scale = Math.Clamp(scale, 0.08, 2.0);
 
         // Adaptive layout (ArrangeStatusControls): one row when everything fits; otherwise the stats
@@ -779,16 +771,16 @@ public partial class MainWindow
         StatusStatsText.FontSize = metrics.Font * scale;
 
         var visibleButtonCount = 0;
-        if (_settings.StatusShowZoom) visibleButtonCount += 2;
-        if (_settings.StatusShowFit) visibleButtonCount += 3;
-        if (_settings.StatusShowInfo) visibleButtonCount += 1;
-        if (_settings.StatusShowOptions) visibleButtonCount += 1;
+        if (StatusBarOptionsView.ShowZoom) visibleButtonCount += 2;
+        if (StatusBarOptionsView.ShowFit) visibleButtonCount += 3;
+        if (StatusBarOptionsView.ShowInfo) visibleButtonCount += 1;
+        if (StatusBarOptionsView.ShowOptions) visibleButtonCount += 1;
         visibleButtonCount += 2; // Save / Save as
         visibleButtonCount += _overlays?.HasOverlays == true ? 4 : 2; // save/clear only exist with overlays
-        if (_settings.StatusShowSlideshow) visibleButtonCount += 1;
-        if (_settings.StatusShowNavigation) visibleButtonCount += 4;
+        if (StatusBarOptionsView.ShowSlideshow) visibleButtonCount += 1;
+        if (StatusBarOptionsView.ShowNavigation) visibleButtonCount += 4;
         visibleButtonCount += 1; // collapse
-        if (_settings.StatusShowClose) visibleButtonCount += 1;
+        if (StatusBarOptionsView.ShowClose) visibleButtonCount += 1;
 
         double NaturalControlsWidth(double icon) => visibleButtonCount * (icon + 3) + 48;
 
@@ -797,7 +789,7 @@ public partial class MainWindow
         var controlsAvailable = Math.Max(baseIconSize * 2 + 8, surfaceWidth - 24);
         var rowsAtConfiguredSize = (int)Math.Ceiling(NaturalControlsWidth(baseIconSize) / Math.Max(1d, controlsAvailable));
         var iconSize = baseIconSize;
-        if (_settings.StatusBarAutoFit && rowsAtConfiguredSize > 2)
+        if (StatusBarOptionsView.AutoFit && rowsAtConfiguredSize > 2)
         {
             // Auto-resize: shrink only the buttons, and only enough to keep the controls within two
             // rows. The configured size stays authoritative and is restored automatically when the
@@ -827,7 +819,7 @@ public partial class MainWindow
         {
             // Same two layouts as the viewer's bar: stacked (info text on its own line, content-sized rows, the configured height is the
             // minimum) or the single fixed-height line.
-            var homeStacked = _settings.StatusStackInfoLine;
+            var homeStacked = StatusBarOptionsView.StackInfoLine;
             _homeSurface.ApplyStackedStatusLayout(homeStacked);
             _homeSurface.StatusSurface.Height = homeStacked ? double.NaN : metrics.Height * scale;
             _homeSurface.StatusSurface.MinHeight = homeStacked ? metrics.Height * scale : 0;
@@ -846,7 +838,7 @@ public partial class MainWindow
     {
         _settings.StatusAutoHide = enabled;
         SaveSettingsAndPublish();
-        ApplyStatusVisibility();
+        NotifyStatusChromeChanged();
     }
 
     /// <summary>
@@ -902,16 +894,16 @@ public partial class MainWindow
             {
                 _settings.FullscreenStatusAlwaysOn = !_settings.FullscreenStatusAlwaysOn;
                 SaveSettingsAndPublish();
-                ApplyStatusVisibility();
+                NotifyStatusChromeChanged();
             };
             pin.Icon = MenuIcon("Fullscreen");
             items.Add(pin);
             items.Add(new MenuItem { Header = "-" });
         }
-        var gifOnly = MenuActions.Tag(new MenuItem { Header = _settings.StatusGifControlsOnlyOnGifs ? "Show GIF controls only on GIFs  ✓" : "Show GIF controls only on GIFs", Icon = MenuIcon("Play") }, "setting.status.gifOnlyOnGifs");
+        var gifOnly = MenuActions.Tag(new MenuItem { Header = StatusBarOptionsView.GifControlsOnlyOnGifs ? "Show GIF controls only on GIFs  ✓" : "Show GIF controls only on GIFs", Icon = MenuIcon("Play") }, "setting.status.gifOnlyOnGifs");
         gifOnly.Click += (_, _) =>
         {
-            _settings.StatusGifControlsOnlyOnGifs = !_settings.StatusGifControlsOnlyOnGifs;
+            _settings.StatusGifControlsOnlyOnGifs = !StatusBarOptionsView.GifControlsOnlyOnGifs;
             SaveSettingsAndPublish();
             UpdateGifStatusUi();
             ApplyStatusBarSize();
@@ -920,31 +912,31 @@ public partial class MainWindow
         var customize = MenuActions.Tag(new MenuItem { Header = MenuActions.Header("Customize status-bar buttons…", ShortcutForAction("statusbar.customize")), Icon = MenuIcon("Settings") }, "statusbar.customize");
         customize.Click += async (_, _) => await ShowStatusBarCustomizerAsync();
         items.Add(customize);
-        var autoHideItem = MenuActions.Tag(new MenuItem { Header = _settings.StatusAutoHide ? "Auto-hide status bar  ✓" : "Auto-hide status bar", Icon = MenuIcon("Eye") }, "setting.status.autoHide");
-        autoHideItem.Click += (_, _) => SetStatusAutoHide(!_settings.StatusAutoHide);
+        var autoHideItem = MenuActions.Tag(new MenuItem { Header = StatusBarOptionsView.AutoHide ? "Auto-hide status bar  ✓" : "Auto-hide status bar", Icon = MenuIcon("Eye") }, "setting.status.autoHide");
+        autoHideItem.Click += (_, _) => SetStatusAutoHide(!StatusBarOptionsView.AutoHide);
         items.Add(autoHideItem);
         // The hover reveal (status.hoverWhenClosed) and its reveal-area adjustment live in Settings > Tabs & status bar only.
-        var reserveFit = MenuActions.Tag(new MenuItem { Header = _settings.StatusReserveFitSpace ? "Reserve status bar space when fitting  ✓" : "Reserve status bar space when fitting", Icon = MenuIcon("FitWindow") }, "setting.status.reserveFitSpace");
-        reserveFit.Click += (_, _) => { _settings.StatusReserveFitSpace = !_settings.StatusReserveFitSpace; SaveSettingsAndPublish(); UpdateViewportStatusInset(); };
+        var reserveFit = MenuActions.Tag(new MenuItem { Header = StatusBarOptionsView.ReserveFitSpace ? "Reserve status bar space when fitting  ✓" : "Reserve status bar space when fitting", Icon = MenuIcon("FitWindow") }, "setting.status.reserveFitSpace");
+        reserveFit.Click += (_, _) => { _settings.StatusReserveFitSpace = !StatusBarOptionsView.ReserveFitSpace; SaveSettingsAndPublish(); UpdateViewportStatusInset(); };
         items.Add(reserveFit);
-        var autoResize = MenuActions.Tag(new MenuItem { Header = _settings.StatusBarAutoFit ? "Auto-resize  ✓" : "Auto-resize", Icon = MenuIcon("Fit") }, "setting.status.autoResize");
+        var autoResize = MenuActions.Tag(new MenuItem { Header = StatusBarOptionsView.AutoFit ? "Auto-resize  ✓" : "Auto-resize", Icon = MenuIcon("Fit") }, "setting.status.autoResize");
         autoResize.Click += (_, _) =>
         {
-            _settings.StatusBarAutoFit = !_settings.StatusBarAutoFit;
+            _settings.StatusBarAutoFit = !StatusBarOptionsView.AutoFit;
             SaveSettingsAndPublish();
             ApplyStatusBarSize();
         };
         items.Add(autoResize);
         const string stackHeader = "Always stack the information on a separate line";
-        var stackInfo = MenuActions.Tag(new MenuItem { Header = _settings.StatusStackInfoLine ? stackHeader + "  ✓" : stackHeader, Icon = MenuIcon("StackLines") }, "setting.status.stackInfoLine");
-        stackInfo.Click += (_, _) => SetStatusStackInfoLine(!_settings.StatusStackInfoLine);
+        var stackInfo = MenuActions.Tag(new MenuItem { Header = StatusBarOptionsView.StackInfoLine ? stackHeader + "  ✓" : stackHeader, Icon = MenuIcon("StackLines") }, "setting.status.stackInfoLine");
+        stackInfo.Click += (_, _) => SetStatusStackInfoLine(!StatusBarOptionsView.StackInfoLine);
         items.Add(stackInfo);
         items.Add(new MenuItem { Header = "-" });
         // The six sizes live in one submenu instead of six top-level entries.
-        var sizeMenu = new MenuItem { Header = $"Size  ({_settings.StatusBarSize})", Icon = MenuIcon("Maximize") };
+        var sizeMenu = new MenuItem { Header = $"Size  ({StatusBarOptionsView.Size})", Icon = MenuIcon("Maximize") };
         foreach (var size in new[] { "Tiny", "Very small", "Small", "Medium", "Large", "Extra large" })
         {
-            var item = MenuActions.Tag(new MenuItem { Header = string.Equals(_settings.StatusBarSize, size, StringComparison.OrdinalIgnoreCase) ? $"{size}  ✓" : size }, "setting.status.size");
+            var item = MenuActions.Tag(new MenuItem { Header = string.Equals(StatusBarOptionsView.Size, size, StringComparison.OrdinalIgnoreCase) ? $"{size}  ✓" : size }, "setting.status.size");
             item.Click += (_, _) =>
             {
                 _settings.StatusBarSize = size;
@@ -955,21 +947,21 @@ public partial class MainWindow
             sizeMenu.Items.Add(item);
         }
         items.Add(sizeMenu);
-        var positionMenu = new MenuItem { Header = $"Position  ({_settings.StatusBarAlignment})", Icon = MenuIcon("Fit") };
+        var positionMenu = new MenuItem { Header = $"Position  ({StatusBarOptionsView.Alignment})", Icon = MenuIcon("Fit") };
         foreach (var position in new[] { "Center", "Left", "Right" })
         {
-            var item = MenuActions.Tag(new MenuItem { Header = string.Equals(_settings.StatusBarAlignment, position, StringComparison.OrdinalIgnoreCase) ? $"{position}  ✓" : position }, "setting.status.alignment");
+            var item = MenuActions.Tag(new MenuItem { Header = string.Equals(StatusBarOptionsView.Alignment, position, StringComparison.OrdinalIgnoreCase) ? $"{position}  ✓" : position }, "setting.status.alignment");
             item.Click += (_, _) =>
             {
                 _settings.StatusBarAlignment = position;
                 SaveSettingsAndPublish();
-                ApplyStatusVisibility();
+                NotifyStatusChromeChanged();
             };
             positionMenu.Items.Add(item);
         }
         items.Add(positionMenu);
-        var cornerItem = MenuActions.Tag(new MenuItem { Header = _settings.StatusCollapsedToCorner ? "Collapsed button in lower-right corner  ✓" : "Collapsed button in lower-right corner", Icon = MenuIcon("Collapse") }, "setting.status.collapsedCorner");
-        cornerItem.Click += (_, _) => { _settings.StatusCollapsedToCorner = !_settings.StatusCollapsedToCorner; SaveSettingsAndPublish(); ApplyStatusVisibility(); };
+        var cornerItem = MenuActions.Tag(new MenuItem { Header = StatusBarOptionsView.CollapsedToCorner ? "Collapsed button in lower-right corner  ✓" : "Collapsed button in lower-right corner", Icon = MenuIcon("Collapse") }, "setting.status.collapsedCorner");
+        cornerItem.Click += (_, _) => { _settings.StatusCollapsedToCorner = !StatusBarOptionsView.CollapsedToCorner; SaveSettingsAndPublish(); NotifyStatusChromeChanged(); };
         items.Add(cornerItem);
         menu.ItemsSource = items;
         return PrepareOwnedContextMenu(menu);

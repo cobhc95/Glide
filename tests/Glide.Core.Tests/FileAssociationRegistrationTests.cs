@@ -6,6 +6,7 @@ namespace Glide.Core.Tests;
 /// Policy tests for the automatic Windows Open With integration. These exercise the pure decision
 /// function so they never touch the real registry.
 /// </summary>
+[Trait("Area", "Shell")]
 public sealed class FileAssociationRegistrationTests
 {
     [Fact]

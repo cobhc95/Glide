@@ -4,7 +4,6 @@ using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using Glide.Core.Reset;
 
 namespace Glide.Core.Data;
 

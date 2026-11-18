@@ -3,6 +3,7 @@ using Xunit;
 
 namespace Glide.Input.Tests;
 
+[Trait("Area", "Hotkeys")]
 public sealed class InputRouterTests
 {
     [Theory]

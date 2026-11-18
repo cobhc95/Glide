@@ -11,7 +11,7 @@ namespace Glide.App.Platform;
 /// abstracts poorly: decoded image pixels (CF_DIBV5) and the underlying image file (CF_HDROP).
 /// No UI state lives here; callers supply an already-decoded bitmap/path.
 /// </summary>
-internal static class WindowsClipboard
+internal static partial class WindowsClipboard
 {
     private const uint CfDibV5 = 17;
     private const uint CfHDrop = 15;
@@ -196,31 +196,39 @@ internal static class WindowsClipboard
         };
     }
 
-    [DllImport("user32.dll", SetLastError = true)]
+    [LibraryImport("user32.dll", SetLastError = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool OpenClipboard(IntPtr owner);
+    private static partial bool OpenClipboard(IntPtr owner);
 
-    [DllImport("user32.dll", SetLastError = true)]
+    [LibraryImport("user32.dll", SetLastError = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool CloseClipboard();
+    private static partial bool CloseClipboard();
 
-    [DllImport("user32.dll", SetLastError = true)]
+    [LibraryImport("user32.dll", SetLastError = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool EmptyClipboard();
+    private static partial bool EmptyClipboard();
 
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern IntPtr SetClipboardData(uint format, IntPtr memory);
+    [LibraryImport("user32.dll", SetLastError = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    private static partial IntPtr SetClipboardData(uint format, IntPtr memory);
 
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern IntPtr GlobalAlloc(uint flags, nuint bytes);
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    private static partial IntPtr GlobalAlloc(uint flags, nuint bytes);
 
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern IntPtr GlobalLock(IntPtr memory);
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    private static partial IntPtr GlobalLock(IntPtr memory);
 
-    [DllImport("kernel32.dll", SetLastError = true)]
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool GlobalUnlock(IntPtr memory);
+    private static partial bool GlobalUnlock(IntPtr memory);
 
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern IntPtr GlobalFree(IntPtr memory);
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    private static partial IntPtr GlobalFree(IntPtr memory);
 }

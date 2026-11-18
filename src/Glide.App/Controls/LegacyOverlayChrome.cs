@@ -59,8 +59,7 @@ public sealed class LegacyOverlayChrome : Control
         context.DrawRectangle(glassFill, null, slider, 10, 10);
         var sx = slider.Center.X;
         context.DrawLine(new Pen(muted, 2), new Point(sx, slider.Top + 10), new Point(sx, slider.Bottom - 10));
-        var t = OverlayChromePolicy.ClampItemOpacity(OpacityValue);
-        var ty = slider.Bottom - 10 - (slider.Height - 20) * t;
+        var ty = OverlayChromePolicy.WholeWindowOpacityTrackY(slider, OpacityValue);
         context.DrawEllipse(accent, null, new Point(sx, ty), 5, 5);
 
         DrawZoomButton(context, ZoomOutRect(Bounds.Size), "−", glassFill, accent, muted);

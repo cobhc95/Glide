@@ -8,6 +8,7 @@ namespace Glide.Core.Tests;
 /// an orientation-5..8 photo arrives as a rotated bitmap. The loader must align the reported source
 /// size with the bitmap's actual orientation or the viewport stretches it to the wrong aspect ratio.
 /// </summary>
+[Trait("Area", "Decode")]
 public sealed class ImageOrientationNormalizationTests
 {
     [Fact]

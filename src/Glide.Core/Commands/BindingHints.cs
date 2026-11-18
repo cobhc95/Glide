@@ -1,5 +1,11 @@
 namespace Glide.Core.Commands;
 
+/// <summary>One part of a hint line drawn as a key chip and a word: [Middle] close (5.1.0 tab hover card).</summary>
+public readonly record struct HintChip(string Input, string Action)
+{
+    public override string ToString() => $"[{Input}] {Action}";
+}
+
 /// <summary>
 /// Pure text helpers for hints that describe a user-configurable binding ("Double-click to close", "Open an image with
 /// Ctrl+O"). Every such string is derived from the live hotkey map / gesture bindings through here, so a hint never
@@ -46,24 +52,41 @@ public static class BindingHints
         null => slotId
     };
 
-    /// <summary>
-    /// One-line mouse hint of a tab's tooltip (5.0.6 hover card): "Drag to move · Middle-click to close · Right-click for
-    /// more". The close part names the first input that really closes the tab (middle-click, else double-click; a custom
-    /// gesture on the same input counts) and is left out when neither does; the right-click part only while that slot
-    /// still opens the menu.
-    /// </summary>
-    public static string TabMouseHint(IReadOnlyDictionary<string, string>? bindings, IReadOnlyList<CustomGesture>? customGestures)
+    /// <summary>The short chip label of a slot's input: "Middle", "Double-click", "Right".</summary>
+    public static string InputChip(string slotId) => GestureCatalog.FindSlot(slotId)?.Input switch
     {
-        var parts = new List<string> { "Drag to move" };
+        GestureInputs.LeftClick => "Click",
+        GestureInputs.RightClick => "Right",
+        GestureInputs.MiddleClick => "Middle",
+        GestureInputs.DoubleLeft => "Double-click",
+        GestureInputs.DoubleRight => "Double-right",
+        { } other => GestureInputs.BaseLabel(other),
+        null => slotId
+    };
+
+    /// <summary>
+    /// Mouse hint chips of a tab's hover card (5.1.0, design B): [Drag] move · [Middle] close · [Right] more ·
+    /// [Ctrl+Wheel] size. The close chip names the first input that really closes the tab (middle-click, else
+    /// double-click; a custom gesture on the same input counts) and is left out when neither does; the right-click chip
+    /// only while that slot still opens the menu; the size chip shows the "Resize preview with wheel and" key
+    /// (<paramref name="resizeModifier"/>) and is left out when it is None.
+    /// </summary>
+    public static IReadOnlyList<HintChip> TabMouseHintChips(IReadOnlyDictionary<string, string>? bindings, IReadOnlyList<CustomGesture>? customGestures,
+        string? resizeModifier)
+    {
+        var chips = new List<HintChip> { new("Drag", "move") };
         var closer = new[] { "tabs.middleClick", "tabs.doubleClick" }
             .FirstOrDefault(slot => GestureRuns(slot, GestureCatalog.CloseTab, bindings, customGestures, defaultRunsAction: true));
-        if (closer is not null)
-        {
-            var phrase = InputPhrase(closer);
-            parts.Add($"{char.ToUpperInvariant(phrase[0])}{phrase[1..]} to close");
-        }
+        if (closer is not null) chips.Add(new(InputChip(closer), "close"));
         if (GestureRuns("tabs.rightClick", GestureCatalog.ContextMenu, bindings, customGestures, defaultRunsAction: true))
-            parts.Add("Right-click for more");
-        return string.Join(" · ", parts);
+            chips.Add(new("Right", "more"));
+        var modifier = Glide.Core.Workspace.TabPreviewSize.NormalizeModifier(resizeModifier);
+        if (!string.Equals(modifier, "None", StringComparison.OrdinalIgnoreCase)) chips.Add(new($"{modifier}+Wheel", "size"));
+        return chips;
     }
+
+    /// <summary>The chips as one plain line ("[Drag] move · [Middle] close · …"), e.g. for diagnostics and tests.</summary>
+    public static string TabMouseHint(IReadOnlyDictionary<string, string>? bindings, IReadOnlyList<CustomGesture>? customGestures,
+        string? resizeModifier = "None") =>
+        string.Join(" · ", TabMouseHintChips(bindings, customGestures, resizeModifier));
 }

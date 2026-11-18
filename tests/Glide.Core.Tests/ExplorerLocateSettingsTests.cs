@@ -12,6 +12,7 @@ namespace Glide.Core.Tests;
 /// "Alternative file manager (.exe)".
 /// </summary>
 [Collection(AvaloniaHeadlessCollection.Name)]
+[Trait("Area", "Explorer")]
 public sealed class ExplorerLocateSettingsTests
 {
     public ExplorerLocateSettingsTests(AvaloniaHeadlessFixture fixture) => _ = fixture;
@@ -57,7 +58,7 @@ public sealed class ExplorerLocateSettingsTests
             }
             finally { SettingsStore.SettingsDirectoryOverrideForTests.Value = previous; }
         });
-        try { Directory.Delete(root, true); } catch { }
+        TempDir.TryDelete(root);
     }
 
     [Fact]

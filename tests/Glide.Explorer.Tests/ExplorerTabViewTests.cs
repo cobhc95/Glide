@@ -9,6 +9,7 @@ namespace Glide.Explorer.Tests;
 
 /// <summary>Views (Extra large ... Details), sorting, filtering, scrolling, thumbnails and the rendered look of the Explorer tab.</summary>
 [Collection(ExplorerHeadlessCollection.Name)]
+[Trait("Area", "Explorer")]
 public sealed class ExplorerTabViewTests
 {
     public ExplorerTabViewTests() { }
@@ -159,33 +160,33 @@ public sealed class ExplorerTabViewTests
             IEnumerable<ExplorerEntry> OnlyFiles() => h.Entries.Where(e => !e.IsDirectory);
 
             var entries = await OpenSortMenu();
-            Assert.Equal(new[] { "Name  ✓", "Date modified", "Type", "Size", "-", "Ascending  ✓", "Descending", "-", "Group folders first  ✓", "Keep selection in view" }, Headers(entries).ToArray());
-            Choose(entries, "Size");
+            Assert.Equal(new[] { "Name ▲  ✓", "Name ▼", "Date modified ▲", "Date modified ▼", "Type ▲", "Type ▼", "File size ▲", "File size ▼", "Dimensions", "-", "Group folders first  ✓", "Keep selection in view" }, Headers(entries).ToArray());
+            Choose(entries, "File size ▲");
             await h.SettleAsync();
             Assert.Equal(OnlyFiles().OrderBy(f => f.Size).ThenBy(f => f.Name, StringComparer.OrdinalIgnoreCase).Select(f => f.Name), OnlyFiles().Select(f => f.Name));
             Assert.Equal(0, OnlyFiles().First().Size - OnlyFiles().Min(f => f.Size)); // smallest first
 
             entries = await OpenSortMenu();
-            Assert.Contains("Size  ✓", Headers(entries));
-            Choose(entries, "Descending");
+            Assert.Contains("File size ▲  ✓", Headers(entries));
+            Choose(entries, "File size ▼");
             await h.SettleAsync();
             Assert.Equal("big.png", OnlyFiles().First().Name);
             Assert.Equal(new[] { "Alpha", "Beta", "Gamma" }, h.Names.Take(3).ToArray()); // folders stay first
 
             entries = await OpenSortMenu();
-            Choose(entries, "Date modified");
+            Choose(entries, "Date modified ▼");
             await h.SettleAsync();
-            Assert.Equal("small.png", OnlyFiles().First().Name); // newest first (Descending is still on)
+            Assert.Equal("small.png", OnlyFiles().First().Name); // newest first
             Assert.Equal("a.png", OnlyFiles().Last().Name);      // oldest last
 
             entries = await OpenSortMenu();
-            Choose(entries, "Ascending");
+            Choose(entries, "Date modified ▲");
             await h.SettleAsync();
             Assert.Equal("a.png", OnlyFiles().First().Name);
 
             // Group folders first off: files and folders interleave by name ("a.png" < "Alpha" case-insensitively? no: Alpha < a.png? natural order decides).
             entries = await OpenSortMenu();
-            Choose(entries, "Name");
+            Choose(entries, "Name ▲");
             await h.SettleAsync();
             entries = await OpenSortMenu();
             Choose(entries, "Group folders first");
@@ -195,7 +196,7 @@ public sealed class ExplorerTabViewTests
             Assert.Equal(natural, names); // plain natural order, folders no longer pinned to the top
             Assert.NotEqual(new[] { "Alpha", "Beta", "Gamma" }, names.Take(3).ToArray());
             entries = await OpenSortMenu();
-            Assert.Contains("Name  ✓", Headers(entries));
+            Assert.Contains("Name ▲  ✓", Headers(entries));
             Assert.DoesNotContain("Group folders first  ✓", Headers(entries));
         }, SortTree);
     }
@@ -218,6 +219,45 @@ public sealed class ExplorerTabViewTests
             File.WriteAllBytes(Path.Combine(root, "img10.png"), ExplorerHarness.Png(8, 8, 1, 1, 1));
             File.WriteAllBytes(Path.Combine(root, "img2.png"), ExplorerHarness.Png(8, 8, 1, 1, 1));
             File.WriteAllBytes(Path.Combine(root, "photo.bmp"), new byte[64]);
+        });
+    }
+
+    [Fact]
+    public async Task Dimensions_submenu_sorts_by_width_height_and_total_pixels()
+    {
+        await ExplorerHarness.Run(async h =>
+        {
+            List<MenuItem> Dimensions()
+            {
+                h.Click(h.EmptySpotInList(), MouseButton.Right);
+                var sortBy = h.ActiveMenu!.Items.OfType<MenuItem>().First(i => (string?)i.Header == "Sort by").Items.OfType<MenuItem>();
+                return sortBy.First(i => i.Header!.ToString()!.StartsWith("Dimensions", StringComparison.Ordinal)).Items.OfType<MenuItem>().ToList();
+            }
+            async Task Choose(string header)
+            {
+                var items = Dimensions();
+                Assert.Equal(new[] { "Width ▲", "Width ▼", "Height ▲", "Height ▼", "Total pixels ▲", "Total pixels ▼" },
+                    items.Select(i => i.Header!.ToString()!.Replace("  ✓", "")).ToArray());
+                items.First(i => i.Header!.ToString()!.StartsWith(header, StringComparison.Ordinal)).RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
+                h.Call("CloseActiveOwnedMenu", new object?[] { null });
+                await h.SettleAsync();
+            }
+            string[] Files() => h.Entries.Where(e => !e.IsDirectory).Select(e => e.Name).ToArray();
+
+            await Choose("Width ▲");
+            Assert.Equal(new[] { "tall.png", "square.png", "wide.png" }, Files());   // widths 10, 30, 60
+            await Choose("Height ▼");
+            Assert.Equal(new[] { "tall.png", "square.png", "wide.png" }, Files());   // heights 80, 30, 5
+            await Choose("Total pixels ▲");
+            Assert.Equal(new[] { "wide.png", "tall.png", "square.png" }, Files());   // 300, 800, 900
+            Assert.Contains("Total pixels ▲  ✓", Dimensions().Select(i => i.Header!.ToString()));
+            Assert.Equal("Total pixels", h.Surface.FindControl<TextBlock>("BrowserSortText")!.Text);
+            Assert.Equal("▲", h.Surface.FindControl<TextBlock>("BrowserSortDirection")!.Text);
+        }, root =>
+        {
+            File.WriteAllBytes(Path.Combine(root, "wide.png"), ExplorerHarness.Png(60, 5, 1, 1, 1));
+            File.WriteAllBytes(Path.Combine(root, "tall.png"), ExplorerHarness.Png(10, 80, 1, 1, 1));
+            File.WriteAllBytes(Path.Combine(root, "square.png"), ExplorerHarness.Png(30, 30, 1, 1, 1));
         });
     }
 

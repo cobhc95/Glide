@@ -1,6 +1,7 @@
 
 namespace Glide.Core.Tests;
 
+[Trait("Area", "Overlay")]
 public sealed class OverlayCollisionPolicyTests
 {
     [Fact]

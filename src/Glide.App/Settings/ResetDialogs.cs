@@ -5,6 +5,7 @@ using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Glide.App.Services;
+using Glide.Core.Data;
 using Glide.Core.Reset;
 
 namespace Glide.App.Settings;

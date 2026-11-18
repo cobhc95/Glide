@@ -4,6 +4,7 @@ using Glide.Imaging;
 namespace Glide.Core.Tests;
 
 // Source-text contract kept: this asserts on production source (UI code-behind, native/installer files or a repo-wide scan) that cannot be run headlessly; behavioural coverage lives in the other test files.
+[Trait("Area", "Security")]
 public sealed class SecurityAuditTests : IDisposable
 {
     private readonly string _tempCacheDir;
@@ -295,6 +296,7 @@ public sealed class SecurityAuditTests : IDisposable
 
 /// <summary>Settings/profile import must never decide which executables Glide launches.</summary>
 [Collection(AvaloniaHeadlessCollection.Name)]
+[Trait("Area", "Security")]
 public sealed class SettingsImportSecurityTests
 {
     public SettingsImportSecurityTests(AvaloniaHeadlessFixture fixture) { _ = fixture; }
@@ -302,8 +304,8 @@ public sealed class SettingsImportSecurityTests
     [Fact]
     public void Imported_files_keep_this_pcs_external_programs()
     {
-        var current = new Glide.App.Settings.GlideSettingsState { ExternalProgram1 = @"C:\Tools\Editor.exe" };
-        var imported = new Glide.App.Settings.GlideSettingsState
+        var current = new Glide.Core.Settings.GlideSettingsState { ExternalProgram1 = @"C:\Tools\Editor.exe" };
+        var imported = new Glide.Core.Settings.GlideSettingsState
         {
             ExternalProgram1 = @"C:\Windows\System32\mshta.exe",
             ExternalProgram2 = @"\\attacker\share\run.exe",
@@ -315,7 +317,7 @@ public sealed class SettingsImportSecurityTests
         Assert.Equal("", imported.ExternalProgram2);
         Assert.Equal("", imported.ExternalProgram3);
 
-        var same = new Glide.App.Settings.GlideSettingsState { ExternalProgram1 = @"c:\tools\editor.exe" };
+        var same = new Glide.Core.Settings.GlideSettingsState { ExternalProgram1 = @"c:\tools\editor.exe" };
         Assert.False(Glide.App.Settings.SettingsWindow.KeepLocalLaunchTargets(same, current));
     }
 

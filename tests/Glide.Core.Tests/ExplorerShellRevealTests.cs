@@ -8,6 +8,7 @@ namespace Glide.Core.Tests;
 /// file's folder: the whole "/select,path" token was quoted by ArgumentList, which explorer.exe cannot
 /// parse. The command line must be /select,"full path" (quotes only around the path).
 /// </summary>
+[Trait("Area", "Explorer")]
 public sealed class ExplorerShellRevealTests
 {
     [Fact]

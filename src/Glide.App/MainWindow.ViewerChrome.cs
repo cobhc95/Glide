@@ -87,7 +87,7 @@ public partial class MainWindow
         _selectionZoomDemandPath = null;
         applyToViewport();
 
-        var scope = _settings.StatusFitScope;
+        var scope = StatusBarOptionsView.FitScope;
         if (string.Equals(scope, "Only the current image", StringComparison.OrdinalIgnoreCase))
             return;
 
@@ -154,7 +154,9 @@ public partial class MainWindow
         else if (ReferenceEquals(button, CaptionCloseButton)) CaptionCloseClicked(button, new RoutedEventArgs());
     }
 
-    private void InfoClicked(object? sender, RoutedEventArgs e)
+    private void InfoClicked(object? sender, RoutedEventArgs e) => ToggleImageInfoPanel();
+
+    private void ToggleImageInfoPanel()
     {
         if (_wholeAppOverlayMode) { ImageInfoOverlay.IsVisible = false; return; }
         if (string.IsNullOrWhiteSpace(_currentPath)) return;
@@ -205,7 +207,7 @@ public partial class MainWindow
     private void CollapseStatusClicked(object? sender, RoutedEventArgs e)
     {
         // on an auto-hide bar the button is the auto-hide toggle: a click keeps the bar shown.
-        if (_settings.StatusAutoHide && !_statusCollapsed)
+        if (StatusBarOptionsView.AutoHide && !_statusCollapsed)
         {
             SetStatusAutoHide(false);
             UpdateCollapseButtonGlyphs();
@@ -219,7 +221,7 @@ public partial class MainWindow
             return;
         }
         _statusCollapsed = true;
-        ApplyStatusVisibility();
+        NotifyStatusChromeChanged();
         _diagnostics.Write("status", "collapsed", new { surface = HomeHost.IsVisible ? "home" : "viewer" });
     }
 
@@ -232,7 +234,7 @@ public partial class MainWindow
     /// </summary>
     private void StatusFileNamePointerPressed(object? sender, PointerPressedEventArgs e)
     {
-        if (!_settings.StatusFileNameClickActions || string.IsNullOrWhiteSpace(_currentPath)) return;
+        if (!StatusBarOptionsView.FileNameClickActions || string.IsNullOrWhiteSpace(_currentPath)) return;
         if (!e.GetCurrentPoint(StatusStatsText).Properties.IsLeftButtonPressed) return;
         e.Handled = true;
         _statusFileNameClickTimer?.Stop();
@@ -255,9 +257,9 @@ public partial class MainWindow
     {
         if (e.InitialPressMouseButton != MouseButton.Right) return;
         e.Handled = true;
-        SetStatusAutoHide(!_settings.StatusAutoHide);
+        SetStatusAutoHide(!StatusBarOptionsView.AutoHide);
         UpdateCollapseButtonGlyphs();
-        ShowViewerNotice(_settings.StatusAutoHide ? "Status bar auto-hide on" : "Status bar auto-hide off");
+        ShowViewerNotice(StatusBarOptionsView.AutoHide ? "Status bar auto-hide on" : "Status bar auto-hide off");
     }
 
     private void StatusCollapseButtonContextRequested(object? sender, ContextRequestedEventArgs e) => e.Handled = true;
@@ -268,11 +270,13 @@ public partial class MainWindow
         _statusCollapsed = false;
         _statusSessionClosed = false;
         SaveSettingsAndPublish();
-        ApplyStatusVisibility();
+        NotifyStatusChromeChanged();
         _diagnostics.Write("status", "expanded", new { surface = HomeHost.IsVisible ? "home" : "viewer" });
     }
 
-    private void CloseStatusClicked(object? sender, RoutedEventArgs e)
+    private void CloseStatusClicked(object? sender, RoutedEventArgs e) => CloseStatusSurface();
+
+    private void CloseStatusSurface()
     {
         // X is a real close, not a temporary hide. Persist the status surface off and do not leave
         // a restore affordance or hover target behind. Restore explicitly via canvas View > Show status bar.
@@ -280,7 +284,7 @@ public partial class MainWindow
         _statusCollapsed = false;
         _statusSessionClosed = false;
         SaveSettingsAndPublish();
-        ApplyStatusVisibility();
+        NotifyStatusChromeChanged();
         _diagnostics.Write("status", "closed", new { persisted = true });
     }
 
@@ -300,7 +304,9 @@ public partial class MainWindow
         return false;
     }
 
-    private void TransparencyClicked(object? sender, RoutedEventArgs e)
+    private void TransparencyClicked(object? sender, RoutedEventArgs e) => ToggleTransparencyPanel();
+
+    private void ToggleTransparencyPanel()
     {
         TransparencyPanel.IsVisible = !TransparencyPanel.IsVisible;
         TransparencySlider.Value = Math.Round(_sessionOpacity * 100);
@@ -309,14 +315,16 @@ public partial class MainWindow
         _diagnostics.Write("window", "transparency_panel_toggled", new { visible = TransparencyPanel.IsVisible, percent = (int)Math.Round(_sessionOpacity * 100) });
     }
 
-    private void TransparencyResetClicked(object? sender, RoutedEventArgs e)
+    private void TransparencyResetClicked(object? sender, RoutedEventArgs e) => ResetWindowTransparency();
+
+    private void ResetWindowTransparency()
     {
         TransparencySlider.Value = 100;
         TransparencyPanel.IsVisible = false;
         _diagnostics.Write("window", "transparency_reset", new { percent = 100 });
     }
 
-    private bool ActiveAlwaysOnTop => _wholeAppOverlayMode ? _settings.OverlayAlwaysOnTop : _settings.AlwaysOnTop;
+    private bool ActiveAlwaysOnTop => _wholeAppOverlayMode ? OverlayOptionsView.AlwaysOnTop : _settings.AlwaysOnTop;
     private bool HardAlwaysOnTop => !string.Equals(_settings.AlwaysOnTopMode, "Soft", StringComparison.OrdinalIgnoreCase);
 
     private static string NormalizeOverlayPlacementKey(string path)
@@ -400,6 +408,9 @@ public partial class MainWindow
             Width = Math.Max(80, width);
             Height = Math.Max(80, height);
             Position = position;
+            // A remembered spot may have been partly under the taskbar or on a monitor that is now smaller;
+            // open fully inside the work area so the bottom button bar is always reachable (round 3 #26).
+            KeepWholeAppOverlayInsideWorkArea();
             _wholeAppOverlayPlacementPath = path;
             Viewport.Fit();
             Dispatcher.UIThread.Post(AlignWholeAppOverlayChromeToPixels, DispatcherPriority.Render);
@@ -439,7 +450,7 @@ public partial class MainWindow
         if (HasOpenPopupWindow(hwnd)) return;
         try
         {
-            SetWindowPos(hwnd, new IntPtr(-1), 0, 0, 0, 0,
+            Platform.Native.User32.SetWindowPos(hwnd, new IntPtr(-1), 0, 0, 0, 0,
                 SwpNoMove | SwpNoSize | SwpNoActivate | SwpNoOwnerZOrder | SwpNoSendChanging);
         }
         catch { /* z-order change failed; the window keeps its current order */ }
@@ -511,6 +522,7 @@ public partial class MainWindow
     private ContextMenu PrepareOwnedContextMenu(ContextMenu menu)
     {
         IDisposable? scope = null;
+        SubmenuHoverSync.Attach(menu);
         menu.Opened += (_, _) => { scope ??= EnterTopmostTransient(); _activeOwnedMenu = menu; };
         menu.Closed += (_, _) =>
         {

@@ -14,9 +14,21 @@ namespace Glide.Explorer.Tests;
 /// 10. which tab becomes active after the active tab is closed (previously used tab when Ctrl+Tab is MRU).
 /// </summary>
 [Collection(ExplorerHeadlessCollection.Name)]
+[Trait("Area", "Tabs")]
 public sealed class TabOpenCloseTests
 {
     private static string Img(ExplorerHarness h, string name) => Path.Combine(h.Root, name);
+
+    /// <summary>
+    /// These tests drive the general new-tab rules through a middle-click. Since 5.1.0 middle-click has its own side and
+    /// position settings, so the click first sets them to follow the general ones (as they were before 5.1.0).
+    /// </summary>
+    private static void MiddleClick(ExplorerHarness h, string name, RawInputModifiers modifiers = RawInputModifiers.None)
+    {
+        h.Settings.MiddleClickNewTabPosition = MiddleClickPositions.SameAsNewTabs;
+        h.Settings.MiddleClickNewTabSide = h.Settings.SwitchToNewTabs ? MiddleClickSides.Foreground : MiddleClickSides.Background;
+        h.Click(name, MouseButton.Middle, modifiers);
+    }
 
     /// <summary>Adds a Home tab to the right of the Explorer tab without activating it: [Home, Explorer, Home].</summary>
     private static Guid AddHomeToTheRight(ExplorerHarness h)
@@ -62,7 +74,7 @@ public sealed class TabOpenCloseTests
             h.Settings.SwitchToNewTabs = false; // background, explicitly (the default is foreground since 5.0.6)
             var explorer = h.Workspace.Active!.Id;
             AddHomeToTheRight(h);
-            h.Click("b.png", MouseButton.Middle);
+            MiddleClick(h, "b.png");
             await h.WaitUntil(() => h.Workspace.Tabs.OfType<ImageTabState>().Any(), "new image tab");
             Assert.Equal(explorer, h.Workspace.Active!.Id);
             Assert.Equal(IndexOf(h, explorer) + 1, IndexOf(h, ImageTab(h, "b.png").Id));
@@ -77,7 +89,7 @@ public sealed class TabOpenCloseTests
             Assert.True(h.Settings.SwitchToNewTabs); // 5.0.6: "Open new tabs in the foreground" is on by default
             var explorer = h.Workspace.Active!.Id;
             AddHomeToTheRight(h);
-            h.Click("b.png", MouseButton.Middle);
+            MiddleClick(h, "b.png");
             await h.WaitUntil(() => h.Workspace.Active is ImageTabState, "switched to the new tab");
             Assert.Equal(Img(h, "b.png"), ((ImageTabState)h.Workspace.Active!).Path);
             Assert.Equal(IndexOf(h, explorer) + 1, h.Workspace.ActiveIndex);
@@ -90,10 +102,10 @@ public sealed class TabOpenCloseTests
         await ExplorerHarness.Run(async h =>
         {
             h.Settings.SwitchToNewTabs = false; // background, explicitly (the default is foreground since 5.0.6)
-            h.Settings.NewTabModifiers = true;
+            h.Settings.NewTabPositionKey = NewTabKeys.Alt; h.Settings.NewTabForegroundKey = NewTabKeys.Shift; // the 5.0.6 Shift / Alt scheme
             var explorer = h.Workspace.Active!.Id;
             AddHomeToTheRight(h);
-            h.Click("b.png", MouseButton.Middle, RawInputModifiers.Shift);
+            MiddleClick(h, "b.png", RawInputModifiers.Shift);
             await h.WaitUntil(() => h.Workspace.Active is ImageTabState, "Shift+middle-click switched to the new tab");
             Assert.Equal(Img(h, "b.png"), ((ImageTabState)h.Workspace.Active!).Path);
             Assert.Equal(IndexOf(h, explorer) + 1, h.Workspace.ActiveIndex); // still next to the Explorer tab
@@ -101,15 +113,15 @@ public sealed class TabOpenCloseTests
     }
 
     [Fact]
-    public async Task Without_the_opt_in_Shift_and_Alt_do_not_change_how_a_new_tab_opens()
+    public async Task With_no_keys_chosen_Shift_and_Alt_do_not_change_how_a_new_tab_opens()
     {
         await ExplorerHarness.Run(async h =>
         {
             h.Settings.SwitchToNewTabs = false; // background, explicitly (the default is foreground since 5.0.6)
-            Assert.False(h.Settings.NewTabModifiers);
+            Assert.Equal((NewTabKeys.None, NewTabKeys.None), (h.Settings.NewTabPositionKey, h.Settings.NewTabForegroundKey)); // both None by default
             var explorer = h.Workspace.Active!.Id;
             AddHomeToTheRight(h);
-            h.Click("b.png", MouseButton.Middle, RawInputModifiers.Shift | RawInputModifiers.Alt);
+            MiddleClick(h, "b.png", RawInputModifiers.Shift | RawInputModifiers.Alt);
             await h.WaitUntil(() => h.Workspace.Tabs.OfType<ImageTabState>().Any(), "new image tab");
             Assert.Equal(explorer, h.Workspace.Active!.Id);                                   // still in the background
             Assert.Equal(IndexOf(h, explorer) + 1, IndexOf(h, ImageTab(h, "b.png").Id));     // still next to the current tab
@@ -122,9 +134,27 @@ public sealed class TabOpenCloseTests
         await ExplorerHarness.Run(async h =>
         {
             h.Settings.SwitchToNewTabs = false; // background, explicitly (the default is foreground since 5.0.6)
-            h.Settings.NewTabModifiers = true;
-            h.Click("c.png", MouseButton.Middle, RawInputModifiers.Control | RawInputModifiers.Shift);
+            h.Settings.NewTabPositionKey = NewTabKeys.Alt; h.Settings.NewTabForegroundKey = NewTabKeys.Shift; // the 5.0.6 Shift / Alt scheme
+            MiddleClick(h, "c.png", RawInputModifiers.Control | RawInputModifiers.Shift);
             await h.WaitUntil(() => h.Workspace.Active is ImageTabState, "Ctrl+Shift+middle-click switched to the new tab");
+            Assert.Equal(Img(h, "c.png"), ((ImageTabState)h.Workspace.Active!).Path);
+        });
+    }
+
+    [Fact]
+    public async Task Round3_18_the_chosen_keys_apply_whichever_keys_they_are()
+    {
+        await ExplorerHarness.Run(async h =>
+        {
+            h.Settings.SwitchToNewTabs = false;
+            h.Settings.NewTabForegroundKey = NewTabKeys.Ctrl; // Ctrl now brings the tab to the front ...
+            h.Settings.NewTabPositionKey = NewTabKeys.None;
+            var tabs = h.Workspace.Tabs.Count;
+            MiddleClick(h, "b.png", RawInputModifiers.Shift); // ... and Shift (not chosen) does nothing
+            await h.WaitUntil(() => h.Workspace.Tabs.Count == tabs + 1, "Shift+middle-click opened a tab");
+            Assert.IsNotType<ImageTabState>(h.Workspace.Active);
+            MiddleClick(h, "c.png", RawInputModifiers.Control);
+            await h.WaitUntil(() => h.Workspace.Active is ImageTabState, "Ctrl+middle-click switched to the new tab");
             Assert.Equal(Img(h, "c.png"), ((ImageTabState)h.Workspace.Active!).Path);
         });
     }
@@ -135,10 +165,10 @@ public sealed class TabOpenCloseTests
         await ExplorerHarness.Run(async h =>
         {
             h.Settings.SwitchToNewTabs = false; // background, explicitly (the default is foreground since 5.0.6)
-            h.Settings.NewTabModifiers = true;
+            h.Settings.NewTabPositionKey = NewTabKeys.Alt; h.Settings.NewTabForegroundKey = NewTabKeys.Shift; // the 5.0.6 Shift / Alt scheme
             var explorer = h.Workspace.Active!.Id;
             AddHomeToTheRight(h);
-            h.Click("b.png", MouseButton.Middle, RawInputModifiers.Alt);
+            MiddleClick(h, "b.png", RawInputModifiers.Alt);
             await h.WaitUntil(() => h.Workspace.Tabs.OfType<ImageTabState>().Any(), "new image tab");
             Assert.Equal(explorer, h.Workspace.Active!.Id);
             Assert.Equal(h.Workspace.Tabs.Count - 1, IndexOf(h, ImageTab(h, "b.png").Id));
@@ -150,9 +180,9 @@ public sealed class TabOpenCloseTests
     {
         await ExplorerHarness.Run(async h =>
         {
-            h.Settings.NewTabModifiers = true;
+            h.Settings.NewTabPositionKey = NewTabKeys.Alt; h.Settings.NewTabForegroundKey = NewTabKeys.Shift; // the 5.0.6 Shift / Alt scheme
             AddHomeToTheRight(h);
-            h.Click("Gamma", MouseButton.Middle, RawInputModifiers.Alt);
+            MiddleClick(h, "Gamma", RawInputModifiers.Alt);
             await h.WaitUntil(() => h.Workspace.Tabs.OfType<BrowserTabState>().Count() == 2, "new Explorer tab");
             Assert.Equal(Path.Combine(h.Root, "Gamma"), ((BrowserTabState)h.Workspace.Tabs[^1]).Folder);
         });
@@ -164,7 +194,7 @@ public sealed class TabOpenCloseTests
         await ExplorerHarness.Run(async h =>
         {
             h.Settings.SwitchToNewTabs = false; // background, explicitly (the default is foreground since 5.0.6)
-            h.Settings.NewTabModifiers = true;
+            h.Settings.NewTabPositionKey = NewTabKeys.Alt; h.Settings.NewTabForegroundKey = NewTabKeys.Shift; // the 5.0.6 Shift / Alt scheme
             h.Settings.Gestures["explorer.doubleClick"] = GestureCatalog.OpenInNewTab;
             var explorer = h.Workspace.Active!.Id;
             AddHomeToTheRight(h);
@@ -208,7 +238,7 @@ public sealed class TabOpenCloseTests
             h.Settings.NewTabPosition = NewTabPositions.AtEnd;
             h.Settings.SwitchToNewTabs = true;
             AddHomeToTheRight(h);
-            h.Click("b.png", MouseButton.Middle);
+            MiddleClick(h, "b.png");
             await h.WaitUntil(() => h.Workspace.Active is ImageTabState, "switched to the new tab");
             Assert.Equal(h.Workspace.Tabs.Count - 1, h.Workspace.ActiveIndex);
         });
@@ -219,12 +249,12 @@ public sealed class TabOpenCloseTests
     {
         await ExplorerHarness.Run(async h =>
         {
-            h.Settings.NewTabModifiers = true;
+            h.Settings.NewTabPositionKey = NewTabKeys.Alt; h.Settings.NewTabForegroundKey = NewTabKeys.Shift; // the 5.0.6 Shift / Alt scheme
             h.Settings.NewTabPosition = NewTabPositions.AtEnd;
             h.Settings.SwitchToNewTabs = true;
             var explorer = h.Workspace.Active!.Id;
             AddHomeToTheRight(h);
-            h.Click("b.png", MouseButton.Middle, RawInputModifiers.Shift | RawInputModifiers.Alt);
+            MiddleClick(h, "b.png", RawInputModifiers.Shift | RawInputModifiers.Alt);
             await h.WaitUntil(() => h.Workspace.Tabs.OfType<ImageTabState>().Any(), "new image tab");
             Assert.Equal(explorer, h.Workspace.Active!.Id);
             Assert.Equal(IndexOf(h, explorer) + 1, IndexOf(h, ImageTab(h, "b.png").Id));
@@ -237,7 +267,7 @@ public sealed class TabOpenCloseTests
         await ExplorerHarness.Run(async h =>
         {
             h.Settings.SwitchToNewTabs = false; // background, explicitly (the default is foreground since 5.0.6)
-            h.Settings.NewTabModifiers = true;
+            h.Settings.NewTabPositionKey = NewTabKeys.Alt; h.Settings.NewTabForegroundKey = NewTabKeys.Shift; // the 5.0.6 Shift / Alt scheme
             AddHomeToTheRight(h);
             var entry = h.Entries.Single(e => e.Name == "c.png");
             var menu = (ContextMenu)h.Call("BuildExplorerContextMenu", entry)!;
@@ -262,10 +292,10 @@ public sealed class TabOpenCloseTests
         {
             h.Settings.SwitchToNewTabs = false; // background, explicitly (the default is foreground since 5.0.6)
             h.Settings.AfterTabCloseActivate = TabCloseActivation.PreviouslyUsed;
-            h.Settings.NewTabModifiers = true;
+            h.Settings.NewTabPositionKey = NewTabKeys.Alt; h.Settings.NewTabForegroundKey = NewTabKeys.Shift; // the 5.0.6 Shift / Alt scheme
             var explorer = h.Workspace.Active!.Id;
             AddHomeToTheRight(h);
-            h.Click("b.png", MouseButton.Middle, RawInputModifiers.Shift);
+            MiddleClick(h, "b.png", RawInputModifiers.Shift);
             await h.WaitUntil(() => h.Workspace.Active is ImageTabState, "switched to the new tab");
             await h.SettleAsync();
             await CtrlWAsync(h);
@@ -301,7 +331,7 @@ public sealed class TabOpenCloseTests
             h.Settings.TabCycleOrder = "Most recently used";
             var explorer = h.Workspace.Active!.Id;
             var home = AddHomeToTheRight(h);
-            h.Click("b.png", MouseButton.Middle);
+            MiddleClick(h, "b.png");
             await h.WaitUntil(() => h.Workspace.Tabs.OfType<ImageTabState>().Any(), "new image tab");
             await ClickTabAsync(h, ImageTab(h, "b.png").Id);
             await CtrlWAsync(h);
@@ -318,7 +348,7 @@ public sealed class TabOpenCloseTests
             h.Settings.SwitchToNewTabs = false; // opened in the background, then switched to by a tab click
             h.Settings.AfterTabCloseActivate = TabCloseActivation.MatchCycleOrder; // no longer the default (5.0.6)
             var home = AddHomeToTheRight(h);
-            h.Click("b.png", MouseButton.Middle);
+            MiddleClick(h, "b.png");
             await h.WaitUntil(() => h.Workspace.Tabs.OfType<ImageTabState>().Any(), "new image tab");
             await ClickTabAsync(h, ImageTab(h, "b.png").Id);
             await CtrlWAsync(h);
@@ -335,7 +365,7 @@ public sealed class TabOpenCloseTests
             Assert.Equal(TabCloseActivation.PreviouslyUsed, h.Settings.AfterTabCloseActivate);
             var explorer = h.Workspace.Active!.Id;
             AddHomeToTheRight(h);
-            h.Click("b.png", MouseButton.Middle);
+            MiddleClick(h, "b.png");
             await h.WaitUntil(() => h.Workspace.Tabs.OfType<ImageTabState>().Any(), "new image tab");
             await ClickTabAsync(h, ImageTab(h, "b.png").Id);
             await CtrlWAsync(h);
@@ -351,7 +381,7 @@ public sealed class TabOpenCloseTests
             Assert.True(h.Settings.SwitchToNewTabs);
             var explorer = h.Workspace.Active!.Id;
             AddHomeToTheRight(h);
-            h.Click("b.png", MouseButton.Middle);
+            MiddleClick(h, "b.png");
             await h.WaitUntil(() => h.Workspace.Active is ImageTabState, "switched to the new tab");
             await h.SettleAsync();
             await CtrlWAsync(h);
@@ -368,7 +398,7 @@ public sealed class TabOpenCloseTests
             h.Settings.TabCycleOrder = "Most recently used";
             var explorer = h.Workspace.Active!.Id;
             AddHomeToTheRight(h);
-            h.Click("b.png", MouseButton.Middle);
+            MiddleClick(h, "b.png");
             await h.WaitUntil(() => h.Workspace.Tabs.OfType<ImageTabState>().Any(), "new image tab");
             await ClickTabAsync(h, ImageTab(h, "b.png").Id);
             await CtrlWAsync(h);

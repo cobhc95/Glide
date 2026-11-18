@@ -25,6 +25,7 @@ namespace Glide.Core.Tests;
 /// of the rest / hover looks of the expand button.
 /// </summary>
 [Collection(AvaloniaHeadlessCollection.Name)]
+[Trait("Area", "StatusBar")]
 public sealed class StatusBarAutoHideTests
 {
     public StatusBarAutoHideTests(AvaloniaHeadlessFixture fixture) { _ = fixture; }
@@ -426,7 +427,7 @@ public sealed class StatusBarAutoHideTests
         finally
         {
             SettingsStore.SettingsDirectoryOverrideForTests.Value = previous;
-            try { Directory.Delete(root, true); } catch { }
+            TempDir.TryDelete(root);
         }
     }
 
@@ -1380,7 +1381,7 @@ public sealed class StatusBarAutoHideTests
                 SettingsStore.SettingsDirectoryOverrideForTests.Value = previousStore;
             }
         });
-        try { Directory.Delete(root, true); } catch { }
+        TempDir.TryDelete(root);
     }
 
     private static void Apply(MainWindow window)

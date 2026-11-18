@@ -3,6 +3,7 @@ using Xunit;
 
 namespace Glide.Core.Tests;
 
+[Trait("Area", "Shell")]
 public sealed class CustomLaunchTargetTests : IDisposable
 {
     private readonly string _root = Path.Combine(Path.GetTempPath(), "Glide.CustomLaunch", Guid.NewGuid().ToString("N"));
@@ -14,7 +15,7 @@ public sealed class CustomLaunchTargetTests : IDisposable
         File.WriteAllText(Path.Combine(_root, "notes.txt"), "x");
     }
 
-    public void Dispose() { try { Directory.Delete(_root, true); } catch { } }
+    public void Dispose() { TempDir.TryDelete(_root); }
 
     [Fact]
     public void Folder_resolves_to_Folder()

@@ -36,6 +36,8 @@ public partial class MainWindow
         Viewport.SetInteractionBitmap(null);
         _interactionPreviewBitmap = null;
         Viewport.SwapPresentedFrame(null, 0, 0, 0, null);
+        // Privacy: no frame kept for instant tab switching survives standby either.
+        _warmImageTabs?.Clear();
 
         _currentPath = null;
         _presentedPath = null;
@@ -106,9 +108,15 @@ public partial class MainWindow
     }
 
     private bool ShouldEnterSpeedBoostStandby()
-        => !_forceProcessExit && !_closeForSpeedBoostStandby && !_speedBoostStandbyActive &&
+        => ShouldEnterSpeedBoostStandbyPolicy(_forceProcessExit, _closeForSpeedBoostStandby, _speedBoostStandbyActive, App.IsShuttingDown) &&
            _settings.SpeedBoostEnabled && App.IsTrayIconAvailable &&
            GlideWindowRegistry.Snapshot().Count <= 1;
+
+    /// <summary>The state half of the standby decision. A window closing because the application is exiting
+    /// (App.IsShuttingDown) never enters standby: standby keeps the launch broker alive, and a process that is
+    /// exiting anyway would then acknowledge launches it can never show.</summary>
+    internal static bool ShouldEnterSpeedBoostStandbyPolicy(bool forceProcessExit, bool closeForStandby, bool standbyActive, bool applicationShuttingDown)
+        => !forceProcessExit && !closeForStandby && !standbyActive && !applicationShuttingDown;
 
     internal void EnterSpeedBoostStandby(bool persistSession = true)
     {
@@ -302,6 +310,8 @@ public partial class MainWindow
         }
 
         _forceProcessExit = true;
+        // Stop acknowledging launches before the window goes away (see App.BeginApplicationShutdown).
+        App.BeginApplicationShutdown("force_exit");
         Close();
         if (Avalonia.Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
@@ -401,6 +411,16 @@ public partial class MainWindow
         if (wasSpeedBoostStandby)
             ShowWarmOpenTransitionSurface();
         ExitStandby();
+        StartupTrace.Write("warm_window_shown", $"pendingReceiver={isPendingWarmReceiver} standby={wasSpeedBoostStandby}");
+        if (wasSpeedBoostStandby)
+        {
+            // 5.1: reveal the chrome + neutral transition surface as soon as it has composed once,
+            // instead of keeping the window at Opacity 0 until the image decode finished (~1 s of an
+            // invisible window with a taskbar button). The decode continues in parallel.
+            _ = RevealWarmTransitionSurfaceEarlyAsync();
+            RestoreFromMinimizedIfNeeded();
+            Activate();
+        }
 
         var duplicateWindow = ExternalLaunchBroker.FindWindowContainingImage(path);
         if (duplicateWindow is not null)
@@ -475,6 +495,7 @@ public partial class MainWindow
             overwriteExistingTab ? "overwrote_active_tab" : replaceDefaultHome ? "replaced_home_tab" : "new_tab"));
         if (wasSpeedBoostStandby)
         {
+            StartupTrace.Write("warm_image_presented", $"presented={_presentedPath is not null}");
             ShowImageSurface();
             // PresentCurrentAsync releases the gate only after the matching image draw/composition.
             // If loading was rejected before that point, reveal a newly composed Home surface.
@@ -712,7 +733,7 @@ public partial class MainWindow
             Item("First image", GlideCommand.FirstImage, _navigator.Count > 1, "First"),
             Item("Last image", GlideCommand.LastImage, _navigator.Count > 1, "Last")));
 
-        var statusShown = _settings.ShowStatusSurface && !_statusCollapsed;
+        var statusShown = StatusBarOptionsView.ShowStatusSurface && !_statusCollapsed;
         var showStatus = MenuActions.Tag(new MenuItem { Header = statusShown ? "Show status bar  ✓" : "Show status bar", Icon = MenuIcon("Status") }, "setting.status.visible");
         showStatus.Click += (_, _) =>
         {
@@ -721,7 +742,7 @@ public partial class MainWindow
             _statusCollapsed = false;
             _statusSessionClosed = false;
             SaveSettingsAndPublish();
-            ApplyStatusVisibility();
+            NotifyStatusChromeChanged();
         };
         var viewItems = new List<object>
         {
@@ -745,7 +766,7 @@ public partial class MainWindow
         items.Add(Group("View and present", "Present", viewItems.ToArray()));
 
         var overlayItems = new List<MenuItem>();
-        AppendWholeAppOverlayMenuItems(overlayItems);
+        AppendWholeAppOverlayMenuItems(overlayItems, includeExit: false);
         if (overlayItems.Count == 1)
         {
             overlayItems[0].Icon = MenuIcon("Overlays");
@@ -759,6 +780,7 @@ public partial class MainWindow
         items.Add(Separator());
         items.Add(Item("Settings", GlideCommand.Settings, true, "Settings"));
         items.Add(Item("Exit Glide", GlideCommand.ExitApplication, true, "Close"));
+        if (_wholeAppOverlayMode) items.Add(CreateExitWholeAppOverlayMenuItem());
         menu.ItemsSource = items;
         return PrepareOwnedContextMenu(menu);
     }

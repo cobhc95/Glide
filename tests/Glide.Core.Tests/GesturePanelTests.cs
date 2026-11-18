@@ -10,6 +10,7 @@ namespace Glide.Core.Tests;
 
 /// <summary>Headless checks of the Settings mouse gesture panel and its search cards (no real UI driving).</summary>
 [Collection(AvaloniaHeadlessCollection.Name)]
+[Trait("Area", "Gestures")]
 public sealed class GesturePanelTests
 {
     public GesturePanelTests(AvaloniaHeadlessFixture fixture) => _ = fixture;

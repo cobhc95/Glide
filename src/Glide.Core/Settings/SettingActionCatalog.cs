@@ -33,6 +33,7 @@ public static class SettingActionCatalog
         ["mouse.leftWindowDrag"] = ["Smart (normal window only)", "Never move window", "Allow move when maximized"],
         ["mouse.rightDragPan"] = ["Smart (pan image / move window)", "Pan image only", "Move window", "Do nothing"],
         ["performance.interactivePanQuality"] = ["Fast", "Balanced", "Full quality"],
+        ["performance.fullRefine"] = ["Preset default", "Immediately", "When idle", "On zoom only"],
         ["status.size"] = ["Tiny", "Very small", "Small", "Medium", "Large", "Extra large"],
         ["status.alignment"] = ["Center", "Left", "Right"],
         ["status.fitScope"] = ["Only the current image", "This session", "This session and future sessions"],
@@ -51,8 +52,15 @@ public static class SettingActionCatalog
         ["overlay.picturePosition"] = ["Top left", "Top center", "Top right", "Bottom left", "Bottom center", "Bottom right"],
         ["overlay.pictureColor"] = ["White", "Soft gray", "Accent", "Amber"],
         ["overlay.animationRegion"] = ["Anywhere", "Top half", "Bottom half", "Top left quarter", "Top right quarter", "Bottom left quarter", "Bottom right quarter"],
-        ["tabs.newTabPosition"] = ["Next to the current tab", "At the end"],
-        ["tabs.afterCloseActivate"] = ["Match Ctrl+Tab order", "Previously used tab", "Tab to the right", "Tab to the left"],
+        ["tabs.newTabPosition"] = ["at the end", "next to the current tab"],
+        ["tabs.switchToNewTabs"] = ["foreground", "background"],
+        ["tabs.newTabPositionKey"] = ["None", "Shift", "Ctrl", "Alt"],
+        ["tabs.newTabForegroundKey"] = ["None", "Shift", "Ctrl", "Alt"],
+        ["tabs.middleClickSide"] = ["background", "foreground"],
+        ["tabs.middleClickPosition"] = ["at the end", "next to the current tab", "same as new tabs"],
+        ["tabs.previewResizeModifier"] = ["Ctrl", "Shift", "Alt", "None"],
+        ["tabs.afterCloseActivate"] = ["Match Ctrl+Tab order", "Previously used tab", "Tab to the right", "Tab to the left", "First tab", "Last tab", "Custom…"],
+        ["tabs.afterCloseCustomTarget"] = ["Home", "New empty Explorer tab", "Explorer tab with the closed picture's folder"],
     };
 
     /// <summary>

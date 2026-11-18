@@ -1,18 +1,36 @@
+using Glide.Imaging;
 using Glide.Core;
 
 namespace Glide.App.Explorer;
 
-internal enum ExplorerSortKey { Name, Modified, Type, Size }
+internal enum ExplorerSortKey { Name, Modified, Type, Size, Width, Height, Pixels }
 
 /// <summary>The sort fields in menu order with their labels: the Sort by menu, the toolbar Sort button and the Details headers.</summary>
 internal static class ExplorerSortFields
 {
+    /// <summary>The main sort fields, in the order of the Sort by list and the Details columns.</summary>
     public static readonly (ExplorerSortKey Key, string Label)[] All =
     {
-        (ExplorerSortKey.Name, "Name"), (ExplorerSortKey.Modified, "Date modified"), (ExplorerSortKey.Type, "Type"), (ExplorerSortKey.Size, "Size")
+        (ExplorerSortKey.Name, "Name"), (ExplorerSortKey.Modified, "Date modified"), (ExplorerSortKey.Type, "Type"), (ExplorerSortKey.Size, "File size")
     };
 
-    public static string Label(ExplorerSortKey key) => All.First(f => f.Key == key).Label;
+    /// <summary>Image-dimension sort fields (the Sort by list's "Dimensions" submenu); they have no Details column.</summary>
+    public static readonly (ExplorerSortKey Key, string Label)[] Dimensions =
+    {
+        (ExplorerSortKey.Width, "Width"), (ExplorerSortKey.Height, "Height"), (ExplorerSortKey.Pixels, "Total pixels")
+    };
+
+    public const string Ascending = "\u25B2", Descending = "\u25BC";
+
+    /// <summary>The direction triangle: ▲ ascending, ▼ descending.</summary>
+    public static string Triangle(bool ascending) => ascending ? Ascending : Descending;
+
+    public static bool IsDimension(ExplorerSortKey key) => key is ExplorerSortKey.Width or ExplorerSortKey.Height or ExplorerSortKey.Pixels;
+
+    public static string Label(ExplorerSortKey key) => All.Concat(Dimensions).First(f => f.Key == key).Label;
+
+    /// <summary>Details column header text (the File size column keeps its short "Size" header).</summary>
+    public static string ColumnLabel(ExplorerSortKey key) => key == ExplorerSortKey.Size ? "Size" : Label(key);
 
     /// <summary>The Sort button's tooltip: "Sort: Date modified, descending, folders first. Click to change."</summary>
     public static string Describe(ExplorerSortKey key, bool ascending, bool foldersFirst) =>
@@ -48,12 +66,15 @@ internal static class ExplorerViewModes
     /// <summary>Tiles with a thumbnail area and a caption underneath.</summary>
     public static bool IsIconMode(int mode) => mode is ExtraLarge or Large or Medium;
 
-    /// <summary>Tile footprint (width, height) in device-independent pixels.</summary>
-    public static (double Width, double Height) TileSize(int mode) => mode switch
+    /// <summary>
+    /// Tile footprint (width, height) in device-independent pixels. <paramref name="infoLines"/> is the number of extra
+    /// info lines under thumbnails (round 3 #6, <see cref="ExplorerTileInfo"/>); only icon-mode tiles show them.
+    /// </summary>
+    public static (double Width, double Height) TileSize(int mode, int infoLines = 0) => mode switch
     {
-        ExtraLarge => (IconTileWidth(ExtraLarge), IconTileHeight(ExtraLarge)),
-        Large => (IconTileWidth(Large), IconTileHeight(Large)),
-        Medium => (IconTileWidth(Medium), IconTileHeight(Medium)),
+        ExtraLarge => (IconTileWidth(ExtraLarge), IconTileHeight(ExtraLarge, infoLines)),
+        Large => (IconTileWidth(Large), IconTileHeight(Large, infoLines)),
+        Medium => (IconTileWidth(Medium), IconTileHeight(Medium, infoLines)),
         Small => (250, 40),
         List => (240, 28),
         _ => (double.NaN, 28)
@@ -62,6 +83,8 @@ internal static class ExplorerViewModes
     /// <summary>Caption line height and line count of icon-mode tiles: the tile reserves room for every caption line.</summary>
     public const double CaptionLineHeight = 17;
     public const int CaptionLines = 2;
+    /// <summary>Height of one extra info line under the caption (date / resolution / file size, round 3 #6).</summary>
+    public const double InfoLineHeight = 15;
     /// <summary>Gap between the preview and the caption.</summary>
     public const double CaptionSpacing = 6;
     /// <summary>Tile padding (7 each side) plus border (1 each side) of icon-mode tiles.</summary>
@@ -76,8 +99,9 @@ internal static class ExplorerViewModes
     /// Icon-mode tile height: preview + gap + all caption lines + chrome. Before 5.0.7 the heights were fixed numbers
     /// that left room for only ~1.5 caption lines, so a wrapped second line spilled below the selection fill.
     /// </summary>
-    public static double IconTileHeight(int mode) =>
-        IconTopInset(mode) + PreviewSize(mode).Height + CaptionSpacing + CaptionLineHeight * CaptionLines + IconTileChrome;
+    public static double IconTileHeight(int mode, int infoLines = 0) =>
+        IconTopInset(mode) + PreviewSize(mode).Height + CaptionSpacing + CaptionLineHeight * CaptionLines
+        + InfoLineHeight * Math.Clamp(infoLines, 0, ExplorerTileInfo.MaxLines) + IconTileChrome;
 
     private static double IconTileWidth(int mode) => mode switch { ExtraLarge => 260, Large => 176, _ => 126 };
 
@@ -96,6 +120,32 @@ internal static class ExplorerViewModes
         Small => (30, 30),
         _ => (0, 0)
     };
+}
+
+/// <summary>
+/// Round 3 #6: the optional extra info lines under Explorer thumbnails (off by default; each one chosen in Settings).
+/// One line per chosen item, in this order: date modified, resolution (pixel size), file size. Every icon tile of the
+/// view reserves the same lines (a folder's resolution and size lines stay empty) so the grid stays uniform and the
+/// text always sits inside the selection fill.
+/// </summary>
+internal readonly record struct ExplorerTileInfo(bool Date, bool Resolution, bool FileSize)
+{
+    public const int MaxLines = 3;
+
+    public int Lines => (Date ? 1 : 0) + (Resolution ? 1 : 0) + (FileSize ? 1 : 0);
+
+    public static ExplorerTileInfo From(Glide.Core.Settings.GlideSettingsState settings) =>
+        new(settings.ExplorerInfoDate, settings.ExplorerInfoResolution, settings.ExplorerInfoFileSize);
+
+    /// <summary>The lines for <paramref name="entry"/>; <paramref name="pixels"/> is its pixel size when known.</summary>
+    public IReadOnlyList<string> Text(ExplorerEntry entry, ImageDimensions? pixels)
+    {
+        var lines = new List<string>(Lines);
+        if (Date) lines.Add(ExplorerModel.FormatDate(entry.Modified));
+        if (Resolution) lines.Add(pixels is { IsValid: true } p ? $"{p.Width} \u00d7 {p.Height}" : "");
+        if (FileSize) lines.Add(entry.IsDirectory ? "" : ExplorerModel.FormatSize(entry.Size));
+        return lines;
+    }
 }
 
 internal sealed class ExplorerEntry
@@ -124,6 +174,23 @@ internal sealed class ExplorerEntry
     public string Extension { get; }
     public bool IsImage { get; }
     public string TypeName { get; }
+
+    private ImageDimensions? _dimensions;
+    private bool _dimensionsProbed;
+
+    /// <summary>The picture's pixel size from its header, read once on first use ((0,0) for folders and unreadable files).</summary>
+    public ImageDimensions PixelDimensions
+    {
+        get
+        {
+            if (!_dimensionsProbed)
+            {
+                _dimensions = IsImage ? ExplorerModel.ProbePixelSize(Path) : null;
+                _dimensionsProbed = true;
+            }
+            return _dimensions ?? default;
+        }
+    }
 
     public override string ToString() => Path;
 }
@@ -170,6 +237,9 @@ internal static class ExplorerModel
         {
             ExplorerSortKey.Modified => (a, b) => { var c = a.Modified.CompareTo(b.Modified); return c != 0 ? c : ByName(a, b); },
             ExplorerSortKey.Size => (a, b) => { var c = a.Size.CompareTo(b.Size); return c != 0 ? c : ByName(a, b); },
+            ExplorerSortKey.Width => (a, b) => { var c = a.PixelDimensions.Width.CompareTo(b.PixelDimensions.Width); return c != 0 ? c : ByName(a, b); },
+            ExplorerSortKey.Height => (a, b) => { var c = a.PixelDimensions.Height.CompareTo(b.PixelDimensions.Height); return c != 0 ? c : ByName(a, b); },
+            ExplorerSortKey.Pixels => (a, b) => { var c = Pixels(a).CompareTo(Pixels(b)); return c != 0 ? c : ByName(a, b); },
             ExplorerSortKey.Type => (a, b) => { var c = string.Compare(a.TypeName, b.TypeName, StringComparison.OrdinalIgnoreCase); return c != 0 ? c : ByName(a, b); },
             _ => ByName
         };
@@ -177,11 +247,38 @@ internal static class ExplorerModel
         {
             if (foldersFirst && a.IsDirectory != b.IsDirectory) return a.IsDirectory ? -1 : 1;
             // Folders have no size: keep them in name order for the Size column regardless of direction.
-            if (key == ExplorerSortKey.Size && a.IsDirectory && b.IsDirectory) return ByName(a, b);
+            if ((key == ExplorerSortKey.Size || ExplorerSortFields.IsDimension(key)) && a.IsDirectory && b.IsDirectory) return ByName(a, b);
             var c = core(a, b);
             return ascending ? c : -c;
         });
         return list;
+    }
+
+    private static long Pixels(ExplorerEntry e) => (long)e.PixelDimensions.Width * e.PixelDimensions.Height;
+
+    /// <summary>Background thread: reads the pixel size of every picture so a dimension sort never reads headers on the UI thread.</summary>
+    public static void ProbeDimensions(IEnumerable<ExplorerEntry> entries, CancellationToken token)
+    {
+        foreach (var entry in entries)
+        {
+            token.ThrowIfCancellationRequested();
+            _ = entry.PixelDimensions;
+        }
+    }
+
+    /// <summary>A picture's pixel size from its header (built-in probe, header probe, then the Windows codecs); null when unknown.</summary>
+    public static ImageDimensions? ProbePixelSize(string path)
+    {
+        try
+        {
+            if (Glide.Imaging.BuiltInRasterDecoder.TryProbeDimensions(path, out var raster) && raster.IsValid) return raster;
+            if (Glide.Imaging.ImageHeaderProbe.TryProbe(path, out var header) && header.IsValid) return header;
+            if (Glide.Imaging.NativeImageProbe.TryProbe(path, out var native) && native.Width > 0 && native.Height > 0)
+                return new ImageDimensions((int)Math.Min(native.Width, (uint)int.MaxValue), (int)Math.Min(native.Height, (uint)int.MaxValue));
+        }
+        catch (IOException) { /* unreadable: unknown size */ }
+        catch (UnauthorizedAccessException) { /* unreadable: unknown size */ }
+        return null;
     }
 
     public static List<ExplorerEntry> Filter(IEnumerable<ExplorerEntry> entries, string? text)
@@ -202,5 +299,28 @@ internal static class ExplorerModel
         return $"{mb / 1024d:0.##} GB";
     }
 
-    public static string FormatDate(DateTime value) => value.ToString("g");
+    public static string FormatDate(DateTime value) => value.ToString("g", System.Globalization.CultureInfo.CurrentCulture);
+}
+
+/// <summary>
+/// The list shown by the Explorer ItemsRepeater. Observable so an in-place reload (round 3 #15) can remove and insert
+/// single entries: the repeater then only adds / drops those tiles and shifts the rest, instead of re-creating every
+/// tile (a dark flash and a thumbnail reload). Replacing the whole list is still how a different folder or a new
+/// sort / view is shown.
+/// </summary>
+internal sealed class ExplorerEntryList : System.Collections.ObjectModel.ObservableCollection<ExplorerEntry>
+{
+    public ExplorerEntryList() { }
+    public ExplorerEntryList(IEnumerable<ExplorerEntry> entries) : base(entries) { }
+
+    public int FindIndex(Predicate<ExplorerEntry> match)
+    {
+        for (var i = 0; i < Count; i++)
+            if (match(this[i])) return i;
+        return -1;
+    }
+
+    /// <summary>Same entry as listed before: same name (case included), kind, size and date. A changed file is re-shown.</summary>
+    public static bool SameListing(ExplorerEntry a, ExplorerEntry b) =>
+        a.IsDirectory == b.IsDirectory && a.Size == b.Size && a.Modified == b.Modified && string.Equals(a.Name, b.Name, StringComparison.Ordinal);
 }

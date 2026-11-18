@@ -9,6 +9,7 @@ namespace Glide.Core.Tests;
 /// 5.0.7 "When the last image is reached" (navigation.endOfFolder), its schema 15 migration, the "Ask me each time" picker
 /// model and the per-tab "Loop this folder" action.
 /// </summary>
+[Trait("Area", "Navigation")]
 public sealed class EndOfFolderPolicyTests
 {
     // ---- the behaviour before 5.0.7, reproduced through the new policy ------------------------------------------
@@ -34,9 +35,9 @@ public sealed class EndOfFolderPolicyTests
     [Fact]
     public void Default_is_move_to_the_next_folder()
     {
-        Assert.Equal(EndOfFolderActions.NextFolder, EndOfFolderActions.Default);
-        Assert.Equal(EndOfFolderActions.NextFolder, new GlideSettingsState().EndOfFolderAction);
-        Assert.Equal(EndOfFolderActions.NextFolder, SettingsCatalog.All.Single(s => s.Id == "navigation.endOfFolder").DefaultValue);
+        Assert.Equal(EndOfFolderActions.Ask, EndOfFolderActions.Default);
+        Assert.Equal(EndOfFolderActions.Ask, new GlideSettingsState().EndOfFolderAction);
+        Assert.Equal(EndOfFolderActions.Ask, SettingsCatalog.All.Single(s => s.Id == "navigation.endOfFolder").DefaultValue);
     }
 
     // ---- the policy ---------------------------------------------------------------------------------------------
@@ -106,25 +107,25 @@ public sealed class EndOfFolderPolicyTests
         foreach (var action in Enum.GetValues<EndOfFolderAction>())
             Assert.Equal(action, EndOfFolderActions.Parse(EndOfFolderActions.NameOf(action)));
         Assert.Equal(EndOfFolderAction.LoopFolder, EndOfFolderActions.Parse("  loop THIS folder "));
-        Assert.Equal(EndOfFolderActions.NextFolder, EndOfFolderActions.Normalize("banana"));
-        Assert.Equal(EndOfFolderActions.NextFolder, EndOfFolderActions.Normalize(null));
+        Assert.Equal(EndOfFolderActions.Ask, EndOfFolderActions.Normalize("banana"));
+        Assert.Equal(EndOfFolderActions.Ask, EndOfFolderActions.Normalize(null));
         Assert.Equal(EndOfFolderActions.All, SettingActionCatalog.Choices["navigation.endOfFolder"]);
     }
 
     // ---- schema 15 migration ------------------------------------------------------------------------------------
 
     [Theory]
-    [InlineData("{\"SettingsSchemaVersion\":14,\"ContinueSiblingFolders\":true}", EndOfFolderActions.NextFolder)]
+    [InlineData("{\"SettingsSchemaVersion\":14,\"ContinueSiblingFolders\":true}", EndOfFolderActions.Ask)]
     [InlineData("{\"SettingsSchemaVersion\":14,\"ContinueSiblingFolders\":false}", EndOfFolderActions.DoNothing)]
     [InlineData("{\"SettingsSchemaVersion\":9,\"ContinueSiblingFolders\":false}", EndOfFolderActions.DoNothing)]
-    [InlineData("{\"SettingsSchemaVersion\":14}", EndOfFolderActions.NextFolder)]
-    [InlineData("{}", EndOfFolderActions.NextFolder)]
+    [InlineData("{\"SettingsSchemaVersion\":14}", EndOfFolderActions.Ask)]
+    [InlineData("{}", EndOfFolderActions.Ask)]
     // An older file never had the new key; even if one appears there, the old checkbox decides.
     [InlineData("{\"SettingsSchemaVersion\":14,\"ContinueSiblingFolders\":false,\"EndOfFolderAction\":\"Show Home\"}", EndOfFolderActions.DoNothing)]
     // From schema 15 on the stored choice is kept (and a stray old key is ignored).
     [InlineData("{\"SettingsSchemaVersion\":15,\"EndOfFolderAction\":\"Ask me each time\"}", EndOfFolderActions.Ask)]
     [InlineData("{\"SettingsSchemaVersion\":15,\"EndOfFolderAction\":\"Do nothing\",\"ContinueSiblingFolders\":true}", EndOfFolderActions.DoNothing)]
-    [InlineData("{\"SettingsSchemaVersion\":15,\"EndOfFolderAction\":\"nonsense\"}", EndOfFolderActions.NextFolder)]
+    [InlineData("{\"SettingsSchemaVersion\":15,\"EndOfFolderAction\":\"nonsense\"}", EndOfFolderActions.Ask)]
     public void Schema_15_migrates_the_old_checkbox(string json, string expected)
     {
         var loaded = SettingsStore.MigrateFromJson(json, isSettingsFile: false);
@@ -136,9 +137,12 @@ public sealed class EndOfFolderPolicyTests
     public void Migration_helper_matches_the_approved_mapping()
     {
         Assert.Equal(15, SettingsStore.EndOfFolderActionSchema);
-        Assert.Equal(EndOfFolderActions.NextFolder, SettingsStore.MigrateEndOfFolderAction(14, true, null));
+        Assert.Equal(EndOfFolderActions.Ask, SettingsStore.MigrateEndOfFolderAction(14, true, null));
         Assert.Equal(EndOfFolderActions.DoNothing, SettingsStore.MigrateEndOfFolderAction(14, false, null));
-        Assert.Equal(EndOfFolderActions.NextFolder, SettingsStore.MigrateEndOfFolderAction(14, null, null));
+        Assert.Equal(EndOfFolderActions.Ask, SettingsStore.MigrateEndOfFolderAction(14, null, null));
+        Assert.Equal(EndOfFolderActions.Ask, SettingsStore.MigrateEndOfFolderAction(16, null, EndOfFolderActions.NextFolder));
+        Assert.Equal(EndOfFolderActions.NextFolder, SettingsStore.MigrateEndOfFolderAction(17, null, EndOfFolderActions.NextFolder));
+        Assert.Equal(EndOfFolderActions.Ask, EndOfFolderActions.Default);
         Assert.Equal(EndOfFolderActions.ShowHome, SettingsStore.MigrateEndOfFolderAction(15, false, EndOfFolderActions.ShowHome));
     }
 

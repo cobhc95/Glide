@@ -15,6 +15,7 @@ using Glide.App.Platform;
 using Glide.App.Settings;
 using Glide.App.Services;
 using Glide.Core;
+using Glide.Core.Settings;
 using Glide.Core.Commands;
 using Glide.Core.Navigation;
 using Glide.Core.Workspace;
@@ -138,8 +139,7 @@ public partial class MainWindow
             _folderIndexReady = true;
             _folderIndexCanonicalReady = false;
             if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("folder_index_first_neighbour_ready", $"count={_navigator.Count}");
-            UpdatePictureCounter();
-            UpdateStatusStats();
+            NotifyViewerStatusChanged();
             _diagnostics.Write("navigation", "folder_index_provisional", new { path = requestedPath, count = _navigator.Count, bounded = true });
             ScheduleNavigationNeighbours();
 
@@ -169,8 +169,7 @@ public partial class MainWindow
             if (!IsFolderSessionCurrent(session)) return;
             _folderIndexCanonicalReady = true;
             if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("folder_index_complete", $"count={_navigator.Count}");
-            UpdatePictureCounter();
-            UpdateStatusStats();
+            NotifyViewerStatusChanged();
             _diagnostics.Write("navigation", "folder_index_ready", new { path = requestedPath, count = _navigator.Count, reconciled = true });
             ScheduleNavigationNeighbours();
 
@@ -253,8 +252,7 @@ public partial class MainWindow
                 // The viewed file was deleted/renamed externally; show the neighbour now in its slot.
                 await PresentCurrentAsync();
             }
-            UpdatePictureCounter();
-            UpdateStatusStats();
+            NotifyViewerStatusChanged();
             ScheduleNavigationNeighbours();
         }
         catch (Exception ex)
@@ -312,13 +310,16 @@ public partial class MainWindow
             // A warm preview can be both the cache entry and the bitmap currently attached to the
             // viewport. Detach that exact preview before an authoritative full load so AddPrepared
             // cannot dispose it while the decoder is still in flight.
-            if (forceFull && Viewport.Bitmap is { } displayed &&
+            // Immediate refine keeps the full frame cached (pre-5.1); idle/zoom refines show it uncached so the
+            // decoded cache keeps display-sized frames and later hits stay cheap to present.
+            var cacheFull = !forceFull || CurrentRefinePolicy(path) == FullRefinePolicy.Immediate;
+            if (forceFull && cacheFull && Viewport.Bitmap is { } displayed &&
                 string.Equals(_presentedPath, path, StringComparison.OrdinalIgnoreCase))
                 _loader.DetachPreparedPreview(path, displayed);
 
             var presentationPolicy = rapidPreviewOnly ? BuildRapidBrowsePolicy() : BuildPerformancePolicy();
             var result = forceFull
-                ? await _loader.LoadFullForegroundAsync(path, request.Token)
+                ? await _loader.LoadFullForegroundAsync(path, request.Token, cacheResult: cacheFull)
                 : await _loader.LoadForegroundAsync(path, presentationPolicy, request.Token,
                     cachePreview: !rapidPreviewOnly);
             if (result is null || !IsRequestCurrent(request))
@@ -351,6 +352,7 @@ public partial class MainWindow
             if (isRefinementOnly)
             {
                 Viewport.ReplaceBitmapPreservingView(result.Bitmap);
+                NavBenchRefined(path, result, "attached_force_full");
             }
             else
             {
@@ -424,7 +426,7 @@ public partial class MainWindow
                     GlidePerformanceTrace.Mark("folder_index_start", $"synthetic=true;request={request.ImageRequestId}");
             }
 
-            if (_warmPresentationGateActive || !_startupFirstImageTimingWritten || GlidePerformanceTrace.Enabled || App.BenchmarkExitAfterFirstFrame || App.NotifyFirstFrameEventName is not null)
+            if (_warmPresentationGateActive || !_startupFirstImageTimingWritten || GlidePerformanceTrace.Enabled || NavBenchActive || App.BenchmarkExitAfterFirstFrame || App.NotifyFirstFrameEventName is not null)
             {
                 var rendered = await renderedTask;
                 if (!rendered || !IsRequestCurrent(request, requirePresented: true))
@@ -437,6 +439,7 @@ public partial class MainWindow
                 }
 
                 _startupFirstImageTimingWritten = true;
+                NavBenchPresented(path, result, rapidPreviewOnly, forceFull);
 
                 if (GlidePerformanceTrace.Enabled)
                     GlidePerformanceTrace.Mark("composition_batch_rendered", $"request={request.ImageRequestId};path={Path.GetFileName(path)}");
@@ -483,8 +486,7 @@ public partial class MainWindow
             if (!rapidPreviewOnly && IsRequestCurrent(request, requirePresented: true))
                 _ = LoadMetadataAfterPaintAsync(path, request, metadataToken);
 
-            UpdatePictureCounter();
-            UpdateStatusStats();
+            NotifyViewerStatusChanged();
             UpdateWindowTitle();
             if (ImageInfoOverlay.IsVisible) UpdateImageInfoOverlayText();
             if (!rapidPreviewOnly && _settings.TabsEnabled) RebuildTabStrip();
@@ -527,6 +529,9 @@ public partial class MainWindow
         {
             OverlayNavigationTrace.Mark(OverlayNavigationTrace.Kind.PrefetchStart,
                 a: _navigator.Index, b: _lastNavigationDirection, x: _navigator.Count);
+            // Prefetch sizes come from the loader's policy: refresh it so a startup prefetch (scheduled before
+            // the first foreground load set it) does not prepare neighbours at the constructor's Balanced sizes.
+            _loader.Policy = BuildPerformancePolicy();
             _loader.SchedulePrefetch(_navigator.Paths, _navigator.Index, _lastNavigationDirection);
             OverlayNavigationTrace.Mark(OverlayNavigationTrace.Kind.PrefetchEnd,
                 a: _navigator.Index, b: _lastNavigationDirection, x: _navigator.Count);
@@ -547,13 +552,13 @@ public partial class MainWindow
     {
         var count = Math.Clamp(_settings.PrefetchSiblingFolderImageCount, 1, 30);
         var options = new SiblingFolderNavigationOptions(
-            _settings.FolderNavIncludeHidden,
-            _settings.FolderNavWrap,
-            _settings.FolderNavSkipEmpty,
-            _settings.FolderNavOpenFirstImage,
-            _settings.HierarchicalFolderTraversal,
-            _settings.FolderNavOrder,
-            string.Equals(_settings.HierarchicalPreviousFolderEntry, "First image", StringComparison.OrdinalIgnoreCase));
+            NavigationOptionsView.FolderNavIncludeHidden,
+            NavigationOptionsView.FolderNavWrap,
+            NavigationOptionsView.FolderNavSkipEmpty,
+            NavigationOptionsView.FolderNavOpenFirstImage,
+            NavigationOptionsView.HierarchicalFolderTraversal,
+            NavigationOptionsView.FolderNavOrder,
+            string.Equals(NavigationOptionsView.HierarchicalPreviousFolderEntry, "First image", StringComparison.OrdinalIgnoreCase));
         var warmed = new List<string>();
         try
         {
@@ -600,7 +605,7 @@ public partial class MainWindow
             // the navigation gate, then serialize only the viewport/cache ownership transition.
             // Previously refinement mutated Viewport.Bitmap independently of Home/manual/slideshow
             // navigation; that gave two UI producers ownership of the same bitmap lifetime.
-            if (refined.IsPreview)
+            if (refined.IsPreview && CurrentRefinePolicy(firstFrame.Path) == FullRefinePolicy.Immediate)
             {
                 DisposeRejectedRefinement(refined);
                 if (!IsRequestCurrent(request, requirePresented: true)) return;
@@ -629,6 +634,7 @@ public partial class MainWindow
                     Viewport.SetInteractionBitmap(null);
                     _interactionPreviewBitmap = null;
                     detachedPreview = Viewport.ReplaceBitmapPreservingView(full.Bitmap);
+                    NavBenchRefined(firstFrame.Path, full, "attached_full_after_bounded");
                 }
                 finally
                 {
@@ -658,6 +664,7 @@ public partial class MainWindow
                                 return;
                             }
                             var fullPromoted = _loader.PromoteRefinement(firstFrame, full);
+                            NavBenchRefined(firstFrame.Path, full, "full_after_bounded");
                             if (retiredInteraction is not null && !ReferenceEquals(retiredInteraction, detachedPreview) &&
                                 !ReferenceEquals(retiredInteraction, full.Bitmap))
                                 RetirePresentedBitmap(retiredInteraction);
@@ -698,6 +705,7 @@ public partial class MainWindow
                 Viewport.SetInteractionBitmap(null);
                 _interactionPreviewBitmap = null;
                 oldBitmap = Viewport.ReplaceBitmapPreservingView(refined.Bitmap);
+                NavBenchRefined(firstFrame.Path, refined, "attached_direct");
             }
             finally
             {
@@ -725,6 +733,7 @@ public partial class MainWindow
                             return;
                         }
                         var promoted = _loader.PromoteRefinement(firstFrame, refined);
+                        NavBenchRefined(firstFrame.Path, refined, "direct");
                         if (retiredInteractionDirect is not null && !ReferenceEquals(retiredInteractionDirect, oldBitmap) &&
                             !ReferenceEquals(retiredInteractionDirect, refined.Bitmap))
                             RetirePresentedBitmap(retiredInteractionDirect);
@@ -779,7 +788,7 @@ public partial class MainWindow
         var paused = player?.IsPaused == true;
         // By default the group is always there and greyed out without an animated GIF, so the bar
         // keeps its size while browsing; "Show GIF controls only on GIFs" restores the old show/hide.
-        var visible = has || !_settings.StatusGifControlsOnlyOnGifs;
+        var visible = has || !StatusBarOptionsView.GifControlsOnlyOnGifs;
         var changed = GifGroup.IsVisible != visible;
         GifGroup.IsVisible = visible;
         GifPreviousFrameButton.IsEnabled = has;
@@ -789,7 +798,6 @@ public partial class MainWindow
         void Tip(Control control, string text, GlideCommand command)
         {
             ToolTip.SetTip(control, $"{text} ({ShortcutFor(command)})");
-            ToolTip.SetShowDelay(control, 650);
         }
         Tip(GifPlayPauseButton, !has ? "GIF playback (only for animated GIFs)" : paused ? "Play GIF" : "Pause GIF", GlideCommand.GifPlayPause);
         Tip(GifPreviousFrameButton, has ? $"Previous GIF frame ({player!.FrameIndex + 1}/{player.FrameCount})" : "Previous GIF frame", GlideCommand.GifPreviousFrame);
@@ -882,7 +890,7 @@ public partial class MainWindow
 
     private bool TryAcceptNavigationRateLimit(NavigationRateInput input, bool showIndicator = true)
     {
-        var intervalMs = Math.Clamp(_settings.NavigationRateLimitMs, 0, 600000);
+        var intervalMs = Math.Clamp(NavigationOptionsView.RateLimitMs, 0, 600000);
         if (intervalMs <= 0 || !NavigationRateLimitAppliesTo(input) || !NavigationRateLimitAppliesInCurrentMode())
         {
             HideNavigationRateLimitNotice();
@@ -901,14 +909,14 @@ public partial class MainWindow
         // The interval indicator is feedback for a blocked user action. The held-browse producer
         // deliberately polls faster than the interval, so it suppresses the indicator to avoid
         // flashing "wait" for its own pacing.
-        if (showIndicator && _settings.NavigationRateLimitShowIndicator)
+        if (showIndicator && NavigationOptionsView.RateLimitShowIndicator)
             ShowNavigationRateLimitNotice();
         return false;
     }
 
     private bool NavigationRateLimitAppliesTo(NavigationRateInput input)
     {
-        var choice = _settings.NavigationRateLimitInput?.Trim();
+        var choice = NavigationOptionsView.RateLimitInput?.Trim();
         if (string.Equals(choice, "Both", StringComparison.OrdinalIgnoreCase)) return true;
         return input == NavigationRateInput.Mouse
             ? string.Equals(choice, "Mouse only", StringComparison.OrdinalIgnoreCase)
@@ -917,9 +925,9 @@ public partial class MainWindow
 
     private bool NavigationRateLimitAppliesInCurrentMode()
     {
-        if (_slideshow?.IsActive == true) return _settings.NavigationRateLimitSlideshow;
-        if (WindowState == WindowState.FullScreen) return _settings.NavigationRateLimitFullscreen;
-        return _settings.NavigationRateLimitWindowed;
+        if (_slideshow?.IsActive == true) return NavigationOptionsView.RateLimitSlideshow;
+        if (WindowState == WindowState.FullScreen) return NavigationOptionsView.RateLimitFullscreen;
+        return NavigationOptionsView.RateLimitWindowed;
     }
 
     private void HideNavigationRateLimitNotice()
@@ -944,7 +952,7 @@ public partial class MainWindow
 
     private void ApplyNavigationRateLimitNoticePosition()
     {
-        var position = _settings.NavigationRateLimitIndicatorPosition?.Trim().ToLowerInvariant();
+        var position = NavigationOptionsView.RateLimitIndicatorPosition?.Trim().ToLowerInvariant();
         NavigationRateLimitNotice.HorizontalAlignment = position is "top right" or "bottom right" ? Avalonia.Layout.HorizontalAlignment.Right : position == "centre" ? Avalonia.Layout.HorizontalAlignment.Center : Avalonia.Layout.HorizontalAlignment.Left;
         NavigationRateLimitNotice.VerticalAlignment = position is "bottom left" or "bottom right" ? Avalonia.Layout.VerticalAlignment.Bottom : position == "centre" ? Avalonia.Layout.VerticalAlignment.Center : Avalonia.Layout.VerticalAlignment.Top;
         NavigationRateLimitNotice.Margin = position switch
@@ -963,7 +971,7 @@ public partial class MainWindow
         {
             while (!token.IsCancellationRequested)
             {
-                var intervalMs = Math.Clamp(_settings.NavigationRateLimitMs, 0, 600000);
+                var intervalMs = Math.Clamp(NavigationOptionsView.RateLimitMs, 0, 600000);
                 if (intervalMs <= 0 || _lastRateLimitedNavigationTimestamp == 0)
                     break;
 
@@ -973,7 +981,7 @@ public partial class MainWindow
                     break;
 
                 NavigationRateLimitNoticeText.Text = $"Wait {Math.Ceiling(remaining):0} ms";
-                NavigationRateLimitNotice.IsVisible = _settings.NavigationRateLimitShowIndicator;
+                NavigationRateLimitNotice.IsVisible = NavigationOptionsView.RateLimitShowIndicator;
                 await Task.Delay(25, token);
             }
         }
@@ -996,38 +1004,33 @@ public partial class MainWindow
 
     private async Task NavigateCoreAsync(int delta)
     {
+        // Stage D6: the route (ignore / buffer / end-of-folder / move) is NavigationCoordinator.Route.
         if (_navigator.Count == 0 || delta == 0 || _navigationBoundaryPromptActive) return;
         _selectionZoomDemandPath = null;
         _lastNavigationDirection = Math.Sign(delta);
 
         var now = Stopwatch.GetTimestamp();
-        var rapid = _lastNavigationRequestTimestamp != 0 &&
-            Stopwatch.GetElapsedTime(_lastNavigationRequestTimestamp, now).TotalMilliseconds <= 150;
+        var rapid = NavigationCoordinator.IsRapid(_lastNavigationRequestTimestamp != 0,
+            _lastNavigationRequestTimestamp == 0 ? 0 : Stopwatch.GetElapsedTime(_lastNavigationRequestTimestamp, now).TotalMilliseconds);
         _lastNavigationRequestTimestamp = now;
         _loader.ReportNavigationActivity(rapid ? ImageNavigationActivity.RapidBrowse : ImageNavigationActivity.NormalBrowse);
         _diagnostics.Write("navigation", "requested", new { delta, rapid, index = _navigator.Index, count = _navigator.Count, folderIndexReady = _folderIndexReady, folderIndexCanonicalReady = _folderIndexCanonicalReady });
         OverlayNavigationTrace.Mark(OverlayNavigationTrace.Kind.NavigationRequest,
             a: delta, b: rapid ? 1 : 0, x: _navigator.Index, y: _navigator.Count);
 
-        if (!_folderIndexReady)
+        var endStep = EndOfFolderStep.Stay;
+        var route = _navigator.Route(delta, _folderIndexReady, _folderIndexCanonicalReady, _navigationBoundaryPromptActive,
+            () => (endStep = EndOfFolderStepFor(delta)).Kind == EndOfFolderStepKind.Stay);
+        if (route == NavigationRoute.Buffer)
         {
             await _navigationSerializationGate.WaitAsync().ConfigureAwait(true);
-            try { _pendingNavigationDelta = Math.Clamp(_pendingNavigationDelta + delta, -MaxBufferedNavigationCommands, MaxBufferedNavigationCommands); }
+            try { _pendingNavigationDelta = NavigationCoordinator.BufferDelta(_pendingNavigationDelta, delta, MaxBufferedNavigationCommands); }
             finally { _navigationSerializationGate.Release(); }
             return;
         }
 
-        var atBoundary = delta > 0 ? _navigator.Index >= _navigator.Count - 1 : _navigator.Index <= 0;
-        if (atBoundary && !_folderIndexCanonicalReady)
-        {
-            await _navigationSerializationGate.WaitAsync().ConfigureAwait(true);
-            try { _pendingNavigationDelta = Math.Clamp(_pendingNavigationDelta + delta, -MaxBufferedNavigationCommands, MaxBufferedNavigationCommands); }
-            finally { _navigationSerializationGate.Release(); }
-            return;
-        }
-
-        var endStep = atBoundary ? EndOfFolderStepFor(delta) : EndOfFolderStep.Stay;
-        if (atBoundary && endStep.Kind != EndOfFolderStepKind.Stay)
+        var atBoundary = route == NavigationRoute.EndOfFolder;
+        if (atBoundary)
         {
             // The folder index may still be a stale single-item fallback after a transient
             // enumeration failure or a late folder refresh. Before declaring a branch boundary,
@@ -1035,15 +1038,14 @@ public partial class MainWindow
             // image-to-image navigation keeps its fast path.
             if (await RefreshCurrentFolderIndexAtBoundaryAsync())
             {
-                atBoundary = delta > 0 ? _navigator.Index >= _navigator.Count - 1 : _navigator.Index <= 0;
+                atBoundary = _navigator.AtBoundary(delta);
                 if (!atBoundary)
                 {
                     await _navigationSerializationGate.WaitAsync().ConfigureAwait(true);
                     try
                     {
                         if (_navigator.Count == 0 || _navigationBoundaryPromptActive) return;
-                        atBoundary = delta > 0 ? _navigator.Index >= _navigator.Count - 1 : _navigator.Index <= 0;
-                        if (atBoundary) return;
+                        if (_navigator.AtBoundary(delta)) return;
                         _navigator.Move(delta);
                     }
                     finally
@@ -1067,8 +1069,7 @@ public partial class MainWindow
         {
             // Re-check after the short gate wait because another command may have moved the index.
             if (_navigator.Count == 0 || _navigationBoundaryPromptActive) return;
-            atBoundary = delta > 0 ? _navigator.Index >= _navigator.Count - 1 : _navigator.Index <= 0;
-            if (atBoundary)
+            if (_navigator.AtBoundary(delta))
             {
                 ShowNavigationBoundaryNotice(delta);
                 return;
@@ -1108,8 +1109,7 @@ public partial class MainWindow
             _navigator.ReplaceFolderIndex(paths, expectedPath);
             _folderIndexReady = true;
             _folderIndexCanonicalReady = true;
-            UpdatePictureCounter();
-            UpdateStatusStats();
+            NotifyViewerStatusChanged();
             _diagnostics.Write("navigation", "boundary_folder_refreshed", new
             {
                 path = expectedPath,
@@ -1144,7 +1144,8 @@ public partial class MainWindow
                         {
                             if (token.IsCancellationRequested || _navigator.Current is null) return;
                             _loader.ReportNavigationActivity(ImageNavigationActivity.NormalBrowse);
-                            await PresentCurrentAsync(rapidPreviewOnly: false, forceFull: true);
+                            await PresentCurrentAsync(rapidPreviewOnly: false,
+                                forceFull: CurrentRefinePolicy(_navigator.Current) == FullRefinePolicy.Immediate);
                         });
                     }
                     catch (OperationCanceledException) { /* cancellation is the expected way to stop this work */ }
@@ -1156,8 +1157,34 @@ public partial class MainWindow
         }, CancellationToken.None);
     }
 
-    private void SchedulePreviewQualityRecovery(string path, long requestId)
+    private FullRefinePolicy CurrentRefinePolicy(string? path) => BuildPerformancePolicy().RefinePolicyFor(path);
+
+    /// <summary>True when the shown frame has fewer pixels than the screen area it covers (zoomed in past it).</summary>
+    private bool PresentedFrameInsufficient()
     {
+        var bitmap = Viewport.Bitmap;
+        if (bitmap is null) return false;
+        // Fit/fill views are covered by the bounded (viewport) refinement; only a manual zoom asks for source detail.
+        if (!string.Equals(Viewport.CaptureViewState().Mode, "Manual", StringComparison.OrdinalIgnoreCase)) return false;
+        var shownPixels = Viewport.LastImageDestWidth * Math.Max(1.0, RenderScaling);
+        var width = Viewport.EditTransform.QuarterTurns % 2 == 1 ? bitmap.PixelSize.Height : bitmap.PixelSize.Width;
+        return shownPixels > width * 1.05;
+    }
+
+    /// <summary>Viewport changed: under idle/zoom refine, a zoom past the shown frame's pixels fetches full detail now.</summary>
+    private void RequestFullDetailIfZoomNeedsIt()
+    {
+        if (!_currentFrameIsPreview || _presentedPath is null || !PresentedFrameInsufficient()) return;
+        if (CurrentRefinePolicy(_presentedPath) == FullRefinePolicy.Immediate) return;
+        SchedulePreviewQualityRecovery(_presentedPath, Volatile.Read(ref _imageRequestId), DecodeScaleCatalog.ZoomFullRefineDelayMs);
+    }
+
+    private void SchedulePreviewQualityRecovery(string path, long requestId, int? delayOverrideMs = null)
+    {
+        var refine = CurrentRefinePolicy(path);
+        // On zoom only: nothing to recover while the frame covers the view (the zoom hook calls back).
+        if (delayOverrideMs is null && refine == FullRefinePolicy.OnZoom && !PresentedFrameInsufficient()) return;
+        var delayMs = delayOverrideMs ?? (refine == FullRefinePolicy.Immediate ? 650 : DecodeScaleCatalog.IdleFullRefineDelayMs);
         _previewQualityRecoveryCts?.Cancel();
         _previewQualityRecoveryCts?.Dispose();
         var cts = _previewQualityRecoveryCts = new CancellationTokenSource();
@@ -1168,7 +1195,7 @@ public partial class MainWindow
             {
                 // This is a safety net, not the primary refinement path. It fires only if a preview
                 // remains attached after normal refinement/rapid-settle should already have completed.
-                await Task.Delay(650, token).ConfigureAwait(false);
+                await Task.Delay(delayMs, token).ConfigureAwait(false);
                 Dispatcher.UIThread.Post(async () =>
                 {
                     try
@@ -1261,7 +1288,7 @@ public partial class MainWindow
         }
         if (result is null || navigationEpoch != _navigationCommandEpoch ||
             !string.Equals(_navigator.Current, current, StringComparison.OrdinalIgnoreCase)) return null;
-        if (result.CrossedAncestorBoundary && _settings.ConfirmHierarchicalFolderTraversal)
+        if (result.CrossedAncestorBoundary && NavigationOptionsView.ConfirmHierarchicalFolderTraversal)
         {
             // A blocking boundary prompt is a hard navigation barrier. Do not allow a second
             // in-flight click/wheel/key request to open another prompt or become stale work that
@@ -1357,38 +1384,50 @@ public partial class MainWindow
         _diagnostics.Write("navigation", "rapid_input_interrupted", new { reason, maxBuffered = MaxBufferedNavigationCommands });
     }
 
-    /// <summary>The Explorer surface is going away (another surface is shown): keep its tab view state for later.</summary>
+    /// <summary>
+    /// 5.1.0 instant tab switching: a picture or the Welcome page covers the Explorer surface. Only its view state is
+    /// saved; the surface keeps its tab, listing, tiles, thumbnails and folder watcher, so returning to that Explorer
+    /// tab just shows it again (and reconciles the listing in place) instead of reading the folder again.
+    /// </summary>
+    private void HideExplorerSurface()
+    {
+        if (_explorerDisplayedTabId == Guid.Empty) return;
+        CommitOrCancelExplorerRename(commit: false);
+        CaptureExplorerTabView();
+    }
+
+    /// <summary>The Explorer surface switches to another Explorer tab: keep its tab view state for later.</summary>
     private void RetireExplorerSurface()
     {
         if (_explorerDisplayedTabId == Guid.Empty) return;
         CommitOrCancelExplorerRename(commit: false);
         CaptureExplorerTabView();
+        KeepWarmExplorerListing();
         _explorerDisplayedTabId = Guid.Empty;
         _explorerLoadedFolder = null;
+        _explorerFolderWatch?.Stop();
     }
 
     private void ShowImageSurface()
     {
-        RetireExplorerSurface();
-        CancelBrowserThumbnailWork();
+        HideExplorerSurface();
         HomeHost.IsVisible = false;
         WarmOpenTransitionHost.IsVisible = false;
         BrowserView.IsVisible = false;
         ImageView.IsVisible = true;
         SyncFullscreenTitleBarForActiveView();
-        ApplyStatusVisibility();
+        NotifyStatusChromeChanged();
     }
 
     private void ShowWarmOpenTransitionSurface()
     {
-        RetireExplorerSurface();
-        CancelBrowserThumbnailWork();
+        HideExplorerSurface();
         HomeHost.IsVisible = false;
         ImageView.IsVisible = false;
         BrowserView.IsVisible = false;
         WarmOpenTransitionHost.IsVisible = true;
         SyncFullscreenTitleBarForActiveView();
-        ApplyStatusVisibility();
+        NotifyStatusChromeChanged();
     }
 
     private void ArmWarmPresentationGate()
@@ -1412,6 +1451,26 @@ public partial class MainWindow
         // Win32 COLORREF is 0x00BBGGRR, while Avalonia stores channels as RRGGBB.
         colorRef = (uint)(color.R | (color.G << 8) | (color.B << 16));
         return color.A != 0;
+    }
+
+    /// <summary>
+    /// Composes the neutral warm-open surface once while still at Opacity 0 (so DWM can never reuse a
+    /// stale frame), then lifts the gate. The image appears in the already-visible window when decoded.
+    /// </summary>
+    private async Task RevealWarmTransitionSurfaceEarlyAsync()
+    {
+        try
+        {
+            await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Render);
+            await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Render);
+            if (!_warmPresentationGateActive || _windowLifetimeCts.IsCancellationRequested) return;
+            if (!WarmOpenTransitionHost.IsVisible && !ImageView.IsVisible) return;
+            Opacity = _sessionOpacity;
+            _windowsBrowserFrame?.HidePrivacyCurtain();
+            _warmPresentationGateActive = false;
+            StartupTrace.Write("warm_first_composed_frame");
+        }
+        catch { /* reveal is cosmetic; the normal gate release still runs after the image */ }
     }
 
     private async Task ReleaseWarmPresentationGateAsync(bool safeFrameReady)
@@ -1462,8 +1521,7 @@ public partial class MainWindow
     {
         _gifPlayer?.Stop();
         AdvanceWorkspaceEpoch();
-        RetireExplorerSurface();
-        CancelBrowserThumbnailWork();
+        HideExplorerSurface();
         _presentedPath = null;
         StopSlideshow(restoreStartingMode: false);
         var home = EnsureHomeSurface();
@@ -1478,7 +1536,7 @@ public partial class MainWindow
         ApplyWelcomeLayout();
         Title = recentLanding ? AppVersion.RecentTitle : AppVersion.HomeTitle;
         RefreshRecentHistoryHome();
-        ApplyStatusVisibility();
+        NotifyStatusChromeChanged();
     }
 
     private BrowserSurface EnsureBrowserSurface()
@@ -1488,11 +1546,14 @@ public partial class MainWindow
         _browserSurface = browser;
         BrowserView.Content = browser;
         _browserUiReady = false;
-        _browserViewMode = ExplorerViewModes.IndexOf(_settings.ExplorerDefaultView);
+        _browserViewMode = ExplorerViewModes.IndexOf(ExplorerOptionsView.DefaultView);
         browser.ViewModeCombo.SelectedIndex = _browserViewMode;
+        WireExplorerNavSplitter(browser);
         browser.Repeater.ItemTemplate = new FuncDataTemplate<ExplorerEntry>((entry, _) => CreateExplorerTile(entry), supportsRecycling: false);
         browser.Repeater.ElementPrepared += BrowserRepeaterElementPrepared;
         browser.Repeater.ElementClearing += BrowserRepeaterElementClearing;
+        ApplyTooltipDelays();
+        if (browser.FindControl<Border>("BrowserToolbarBorder") is { } toolbarRow) toolbarRow.ContextMenu = BuildAddressRowContextMenu();
         // Explorer wheel row: Default scrolls the file list (unchanged); another action replaces it.
         browser.ScrollViewer.AddHandler(InputElement.PointerWheelChangedEvent, async (_, e) =>
         {
@@ -1510,8 +1571,8 @@ public partial class MainWindow
                 if (e.KeyModifiers == KeyModifiers.None && e.Delta.Y != 0)
                 {
                     var viewer = browser.ScrollViewer;
-                    var change = Glide.App.Explorer.ExplorerWheelScroll.OffsetChange(_browserViewMode, e.Delta.Y, _settings.ExplorerScrollSpeed, ExplorerGridSpacing,
-                        _settings.ExplorerScrollMode, _settings.ExplorerScrollRows, _settings.ExplorerScrollPixels);
+                    var change = Glide.App.Explorer.ExplorerWheelScroll.OffsetChange(_browserViewMode, e.Delta.Y, ExplorerOptionsView.ScrollSpeed, ExplorerGridSpacing,
+                        ExplorerOptionsView.ScrollMode, ExplorerOptionsView.ScrollRows, ExplorerOptionsView.ScrollPixels, ExplorerInfoLines);
                     var max = Math.Max(0, viewer.Extent.Height - viewer.Viewport.Height);
                     viewer.Offset = new Vector(viewer.Offset.X, Math.Clamp(viewer.Offset.Y + change, 0, max));
                     e.Handled = true;
@@ -1568,7 +1629,6 @@ public partial class MainWindow
 
     private ScrollViewer BrowserScrollViewer => EnsureBrowserSurface().ScrollViewer;
     private ItemsRepeater BrowserRepeater => EnsureBrowserSurface().Repeater;
-    private Grid NativeExplorerHostSurface => EnsureBrowserSurface().NativeHostSurface;
 
     private void ShowBrowserSurface()
     {
@@ -1588,7 +1648,7 @@ public partial class MainWindow
         // is authoritative because it can follow Glide theme/resizing consistently across Windows/DPI.
         BrowserScrollViewer.IsVisible = true;
         ApplyManagedExplorerTheme();
-        ApplyStatusVisibility();
+        NotifyStatusChromeChanged();
     }
 
     /// <summary>Keyboard focus goes to the folder list so arrows / Enter / Backspace act on it.</summary>
@@ -1601,92 +1661,13 @@ public partial class MainWindow
         }, DispatcherPriority.Loaded);
     }
 
-    /// <summary>
-    /// Native Shell COM objects are created only after a Browser tab becomes the active workspace.
-    /// Keeping the factory here also makes the startup contract auditable: constructing MainWindow
-    /// or a Home/Image tab cannot instantiate ExplorerBrowser.
-    /// </summary>
-    private void EnsureNativeExplorerHost(bool recreateIfFailed = false)
-    {
-        if (NativeExplorerHost is not null && recreateIfFailed && NativeExplorerHost.State == ExplorerHostState.Failed)
-        {
-            // NativeControlHost owns a real child HWND. A failed host remains an opaque native window
-            // and can physically cover Avalonia's managed fallback even when BrowserScrollViewer.IsVisible=true.
-            // Detach the failed child so Refresh/address navigation can make a clean COM attempt.
-            NativeExplorerHost.FolderNavigated -= NativeExplorerFolderNavigated;
-            NativeExplorerHost.StateChanged -= NativeExplorerStateChanged;
-            NativeExplorerHost.FileActivated -= NativeExplorerFileActivated;
-            NativeExplorerHostSurface.Children.Remove(NativeExplorerHost);
-            NativeExplorerHost = null;
-        }
-        if (NativeExplorerHost is not null) return;
-        NativeExplorerHost = new WindowsExplorerHost
-        {
-            // Keep the native HWND at 1x1 until Explorer has produced a real view. Native child HWNDs
-            // always sit above Avalonia-rendered content, so this makes the managed fallback genuinely
-            // visible while COM creation/navigation is in flight instead of showing a black rectangle.
-            Width = 1,
-            Height = 1,
-            HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Left,
-            VerticalAlignment = Avalonia.Layout.VerticalAlignment.Top
-        };
-        NativeExplorerHost.FolderNavigated += NativeExplorerFolderNavigated;
-        NativeExplorerHost.StateChanged += NativeExplorerStateChanged;
-        NativeExplorerHost.Diagnostic += (name, data) => _diagnostics.Write("native_explorer", name, data);
-        NativeExplorerHost.CanActivateFile = ImageNavigator.IsSupported;
-        NativeExplorerHost.FileActivated += NativeExplorerFileActivated;
-        NativeExplorerHostSurface.Children.Add(NativeExplorerHost);
-        ApplyEmbeddedExplorerTheme();
-        ApplyNativeExplorerSurfaceOwnership(NativeExplorerHost.State);
-    }
-
-    private void ApplyNativeExplorerSurfaceOwnership(ExplorerHostState state)
-    {
-        if (NativeExplorerHost is null)
-        {
-            BrowserScrollViewer.IsVisible = true;
-            return;
-        }
-
-        var ready = state == ExplorerHostState.Ready;
-        BrowserScrollViewer.IsVisible = !ready;
-        // Keep the host attached (1x1 when not ready) so a failure does not trigger an Avalonia
-        // visibility destroy/recreate loop. The 1x1 child cannot obscure the managed fallback.
-        NativeExplorerHost.IsVisible = true;
-        if (ready)
-        {
-            NativeExplorerHost.ClearValue(WidthProperty);
-            NativeExplorerHost.ClearValue(HeightProperty);
-            NativeExplorerHost.HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch;
-            NativeExplorerHost.VerticalAlignment = Avalonia.Layout.VerticalAlignment.Stretch;
-        }
-        else
-        {
-            NativeExplorerHost.Width = 1;
-            NativeExplorerHost.Height = 1;
-            NativeExplorerHost.HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Left;
-            NativeExplorerHost.VerticalAlignment = Avalonia.Layout.VerticalAlignment.Top;
-        }
-        _diagnostics.Write("native_explorer", "surface_owner_changed", new
-        {
-            state = state.ToString(),
-            fallbackVisible = BrowserScrollViewer.IsVisible,
-            nativeVisible = NativeExplorerHost.IsVisible,
-            nativeReady = ready
-        });
-    }
-
-    private void NativeExplorerStateChanged(ExplorerHostState state)
-    {
-        // The real HWND only expands to cover the browser after both view creation and navigation
-        // complete. Failure removes the opaque child from sight immediately, leaving a usable fallback.
-        if (!BrowserView.IsVisible) return;
-        ApplyNativeExplorerSurfaceOwnership(state);
-    }
-
     private async Task ActivateWorkspaceAsync()
     {
-        if (_tabMruCycleSnapshot is null) TouchTabMru();
+        var switchStarted = Stopwatch.GetTimestamp();
+        _tabStrip.TouchUnlessCycling(TabIds, _workspace.Active?.Id);
+        // 5.1.0 instant tab switching: keep what the tab being left shows (MainWindow.TabWarmCache.cs).
+        CaptureLeavingTabForWarmSwitch(_workspace.Active?.Id ?? Guid.Empty);
+        _shownTabId = _workspace.Active?.Id ?? Guid.Empty;
         // The active tab owns its history from the moment it is active, not only after the awaits below (an image tab's
         // load): Back / Forward and anything else that reads the active tab's history must never find it missing.
         if (_workspace.Active is { } activating) HistoryFor(activating);
@@ -1697,6 +1678,7 @@ public partial class MainWindow
                 break;
             case ImageTabState image:
                 AdvanceWorkspaceEpoch();
+                if (TryShowWarmImageTab(image)) break;
                 await LoadPathAsync(image.Path, updateActiveTab: false);
                 if (image.ViewState is { } view)
                     Viewport.RestoreViewState(new ViewerViewSnapshot(view.Mode, view.Zoom, new Vector(view.PanX, view.PanY)));
@@ -1715,7 +1697,8 @@ public partial class MainWindow
                 ShowBrowserSurface();
                 ApplyExplorerTabView(browser, applySavedView: folderRestored);
                 BuildExplorerNavPane();
-                NavigateBrowserTo(folder, addHistory: !folderRestored);
+                // The surface still holding this tab (back from a picture / Welcome page) is reconciled in place.
+                NavigateBrowserTo(folder, !folderRestored, null, rebuildTabStrip: false);
                 FocusBrowserList();
                 // A custom new-tab folder that could not be used says so in the Explorer message slot.
                 if (_tabNotices.Remove(browser.Id, out var explorerNotice)) ShowExplorerMessage(explorerNotice, isError: true);
@@ -1724,6 +1707,9 @@ public partial class MainWindow
         }
         RebuildTabStrip();
         if (_workspace.Active is { } active) SelectBrowserHighlight(active.Id);
+        var switchMs = Stopwatch.GetElapsedTime(switchStarted).TotalMilliseconds;
+        if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("tab_activated", $"ms={switchMs:F2};kind={_workspace.Active?.GetType().Name}");
+        _diagnostics.Write("navigation", "tab_activated", new { ms = switchMs, kind = _workspace.Active?.GetType().Name });
         // Back / Forward: the first time a tab is shown its history starts here; a tab that changed what it shows
         // (an image tab turned into an Explorer view...) gets a new step.
         RecordActiveTabLocation();
@@ -1758,7 +1744,7 @@ public partial class MainWindow
             case BrowserTabState browser:
             {
                 // The session file keeps the Explorer folders of the tab history (images and Home are not persisted).
-                if (_tabHistories.TryGetValue(id, out var history) && history.Current is { Kind: Glide.Core.Navigation.NavigationEntryKind.Explorer })
+                if (_tabHistories.TryGet(id, out var history) && history.Current is { Kind: Glide.Core.Navigation.NavigationEntryKind.Explorer })
                     CaptureExplorerHistoryEntry(history, browser);
                 var navigation = BrowserNavigationFor(id) ?? browser.Navigation;
                 _workspace.ReplaceTab(browser with { Navigation = navigation, View = CaptureExplorerViewFor(browser) ?? browser.View });

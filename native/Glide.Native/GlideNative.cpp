@@ -389,9 +389,10 @@ static int DecodeImageBoundedW(const wchar_t* path, std::uint32_t maxWidth, std:
 {
     if (!path || !image) return 0;
     *image = {};
-    // 5.0.7: a camera JPEG's embedded MPF large preview as the first view (GlideJpeg.cpp). Everything else, and
-    // any JPEG that path declines or fails on, continues with WIC below exactly as before.
-    if (maxWidth > 0 && maxHeight > 0 && GlideTurboDecodeBounded(path, maxWidth, maxHeight, image)) return 1;
+    // JPEG first view through libjpeg-turbo (GlideJpeg.cpp): the embedded MPF preview when it covers the request,
+    // else a DCT-scaled decode; progressive only without a staged WIC preview (WIC's first-scans preview is faster
+    // there). Any JPEG that path declines or fails on continues with WIC below exactly as before.
+    if (maxWidth > 0 && maxHeight > 0 && GlideTurboDecodeBounded(path, maxWidth, maxHeight, !stagedProgressivePreview, image)) return 1;
     *image = {};
     const HRESULT init = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     const bool mustUninit = SUCCEEDED(init);
@@ -1370,4 +1371,12 @@ bool GlideWithinDecodeCap(std::uint64_t width, std::uint64_t height) { return Wi
 extern "C" __declspec(dllexport) int __cdecl GlideJpegTurboAcceptsW(const wchar_t* path)
 {
     return GlideTurboAccepts(path) ? 1 : 0;
+}
+
+// Tests: the JPEG first-view decision (0 = WIC, 1 = embedded preview, 2 = DCT-scaled decode) and its scale.
+extern "C" __declspec(dllexport) int __cdecl GlideJpegPlanFirstView(int width, int height, std::uint32_t needW, std::uint32_t needH,
+                                                                    std::uint32_t previewLongSide, int scaledAllowed, int* scaleDenom)
+{
+    if (scaleDenom) *scaleDenom = GlideJpegChooseScaleDenom(width, height, needW, needH);
+    return static_cast<int>(GlideJpegChooseFirstView(width, height, needW, needH, previewLongSide, scaledAllowed != 0));
 }

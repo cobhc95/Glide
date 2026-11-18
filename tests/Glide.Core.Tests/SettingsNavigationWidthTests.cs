@@ -9,6 +9,7 @@ namespace Glide.Core.Tests;
 
 /// <summary>The Settings left navigation column is a narrow FIXED width: it fits every page label and cannot be resized.</summary>
 [Collection(AvaloniaHeadlessCollection.Name)]
+[Trait("Area", "Settings")]
 public sealed class SettingsNavigationWidthTests
 {
     public SettingsNavigationWidthTests(AvaloniaHeadlessFixture fixture) => _ = fixture;

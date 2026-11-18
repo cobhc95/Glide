@@ -6,16 +6,22 @@ using Glide.Core.Workspace;
 namespace Glide.App;
 
 /// <summary>
-/// 5.0.6: where tabs opened "in a new tab" go and whether Glide switches to them ("New tabs open at", "Open new
-/// tabs in the foreground", and Shift / Alt flip them when "Shift and Alt change how a new tab opens" is on:
+/// 5.0.6: where tabs opened "in a new tab" go and whether Glide switches to them ("New tabs open", "Open new
+/// tabs in the", and each one's "Key to open … instead" flips it for one tab (round 3 #18):
 /// <see cref="NewTabPolicy"/>; Ctrl+T and "+" follow only the position), and which tab becomes active after closing the active
 /// tab ("After closing a tab, activate": <see cref="TabCloseActivation"/>).
 /// </summary>
 public partial class MainWindow
 {
     private NewTabOpening ResolveNewTabOpening(KeyModifiers modifiers) =>
-        NewTabPolicy.Resolve(_settings.NewTabPosition, _settings.SwitchToNewTabs,
-            shift: modifiers.HasFlag(KeyModifiers.Shift), alt: modifiers.HasFlag(KeyModifiers.Alt), modifiersEnabled: _settings.NewTabModifiers);
+        NewTabPolicy.Resolve(_settings.NewTabPosition, _settings.SwitchToNewTabs, _settings.NewTabPositionKey, _settings.NewTabForegroundKey,
+            shift: modifiers.HasFlag(KeyModifiers.Shift), ctrl: modifiers.HasFlag(KeyModifiers.Control), alt: modifiers.HasFlag(KeyModifiers.Alt));
+
+    /// <summary>5.1.0: an Explorer middle-click has its own side and position settings; the held-key flips still apply.</summary>
+    private NewTabOpening ResolveMiddleClickOpening(KeyModifiers modifiers) =>
+        NewTabPolicy.ResolveMiddleClick(_settings.MiddleClickNewTabSide, _settings.MiddleClickNewTabPosition, _settings.NewTabPosition,
+            _settings.NewTabPositionKey, _settings.NewTabForegroundKey,
+            shift: modifiers.HasFlag(KeyModifiers.Shift), ctrl: modifiers.HasFlag(KeyModifiers.Control), alt: modifiers.HasFlag(KeyModifiers.Alt));
 
     /// <summary>Adds <paramref name="tab"/> as a tab opened from the current one: placed and activated as the settings and held keys say.</summary>
     private Task OpenInNewTabAsync(TabState tab, KeyModifiers modifiers, string source) =>
@@ -31,22 +37,28 @@ public partial class MainWindow
         else RebuildTabStrip();
     }
 
-    private async Task OpenImageInNewTabAsync(string path, KeyModifiers modifiers, string source)
+    private Task OpenImageInNewTabAsync(string path, KeyModifiers modifiers, string source) =>
+        OpenImageInNewTabAsync(path, ResolveNewTabOpening(modifiers), source);
+
+    private async Task OpenImageInNewTabAsync(string path, NewTabOpening opening, string source)
     {
         if (!File.Exists(path) || !ImageNavigator.IsSupported(path)) return;
-        await OpenInNewTabAsync(new ImageTabState(Guid.NewGuid(), Path.GetFullPath(path)), modifiers, source);
+        await OpenInNewTabAsync(new ImageTabState(Guid.NewGuid(), Path.GetFullPath(path)), opening, source);
         if (_settings.RecentHistoryEnabled) RecentHistoryStore.RecordFile(path, _settings.HistorySize);
     }
 
     private Task OpenFolderInNewTabAsync(string folder, KeyModifiers modifiers, string source) =>
-        OpenInNewTabAsync(new BrowserTabState(Guid.NewGuid(), Path.GetFullPath(folder)), modifiers, source);
+        OpenFolderInNewTabAsync(folder, ResolveNewTabOpening(modifiers), source);
+
+    private Task OpenFolderInNewTabAsync(string folder, NewTabOpening opening, string source) =>
+        OpenInNewTabAsync(new BrowserTabState(Guid.NewGuid(), Path.GetFullPath(folder)), opening, source);
 
     /// <summary>
-    /// Adds a plain new tab (Ctrl+T, "+", its menu, a title-bar middle-click) where "New tabs open at" says and makes it
+    /// Adds a plain new tab (Ctrl+T, "+", its menu, a title-bar middle-click) at the far right end and makes it
     /// the active tab (<see cref="NewTabPolicy.ForNewTabCommand"/>); the caller then activates the workspace.
     /// </summary>
     private TabState AddNewTab(TabState tab) =>
-        _workspace.OpenTab(tab, NewTabPolicy.ForNewTabCommand(_settings.NewTabPosition));
+        _workspace.OpenTab(tab, NewTabPolicy.ForNewTabCommand());
 
     private TabState AddNewHomeTab() => AddNewTab(new HomeTabState(Guid.NewGuid()));
     private TabState AddNewImageTab(string path) => AddNewTab(new ImageTabState(Guid.NewGuid(), Path.GetFullPath(path)));
@@ -61,6 +73,6 @@ public partial class MainWindow
     {
         EndTabMruCycle();
         TouchTabMru();
-        return _tabMru.ToArray();
+        return _tabStrip.Mru.ToArray();
     }
 }

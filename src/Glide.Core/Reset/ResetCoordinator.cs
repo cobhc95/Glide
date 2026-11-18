@@ -1,3 +1,4 @@
+using Glide.Core.Data;
 namespace Glide.Core.Reset;
 
 /// <summary>Everything the reset flow touches, in one place so tests can hand it scratch folders and fakes.</summary>

@@ -17,6 +17,7 @@ namespace Glide.Explorer.Tests;
 /// running, so the tooltip popped up between two wheel ticks, right where the next tick then went (a tooltip is its own
 /// native popup window).
 /// </summary>
+[Trait("Area", "Settings")]
 public sealed class SettingsWheelToolTipTests
 {
     private static async Task Settle(ExplorerHarness h, int rounds = 5)

@@ -4,6 +4,7 @@ using Glide.App.Services;
 namespace Glide.Core.Tests;
 
 /// <summary>Locks the canonical shortcut text shared by Settings capture and runtime hotkey lookup.</summary>
+[Trait("Area", "Hotkeys")]
 public sealed class KeyboardShortcutTextTests
 {
     [Theory]

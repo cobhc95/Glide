@@ -11,6 +11,7 @@ namespace Glide.Core.Tests;
 /// encoder — plus PXR24 and B44), HALF/FLOAT/UINT channels, premultiplied alpha and luminance/chroma files.
 /// </summary>
 [Collection(AvaloniaHeadlessCollection.Name)]
+[Trait("Area", "Decode")]
 public sealed class ExrDecoderTests : IDisposable
 {
     private readonly List<string> _files = new();

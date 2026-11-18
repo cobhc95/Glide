@@ -1,6 +1,7 @@
 
 namespace Glide.Core.Tests;
 
+[Trait("Area", "Navigation")]
 public sealed class FullscreenCursorAutoHideTests
 {
     private static readonly DateTime T0 = new(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);

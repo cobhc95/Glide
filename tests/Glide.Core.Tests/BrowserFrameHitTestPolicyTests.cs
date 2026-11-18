@@ -12,6 +12,7 @@ namespace Glide.Core.Tests;
 /// still resizes, (b) empty title bar defers (Avalonia/DefWindowProc: HTCLIENT, then Glide's drag/double-click),
 /// (c) caption buttons keep native HT* codes for Snap Layouts, (d) ordinary moves never run the Avalonia hit test.
 /// </summary>
+[Trait("Area", "Explorer")]
 public sealed class BrowserFrameHitTestPolicyTests
 {
     private static readonly double[] Scales = { 1.0, 1.25, 1.5, 1.75, 2.0 };

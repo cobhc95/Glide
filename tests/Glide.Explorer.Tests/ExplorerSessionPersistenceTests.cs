@@ -10,6 +10,7 @@ namespace Glide.Explorer.Tests;
 /// continuously (debounced, atomic) and come back after a crash or restart, even when things moved.
 /// </summary>
 [Collection(ExplorerHeadlessCollection.Name)]
+[Trait("Area", "Explorer")]
 public sealed class ExplorerSessionPersistenceTests
 {
     private static readonly TimeSpan Quick = TimeSpan.FromMilliseconds(150);
@@ -59,7 +60,7 @@ public sealed class ExplorerSessionPersistenceTests
     {
         var loaded = WorkspaceSessionStore.Load() ?? throw new InvalidOperationException("no session file to restore");
         ((System.Collections.IDictionary)h.Get<object>("_explorerTabViews")).Clear();
-        ((System.Collections.IDictionary)h.Get<object>("_tabHistories")).Clear();
+        h.Window.TabHistories.Clear();
         h.Set("_explorerDisplayedTabId", Guid.Empty);
         h.Set("_explorerLoadedFolder", null);
         h.SelectionSet.Clear();

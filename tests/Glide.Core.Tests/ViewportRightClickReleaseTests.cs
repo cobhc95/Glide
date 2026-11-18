@@ -14,6 +14,7 @@ namespace Glide.Core.Tests;
 /// right-drag), instead of popping the menu on the press.
 /// </summary>
 [Collection(AvaloniaHeadlessCollection.Name)]
+[Trait("Area", "Gestures")]
 public sealed class ViewportRightClickReleaseTests
 {
     public ViewportRightClickReleaseTests(AvaloniaHeadlessFixture fixture) { _ = fixture; }

@@ -11,6 +11,7 @@ namespace Glide.Core.Tests;
 /// not just in isolation.
 /// </summary>
 [Collection(AvaloniaHeadlessCollection.Name)]
+[Trait("Area", "Decode")]
 public sealed class DecoderBackendBuiltInFormatTests
 {
     public DecoderBackendBuiltInFormatTests(AvaloniaHeadlessFixture fixture) { _ = fixture; }

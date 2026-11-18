@@ -1,6 +1,6 @@
 # Glide Image Viewer
 
-> **Glide 5.0.7:** [download](https://github.com/cobhc95/Glide/releases/latest) · choose what happens at the end of a folder (including an *Ask* picker), a *Loop this folder* button, and faster JPEG, TIFF, BMP, JPEG XL, HEIC and JPEG 2000 opening. [Release notes](docs/releases/release-notes-5.0.7.md) · [changelog](CHANGELOG.md)
+> **Glide 5.1.0:** [download](https://github.com/cobhc95/Glide/releases/latest) · held-arrow browsing through 30 MP photos at ~14 ms a picture with a third of the memory, instant tab switching, Explorer tabs that follow outside changes, an address bar over pictures, tooltip delays, a movable Overlay (Alt+O) and browser-style middle-click tabs. [Release notes](docs/releases/release-notes-5.1.0.md) · [changelog](CHANGELOG.md)
 
 ## Fast. Multi-tabbed. Multi-window. Highly customizable.
 
@@ -15,27 +15,25 @@
 Windows 10 1607 or later, x64. From the [latest release](https://github.com/cobhc95/Glide/releases/latest):
 
 * **`Glide.Setup.exe`**: installer (administrator rights; adds Open With and Explorer thumbnails).
-* **`Glide-5.0.7-Portable.zip`**: extract anywhere and run `Glide.exe`.
+* **`Glide-5.1.0-Portable.zip`**: extract anywhere and run `Glide.exe`.
 * **`Glide.Setup.sha256`**: checksum (`certutil -hashfile Glide.Setup.exe SHA256`).
 
 Upgrades keep your settings, key bindings and title bar.
 
 ## Performance
 
-Glide shows a screen-sized first view as early as possible, then swaps in the full-resolution picture while you look at it.
+Glide shows a window-sized view as early as possible and decodes full resolution for the picture you stop on (after a short idle) or as soon as you zoom.
 
-**Measured in 5.0.7** (vs 5.0.6, Ryzen 7 9700X, median, warm cache; [benchmark report](docs/perf/benchmark-report-5.0.7.md)):
+**Measured in 5.1.0** (vs 5.0.7, median; synthetic or generic test files; [release notes](docs/releases/release-notes-5.1.0.md#speed-results)):
 
-* **TIFF** opens about 4x faster (24 MP 182 → 39 ms, 100 MP 766 → 164 ms); **BMP** up to 1.5x.
-* **Camera JPEGs** with a built-in large preview show up to 6x sooner (45 MP: 225 → 39 ms).
-* **JPEG full resolution** is 26–43 % faster (24 MP 131 → 97 ms; progressive 445 → 253 ms).
-* **JPEG XL, HEIC, JPEG 2000** decode 12–20 % faster with the speed-built codec pack.
-* **Next image** from the prefetch cache appears in about 0.15 ms.
-* Since 5.0: half the memory of 4.x per full decode and 90 % less CPU when browsing 4K images.
+* **Holding an arrow key** through 30 MP JPEGs: 11–14 ms per picture (p95 ≤ 28 ms, was 214 ms), about 70 frames/s; memory 0.3–1.0 GB instead of 2.2–3.2 GB.
+* **Large JPEGs without a camera preview**: 30 MP first frame 103 → 87 ms; progressive prefetch 630 → 300 ms.
+* **Tab switching**: back to an Explorer tab 65–101 → 13–42 ms, back to a picture tab 51–107 → 16–19 ms.
+* **From 5.0.7**: TIFF about 4x faster, JPEG full decode 1.3–1.8x, camera JPEG previews 225 → 39 ms, JPEG XL / HEIC / JPEG 2000 12–20 % faster ([report](docs/perf/benchmark-report-5.0.7.md)).
 
 **Which engine handles what, and why**
 
-* **JPEG** (`.jpg .jpeg .jpe .jfif` …): camera files with a large embedded (MPF) preview show it first; otherwise Windows WIC's scaled decode gives the first view. The full picture is decoded by **libjpeg-turbo** (memory-mapped, straight into the bitmap, large baseline files in up to 8 parallel bands), within one level per channel of WIC. CMYK, 12-bit, lossless, arithmetic and anything odd fall back to WIC.
+* **JPEG** (`.jpg .jpeg .jpe .jfif` …): camera files with a large embedded (MPF) preview show it first; otherwise libjpeg-turbo's 1/2–1/8 reduced-size decode gives the first view and prefetch (WIC for progressive first views). The full picture is decoded by **libjpeg-turbo** (memory-mapped, straight into the bitmap, large baseline files in up to 8 parallel bands), within one level per channel of WIC. CMYK, 12-bit, lossless, arithmetic and anything odd fall back to WIC.
 * **TIFF, BMP**: WIC, split into up to 8 parallel bands, each with its own decoder (identical pixels).
 * **PNG, GIF, ICO**: WIC, decoded at full resolution straight away when they fit the budget.
 * **WebP**: Skia (Windows has no WebP decoder without a Store extension).
@@ -47,20 +45,24 @@ Glide shows a screen-sized first view as early as possible, then swaps in the fu
 
 * **Predictive prefetch** decodes the next and previous images off the UI thread (*prefetch depth* 1–30 each way, default 15), nearest first, in 1–6 parallel lanes by PC class, cancelling stale work when you jump.
 * **Decoded and compressed caches** keep finished bitmaps and raw neighbour file bytes (budgets in Settings > Performance).
-* **Adaptive fast preview** with background refinement after a short idle delay; **sequential foreground reads** hint the OS to stream the file.
-* **Speed Boost** keeps a warm Glide in the background (3–4 MB working set), so opening from Explorer is immediate.
+* **Per-preset decode sizes**: *First view decode size*, *Prefetch decode size* and *Decode full resolution* (immediately / when idle / on zoom only) in Settings > Performance.
+* **Speed Boost** keeps a warm Glide in the background (3–4 MB working set); opening from Explorer shows the window at once and the picture fills in.
+
+![Performance settings with decode sizes](docs/screenshots/5.1/settings-performance-decode-sizes.png)
 
 ## Feature tour
 
 ### Viewer
 
-Fit to window, width or height, or 100 %; zoom at the pointer, zoom to a dragged region, pan, rotate and flip. Images up to 512 MP open at full resolution behind a free-memory check. Fullscreen hides the cursor. Animated GIFs play with pause and frame stepping (`P`, `,` `.`). A text overlay shows index, name or any token you choose.
+Fit to window, width or height, or 100 %; zoom at the pointer, zoom to a dragged region, pan, rotate and flip. Images up to 512 MP open at full resolution behind a free-memory check. Fullscreen hides the cursor. Animated GIFs play with pause and frame stepping (`P`, `,` `.`). A text overlay shows index, name or any token you choose. Tooltip delays are set per area (Settings window, main interface, Overlay, Explorer items).
 
-![Appearance and viewing settings](docs/screenshots/5.0/settings-appearance.png)
+| Appearance | Tooltips |
+|---|---|
+| ![Appearance and viewing settings](docs/screenshots/5.1/settings-appearance.png) | ![Tooltip settings](docs/screenshots/5.1/settings-tooltips.png) |
 
-### Moving through folders (new in 5.0.7)
+### Moving through folders
 
-Next / Previous use Explorer's natural order with six sorts, and live folder refresh picks up new files. **When the last image is reached** decides what happens at the end of a folder: do nothing, loop, move to the next folder (default, also in a new tab), go back, show Home, or **Ask me each time**: a small card with numbered choices and *Remember this choice*. The **Loop this folder** status-bar button loops the current tab only. Bouncy laptop keys no longer skip pictures (5.0.6).
+Next / Previous use Explorer's natural order with six sorts, and live folder refresh picks up new files. **When the last image is reached** decides what happens at the end of a folder: do nothing, loop, move to the next folder (also in a new tab), go back, show Home, or **Ask me each time** (default): a small card with numbered choices and *Remember this choice*. The **Loop this folder** status-bar button loops the current tab only. Bouncy laptop keys no longer skip pictures .
 
 | Ask me each time | The setting |
 |---|---|
@@ -68,7 +70,7 @@ Next / Previous use Explorer's natural order with six sorts, and live folder ref
 
 ### Explorer tab
 
-A folder browser inside a tab: breadcrumb address bar, navigation pane, Thumbnails XL / L / M / S, List and Details, a Sort button, filter (`Ctrl+F`), click-to-rename, copy / cut / paste through the Windows clipboard, Recycle Bin delete and drag and drop. *Open last session* restores each tab's folder, selection and scroll, even after a crash. Long names wrap inside the selection and end with "…".
+A folder browser inside a tab: breadcrumb address bar, a resizable drive bar, Thumbnails XL / L / M / S, List and Details, sorting by name, date, type, file size or image width / height / pixels, filter (`Ctrl+F`), click-to-rename, copy / cut / paste through the Windows clipboard, Recycle Bin delete and drag and drop. Changes made in Windows File Explorer or other programs appear within a fraction of a second, updated in place without a reload. Optionally show date, resolution and file size under thumbnails, and keep the address bar above pictures in picture tabs. *Open last session* restores each tab's folder, selection and scroll, even after a crash.
 
 ![Explorer tab in a wide window](docs/screenshots/5.0.7/explorer-full.png)
 
@@ -82,21 +84,21 @@ A folder browser inside a tab: breadcrumb address bar, navigation pane, Thumbnai
 
 ### Tabs, windows and history
 
-Drag tabs between windows, restore closed tabs (`Ctrl+Shift+T`), duplicate, and `Ctrl+Tab` in tab or recent order. Hovering a background tab previews its picture or folder thumbnails. You choose where new tabs open and which tab activates after closing one. Every tab has browser-style **Back / Forward** (100 steps; `Alt+Left` / `Alt+Right`, mouse side buttons, title-bar buttons). See [NAVIGATION-HISTORY.md](docs/NAVIGATION-HISTORY.md).
+Drag tabs between windows, restore closed tabs (`Ctrl+Shift+T`), duplicate, and `Ctrl+Tab` in tab or recent order. Switching back to a recent tab is instant: its picture, zoom or folder view is kept. Hovering a tab previews it (resize with Ctrl+wheel). Like a browser, middle-click opens in a background tab at the end and `Ctrl+T` adds a tab at the far right; you choose where new tabs open, a key to flip that, and which tab activates after closing one (including first, last or a Home / Explorer tab). Every tab has browser-style **Back / Forward** (100 steps; `Alt+Left` / `Alt+Right`, title-bar buttons, and the mouse side buttons if you bind them). See [NAVIGATION-HISTORY.md](docs/NAVIGATION-HISTORY.md).
 
-![Tab settings](docs/screenshots/5.0/settings-tabs.png)
+![Tab settings](docs/screenshots/5.1/settings-tabs-middle-click-previews.png)
 
 ### Status bar and title bar
 
 The status bar stacks file info above its buttons, reflows to the window width, can auto-hide, and can reserve space when fitting. Title-bar buttons are customisable and hide gracefully when the window narrows.
 
-![Status bar settings](docs/screenshots/5.0/settings-status-bar.png)
+![Status bar settings](docs/screenshots/5.1/settings-status-bar.png)
 
 ### Hotkeys and mouse gestures
 
 One registry of more than 260 actions sits behind every key, gesture, button and menu, and 132 on/off and choice settings can be bound as *Toggle:* / *Cycle:* actions. Presets for Glide, Windows Photos, IrfanView, nomacs, FastStone and XnView MP; *Search hotkey* tells you what a key does; conflicts are named before you replace them. One gesture panel covers clicks, drags and wheel in 9 areas, with up to 6 custom gestures each. See [ACTIONS-AND-HOTKEYS.md](docs/ACTIONS-AND-HOTKEYS.md).
 
-![Keyboard shortcuts](docs/screenshots/5.0/settings-hotkeys.png)
+![Keyboard shortcuts](docs/screenshots/5.1/settings-hotkeys.png)
 ![Mouse gesture panel](docs/screenshots/5.0/settings-mouse-gestures.png)
 
 ### Settings
@@ -109,6 +111,7 @@ Eight pages of collapsible cards with *N changed* badges and a search that opens
 
 * **Save / Save As**: `Ctrl+S` saves in place after confirmation, `Ctrl+Alt+S` converts to about 30 formats via a temporary file, keeping EXIF / XMP / colour profile where the format allows.
 * **Print** (`Ctrl+P`): full-resolution output with an instant live preview, fit / fill / actual size / custom scale, alignment and margins.
+* **Overlay mode** (`Alt+O`): all of Glide as a frameless, transparent picture window. Drag the picture to move it (zoomed in: bottom bar or `Alt+drag`), opacity slider with mouse wheel, sizes 25-200 % above the taskbar, optional drag strip and **Lock position**.
 * **Window-in-Window overlays**: transparent reference images or videos with their own zoom, opacity and rotation; saveable layouts.
 * **Slideshow**: interval, order, shuffle, loop, across folders.
 * **Windows integration**: Open With for every format, Explorer thumbnails for every format Glide decodes, three external-program slots (`Shift+1/2/3`).
@@ -123,7 +126,7 @@ All rebindable in Settings > Mouse & keyboard. *Glide default* preset:
 | Action | Shortcut |
 |---|---|
 | Next / previous image | `Space`, `Right`, `Page Down` / `Left`, `Page Up` |
-| Back / forward | `Alt+Left` / `Alt+Right`, `Shift+Backspace` (mouse side buttons) |
+| Back / forward | `Alt+Left` / `Alt+Right`, `Shift+Backspace` (mouse side buttons only if bound in Mouse gestures; by default Glide leaves them to Windows / your mouse software) |
 | Back, or previous image | `Backspace` |
 | First / last image, sibling folder | `Home` / `End`, `Shift+Left` / `Shift+Right` |
 | Fullscreen | `F`, `F11`, `Enter` |
@@ -139,11 +142,11 @@ All rebindable in Settings > Mouse & keyboard. *Glide default* preset:
 | Copy / rename / delete | `Ctrl+C` / `F2` / `Delete` |
 | Print / Save / Save As | `Ctrl+P` / `Ctrl+S` / `Ctrl+Alt+S` |
 | External program 1 / 2 / 3 | `Shift+1` / `Shift+2` / `Shift+3` |
-| Add overlay | `Shift+O` |
+| Add overlay, Overlay mode | `Shift+O`, `Alt+O` |
 
 ## Formats
 
-196 recognised extensions; whether one opens depends on its route (built-in decoder, codec module, WIC, Shell preview or optional codec). New in 5.0.7: headerless DIB, Apple ICNS, Sun raster, XWD, DPX and OpenEXR DWAA/DWAB. Full route map: [format-coverage.md](docs/format-coverage.md).
+196 recognised extensions; whether one opens depends on its route (built-in decoder, codec module, WIC, Shell preview or optional codec). Added in 5.0.7: headerless DIB, Apple ICNS, Sun raster, XWD, DPX and OpenEXR DWAA/DWAB. Full route map: [format-coverage.md](docs/format-coverage.md).
 
 <details>
 <summary><strong>All 196 extensions</strong></summary>
@@ -160,7 +163,7 @@ Run `build.cmd` (or `build.cmd fast --no-pause`) with the .NET 10 SDK (x64) and 
 
 [CHANGELOG](CHANGELOG.md) · [Release notes](docs/releases/) · [Actions and hotkeys](docs/ACTIONS-AND-HOTKEYS.md) · [Navigation history](docs/NAVIGATION-HISTORY.md) · [Format coverage](docs/format-coverage.md) · [Explorer thumbnails](docs/explorer-thumbnails.md) · [Print research](docs/print-research.md) · [Architecture handoff](docs/GLIDE_MANIFESTO_AND_HANDOFF.md) · [All docs](docs/README.md)
 
-Thanks to vertigo220, whose reports and ideas shaped 5.0 ([feedback map](docs/releases/5.0.0-community-feedback.md)), and to everyone who tested 5.0.6 and 5.0.7.
+Thanks to vertigo220, whose reports and ideas shaped 5.0 ([feedback map](docs/releases/5.0.0-community-feedback.md)), and to everyone who tested 5.0.x and 5.1.
 
 ## License
 

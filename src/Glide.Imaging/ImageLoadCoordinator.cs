@@ -171,7 +171,21 @@ public sealed class ImageLoadCoordinator : IDisposable
         return DisposeBitmap(bitmap);
     }
 
+    /// <summary>
+    /// Adds one presentation lease to a bitmap the caller already holds a lease on (it is presented now), so a second
+    /// owner (5.1.0: the per-tab frame kept for instant tab switching) keeps it alive until its own
+    /// <see cref="ReleaseBitmap"/>. Cache eviction then retires it instead of disposing it.
+    /// </summary>
+    public void AddLease(Bitmap bitmap)
+    {
+        lock (_cacheGate) LeaseLocked(bitmap);
+    }
+
+    /// <summary>Drops the lease TryGetPrepared just took (a preview a full request cannot use); always false.</summary>
+    private bool ReleaseLease(Bitmap bitmap) { ReleaseBitmap(bitmap); return false; }
+
     /// <summary>Number of presentation leases currently held on <paramref name="bitmap"/> (diagnostics/tests).</summary>
+
     public int GetLeaseCount(Bitmap? bitmap)
     {
         if (bitmap is null) return 0;
@@ -289,8 +303,9 @@ public sealed class ImageLoadCoordinator : IDisposable
         var started = System.Diagnostics.Stopwatch.GetTimestamp();
         if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("foreground_load_start", ImageFormatRegistry.GetLongestExtension(path));
 
-        if (!requireFull && TryGetPrepared(path, out var prepared, lease: true))
+        if (TryGetPrepared(path, out var prepared, lease: true) && (!requireFull || prepared.IsFull || ReleaseLease(prepared.Bitmap)))
         {
+            Interlocked.Increment(ref ImageLoadCounters.PreparedHits);
             if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("foreground_prepared_cache_hit", path);
             return new ImageLoadResult(path, prepared.Bitmap, System.Diagnostics.Stopwatch.GetElapsedTime(started),
                 CacheHit: true, IsPreview: !prepared.IsFull, SourceWidth: prepared.Source.Width,
@@ -413,8 +428,9 @@ public sealed class ImageLoadCoordinator : IDisposable
                     {
                         if (GlidePerformanceTrace.Enabled)
                             GlidePerformanceTrace.Mark("foreground_path_preview_start", $"source={source.Width}x{source.Height};box={policy.PreviewMaxWidth}x{policy.PreviewMaxHeight}");
+                        var firstBox = policy.ScaledBox(path, prefetch: false);
                         var direct = await pathBackend.TryDecodePreviewFromPathAsync(path, source,
-                            policy.PreviewMaxWidth, policy.PreviewMaxHeight, policy.ProgressiveColorFirstPreview,
+                            firstBox.Width, firstBox.Height, policy.ProgressiveColorFirstPreview,
                             cancellationToken).ConfigureAwait(false);
                         if (direct is { } pathPreview)
                         {
@@ -477,7 +493,7 @@ public sealed class ImageLoadCoordinator : IDisposable
                     }
                     else if (scaledFirstFrame)
                     {
-                        var targetLongest = RequiredPreviewLongestSide(source, policy);
+                        var targetLongest = RequiredPreviewLongestSide(source, policy.ScaledBox(path, prefetch: false));
                         bitmap = await _backend.DecodePreviewAsync(stream, source, targetLongest, policy.PreviewInterpolation, path, cancellationToken).ConfigureAwait(false);
                         isPreview = bitmap.PixelSize.Width < source.Width || bitmap.PixelSize.Height < source.Height;
                     }
@@ -504,6 +520,8 @@ public sealed class ImageLoadCoordinator : IDisposable
                         if (!source.IsValid) source = new ImageDimensions(bitmap.PixelSize.Width, bitmap.PixelSize.Height);
                     }
 
+                    Interlocked.Increment(ref ImageLoadCounters.ForegroundDecodes);
+                    if (!isPreview) Interlocked.Increment(ref ImageLoadCounters.ForegroundFullDecodes);
                     if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("foreground_decode_ready", $"{bitmap.PixelSize.Width}x{bitmap.PixelSize.Height};preview={isPreview}");
                     if (generation != Volatile.Read(ref _generation))
                     {
@@ -609,7 +627,9 @@ public sealed class ImageLoadCoordinator : IDisposable
                         if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("refinement_skipped_first_frame_sufficient", $"first={firstLongest};target={boundedTarget}");
                         return null;
                     }
-                    if (budgetAllowsFull && sourceBytes <= MaxDirectFullRefinementBytes)
+                    if (budgetAllowsFull && sourceBytes <= MaxDirectFullRefinementBytes &&
+                        (policy.RefinePolicyFor(firstFrame.Path) == Glide.Core.Settings.FullRefinePolicy.Immediate ||
+                         NativeImageDecoder.IsFullDecodeOnlyFormat(firstFrame.Path)))
                     {
                         // MainWindow discards a bounded refinement and immediately decodes the full frame
                         // (RefinePresentedAsync), and codecs without reduced-size decoding (PNG/WebP/TIFF/
@@ -622,6 +642,8 @@ public sealed class ImageLoadCoordinator : IDisposable
                 var bitmap = isPreview
                     ? await _backend.DecodePreviewAsync(stream, new ImageDimensions(firstFrame.SourceWidth, firstFrame.SourceHeight), boundedTarget, policy.PreviewInterpolation, firstFrame.Path, cancellationToken).ConfigureAwait(false)
                     : await _backend.DecodeFullAsync(stream, firstFrame.Path, cancellationToken).ConfigureAwait(false);
+                Interlocked.Increment(ref ImageLoadCounters.RefineDecodes);
+                if (!isPreview) Interlocked.Increment(ref ImageLoadCounters.RefineFullDecodes);
                 if (firstFrame.Generation != Volatile.Read(ref _generation)) { DisposeBitmap(bitmap); return null; }
                 if ((long)bitmap.PixelSize.Width * bitmap.PixelSize.Height <=
                     (long)firstFrame.Bitmap.PixelSize.Width * firstFrame.Bitmap.PixelSize.Height)
@@ -817,8 +839,17 @@ public sealed class ImageLoadCoordinator : IDisposable
                 }
                 else
                 {
-                    bitmap = await _backend.DecodePreviewAsync(stream, source, RequiredPreviewLongestSide(source, policy), policy.PreviewInterpolation, path, token).ConfigureAwait(false);
+                    // Same decoder-native 2-D box route as the foreground first view: the longest-side
+                    // DecodePreviewAsync route treats the size as a ceiling and picked a 1/8 JPEG DCT scale
+                    // (560x840 for a 1068 px tall need), so every prefetched neighbour looked soft.
+                    var box = policy.ScaledBox(path, prefetch: true);
+                    var direct = _backend is IPathOptimizedImageDecoderBackend pathBackend && pathBackend.SupportsPathPreview(path)
+                        ? await pathBackend.TryDecodePreviewFromPathAsync(path, source, box.Width, box.Height, policy.ProgressiveColorFirstPreview, token).ConfigureAwait(false)
+                        : null;
+                    bitmap = direct?.Bitmap ?? await _backend.DecodePreviewAsync(stream, source, RequiredPreviewLongestSide(source, box), policy.PreviewInterpolation, path, token).ConfigureAwait(false);
                 }
+                Interlocked.Increment(ref ImageLoadCounters.SpeculativeDecodes);
+                if (isFull) Interlocked.Increment(ref ImageLoadCounters.SpeculativeFullDecodes);
                 if (epoch != Volatile.Read(ref _cacheEpoch)) { DisposeBitmap(bitmap); return false; }
                 source = NormalizeSourceOrientation(source, bitmap);
                 // Some WIC codecs (PNG) answer a bounded request at source size; record what was
@@ -990,10 +1021,13 @@ public sealed class ImageLoadCoordinator : IDisposable
     /// landscape overdecode even for formats that do not expose a native bounded decode interface.
     /// </summary>
     private static int RequiredPreviewLongestSide(ImageDimensions source, ImagePerformancePolicy policy)
+        => RequiredPreviewLongestSide(source, (policy.PreviewMaxWidth, policy.PreviewMaxHeight));
+
+    private static int RequiredPreviewLongestSide(ImageDimensions source, (int Width, int Height) box)
     {
-        if (!source.IsValid) return policy.PreviewLongestSide;
-        var scale = Math.Min(1.0, Math.Min(policy.PreviewMaxWidth / (double)source.Width,
-                                          policy.PreviewMaxHeight / (double)source.Height));
+        if (!source.IsValid) return Math.Max(box.Width, box.Height);
+        var scale = Math.Min(1.0, Math.Min(box.Width / (double)source.Width,
+                                          box.Height / (double)source.Height));
         return Math.Max(1, (int)Math.Ceiling(source.LongestSide * scale));
     }
 
@@ -1187,6 +1221,7 @@ public sealed class ImageLoadCoordinator : IDisposable
                 _prepared.TryGetValue(path, out var added) && ReferenceEquals(added.Bitmap, bitmap))
             {
                 RemovePreparedLocked(path, added, dispose: false);
+                Interlocked.Increment(ref ImageLoadCounters.PreparedRejections);
                 return false;
             }
             return true;
@@ -1265,7 +1300,10 @@ public sealed class ImageLoadCoordinator : IDisposable
                 continue;
             }
             if (_prepared.TryGetValue(path, out var entry))
+            {
+                Interlocked.Increment(ref ImageLoadCounters.PreparedEvictions);
                 RemovePreparedLocked(path, entry, dispose: true);
+            }
             else
                 _preparedLru.Remove(node);
             node = prev;
@@ -1356,3 +1394,17 @@ public sealed record ImageLoadResult(
     string DecodeRoute = "stream");
 
 public readonly record struct ImageCacheSnapshot(int CompressedItems, long CompressedBytes, int DecodedItems, long DecodedBytes, long Epoch);
+
+/// <summary>
+/// Process-wide decode/cache counters for the navigation benchmark (--benchmark-nav) and diagnostics.
+/// Plain Interlocked increments: always on, negligible cost.
+/// </summary>
+public static class ImageLoadCounters
+{
+    public static long ForegroundDecodes, ForegroundFullDecodes, PreparedHits, RefineDecodes, RefineFullDecodes,
+        SpeculativeDecodes, SpeculativeFullDecodes, PreparedEvictions, PreparedRejections;
+    public static string Snapshot() =>
+        $"fg={Volatile.Read(ref ForegroundDecodes)};fgFull={Volatile.Read(ref ForegroundFullDecodes)};hits={Volatile.Read(ref PreparedHits)};" +
+        $"refine={Volatile.Read(ref RefineDecodes)};refineFull={Volatile.Read(ref RefineFullDecodes)};spec={Volatile.Read(ref SpeculativeDecodes)};" +
+        $"specFull={Volatile.Read(ref SpeculativeFullDecodes)};evict={Volatile.Read(ref PreparedEvictions)};reject={Volatile.Read(ref PreparedRejections)}";
+}

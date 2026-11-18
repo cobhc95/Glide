@@ -17,6 +17,7 @@ namespace Glide.Core.Tests;
 /// metadata is carried over with Orientation reset, and the Save as list/name logic is consistent.
 /// </summary>
 [Collection(AvaloniaHeadlessCollection.Name)]
+[Trait("Area", "Decode")]
 public sealed class ImageEncoderTests : IDisposable
 {
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "GlideEncode_" + Guid.NewGuid().ToString("N"));
@@ -29,7 +30,7 @@ public sealed class ImageEncoderTests : IDisposable
 
     public void Dispose()
     {
-        try { Directory.Delete(_dir, true); } catch { }
+        TempDir.TryDelete(_dir);
         // Saving JPEG 2000/WebP resolves the bundled provider, which registers its decode suffixes process-wide.
         CodecCapabilityRegistry.ClearExternalProviders();
     }

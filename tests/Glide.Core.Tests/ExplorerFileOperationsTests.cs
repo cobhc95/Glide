@@ -44,6 +44,7 @@ internal sealed class SyncProgress<T>(Action<T> handler) : IProgress<T>
 }
 
 [Collection("ExplorerFileOperations")]
+[Trait("Area", "Explorer")]
 public sealed class ExplorerFileOperationsTests
 {
     // ------------------------------------------------------------ ValidateName

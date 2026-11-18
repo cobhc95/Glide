@@ -23,6 +23,7 @@ namespace Glide.Core.Tests;
 /// </summary>
 // Source-text contract kept: this asserts on production source (UI code-behind, native/installer files or a repo-wide scan) that cannot be run headlessly; behavioural coverage lives in the other test files.
 [Collection(AvaloniaHeadlessCollection.Name)]
+[Trait("Area", "Hotkeys")]
 public sealed class HotkeyEndToEndTests
 {
     public HotkeyEndToEndTests(AvaloniaHeadlessFixture fixture) { _ = fixture; }
@@ -142,7 +143,7 @@ public sealed class HotkeyEndToEndTests
                 // 1. Glide's own Explorer tab (Existing or new tab mode): a real Ctrl+E press opens it on the image's folder.
                 Settings(window).ExplorerLocateOpensIn = Glide.Core.Navigation.ExplorerLocateTargets.ExistingOrNewTab;
                 await Press(window, Key.E, RawInputModifiers.Control);
-                for (var i = 0; i < 100 && workspace.Active is not BrowserTabState; i++) { Dispatcher.UIThread.RunJobs(); await Task.Delay(20); }
+                await Wait.UntilAsync(() => workspace.Active is BrowserTabState, "Explorer tab opened", pump: () => Dispatcher.UIThread.RunJobs());
                 Assert.Contains(routed, a => a.Id == "folder.exploreParent");
                 var active = Assert.IsType<BrowserTabState>(workspace.Active);
                 Assert.Equal(Path.GetFullPath(folder), active.Folder);
@@ -155,12 +156,12 @@ public sealed class HotkeyEndToEndTests
                 Settings(window).ShowInExplorerTarget = ShowInExplorerTargets.WindowsExplorer;
                 var tabs = workspace.Tabs.Count;
                 await Press(window, Key.E, RawInputModifiers.Control);
-                for (var i = 0; i < 100 && launched.Count == 0; i++) { Dispatcher.UIThread.RunJobs(); await Task.Delay(20); }
+                await Wait.UntilAsync(() => launched.Count > 0, "file manager launched", pump: () => Dispatcher.UIThread.RunJobs());
                 Assert.Equal(new[] { file }, launched);
                 Assert.Equal(tabs, workspace.Tabs.Count);
             });
         }
-        finally { try { Directory.Delete(folder, true); } catch { } }
+        finally { TempDir.TryDelete(folder); }
     }
 
     // ---- every default hotkey reaches its action through the real key handler -----------------------------
@@ -259,7 +260,7 @@ public sealed class HotkeyEndToEndTests
                 Assert.Contains("status.toggle", executed);
             });
         }
-        finally { try { Directory.Delete(root, true); } catch { } }
+        finally { TempDir.TryDelete(root); }
     }
 
     // ---- generated setting actions ----------------------------------------------------------------------------
@@ -505,6 +506,42 @@ public sealed class HotkeyEndToEndTests
         });
     }
 
+    /// <summary>Behaviour test (Stage B; replaced the FitScopeContractTests source-text checks): each status-bar Fit button,
+    /// clicked as a button, applies its mode under the Fit control scope.</summary>
+    [Theory]
+    [InlineData("StatusFitImageButton", "Fit image")]
+    [InlineData("StatusFitWidthButton", "Fit width")]
+    [InlineData("StatusFitHeightButton", "Fit height")]
+    public async Task Status_bar_Fit_buttons_apply_their_mode_through_the_Fit_control_scope(string buttonName, string viewMode)
+    {
+        await OnWindow(async (window, _) =>
+        {
+            ImageViewHost(window).IsVisible = true;
+            var button = (Button)GetField(window, buttonName)!;
+            var initial = viewMode == "Fit image" ? "Fit width" : "Fit image";
+
+            Settings(window).StatusFitScope = "Only the current image";
+            Settings(window).DefaultViewMode = initial;
+            SetField(window, "_sessionDefaultViewMode", null);
+            button.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+            await Settle();
+            Assert.True(string.IsNullOrEmpty((string?)GetField(window, "_sessionDefaultViewMode")));
+
+            Settings(window).StatusFitScope = "This session";
+            button.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+            await Settle();
+            Assert.Equal(viewMode, (string?)GetField(window, "_sessionDefaultViewMode"));
+            Assert.Equal(initial, Settings(window).DefaultViewMode);
+
+            Settings(window).StatusFitScope = "This session and future sessions";
+            SetField(window, "_sessionDefaultViewMode", null);
+            button.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+            await Settle();
+            Assert.Equal(viewMode, (string?)GetField(window, "_sessionDefaultViewMode"));
+            Assert.Equal(viewMode, Settings(window).DefaultViewMode);
+        });
+    }
+
     [Fact]
     public async Task Exit_Glide_is_a_labelled_registry_action_and_runs_the_exit_path()
     {
@@ -585,7 +622,7 @@ public sealed class HotkeyEndToEndTests
     }
 
     [Fact]
-    public async Task Mouse_side_buttons_go_Back_and_Forward_by_default_and_a_bound_action_overrides_in_the_viewer_and_tab_strip()
+    public async Task Mouse_side_buttons_pass_through_by_default_and_a_bound_action_overrides_in_the_viewer_and_tab_strip()
     {
         await OnWindow(async (window, _) =>
         {
@@ -601,18 +638,27 @@ public sealed class HotkeyEndToEndTests
                 return handled;
             }
 
-            // Default (5.0.0): the press is claimed and goes Back / Forward. A fresh tab has no history, so nothing changes.
+            // Default (5.0.8): "not used by Glide". The press is NOT claimed, so Windows / the mouse software keep it.
+            Assert.False(await Click(viewport, true));
+            Assert.False(await Click(viewport, false));
+            Assert.False(await Click(strip, true));
+            Assert.False(await Click(strip, false));
+            Assert.False(Collapsed(window));
+
+            // Explicitly bound to Back / Forward: claimed. A fresh tab has no history, so nothing visible changes.
+            Settings(window).Gestures["windowed.backButtonImage"] = GestureCatalog.NavigateBack;
+            Settings(window).Gestures["windowed.forwardButtonImage"] = GestureCatalog.NavigateForward;
             Assert.True(await Click(viewport, true));
             Assert.True(await Click(viewport, false));
-            Assert.True(await Click(strip, true));
             Assert.False(Collapsed(window));
+            Settings(window).Gestures["tabs.backButton"] = GestureCatalog.NavigateBack;
 
             // Bound: toggleStatusBar is observable without images.
             Settings(window).Gestures["windowed.backButtonImage"] = GestureCatalog.ToggleStatusBar;
             Assert.True(await Click(viewport, true));
             Assert.True(Collapsed(window), "XButton1 over the windowed image ran its gesture");
             Assert.True(await Click(viewport, false));
-            Assert.True(Collapsed(window), "XButton2 is a different slot and still goes Forward");
+            Assert.True(Collapsed(window), "XButton2 is a different slot and still goes Forward (as bound)");
             Settings(window).Gestures["windowed.forwardButtonImage"] = GestureCatalog.ToggleStatusBar;
             Assert.True(await Click(viewport, false));
             Assert.False(Collapsed(window));
@@ -631,7 +677,7 @@ public sealed class HotkeyEndToEndTests
             // A custom gesture with a held key overrides the row for that key only.
             Settings(window).CustomGestures.Add(new CustomGesture { Area = GestureAreas.Windowed, Input = GestureInputs.BackButton, Modifier = GestureModifiers.Ctrl, Action = GestureCatalog.ToggleStatusBar });
             Settings(window).Gestures["windowed.backButtonImage"] = GestureCatalog.Default;
-            Assert.True(RaiseSideButton(window, viewport, true).Handled);                  // Default: Back
+            Assert.False(RaiseSideButton(window, viewport, true).Handled);                 // Default: pass-through
             await Settle();
             Assert.True(Collapsed(window));
             Assert.True(RaiseSideButton(window, viewport, true, KeyModifiers.Control).Handled);
@@ -641,7 +687,7 @@ public sealed class HotkeyEndToEndTests
     }
 
     [Fact]
-    public async Task Side_buttons_map_to_the_slot_of_the_area_under_the_pointer_and_go_Back_in_the_explorer_by_default()
+    public async Task Side_buttons_map_to_the_slot_of_the_area_under_the_pointer_and_pass_through_in_the_explorer_by_default()
     {
         var root = Path.Combine(Path.GetTempPath(), "Glide.SideButtons", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
@@ -668,7 +714,12 @@ public sealed class HotkeyEndToEndTests
                 Assert.True(browserView.IsVisible);
                 Assert.Equal("explorer.backButton", window.SideButtonSlotAt(browserView, true, out tab)!.Id);
                 Assert.Equal("explorer.forwardButton", window.SideButtonSlotAt(browserView, false, out tab)!.Id);
-                // Default (5.0.0): Back. A new Explorer tab has nothing to go back to, so the folder stays.
+                // Default (5.0.8): pass-through, not handled by Glide.
+                Assert.False(RaiseSideButton(window, browserView, true).Handled);
+                await Settle();
+                Assert.False(Collapsed(window));
+                // Explicitly bound to Back: claimed. A new Explorer tab has nothing to go back to, so the folder stays.
+                Settings(window).Gestures["explorer.backButton"] = GestureCatalog.NavigateBack;
                 Assert.True(RaiseSideButton(window, browserView, true).Handled);
                 await Settle();
                 Assert.False(Collapsed(window));
@@ -679,10 +730,73 @@ public sealed class HotkeyEndToEndTests
                 Assert.True(Collapsed(window));
             });
         }
-        finally { try { Directory.Delete(root, true); } catch { } }
+        finally { TempDir.TryDelete(root); }
     }
 
     // ---- registry coverage of menus, buttons and the dispatcher ------------------------------------------------
+
+    /// <summary>Stage B: one window list; open-window and external-open-receiver memberships stay independent.</summary>
+    [Fact]
+    public async Task Window_registry_keeps_open_windows_and_external_open_receivers_apart()
+    {
+        await OnWindow((window, _) =>
+        {
+            bool Open() => Glide.App.Platform.GlideWindowRegistry.Snapshot().Contains(window);
+            bool Receiver() => Glide.App.Platform.GlideWindowRegistry.LaunchReceivers().Contains(window);
+            var wasOpen = Open();
+            var wasReceiver = Receiver();
+            try
+            {
+                Glide.App.Platform.GlideWindowRegistry.Register(window);
+                Glide.App.Platform.GlideWindowRegistry.SetLaunchReceiver(window, false);
+                Assert.True(Open());
+                Assert.False(Receiver());
+                Glide.App.Platform.GlideWindowRegistry.SetLaunchReceiver(window, true);   // ExternalLaunchBroker.Start
+                Assert.True(Receiver());
+                Glide.App.Platform.GlideWindowRegistry.Unregister(window);               // closed for docking...
+                Assert.False(Open());
+                Assert.True(Receiver());                                                  // ...the broker still has it until it lets go
+                Glide.App.Platform.GlideWindowRegistry.SetLaunchReceiver(window, false); // standby / broker Unregister
+                Assert.False(Receiver());
+            }
+            finally
+            {
+                if (wasOpen) Glide.App.Platform.GlideWindowRegistry.Register(window);
+                Glide.App.Platform.GlideWindowRegistry.SetLaunchReceiver(window, wasReceiver);
+            }
+            return Task.CompletedTask;
+        });
+    }
+
+    /// <summary>Behaviour test (Stage B; replaced a source-text contract): the windowed viewer menu and the fullscreen chrome
+    /// menu both carry a tickable "Always on top" item whose tick follows the setting and whose click toggles it.</summary>
+    [Fact]
+    public async Task Windowed_and_fullscreen_context_menus_expose_a_tickable_always_on_top_item()
+    {
+        await OnWindow(async (window, _) =>
+        {
+            static IEnumerable<MenuItem> Flatten(ItemsControl control) =>
+                (control.ItemsSource?.Cast<object>() ?? control.Items.Cast<object?>()).OfType<MenuItem>().SelectMany(i => Flatten(i).Prepend(i));
+            static MenuItem AlwaysOnTop(ContextMenu menu) =>
+                Flatten(menu).Single(i => i.Header?.ToString()?.StartsWith("Always on top", StringComparison.Ordinal) == true);
+
+            Settings(window).AlwaysOnTop = false;
+            var viewer = AlwaysOnTop((ContextMenu)Invoke(window, "BuildViewerContextMenu")!);
+            var fullscreen = AlwaysOnTop(window.BuildFullscreenChromeContextMenu());
+            Assert.Equal("Always on top", viewer.Header);
+            Assert.Equal("Always on top", fullscreen.Header);
+
+            viewer.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
+            await Settle();
+            Assert.True(Settings(window).AlwaysOnTop);
+            Assert.Equal("Always on top  ✓", AlwaysOnTop((ContextMenu)Invoke(window, "BuildViewerContextMenu")!).Header);
+            Assert.Equal("Always on top  ✓", AlwaysOnTop(window.BuildFullscreenChromeContextMenu()).Header);
+
+            AlwaysOnTop(window.BuildFullscreenChromeContextMenu()).RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
+            await Settle();
+            Assert.False(Settings(window).AlwaysOnTop);
+        });
+    }
 
     [Fact]
     public async Task Every_context_menu_item_is_a_registry_action_or_an_explicit_context_item()
@@ -728,7 +842,7 @@ public sealed class HotkeyEndToEndTests
                 Assert.True(problems.Count == 0, string.Join("\n", problems));
             });
         }
-        finally { try { Directory.Delete(root, true); } catch { } }
+        finally { TempDir.TryDelete(root); }
     }
 
     [Fact]
@@ -951,7 +1065,7 @@ public sealed class HotkeyEndToEndTests
                 SettingsStore.SettingsDirectoryOverrideForTests.Value = previousStore;
             }
         });
-        try { Directory.Delete(root, true); } catch { }
+        TempDir.TryDelete(root);
     }
 
     private static GlideSettingsState Settings(MainWindow window) => (GlideSettingsState)GetField(window, "_settings")!;

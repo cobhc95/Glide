@@ -10,6 +10,7 @@ namespace Glide.Core.Tests;
 /// Every container here is a SYNTHETIC minimal file built in the test (headers only, no media data, nothing downloaded).
 /// The Media Foundation decoder probe is mocked, so the expected message never depends on this PC's codecs.
 /// </summary>
+[Trait("Area", "Video")]
 public sealed class VideoCodecDetectionTests
 {
     // ============================================================================ MP4 / MOV ========
@@ -672,6 +673,7 @@ public sealed class VideoCodecDetectionTests
 }
 
 /// <summary>The old FFmpeg decoder pack is gone from code, build scripts and the native bridge (5.0.4).</summary>
+[Trait("Area", "Video")]
 public sealed class NoBundledVideoDecoderTests
 {
     // The only source allowed to name it: the cleanup that deletes what older versions downloaded.
@@ -728,6 +730,7 @@ public sealed class NoBundledVideoDecoderTests
 }
 
 /// <summary>Leftovers of the decoder older versions downloaded are removed on startup idle and by Reset's caches item.</summary>
+[Trait("Area", "Video")]
 public sealed class LegacyVideoDecoderCleanupTests
 {
     [Fact]

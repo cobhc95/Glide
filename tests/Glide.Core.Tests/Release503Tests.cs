@@ -13,6 +13,7 @@ namespace Glide.Core.Tests;
 
 /// <summary>5.0.3 features and fixes: pure logic and headless window checks.</summary>
 [Collection(AvaloniaHeadlessCollection.Name)]
+[Trait("Area", "Regression")]
 public sealed class Release503Tests
 {
     public Release503Tests(AvaloniaHeadlessFixture fixture) { _ = fixture; }

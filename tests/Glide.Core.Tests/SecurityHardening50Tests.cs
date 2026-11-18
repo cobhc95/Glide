@@ -14,6 +14,7 @@ namespace Glide.Core.Tests;
 /// </summary>
 // Source-text contract kept: this asserts on production source (UI code-behind, native/installer files or a repo-wide scan) that cannot be run headlessly; behavioural coverage lives in the other test files.
 [Collection(AvaloniaHeadlessCollection.Name)]
+[Trait("Area", "Security")]
 public sealed class SecurityHardening50Tests : IDisposable
 {
     private const long GB = 1024L * 1024 * 1024;
@@ -28,7 +29,7 @@ public sealed class SecurityHardening50Tests : IDisposable
     public void Dispose()
     {
         DecodeMemoryGuard.SnapshotOverrideForTests = null;
-        try { Directory.Delete(_dir, recursive: true); } catch { }
+        TempDir.TryDelete(_dir);
     }
 
     // ============================================================================ helpers ========
@@ -526,13 +527,13 @@ public sealed class SecurityHardening50Tests : IDisposable
     [Fact]
     public void Imported_files_never_bring_network_folders()
     {
-        var current = new Glide.App.Settings.GlideSettingsState
+        var current = new Glide.Core.Settings.GlideSettingsState
         {
             StartupCustomPath = @"C:\Pictures",
             OpenFileDefaultDirectory = @"\\old\share", // this PC's own value is a network path: cleared, not kept
             LastOpenDirectory = @"D:\Photos",
         };
-        var imported = new Glide.App.Settings.GlideSettingsState
+        var imported = new Glide.Core.Settings.GlideSettingsState
         {
             StartupCustomPath = @"\\attacker\share\pics",
             NewTabCustomPath = @"\\attacker\x",
@@ -554,7 +555,7 @@ public sealed class SecurityHardening50Tests : IDisposable
         Assert.Equal("", imported.ProfileDefaultDirectory);
         Assert.Equal("", imported.LastNewExplorerTabDirectory);
 
-        var local = new Glide.App.Settings.GlideSettingsState { StartupCustomPath = @"C:\Local" };
+        var local = new Glide.Core.Settings.GlideSettingsState { StartupCustomPath = @"C:\Local" };
         Assert.False(Glide.App.Settings.SettingsWindow.KeepLocalFolderPaths(local, current));
         Assert.Equal(@"C:\Local", local.StartupCustomPath);
 

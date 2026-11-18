@@ -56,7 +56,7 @@ public partial class MainWindow
 
     private MenuItem BuildAlternativeFileManagerMenuItem(bool tickTarget)
     {
-        var name = AlternativeFileManagerDisplayName(_settings.AlternativeFileManagerPath);
+        var name = AlternativeFileManagerDisplayName(ExplorerOptionsView.AlternativeFileManagerPath);
         MenuItem item;
         if (name is null)
         {
@@ -89,7 +89,7 @@ public partial class MainWindow
     private string ExplorerRevealButtonTip()
     {
         var windows = WithActionShortcuts("Show in Windows File Explorer, with the selected item selected", "explorer.showInWindows");
-        var alternative = AlternativeFileManagerDisplayName(_settings.AlternativeFileManagerPath) is { } name
+        var alternative = AlternativeFileManagerDisplayName(ExplorerOptionsView.AlternativeFileManagerPath) is { } name
             ? WithActionShortcuts("Show in " + name, "explorer.showInAlternative")
             : AlternativeFileManagerSetUpLabel + " (set up)";
         return $"{windows}\nRight-click for more: {alternative}";

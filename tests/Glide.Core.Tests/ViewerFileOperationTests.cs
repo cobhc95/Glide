@@ -10,6 +10,7 @@ namespace Glide.Core.Tests;
 /// case-only renames.
 /// </summary>
 [Collection(AvaloniaHeadlessCollection.Name)]
+[Trait("Area", "Explorer")]
 public sealed class ViewerFileOperationTests
 {
     public ViewerFileOperationTests(AvaloniaHeadlessFixture fixture) => _ = fixture;

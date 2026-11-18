@@ -17,6 +17,7 @@ namespace Glide.Core.Tests;
 /// set GLIDE_SAVE_RENDERS to a folder to keep the PNGs (and GLIDE_PRINT_PERF_IMAGES to use a real photo).
 /// </summary>
 [Collection(AvaloniaHeadlessCollection.Name)]
+[Trait("Area", "Print")]
 public sealed class PrintWindowRenderTests : IDisposable
 {
     private readonly string _settingsDir = Path.Combine(Path.GetTempPath(), "Glide.PrintRender", Guid.NewGuid().ToString("N"));
@@ -35,7 +36,7 @@ public sealed class PrintWindowRenderTests : IDisposable
         PrintSettingsStore.DirectoryOverrideForTests = null;
         WindowPlacementService.PersistOverrideForTests = null;
         WindowPlacementService.ResetForTests();
-        try { Directory.Delete(_settingsDir, true); } catch { }
+        TempDir.TryDelete(_settingsDir);
     }
 
     private static int WhitePixels(Bitmap frame)

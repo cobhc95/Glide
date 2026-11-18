@@ -19,8 +19,16 @@ public partial class SettingsWindow
 
     /// <summary>
     /// The Explorer tab card's "Opening pictures in new tabs →" link: opens Tabs &amp; status bar > Tabs, expands the card,
-    /// scrolls to the new-tab settings and highlights them (the whole NewTabSettingsGroup: New tabs open at, Open new tabs
-    /// in the foreground, Shift and Alt change how a new tab opens).
+    /// scrolls to the new-tab settings and highlights them (the whole NewTabSettingsGroup: New tabs open, Open new tabs
+    /// in the, and their Key to open … instead rows).
     /// </summary>
+    /// <summary>The "Tooltip delay →" links (Explorer tab, Settings window, Overlay mode, Fullscreen cards): open Appearance &amp;
+    /// viewing > Tooltips and highlight that area's delay.</summary>
+    private void TooltipDelayLinkClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e) => RevealSetting(
+        ReferenceEquals(sender, ExplorerTooltipLinkButton) ? "appearance.tooltipDelayExplorer"
+        : ReferenceEquals(sender, SettingsTooltipLinkButton) ? "appearance.tooltipDelaySettings"
+        : ReferenceEquals(sender, OverlayTooltipLinkButton) ? "appearance.tooltipDelayOverlay"
+        : "appearance.tooltipDelayMain");
+
     private void NewTabsLinkClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e) => RevealSetting("tabs.switchToNewTabs");
 }

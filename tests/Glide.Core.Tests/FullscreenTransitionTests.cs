@@ -15,6 +15,7 @@ namespace Glide.Core.Tests;
 /// through extra states, never touches the user's window opacity, and still returns to the remembered bounds.
 /// </summary>
 [Collection(AvaloniaHeadlessCollection.Name)]
+[Trait("Area", "Navigation")]
 public sealed class FullscreenTransitionTests
 {
     public FullscreenTransitionTests(AvaloniaHeadlessFixture fixture) { _ = fixture; }

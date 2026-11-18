@@ -28,7 +28,7 @@ public static class EndOfFolderActions
     public const string Ask = "Ask me each time";
 
     /// <summary>The default (and the behaviour of the old "Automatically continue into sibling folders" checkbox when on).</summary>
-    public const string Default = NextFolder;
+    public const string Default = Ask;
 
     /// <summary>Every option in Settings combo order.</summary>
     public static IReadOnlyList<string> All { get; } = [DoNothing, LoopFolder, NextFolder, NextFolderNewTab, PreviousFolder, ShowHome, Ask];
@@ -39,7 +39,7 @@ public static class EndOfFolderActions
         var trimmed = name?.Trim();
         for (var i = 0; i < All.Count; i++)
             if (string.Equals(All[i], trimmed, StringComparison.OrdinalIgnoreCase)) return (EndOfFolderAction)i;
-        return EndOfFolderAction.NextFolder;
+        return EndOfFolderAction.Ask;
     }
 
     public static string NameOf(EndOfFolderAction action) => All[(int)action];

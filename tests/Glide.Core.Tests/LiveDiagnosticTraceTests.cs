@@ -3,6 +3,7 @@ using Glide.Diagnostics.Runtime;
 
 namespace Glide.Core.Tests;
 
+[Trait("Area", "Diagnostics")]
 public sealed class LiveDiagnosticTraceTests
 {
     [Fact]
@@ -32,7 +33,7 @@ public sealed class LiveDiagnosticTraceTests
         finally
         {
             Environment.SetEnvironmentVariable("GLIDE_DIAGNOSTIC_TRACE_DIR", null);
-            try { Directory.Delete(folder, recursive: true); } catch { }
+            TempDir.TryDelete(folder);
         }
     }
 }

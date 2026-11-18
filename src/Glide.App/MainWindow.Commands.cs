@@ -74,21 +74,21 @@ public partial class MainWindow
         var input = back ? GestureInputs.BackButton : GestureInputs.ForwardButton;
         if (source is null) return null;
         bool Within(Visual host) => ReferenceEquals(source, host) || source.GetVisualAncestors().Any(a => ReferenceEquals(a, host));
-        if (Within(TabStripScroll))
+        var onTabStrip = Within(TabStripScroll);
+        if (onTabStrip)
         {
             for (Visual? v = source; v is not null && !ReferenceEquals(v, TabStripScroll); v = v.GetVisualParent())
                 if (v is Border { DataContext: Guid id }) { tabId = id; break; }
-            return GestureCatalog.SlotFor(GestureAreas.Tabs, input);
         }
-        if (_workspace.Active is BrowserTabState && BrowserView.IsVisible && Within(BrowserView))
-            return GestureCatalog.SlotFor(GestureAreas.Explorer, input);
-        if (ImageView.IsVisible && Within(Viewport))
-            return GestureCatalog.SlotFor(WindowState == WindowState.FullScreen ? GestureAreas.Fullscreen : GestureAreas.Windowed, input);
         // The Welcome / Home page has no gesture rows of its own: it follows the Windowed image rows, so the side buttons
         // go Back / Forward there too (after Back to Home, the forward button returns to the image).
-        if (_workspace.Active is HomeTabState && HomeHost.IsVisible && Within(HomeHost))
-            return GestureCatalog.SlotFor(GestureAreas.Windowed, input);
-        return null;
+        var area = GestureResolver.SideButtonArea(
+            onTabStrip,
+            onVisibleExplorer: _workspace.Active is BrowserTabState && BrowserView.IsVisible && Within(BrowserView),
+            onVisibleImage: ImageView.IsVisible && Within(Viewport),
+            onVisibleHome: _workspace.Active is HomeTabState && HomeHost.IsVisible && Within(HomeHost),
+            fullscreen: WindowState == WindowState.FullScreen);
+        return area is null ? null : GestureCatalog.SlotFor(area, input);
     }
 
     private bool TryRouteSideButtonGesture(PointerPressedEventArgs e)
@@ -97,12 +97,11 @@ public partial class MainWindow
         if (kind is not (PointerUpdateKind.XButton1Pressed or PointerUpdateKind.XButton2Pressed)) return false;
         var slot = SideButtonSlotAt(e.Source as Visual, kind == PointerUpdateKind.XButton1Pressed, out var tabId);
         if (slot is null) return false;
-        var action = ResolveGestureSlot(slot.Id, e.KeyModifiers);
-        // 5.0.0: Default on a side-button row is Back / Forward (GestureCatalog.DefaultActionFor); "Do nothing" or any other
-        // action the user chose (row or custom gesture) wins.
-        if (string.Equals(action, GestureCatalog.Default, StringComparison.OrdinalIgnoreCase))
-            action = GestureCatalog.DefaultActionFor(slot.Id) ?? action;
-        if (string.Equals(action, GestureCatalog.Default, StringComparison.OrdinalIgnoreCase)) return false;
+        // 5.0.8: Default on a side-button row is pass-through ("not used by Glide"): the press is NOT marked handled, so
+        // Windows / the mouse software keep it. Only an explicit choice ("Do nothing" blocks; any action runs) claims it.
+        var decision = GestureResolver.ForSideButton(slot.Id, ResolveGestureSlot(slot.Id, e.KeyModifiers));
+        if (!decision.Runs) return false;
+        var action = decision.Action;
         e.Handled = true;
         _diagnostics.Write("input", "side_button_gesture", new { slot = slot.Id, action });
         _ = RunSideButtonGestureAsync(slot.Id, action, tabId);
@@ -782,7 +781,7 @@ public partial class MainWindow
             // Same as the viewer menu's "Show status bar": showing it again also clears a collapsed / session-closed bar.
             _statusCollapsed = false;
             _statusSessionClosed = false;
-            ApplyStatusVisibility();
+            NotifyStatusChromeChanged();
         }
         _diagnostics.Write("settings", "setting_action_applied", new { action = action.Id, setting = settingId, value });
     }
@@ -791,10 +790,14 @@ public partial class MainWindow
 
     private MainWindowCommandDispatcher CreateCommandDispatcher()
     {
-        Task Event(Action<object?, RoutedEventArgs> action) { action(this, new RoutedEventArgs()); return Task.CompletedTask; }
+        // Commands call the same methods the buttons do (no fake click events). Fire keeps the old fire-and-forget timing of the
+        // async click handlers: the command completes at once and an exception surfaces like an async void handler's.
+        static Task Run(Action action) { action(); return Task.CompletedTask; }
+        static Task Fire(Func<Task> action) { FireAndForget(action); return Task.CompletedTask; }
+        static async void FireAndForget(Func<Task> action) => await action();
         var actions = new Dictionary<GlideCommand, Func<Task>>
         {
-            [GlideCommand.OpenFile] = () => Event(OpenClicked), [GlideCommand.OpenFolder] = () => Event(OpenFolderClicked),
+            [GlideCommand.OpenFile] = () => Fire(OpenImageFromPickerAsync), [GlideCommand.OpenFolder] = () => Fire(OpenFolderFromPickerAsync),
             [GlideCommand.RefreshFolder] = async () => { if (_workspace.Active is BrowserTabState b) NavigateBrowserTo(b.Folder, false); else if (_currentPath is not null) await LoadPathAsync(_currentPath, true); },
             [GlideCommand.Home] = NavigateHomeAsync,
             [GlideCommand.ToggleLoopFolder] = ToggleLoopFolderAsync,
@@ -811,9 +814,9 @@ public partial class MainWindow
             [GlideCommand.NewTab] = async () => { CreateConfiguredNewTabDestination(); await ActivateWorkspaceAsync(); }, [GlideCommand.NewWindowSameImage] = OpenCurrentInNewWindowAsync, [GlideCommand.DuplicateSessionWindow] = DuplicateSessionWindowAsync, [GlideCommand.CloseTab] = CloseActiveTabAsync, [GlideCommand.RestoreClosedTab] = RestoreClosedTabAsync, [GlideCommand.DuplicateTab] = DuplicateActiveTabAsync,
             [GlideCommand.NextTab] = () => CycleTabAsync(1), [GlideCommand.PreviousTab] = () => CycleTabAsync(-1),
             [GlideCommand.SelectTab1] = () => SelectTabIndexAsync(0), [GlideCommand.SelectTab2] = () => SelectTabIndexAsync(1), [GlideCommand.SelectTab3] = () => SelectTabIndexAsync(2), [GlideCommand.SelectTab4] = () => SelectTabIndexAsync(3), [GlideCommand.SelectTab5] = () => SelectTabIndexAsync(4), [GlideCommand.SelectTab6] = () => SelectTabIndexAsync(5), [GlideCommand.SelectTab7] = () => SelectTabIndexAsync(6), [GlideCommand.SelectTab8] = () => SelectTabIndexAsync(7), [GlideCommand.SelectLastTab] = () => SelectTabIndexAsync(Math.Max(0, _workspace.Tabs.Count - 1)),
-            [GlideCommand.DetachTab] = async () => { if (_workspace.Active is { } a) await DetachTabAsync(a.Id, this.PointToScreen(new Point(Bounds.Width / 2, 48))); }, [GlideCommand.CloseWindow] = () => { Close(); return Task.CompletedTask; }, [GlideCommand.ExitApplication] = ExitGlideAsync, [GlideCommand.ToggleFullscreen] = () => { ToggleFullscreen(); return Task.CompletedTask; }, [GlideCommand.StartPauseSlideshow] = ToggleSlideshowAsync, [GlideCommand.StopSlideshow] = () => { StopSlideshow(true); return Task.CompletedTask; },
-            [GlideCommand.ToggleImageInfo] = () => Event(InfoClicked), [GlideCommand.ClearSelection] = HandleEscapeAsync, [GlideCommand.Settings] = () => Event(SettingsClicked), [GlideCommand.AddOverlay] = () => Event(OverlayAddClicked), [GlideCommand.SaveOverlayLayout] = () => Event(OverlaySaveClicked), [GlideCommand.LoadOverlayLayout] = () => Event(OverlayLoadClicked), [GlideCommand.ResetSelectedOverlayZoom] = () => { EnsureOverlays().ResetSelectedZoom(); return Task.CompletedTask; }, [GlideCommand.BringSelectedOverlayFront] = () => { EnsureOverlays().BringSelectedToFront(); return Task.CompletedTask; },
-            [GlideCommand.ToggleAlwaysOnTop] = () => Event(AlwaysOnTopClicked), [GlideCommand.ToggleTransparency] = () => Event(TransparencyClicked), [GlideCommand.ShowContextMenu] = () => { ShowViewerContextMenu(); return Task.CompletedTask; }, [GlideCommand.BrowserBack] = () => Event(BrowserBackClicked), [GlideCommand.BrowserForward] = () => Event(BrowserForwardClicked), [GlideCommand.BrowserUp] = () => Event(BrowserUpClicked),
+            [GlideCommand.DetachTab] = async () => { if (_workspace.Active is { } a) await DetachTabAsync(a.Id, this.PointToScreen(new Point(Bounds.Width / 2, 48)), fromMenu: true); }, [GlideCommand.CloseWindow] = () => { Close(); return Task.CompletedTask; }, [GlideCommand.ExitApplication] = ExitGlideAsync, [GlideCommand.ToggleFullscreen] = () => { ToggleFullscreen(); return Task.CompletedTask; }, [GlideCommand.StartPauseSlideshow] = ToggleSlideshowAsync, [GlideCommand.StopSlideshow] = () => { StopSlideshow(true); return Task.CompletedTask; },
+            [GlideCommand.ToggleImageInfo] = () => Run(ToggleImageInfoPanel), [GlideCommand.ClearSelection] = HandleEscapeAsync, [GlideCommand.Settings] = () => Fire(OpenSettingsAsync), [GlideCommand.AddOverlay] = () => Fire(AddOverlayFromPickerAsync), [GlideCommand.SaveOverlayLayout] = () => Fire(SaveOverlayLayoutAsync), [GlideCommand.LoadOverlayLayout] = () => Fire(LoadOverlayLayoutAsync), [GlideCommand.ResetSelectedOverlayZoom] = () => { EnsureOverlays().ResetSelectedZoom(); return Task.CompletedTask; }, [GlideCommand.BringSelectedOverlayFront] = () => { EnsureOverlays().BringSelectedToFront(); return Task.CompletedTask; },
+            [GlideCommand.ToggleAlwaysOnTop] = () => Run(ToggleAlwaysOnTopSetting), [GlideCommand.ToggleTransparency] = () => Run(ToggleTransparencyPanel), [GlideCommand.ShowContextMenu] = () => { ShowViewerContextMenu(); return Task.CompletedTask; }, [GlideCommand.BrowserBack] = () => Fire(BrowserBackAsync), [GlideCommand.BrowserForward] = () => Fire(BrowserForwardAsync), [GlideCommand.BrowserUp] = () => Run(NavigateBrowserUp),
             [GlideCommand.CopyImage] = () => { CopyImagePixels(); return Task.CompletedTask; }, [GlideCommand.ExportSelection] = ExportSelectionAsync, [GlideCommand.CopyFile] = () => { CopyImageFile(); return Task.CompletedTask; }, [GlideCommand.CopyFileName] = () => CopyTextAsync(_currentPath is null ? null : Path.GetFileName(_currentPath)), [GlideCommand.CopyFolderPath] = () => CopyTextAsync(_currentPath is null ? null : Path.GetDirectoryName(_currentPath)), [GlideCommand.CopyFullPath] = () => CopyTextAsync(_currentPath), [GlideCommand.RenameFile] = RenameCurrentFileAsync, [GlideCommand.DeleteFile] = DeleteCurrentFileAsync, [GlideCommand.OpenContainingFolder] = OpenContainingFolderOrAlternativeAsync, [GlideCommand.Print] = PrintCurrentImageAsync, [GlideCommand.SaveImage] = SaveCurrentImageAsync, [GlideCommand.SaveImageAs] = SaveCurrentImageAsAsync, [GlideCommand.ExternalProgram1] = () => { LaunchExternal(1); return Task.CompletedTask; }, [GlideCommand.ExternalProgram2] = () => { LaunchExternal(2); return Task.CompletedTask; }, [GlideCommand.ExternalProgram3] = () => { LaunchExternal(3); return Task.CompletedTask; }
         };
         actions[GlideCommand.JumpForward10] = () => NavigateMouseAsync(10);
@@ -827,8 +830,8 @@ public partial class MainWindow
         // command (and therefore a hotkey row, a gesture entry and Settings search) of their own.
         actions[GlideCommand.MaximizeRestoreWindow] = () => { ToggleMaximizeRestoreFromGesture(); return Task.CompletedTask; };
         actions[GlideCommand.MinimizeWindow] = () => { WindowState = WindowState.Minimized; return Task.CompletedTask; };
-        actions[GlideCommand.ClearOverlays] = () => Event(OverlayClearClicked);
-        actions[GlideCommand.CloseStatusBar] = () => Event(CloseStatusClicked);
+        actions[GlideCommand.ClearOverlays] = () => Run(ClearAllOverlays);
+        actions[GlideCommand.CloseStatusBar] = () => Run(CloseStatusSurface);
         actions[GlideCommand.NewExplorerTab] = () => OpenExplorerTabAsync(_currentPath is { } current && File.Exists(current) ? Path.GetDirectoryName(current) : null);
         actions[GlideCommand.NewHomeTab] = async () => { AddNewHomeTab(); RebuildTabStrip(); await ActivateWorkspaceAsync(); };
         actions[GlideCommand.OpenFirstImageInFolder] = () => _workspace.Active is BrowserTabState browserTab ? OpenFirstImageInFolderAsync(browserTab.Folder) : Task.CompletedTask;
@@ -839,9 +842,9 @@ public partial class MainWindow
         actions[GlideCommand.TabToolTipSmaller] = () => { StepTabToolTipTextSize(-1); return Task.CompletedTask; };
         actions[GlideCommand.ShowFolderInWindowsExplorer] = () => { ShowFolderInWindowsExplorer(); return Task.CompletedTask; };
         actions[GlideCommand.ShowInAlternativeFileManager] = () => { ShowInAlternativeFileManager(); return Task.CompletedTask; };
-        actions[GlideCommand.ResetTransparency] = () => Event(TransparencyResetClicked);
-        actions[GlideCommand.ClearRecentHistory] = () => Event(ClearRecentHistoryClicked);
-        actions[GlideCommand.CycleRecentHistorySize] = () => Event(ResizeRecentHistoryClicked);
+        actions[GlideCommand.ResetTransparency] = () => Run(ResetWindowTransparency);
+        actions[GlideCommand.ClearRecentHistory] = () => Run(ClearRecentHistoryList);
+        actions[GlideCommand.CycleRecentHistorySize] = () => Run(CycleRecentHistoryTileSize);
         // 5.0.0 browser-style tab history (MainWindow.History.cs). explorer.back / explorer.forward (BrowserBack /
         // BrowserForward) run the same steps from an Explorer tab.
         actions[GlideCommand.NavigateBack] = NavigateBackAsync;
@@ -864,7 +867,7 @@ public partial class MainWindow
     /// </summary>
     private void ToggleStatusSurfaceCommand()
     {
-        if (!_settings.ShowStatusSurface || _statusSessionClosed)
+        if (!StatusBarOptionsView.ShowStatusSurface || _statusSessionClosed)
         {
             _settings.ShowStatusSurface = true;
             _statusCollapsed = false;
@@ -872,8 +875,8 @@ public partial class MainWindow
             SaveSettingsAndPublish();
         }
         else _statusCollapsed = !_statusCollapsed;
-        ApplyStatusVisibility();
-        _diagnostics.Write("status", "toggle_command", new { collapsed = _statusCollapsed, autoHide = _settings.StatusAutoHide });
+        NotifyStatusChromeChanged();
+        _diagnostics.Write("status", "toggle_command", new { collapsed = _statusCollapsed, autoHide = StatusBarOptionsView.AutoHide });
     }
 
     /// <summary>Explorer tab: the folder being browsed; elsewhere: the current image's folder, with the image selected.</summary>
@@ -904,23 +907,21 @@ public partial class MainWindow
         void Tip(Control c, string text, GlideCommand? command = null)
         {
             ToolTip.SetTip(c, command is null ? text : $"{text} ({ShortcutFor(command.Value)})");
-            ToolTip.SetShowDelay(c, 650);
         }
         Tip(NewTabButton, "New tab", GlideCommand.NewTab);
         foreach (var (id, button) in _titleBarButtons)
         {
             if (TitleBarButtonCatalog.Find(id) is not { } definition) continue;
             ToolTip.SetTip(button, TitleActionTip(id, definition));
-            ToolTip.SetShowDelay(button, 650);
         }
         if (_homeSurface is not null) UpdateHomeHintTexts(_homeSurface);
         if (_homeSurface is not null) Tip(_homeSurface.OptionsButton, "Settings", GlideCommand.Settings);
         Tip(StatusZoomOutButton, "Zoom out", GlideCommand.ZoomOut);
         Tip(StatusZoomInButton, "Zoom in", GlideCommand.ZoomIn);
-        Tip(StatusFitImageButton, $"Fit image: shrink to fit, never enlarge past 100% (applies to: {_settings.StatusFitScope})", GlideCommand.FitImage);
-        Tip(StatusFitWindowButton, $"Fit to window: enlarge or shrink to fill the window (applies to: {_settings.StatusFitScope})", GlideCommand.FitWindow);
-        Tip(StatusFitWidthButton, $"Fit width (applies to: {_settings.StatusFitScope})", GlideCommand.FitWidth);
-        Tip(StatusFitHeightButton, $"Fit height (applies to: {_settings.StatusFitScope})", GlideCommand.FitHeight);
+        Tip(StatusFitImageButton, $"Fit image: shrink to fit, never enlarge past 100% (applies to: {StatusBarOptionsView.FitScope})", GlideCommand.FitImage);
+        Tip(StatusFitWindowButton, $"Fit to window: enlarge or shrink to fill the window (applies to: {StatusBarOptionsView.FitScope})", GlideCommand.FitWindow);
+        Tip(StatusFitWidthButton, $"Fit width (applies to: {StatusBarOptionsView.FitScope})", GlideCommand.FitWidth);
+        Tip(StatusFitHeightButton, $"Fit height (applies to: {StatusBarOptionsView.FitScope})", GlideCommand.FitHeight);
         Tip(SlideshowButton, _slideshow?.IsActive != true ? "Start slideshow" : _slideshow.IsRunning ? "Pause slideshow" : "Resume slideshow", GlideCommand.StartPauseSlideshow);
         Tip(SlideshowStopButton, "Stop slideshow session", GlideCommand.StopSlideshow);
         Tip(StatusInfoButton, "Image information", GlideCommand.ToggleImageInfo);
@@ -946,7 +947,6 @@ public partial class MainWindow
             var upKeys = HotkeyCatalog.ShortcutsForCommand(GlideCommand.BrowserUp, _settings.Hotkeys);
             if (upKeys.Count == 0 && BindingHints.FixedShortcut("fixed.explorer.up") is { } fixedUp) upKeys = [fixedUp];
             ToolTip.SetTip(_browserSurface.UpButton, BindingHints.WithShortcuts("Up one folder", upKeys));
-            ToolTip.SetShowDelay(_browserSurface.UpButton, 650);
             Tip(_browserSurface.RefreshButton, "Refresh", GlideCommand.RefreshFolder);
             ToolTip.SetTip(_browserSurface.WindowsExplorerButton, ExplorerRevealButtonTip());
             // Ctrl+F is a fixed registry shortcut: read it from there instead of typing it a second time.
@@ -1178,8 +1178,24 @@ public partial class MainWindow
 
     private async Task<bool> ConfirmAsync(string title, string message, string acceptText, bool showCancel = true)
     {
-        var accept = new Button { Content = acceptText, MinWidth = 100 };
-        var cancel = new Button { Content = "Cancel", MinWidth = 90, IsVisible = showCancel };
+        var dialog = CreateConfirmDialog(title, message, acceptText, showCancel);
+        dialog.Icon = Icon;
+        dialog.Topmost = Topmost;
+        PopupPlacementStore.Track(dialog, "confirm");
+        _overlays?.SetModalSuppressed(true);
+        try { return await ShowOwnedDialogAsync<bool>(dialog); }
+        finally { _overlays?.SetModalSuppressed(false); }
+    }
+
+    /// <summary>
+    /// The confirmation dialog (Explorer Delete, Save overwrite ...): message, Cancel and the accept button. Closes with
+    /// true (accept) or false (Cancel). The accept button is the default and has the keyboard focus when the dialog opens,
+    /// so Enter confirms (round 3 #14, like Windows' own Delete prompt); Escape is Cancel.
+    /// </summary>
+    internal static Window CreateConfirmDialog(string title, string message, string acceptText, bool showCancel = true)
+    {
+        var accept = new Button { Content = acceptText, MinWidth = 100, IsDefault = true };
+        var cancel = new Button { Content = "Cancel", MinWidth = 90, IsVisible = showCancel, IsCancel = true };
         var buttons = new StackPanel { Orientation = Avalonia.Layout.Orientation.Horizontal, Spacing = 10, HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right };
         buttons.Children.Add(cancel);
         buttons.Children.Add(accept);
@@ -1188,15 +1204,13 @@ public partial class MainWindow
         root.Children.Add(buttons);
         var dialog = new Window
         {
-            Title = title, Icon = Icon, Width = 470, SizeToContent = SizeToContent.Height, CanResize = false,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner, Content = root, Topmost = Topmost
+            Title = title, Width = 470, SizeToContent = SizeToContent.Height, CanResize = false,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner, Content = root
         };
-        PopupPlacementStore.Track(dialog, "confirm");
         accept.Click += (_, _) => dialog.Close(true);
         cancel.Click += (_, _) => dialog.Close(false);
-        _overlays?.SetModalSuppressed(true);
-        try { return await ShowOwnedDialogAsync<bool>(dialog); }
-        finally { _overlays?.SetModalSuppressed(false); }
+        dialog.Opened += (_, _) => accept.Focus(NavigationMethod.Tab);
+        return dialog;
     }
 
     private void CopyImageFile()
@@ -1391,6 +1405,20 @@ public partial class MainWindow
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool IsZoomed(IntPtr hWnd);
+
+    private bool TryGetNativeIconic(out bool iconic)
+    {
+        iconic = false;
+        if (!OperatingSystem.IsWindows()) return false;
+        var handle = TryGetPlatformHandle();
+        if (handle is null || handle.Handle == IntPtr.Zero) return false;
+        iconic = IsIconic(handle.Handle);
+        return true;
+    }
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsIconic(IntPtr hWnd);
 
     private void EnsureNativeMaximizedState()
     {

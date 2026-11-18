@@ -12,6 +12,7 @@ namespace Glide.Core.Tests;
 /// chunked, gzip-compressed BGRA layer data, inside the PDN3 container with a PNG thumbnail.
 /// </summary>
 [Collection(AvaloniaHeadlessCollection.Name)]
+[Trait("Area", "Decode")]
 public sealed class PdnDecoderTests : IDisposable
 {
     private readonly List<string> _files = new();

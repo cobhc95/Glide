@@ -6,6 +6,7 @@ namespace Glide.Core.Tests;
 /// Assigning a shortcut that another action already uses asks Replace / Cancel instead of silently stealing it.
 /// These are the pure rules behind that prompt (no UI).
 /// </summary>
+[Trait("Area", "Hotkeys")]
 public sealed class HotkeyConflictTests
 {
     private static Dictionary<string, List<string>> Defaults() => HotkeyCatalog.CreateDefaultMap();

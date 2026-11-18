@@ -42,20 +42,20 @@ internal static class ExplorerWheelScroll
     };
 
     /// <summary>Distance from one row's top to the next (tile height plus the layout's row spacing).</summary>
-    public static double RowPitch(int viewMode, double gridSpacing)
+    public static double RowPitch(int viewMode, double gridSpacing, int infoLines = 0)
     {
-        var (_, height) = ExplorerViewModes.TileSize(viewMode);
+        var (_, height) = ExplorerViewModes.TileSize(viewMode, infoLines);
         return viewMode == ExplorerViewModes.Details ? height : height + gridSpacing;
     }
 
     /// <summary>Pixels one notch scrolls at 1x speed for the given mode.</summary>
-    public static double PixelsPerNotch(int viewMode, double gridSpacing, string? mode, int rows, int pixels) =>
+    public static double PixelsPerNotch(int viewMode, double gridSpacing, string? mode, int rows, int pixels, int infoLines = 0) =>
         ExplorerScrollModes.Normalize(mode) switch
         {
-            ExplorerScrollModes.FixedRows => ClampRows(rows) * RowPitch(viewMode, gridSpacing),
-            ExplorerScrollModes.PerView => RowsPerNotch(viewMode) * RowPitch(viewMode, gridSpacing),
+            ExplorerScrollModes.FixedRows => ClampRows(rows) * RowPitch(viewMode, gridSpacing, infoLines),
+            ExplorerScrollModes.PerView => RowsPerNotch(viewMode) * RowPitch(viewMode, gridSpacing, infoLines),
             ExplorerScrollModes.Pixels => ClampPixels(pixels),
-            _ => RowPitch(viewMode, gridSpacing)
+            _ => RowPitch(viewMode, gridSpacing, infoLines)
         };
 
     /// <summary>
@@ -63,6 +63,6 @@ internal static class ExplorerWheelScroll
     /// returned offset change is negative). <paramref name="deltaY"/> is in notches (1.0 = 120 units).
     /// </summary>
     public static double OffsetChange(int viewMode, double deltaY, double speed, double gridSpacing,
-        string? mode = ExplorerScrollModes.Default, int rows = DefaultRows, int pixels = DefaultPixels) =>
-        -deltaY * PixelsPerNotch(viewMode, gridSpacing, mode, rows, pixels) * ClampSpeed(speed);
+        string? mode = ExplorerScrollModes.Default, int rows = DefaultRows, int pixels = DefaultPixels, int infoLines = 0) =>
+        -deltaY * PixelsPerNotch(viewMode, gridSpacing, mode, rows, pixels, infoLines) * ClampSpeed(speed);
 }

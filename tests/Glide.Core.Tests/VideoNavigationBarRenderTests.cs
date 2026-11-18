@@ -6,6 +6,7 @@ using Glide.App.Controls;
 namespace Glide.Core.Tests;
 
 [Collection(AvaloniaHeadlessCollection.Name)]
+[Trait("Area", "Video")]
 public sealed class VideoNavigationBarRenderTests
 {
     public VideoNavigationBarRenderTests(AvaloniaHeadlessFixture fixture) { _ = fixture; }

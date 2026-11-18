@@ -1,6 +1,7 @@
 
 namespace Glide.Core.Tests;
 
+[Trait("Area", "Navigation")]
 public sealed class ImageNavigatorTests : IDisposable
 {
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "GlideTests_" + Guid.NewGuid().ToString("N"));
@@ -87,6 +88,6 @@ public sealed class ImageNavigatorTests : IDisposable
 
     public void Dispose()
     {
-        try { Directory.Delete(_dir, true); } catch { }
+        TempDir.TryDelete(_dir);
     }
 }

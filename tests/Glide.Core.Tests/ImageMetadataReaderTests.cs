@@ -3,6 +3,7 @@ using Glide.Imaging;
 
 namespace Glide.Core.Tests;
 
+[Trait("Area", "Decode")]
 public sealed class ImageMetadataReaderTests
 {
     [Fact]

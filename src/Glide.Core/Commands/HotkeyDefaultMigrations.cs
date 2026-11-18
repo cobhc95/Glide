@@ -65,6 +65,29 @@ public static class HotkeyDefaultMigrations
         return true;
     }
 
+    /// <summary>Settings schema that gave "Enter / exit Overlay mode" the default Alt+O.</summary>
+    public const int OverlayToggleDefaultSchema = 19;
+
+    public const string OverlayToggleId = "overlay.toggleMode";
+    public const string OverlayToggleNewDefault = "Alt+O";
+
+    /// <summary>
+    /// Schema 19: "Enter / exit Overlay mode" gains Alt+O, only where the row is still unassigned and no other action uses Alt+O.
+    /// </summary>
+    /// <returns>True when the map was changed.</returns>
+    public static bool MigrateOverlayToggle(IDictionary<string, List<string>> hotkeys, int sourceSchema)
+    {
+        if (sourceSchema >= OverlayToggleDefaultSchema) return false;
+        if (hotkeys.TryGetValue(OverlayToggleId, out var current) && current is not null && current.Count > 0) return false;
+        foreach (var (id, shortcuts) in hotkeys)
+        {
+            if (string.Equals(id, OverlayToggleId, StringComparison.OrdinalIgnoreCase)) continue;
+            if (shortcuts is not null && shortcuts.Any(s => ShortcutText.AreEqual(s, OverlayToggleNewDefault))) return false;
+        }
+        hotkeys[OverlayToggleId] = [OverlayToggleNewDefault];
+        return true;
+    }
+
     /// <summary>Settings schema that moved the Backspace default from "Previous image" (nav.previousBack) to "Back, or Previous image" (nav.backOrPrevious).</summary>
     public const int BackspaceToBackOrPreviousSchema = 11;
 

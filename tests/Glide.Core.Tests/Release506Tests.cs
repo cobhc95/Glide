@@ -20,6 +20,7 @@ namespace Glide.Core.Tests;
 /// border option and the Mouse &amp; keyboard link to the Explorer scroll settings.
 /// </summary>
 [Collection(AvaloniaHeadlessCollection.Name)]
+[Trait("Area", "Regression")]
 public sealed class Release506Tests
 {
     private readonly ITestOutputHelper _output;
@@ -58,6 +59,34 @@ public sealed class Release506Tests
             Assert.Equal(20, Live(main).PictureCounterFontSize);
             Assert.Equal(20, main.FindControl<TextBlock>("CornerCounterText")!.FontSize);
             Assert.Equal(0, visualsPasses);
+        });
+    }
+
+    [Fact]
+    public async Task Stage_C_owned_previews_are_routed_and_unknown_ones_fall_back_to_the_full_pass()
+    {
+        await OnMainWindowWithSettings((main, settings, apply) =>
+        {
+            // status.statZoom (StatusBar) and slideshow.interval (Slideshow, read at use) have narrow owner handlers.
+            var routedBefore = main.SettingsRoutedPassesForTests;
+            var routedPasses = CountFullVisualPasses(main, () =>
+            {
+                Named<CheckBox>(settings, "StatZoomCheck").IsChecked = !(Named<CheckBox>(settings, "StatZoomCheck").IsChecked == true);
+                RunPreviewNow(settings);
+                Named<NumericUpDown>(settings, "SlideshowIntervalBox").Value = 4500;
+                RunPreviewNow(settings);
+            });
+            Assert.Equal(0, routedPasses);
+            Assert.True(main.SettingsRoutedPassesForTests - routedBefore >= 2);
+            Assert.Equal(4500, Live(main).SlideshowIntervalMs);
+
+            // view.scrollbars has no narrow handler: the safe full re-apply runs.
+            var fullPasses = CountFullVisualPasses(main, () =>
+            {
+                Named<CheckBox>(settings, "ShowScrollbarsCheck").IsChecked = !(Named<CheckBox>(settings, "ShowScrollbarsCheck").IsChecked == true);
+                RunPreviewNow(settings);
+            });
+            Assert.Equal(1, fullPasses);
         });
     }
 
@@ -228,10 +257,10 @@ public sealed class Release506Tests
                 Assert.NotNull(link);
                 var texts = link!.GetLogicalDescendants().OfType<TextBlock>().Select(t => t.Text).ToList();
                 Assert.Contains("Opening pictures in new tabs →", texts);
-                Assert.Contains("Foreground or background, position, Shift and Alt. Opens Tabs & status bar > Tabs.", texts);
+                Assert.Contains("Foreground or background, position, and the key to open the other way. Opens Tabs & status bar > Tabs.", texts);
                 // A link, not a copy: the new-tab editors exist once, on the Tabs card.
                 Assert.DoesNotContain(explorerCard.GetLogicalDescendants().OfType<Control>(),
-                    c => c.Name is "NewTabPositionCombo" or "SwitchToNewTabsCheck" or "NewTabModifiersCheck");
+                    c => c.Name is "NewTabPositionCombo" or "SwitchToNewTabsCombo" or "NewTabPositionKeyCombo" or "NewTabForegroundKeyCombo");
 
                 Call(window, "ShowCategory", "Interface", true, false, null!);
                 Settle(window);
@@ -244,7 +273,7 @@ public sealed class Release506Tests
                 Assert.True(card.IsExpanded);
                 var target = Named<Control>(window, "NewTabSettingsGroup");
                 Assert.NotNull(AdornerLayer.GetAdorner(target));
-                foreach (var name in new[] { "NewTabPositionCombo", "SwitchToNewTabsCheck", "NewTabModifiersCheck" })
+                foreach (var name in new[] { "NewTabPositionCombo", "NewTabPositionKeyCombo", "SwitchToNewTabsCombo", "NewTabForegroundKeyCombo" })
                     Assert.True(Named<Control>(window, name).GetVisualAncestors().Contains(target), $"{name} is not inside the highlighted group");
                 var viewport = Named<ScrollViewer>(window, "ContentScroll");
                 var top = target.TranslatePoint(new Point(0, 0), viewport)!.Value.Y;
@@ -458,7 +487,7 @@ public sealed class Release506Tests
             }
             return Task.CompletedTask;
         });
-        try { Directory.Delete(root, true); } catch { }
+        TempDir.TryDelete(root);
     }
 
     private static T Named<T>(Visual root, string name) where T : Visual =>

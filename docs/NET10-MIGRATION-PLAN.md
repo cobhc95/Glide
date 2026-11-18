@@ -134,7 +134,7 @@ Edit exactly these files:
 ### WP2: Build script, installer and docs, about 1 h, agent
 - `build.cmd` ([preflight], currently line 114): change `Install .NET 8 SDK x64` to `Install .NET 10 SDK x64`.
 - Optional hardening in `build.cmd` preflight: fail fast with a clear message when `dotnet --list-sdks` has no `10.` entry, instead of the generic global.json error.
-- `docs\GLIDE_MANIFESTO_AND_HANDOFF.md:38`: Toolchain becomes .NET 10 SDK (x64), with VS 2022/2026 Build Tools C++ x64.
+- `docs\history\GLIDE_MANIFESTO_AND_HANDOFF.md:38`: Toolchain becomes .NET 10 SDK (x64), with VS 2022/2026 Build Tools C++ x64.
 - `installer\Glide.iss`: optionally add `MinVersion=10.0.14393` (decision 4). No other installer change. Output paths, the `dist\*` payload layout, and the absence of a runtime prerequisite are all unchanged.
 - `CHANGELOG.md` / release notes: "Runtime moved to .NET 10 LTS (supported until Nov 2028); NativeAOT binary about 7 % smaller; CET shadow-stack compatible."
 - `tools\package-source.ps1`, `tools\build-installer.cmd` and `tools\perf\*.ps1`: no change needed (they contain no TFM-specific paths; verified).

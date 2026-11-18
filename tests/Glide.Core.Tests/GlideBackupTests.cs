@@ -19,6 +19,7 @@ namespace Glide.Core.Tests;
 /// the stores' test seams), never the real user profile.
 /// </summary>
 [Collection("RecentHistory")]
+[Trait("Area", "Data")]
 public sealed class GlideBackupTests
 {
     /// <summary>One scratch "PC": its own settings folder, recent-files file, placement store and session flag.</summary>
@@ -58,7 +59,7 @@ public sealed class GlideBackupTests
             WindowPlacementService.PersistOverrideForTests = null;
             WindowPlacementService.ResetForTests();
             WorkspaceSessionStore.ResetImportedSessionForTests();
-            try { Directory.Delete(Root, true); } catch { }
+            TempDir.TryDelete(Root);
         }
     }
 

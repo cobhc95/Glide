@@ -1,4 +1,3 @@
-using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
@@ -14,18 +13,11 @@ namespace Glide.App.Services;
 /// <para>The handler runs on the bubble route and ignores handled events, so whatever sits closer to the key wins:
 /// an open dropdown or popup closes first, an active shortcut capture cancels the capture first (Settings marks
 /// that Esc handled), and windows with their own Esc handling (Settings, Reset, Update prompt) keep it.</para>
-/// <para>Excluded: <see cref="MainWindow"/> (Esc there is a bindable viewer key, never "close the window"), and any
-/// window that sets <see cref="IsDisabledProperty"/>.</para>
+/// <para>Excluded: <see cref="MainWindow"/> (Esc there is a bindable viewer key, never "close the window").</para>
 /// </summary>
 internal static class DialogEscape
 {
     private static bool _registered;
-
-    public static readonly AttachedProperty<bool> IsDisabledProperty =
-        AvaloniaProperty.RegisterAttached<Window, bool>("IsDisabled", typeof(DialogEscape));
-
-    public static void SetIsDisabled(Window window, bool value) => window.SetValue(IsDisabledProperty, value);
-    public static bool GetIsDisabled(Window window) => window.GetValue(IsDisabledProperty);
 
     /// <summary>Window types Esc never closes, with the reason (checked by DialogEscapeCoverageTests).</summary>
     public static readonly IReadOnlyDictionary<Type, string> ExcludedTypes = new Dictionary<Type, string>
@@ -42,7 +34,7 @@ internal static class DialogEscape
     }
 
     /// <summary>True when Esc closes <paramref name="window"/>.</summary>
-    internal static bool Applies(Window window) => AppliesTo(window.GetType()) && !GetIsDisabled(window);
+    internal static bool Applies(Window window) => AppliesTo(window.GetType());
 
     /// <summary>True for every Window type except <see cref="ExcludedTypes"/> (plain <c>new Window</c> dialogs included).</summary>
     internal static bool AppliesTo(Type windowType) => typeof(Window).IsAssignableFrom(windowType) && !ExcludedTypes.ContainsKey(windowType);

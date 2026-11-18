@@ -1,6 +1,7 @@
 
 namespace Glide.Core.Tests;
 
+[Trait("Area", "Overlay")]
 public sealed class OverlayAnimationPolicyTests
 {
     private static readonly OverlayAnimationRect Host = new(10, 20, 800, 600);

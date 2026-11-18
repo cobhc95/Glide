@@ -10,10 +10,11 @@ using Glide.Core.Workspace;
 namespace Glide.Core.Tests;
 
 /// <summary>
-/// 5.0.6: Ctrl+T (GlideCommand.NewTab) and the "+" button put the new tab where "New tabs open at" says and always
-/// switch to it, whatever "Open new tabs in the foreground" is set to.
+/// 5.1.0: Ctrl+T (GlideCommand.NewTab) and the "+" button always put the new tab at the far right end (like a web
+/// browser) and switch to it, whatever "New tabs open at" and "Open new tabs in the foreground" are set to.
 /// </summary>
 [Collection(AvaloniaHeadlessCollection.Name)]
+[Trait("Area", "Tabs")]
 public sealed class NewTabCommandPlacementTests
 {
     public NewTabCommandPlacementTests(AvaloniaHeadlessFixture fixture) { _ = fixture; }
@@ -24,7 +25,7 @@ public sealed class NewTabCommandPlacementTests
     [InlineData(NewTabPositions.AtEnd, false, false)]
     [InlineData(NewTabPositions.NextToCurrent, false, true)]
     [InlineData(NewTabPositions.AtEnd, false, true)]
-    public async Task Ctrl_T_and_the_plus_button_follow_New_tabs_open_at_and_switch_to_the_tab(string position, bool switchSetting, bool plusButton)
+    public async Task Ctrl_T_and_the_plus_button_open_at_the_end_and_switch_to_the_tab(string position, bool switchSetting, bool plusButton)
     {
         var root = Path.Combine(Path.GetTempPath(), "Glide.Settings.Tests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
@@ -50,8 +51,7 @@ public sealed class NewTabCommandPlacementTests
 
                 Assert.Equal(4, workspace.Tabs.Count);
                 var added = workspace.Tabs.Single(t => !before.Contains(t.Id));
-                var expectedIndex = position == NewTabPositions.AtEnd ? 3 : 1;
-                Assert.Equal(expectedIndex, workspace.Tabs.ToList().IndexOf(added));
+                Assert.Equal(3, workspace.Tabs.ToList().IndexOf(added)); // at the end, whatever "New tabs open at" says
                 Assert.Same(added, workspace.Active); // always switches, even with the switch setting off
             }
             finally
@@ -60,7 +60,7 @@ public sealed class NewTabCommandPlacementTests
                 SettingsStore.SettingsDirectoryOverrideForTests.Value = previousStore;
             }
         });
-        try { Directory.Delete(root, true); } catch { }
+        TempDir.TryDelete(root);
     }
 
     private const BindingFlags Flags = BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance;

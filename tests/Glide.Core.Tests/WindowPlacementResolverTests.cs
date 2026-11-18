@@ -3,6 +3,7 @@ using Glide.Core.Windows;
 namespace Glide.Core.Tests;
 
 /// <summary>The shared, pure clamp/validate rules every remembering window uses (Glide.Core WindowPlacementResolver).</summary>
+[Trait("Area", "Window")]
 public sealed class WindowPlacementResolverTests
 {
     private static readonly ScreenWorkArea Full = new(0, 0, 1920, 1040, 1.0);

@@ -6,6 +6,7 @@ namespace Glide.Core.Tests;
 /// only when a tray icon actually exists to bring the window back.
 /// </summary>
 // Source-text contract kept: this asserts on production source (UI code-behind, native/installer files or a repo-wide scan) that cannot be run headlessly; behavioural coverage lives in the other test files.
+[Trait("Area", "Window")]
 public sealed class MinimizeBehaviorContractTests
 {
     [Fact]

@@ -3,6 +3,7 @@ using Glide.Core.Commands;
 namespace Glide.Core.Tests;
 
 /// <summary>Clickable column headers of the hotkey list: sort orders, direction toggle and the arrow indicator.</summary>
+[Trait("Area", "Hotkeys")]
 public sealed class HotkeyListSortTests
 {
     private static List<HotkeyListRow> Rows() => new()

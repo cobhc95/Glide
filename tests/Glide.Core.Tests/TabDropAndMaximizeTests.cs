@@ -8,6 +8,7 @@ namespace Glide.Core.Tests;
 /// Tab reorder/attach drop index (the drop must match the last live preview / the insertion marker) and the
 /// title-bar maximize/restore fence (same flash-free pipeline as fullscreen).
 /// </summary>
+[Trait("Area", "Tabs")]
 public sealed class TabDropAndMaximizeTests
 {
     [Theory]

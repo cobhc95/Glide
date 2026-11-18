@@ -14,7 +14,7 @@ diagnostics-out/
 *.log
 *-output.txt
 # Historical handoff/manifesto snapshots live under Archive/ (git-ignored). The canonical
-# docs/GLIDE_MANIFESTO_AND_HANDOFF.md stays tracked.
+# docs/history/GLIDE_MANIFESTO_AND_HANDOFF.md stays tracked.
 Archive/*MANIFESTO*
 Archive/*HANDOFF*
 Archive/*handover*
@@ -43,3 +43,12 @@ docs/mockups/
 codecs/*.dll
 
 tools/bench-507/.out/
+
+# Stage A (audit R1): history copies, caches and bench outputs never tracked
+Archive/
+dist-*/
+**/__pycache__/
+*.pyc
+**/TestResults/
+tools/bench-507/.out/
+bench-out*/

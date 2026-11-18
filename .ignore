@@ -1,0 +1,21 @@
+﻿# Search scope for ripgrep / agents (ripgrep reads this even without git).
+# Keeps searches on live source only. Build outputs and history copies are excluded.
+Archive/
+.artifacts/
+artifacts/
+dist/
+dist-*/
+**/bin/
+**/obj/
+**/build/
+codecs/*.dll
+native/third_party/
+tools/benchmark_corpus/
+tools/benchmark_references/
+tools/bench-507/.out/
+docs/screenshots/
+**/TestResults/
+**/__pycache__/
+*.zip
+*.pdb
+build-output*.txt

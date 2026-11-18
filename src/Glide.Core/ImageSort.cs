@@ -74,6 +74,9 @@ public static class ImageSortOrder
     /// <summary>Returns a known display name, falling back to the default for unknown or empty values.</summary>
     public static string NormalizeDisplayName(string? value) => ToDisplayName(ParseKey(value));
 
+    /// <summary>The spec for a Settings display name and direction (unknown names fall back to the default key).</summary>
+    public static ImageSortSpec SpecFor(string? displayName, bool descending) => new(ParseKey(displayName), descending);
+
     public static IComparer<string> CreateComparer(ImageSortSpec spec) => new PathComparer(spec);
 
     public static IComparer<string> CreateComparer() => CreateComparer(Current);

@@ -2,7 +2,7 @@
 
 rem Outer wrapper: stream the inner build live while mirroring the transcript to build-output.txt.
 rem PowerShell Tee-Object preserves live progress and a complete failure transcript at the same time.
-rem On failure the transcript is copied to the Windows clipboard for one-paste diagnostics.
+rem The last transcript (success or failure) is kept at build-output.txt for post-mortems and warning baselines.
 if /I "%~1"=="--glide-captured" (
   shift
   goto :captured_entry
@@ -17,8 +17,7 @@ if exist "%GLIDE_BUILD_LOG%" del /q "%GLIDE_BUILD_LOG%" >nul 2>nul
 echo Glide build running. Output is live and mirrored to build-output.txt...
 powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\build-live.ps1" -BuildScript "%~f0" -LogPath "%GLIDE_BUILD_LOG%" -ForwardArgsLine "%*"
 set "GLIDE_WRAPPER_RC=%errorlevel%"
-rem Success leaves no transcript behind; the transcript is kept only when a build fails.
-if "%GLIDE_WRAPPER_RC%"=="0" if exist "%GLIDE_BUILD_LOG%" del /q "%GLIDE_BUILD_LOG%" >nul 2>nul
+rem The transcript of the last build is always kept (overwritten by the next build); it is never copied to the clipboard.
 
 if not "%GLIDE_WRAPPER_RC%"=="0" (
   if not exist "%GLIDE_BUILD_LOG%" (
@@ -26,18 +25,9 @@ if not "%GLIDE_WRAPPER_RC%"=="0" (
     >>"%GLIDE_BUILD_LOG%" echo Exit code: %GLIDE_WRAPPER_RC%
     >>"%GLIDE_BUILD_LOG%" echo Command: powershell build-live.ps1
   )
-  where clip >nul 2>nul
-  if not errorlevel 1 (
-    type "%GLIDE_BUILD_LOG%" | clip
-    set "GLIDE_CLIPBOARD_STATUS=copied to clipboard"
-  ) else (
-    set "GLIDE_CLIPBOARD_STATUS=NOT copied - clip.exe was not found"
-  )
   echo.
   echo ============================================================
   echo   FULL FAILURE TRANSCRIPT: build-output.txt
-  echo   Transcript: !GLIDE_CLIPBOARD_STATUS!
-  echo   Paste build-output.txt directly back into ChatGPT for diagnostics.
   echo ============================================================
   if not "%GLIDE_WRAPPER_NO_PAUSE%"=="1" pause
 )
@@ -309,11 +299,15 @@ if "%GLIDE_FAST%"=="1" (
   echo [5/8] Input tests skipped in fast mode.
   echo [6/8] Headless diagnostics skipped in fast mode.
 ) else (
-  call :progress 48 "Core + Input tests (parallel)"
-  echo [4-5/8] Running Core and Input test projects in parallel...
+  call :progress 48 "Core + Input + Explorer tests (parallel)"
+  echo [4-5/8] Running Core, Input and Explorer test projects in parallel...
+  rem Capture the exit code on the very next line: any command in between (even echo/call) can reset
+  rem it, and a non-zero code from the parallel run must stop the build before dist\ is deleted.
   dotnet test Glide.sln -c Release --no-build -m -p:BuildInParallel=true
-  if errorlevel 1 (
-    set "GLIDE_BUILD_RC=!errorlevel!"
+  set "GLIDE_TEST_RC=!errorlevel!"
+  if not "!GLIDE_TEST_RC!"=="0" (
+    echo ERROR: Core/Input/Explorer tests failed ^(exit code !GLIDE_TEST_RC!^). Publish skipped; dist\ left untouched.
+    set "GLIDE_BUILD_RC=!GLIDE_TEST_RC!"
     goto :fail
   )
 
@@ -333,8 +327,15 @@ if "%GLIDE_FAST%"=="1" if not exist dist mkdir dist
 rem NativeAOT: Glide.exe needs no installed .NET. The linker step locates MSVC through vswhere.
 set "PATH=%PATH%;%ProgramFiles(x86)%\Microsoft Visual Studio\Installer"
 dotnet publish src\Glide.App\Glide.App.csproj -c Release -r win-x64 --self-contained true -p:PublishAot=true -o dist
-if errorlevel 1 (
-  set "GLIDE_BUILD_RC=!errorlevel!"
+set "GLIDE_PUBLISH_RC=!errorlevel!"
+if not "!GLIDE_PUBLISH_RC!"=="0" (
+  echo ERROR: dotnet publish failed ^(exit code !GLIDE_PUBLISH_RC!^).
+  set "GLIDE_BUILD_RC=!GLIDE_PUBLISH_RC!"
+  goto :fail
+)
+if not exist "dist\Glide.exe" (
+  echo ERROR: dotnet publish reported success but dist\Glide.exe is missing.
+  set "GLIDE_BUILD_RC=1"
   goto :fail
 )
 rem Post-build cleanup: fast mode keeps dist\, so drop any symbol files left by earlier builds.

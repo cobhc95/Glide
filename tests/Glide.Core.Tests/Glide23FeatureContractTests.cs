@@ -11,6 +11,7 @@ namespace Glide.Core.Tests;
 /// or Explorer HWND behaviour on this non-Windows test host.
 /// </summary>
 // Source-text contract kept: this asserts on production source (UI code-behind, native/installer files or a repo-wide scan) that cannot be run headlessly; behavioural coverage lives in the other test files.
+[Trait("Area", "Regression")]
 public sealed class Glide23FeatureContractTests
 {
     [Fact]
@@ -73,9 +74,9 @@ public sealed class Glide23FeatureContractTests
     public void TabTooltipContractIsSimplified()
     {
         var source = Source("src/Glide.App/MainWindow.axaml.cs");
-        // 5.0.6 hover card: one short hint line built from the live bindings (BindingHints.TabMouseHint).
-        Assert.Contains("BindingHints.TabMouseHint(", source, StringComparison.Ordinal);
-        Assert.StartsWith("Drag to move", Glide.Core.Commands.BindingHints.TabMouseHint(Glide.Core.Commands.GestureCatalog.CreateDefaultMap(), null), StringComparison.Ordinal);
+        // 5.0.6 hover card: one short hint line built from the live bindings; 5.1.0 draws it as key chips (BindingHints.TabMouseHintChips).
+        Assert.Contains("BindingHints.TabMouseHintChips(", source, StringComparison.Ordinal);
+        Assert.StartsWith("[Drag] move", Glide.Core.Commands.BindingHints.TabMouseHint(Glide.Core.Commands.GestureCatalog.CreateDefaultMap(), null), StringComparison.Ordinal);
         Assert.DoesNotContain("next/previous hotkey", source, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -89,16 +90,6 @@ public sealed class Glide23FeatureContractTests
         Assert.NotEqual(state.StartupAction, state.NewTabAction);
         Assert.Contains("general.startupAction", SettingsCatalog.All.Select(x => x.Id));
         Assert.Contains("general.newTabAction", SettingsCatalog.All.Select(x => x.Id));
-    }
-
-    [Fact]
-    public void ExplorerContractDeclaresLazyNativeHostAndActivationRoute()
-    {
-        var source = Source("src/Glide.App/Platform/WindowsExplorerHost.cs");
-        Assert.Contains("NativeControlHost", source, StringComparison.Ordinal);
-        Assert.Contains("GeneratedComInterface", source, StringComparison.Ordinal);
-        Assert.Contains("FileActivated", source, StringComparison.Ordinal);
-        Assert.Contains("CreateNativeControlCore", source, StringComparison.Ordinal);
     }
 
     [Fact]

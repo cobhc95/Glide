@@ -61,7 +61,6 @@ public partial class MainWindow
         ((GlideIconView)button.Content).Classes.Add("statusGlyph");
         var shortcut = ShortcutForAction(action.Id);
         ToolTip.SetTip(button, string.IsNullOrWhiteSpace(shortcut) ? definition.Label : $"{definition.Label} ({shortcut})");
-        ToolTip.SetShowDelay(button, 650);
         button.Click += async (_, _) => await ExecuteActionAsync(action, "status_bar");
         var inner = new StackPanel { Orientation = Avalonia.Layout.Orientation.Horizontal, Spacing = 2 };
         inner.Children.Add(button);
@@ -94,7 +93,7 @@ public partial class MainWindow
         const double Gap = 4d, ColGap = 8d;
         var inner = Math.Max(80d, availableWidth - 14d - 10d);
         // the user's order and choice of groups (Customize status-bar buttons).
-        var shownIds = Glide.Core.StatusBarGroupCatalog.Parse(_settings.StatusBarGroups);
+        var shownIds = Glide.Core.StatusBarGroupCatalog.Parse(StatusBarOptionsView.Groups);
         foreach (var hiddenSlot in StatusSlots.Where(x => !shownIds.Contains(x.Id))) hiddenSlot.Border.IsVisible = false;
         var slots = shownIds.Select(id => StatusSlots.FirstOrDefault(x => x.Id == id) ?? ExtraStatusSlot(id)).OfType<StatusSlot>().ToList();
 
@@ -169,7 +168,7 @@ public partial class MainWindow
         // "Always stack the information on a separate line" (default): the info text keeps its own top line (with the window
         // buttons at its right) and the button groups sit below it even when everything would fit on one line. It needs a
         // visible info text: with no stats to show (a very narrow window, or nothing to display) the single-row logic applies.
-        var stacked = _settings.StatusStackInfoLine && showStats && !string.IsNullOrWhiteSpace(StatusStatsText.Text);
+        var stacked = StatusBarOptionsView.StackInfoLine && showStats && !string.IsNullOrWhiteSpace(StatusStatsText.Text);
         var wide = !stacked && allWidth + ColGap + windowControlsWidth + (showStats ? statsWidth + ColGap : 0d) <= inner;
 
         List<int> row1 = all, row2 = new();

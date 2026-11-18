@@ -18,6 +18,7 @@ namespace Glide.Core.Tests;
 /// Nothing here launches explorer.exe (the launcher seam is replaced) or writes the real settings file.
 /// </summary>
 [Collection(AvaloniaHeadlessCollection.Name)]
+[Trait("Area", "Explorer")]
 public sealed class TitleBarLocateButtonTests
 {
     private const string TabHeader = "Show in Glide's Explorer tab";
@@ -182,7 +183,7 @@ public sealed class TitleBarLocateButtonTests
             }, launched);
             Assert.Empty(launched);
         }
-        finally { try { Directory.Delete(folder, true); } catch { } }
+        finally { TempDir.TryDelete(folder); }
     }
 
     // ---- "Explore/Browse containing folder" hotkey action (folder.exploreParent) ----------------------------------------
@@ -223,7 +224,7 @@ public sealed class TitleBarLocateButtonTests
             }, launched);
             Assert.Empty(launched);
         }
-        finally { try { Directory.Delete(folder, true); } catch { } }
+        finally { TempDir.TryDelete(folder); }
     }
 
     [Fact]
@@ -247,7 +248,7 @@ public sealed class TitleBarLocateButtonTests
                 Assert.Equal(activeId, Workspace(window).Active!.Id);
             }, launched);
         }
-        finally { try { Directory.Delete(folder, true); } catch { } }
+        finally { TempDir.TryDelete(folder); }
     }
 
     [Fact]
@@ -271,16 +272,12 @@ public sealed class TitleBarLocateButtonTests
 
                 // 2. A real key press on the window runs it (OnKeyDown -> ExecuteCommandAsync -> dispatcher).
                 window.KeyPress(Key.E, RawInputModifiers.Control | RawInputModifiers.Alt, PhysicalKey.E, "e");
-                for (var i = 0; i < 100 && Workspace(window).Active is not BrowserTabState; i++)
-                {
-                    Dispatcher.UIThread.RunJobs();
-                    await Task.Delay(20);
-                }
+                await Wait.UntilAsync(() => Workspace(window).Active is BrowserTabState, "Explorer tab opened", pump: () => Dispatcher.UIThread.RunJobs());
                 var active = Assert.IsType<BrowserTabState>(Workspace(window).Active);
                 Assert.Equal(Path.GetFullPath(folder), active.Folder);
             }, new List<string>());
         }
-        finally { try { Directory.Delete(folder, true); } catch { } }
+        finally { TempDir.TryDelete(folder); }
     }
 
     [Fact]
@@ -320,7 +317,7 @@ public sealed class TitleBarLocateButtonTests
                 Assert.IsType<ImageTabState>(Workspace(window).Active);
             }, launched);
         }
-        finally { try { Directory.Delete(folder, true); } catch { } }
+        finally { TempDir.TryDelete(folder); }
     }
 
     [Fact]
@@ -354,7 +351,7 @@ public sealed class TitleBarLocateButtonTests
                 Assert.Equal(Path.GetFullPath(folder), active.Folder);
             }, new List<string>());
         }
-        finally { try { Directory.Delete(folder, true); } catch { } }
+        finally { TempDir.TryDelete(folder); }
     }
 
     [Fact]
@@ -377,7 +374,7 @@ public sealed class TitleBarLocateButtonTests
                 Assert.True(!targets.Contains(explorer.Id) || Equals(targets[explorer.Id], file));
             }, new List<string>());
         }
-        finally { try { Directory.Delete(folder, true); } catch { } }
+        finally { TempDir.TryDelete(folder); }
     }
 
     [Fact]
@@ -396,7 +393,7 @@ public sealed class TitleBarLocateButtonTests
                 Assert.Equal(Path.GetFullPath(folder), Assert.IsType<BrowserTabState>(Workspace(window).Active).Folder);
             }, new List<string>());
         }
-        finally { try { Directory.Delete(folder, true); } catch { } }
+        finally { TempDir.TryDelete(folder); }
     }
 
     // ---- alternative file manager entry -------------------------------------------------------------
@@ -505,7 +502,7 @@ public sealed class TitleBarLocateButtonTests
         finally
         {
             Glide.App.Explorer.ExplorerHost.LaunchAlternativeFileManager = previous;
-            try { Directory.Delete(folder, true); } catch { }
+            TempDir.TryDelete(folder);
         }
     }
 
@@ -548,7 +545,7 @@ public sealed class TitleBarLocateButtonTests
                 SettingsStore.SettingsDirectoryOverrideForTests.Value = previousStore;
             }
         });
-        try { Directory.Delete(root, true); } catch { }
+        TempDir.TryDelete(root);
     }
 
     private static void WithIsolatedStore(Action<string> action)
@@ -561,7 +558,7 @@ public sealed class TitleBarLocateButtonTests
         finally
         {
             SettingsStore.SettingsDirectoryOverrideForTests.Value = previous;
-            try { Directory.Delete(root, true); } catch { }
+            TempDir.TryDelete(root);
         }
     }
 

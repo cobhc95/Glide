@@ -12,6 +12,7 @@ namespace Glide.Core.Tests;
 /// generate_codec_fixtures.py) decode with the right size, orientation, alpha and colours.
 /// </summary>
 [Collection(AvaloniaHeadlessCollection.Name)]
+[Trait("Area", "Decode")]
 public sealed class BundledCodecProviderTests : IDisposable
 {
     private const string ProviderId = "glide.codecs";

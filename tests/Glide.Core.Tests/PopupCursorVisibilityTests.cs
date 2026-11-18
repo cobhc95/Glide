@@ -24,6 +24,7 @@ namespace Glide.Core.Tests;
 /// </summary>
 // Source-text contract kept: this asserts on production source (UI code-behind, native/installer files or a repo-wide scan) that cannot be run headlessly; behavioural coverage lives in the other test files.
 [Collection(AvaloniaHeadlessCollection.Name)]
+[Trait("Area", "Gestures")]
 public sealed class PopupCursorVisibilityTests
 {
     private static readonly DateTime T0 = new(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
@@ -340,7 +341,7 @@ public sealed class PopupCursorVisibilityTests
             }
             return Task.CompletedTask;
         });
-        try { Directory.Delete(root, true); } catch { }
+        TempDir.TryDelete(root);
     }
 
     private const BindingFlags Flags = BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance;

@@ -261,7 +261,7 @@ public static class AppActionRegistry
         Cmd("overlay.resetZoom", "Reset selected overlay zoom", "Overlays", GlideCommand.ResetSelectedOverlayZoom, []) with { Gesture = G(GestureCatalog.ResetOverlayZoom, "Reset selected overlay zoom", GestureActionCategories.Overlay, 17, ViewerAndOverlay) },
         Cmd("overlay.bringFront", "Bring selected overlay to front", "Overlays", GlideCommand.BringSelectedOverlayFront, []) with { Icon = "BringToFront", Gesture = G(GestureCatalog.BringOverlayFront, "Bring selected overlay to front", GestureActionCategories.Overlay, 18, ViewerAndOverlay) },
         Cmd("overlay.clear", "Clear all overlays", "Overlays", GlideCommand.ClearOverlays, [], ["remove overlays", "close overlays", "window in window"]),
-        Cmd("overlay.toggleMode", "Enter / exit Overlay (Window-in-Window) mode", "Overlays", GlideCommand.ToggleOverlayMode, [],
+        Cmd("overlay.toggleMode", "Enter / exit Overlay (Window-in-Window) mode", "Overlays", GlideCommand.ToggleOverlayMode, ["Alt+O"],
             ["overlay mode", "window in window", "frameless", "transparent window", "exit overlay"]) with { Icon = "Overlays" },
         Cmd("status.close", "Close (hide) the status bar", "Application", GlideCommand.CloseStatusBar, [], ["status", "status bar", "hide", "close"]),
         Cmd("tab.newExplorer", "New Explorer tab (browse folders)", "Tabs", GlideCommand.NewExplorerTab, [], ["explorer", "browse", "folder", "files"]) with { Icon = "Browser" },

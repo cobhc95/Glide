@@ -9,6 +9,7 @@ public sealed class ImageSortOrderCollection
 }
 
 [Collection(ImageSortOrderCollection.Name)]
+[Trait("Area", "Navigation")]
 public sealed class ImageSortOrderTests : IDisposable
 {
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "glide-sort-" + Guid.NewGuid().ToString("N"));
@@ -23,7 +24,7 @@ public sealed class ImageSortOrderTests : IDisposable
     public void Dispose()
     {
         ImageSortOrder.Current = _original;
-        try { Directory.Delete(_dir, recursive: true); } catch { }
+        TempDir.TryDelete(_dir);
     }
 
     private string Make(string name, int size = 1, DateTime? modified = null)

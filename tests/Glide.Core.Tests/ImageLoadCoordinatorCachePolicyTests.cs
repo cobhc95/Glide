@@ -4,6 +4,7 @@ using Glide.Diagnostics;
 namespace Glide.Core.Tests;
 
 [Collection(AvaloniaHeadlessCollection.Name)]
+[Trait("Area", "Decode")]
 public sealed class ImageLoadCoordinatorCachePolicyTests
 {
     [Fact]
@@ -149,6 +150,7 @@ public sealed class ImageLoadCoordinatorCachePolicyTests
 
 // 2.5 regression contracts for aspect-aware first-paint sizing. These deliberately avoid
 // hard-coding a hardware tier: the governor may select different overscan on different test PCs.
+[Trait("Area", "Decode")]
 public sealed class ImageFirstPaintBoundsTests
 {
     [Fact]

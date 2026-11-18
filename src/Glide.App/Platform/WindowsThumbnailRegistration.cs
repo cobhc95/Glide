@@ -105,12 +105,6 @@ internal static class WindowsThumbnailRegistration
     /// <summary>Formats Glide's provider decodes natively (compact decoders, libwebp, Direct2D SVG).</summary>
     internal static IReadOnlyCollection<string> NativeProviderFormats => GlideNativeFormats;
 
-    /// <summary>True when another application already registers a thumbnail handler for the extension.</summary>
-    public static bool HasForeignHandler(string extension)
-    {
-        var existing = ReadRegisteredHandler(extension);
-        return existing is not null && !existing.Equals(ProviderClsid, StringComparison.OrdinalIgnoreCase);
-    }
 
     public static bool IsRegistered() => !string.IsNullOrWhiteSpace(RegisteredDllPath(perUser: true));
 

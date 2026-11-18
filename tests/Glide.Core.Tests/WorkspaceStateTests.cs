@@ -2,6 +2,7 @@ using Glide.Core.Workspace;
 
 namespace Glide.Core.Tests;
 
+[Trait("Area", "Tabs")]
 public sealed class WorkspaceStateTests
 {
     [Fact]

@@ -27,31 +27,29 @@ public partial class MainWindow
             return;
         }
         // Turning Auto-hide on or off always starts from a clean state (hidden / normal), never a stale reveal.
-        if (_statusAutoHideApplied != _settings.StatusAutoHide)
+        if (_statusAutoHideApplied != StatusBarOptionsView.AutoHide)
         {
-            _statusAutoHideApplied = _settings.StatusAutoHide;
+            _statusAutoHideApplied = StatusBarOptionsView.AutoHide;
             _statusHoverRevealed = false;
             _statusHoverCollapsedRect = null;
         }
-        var collapsedNow = StatusCollapsedNow;
-        if (!collapsedNow && !_settings.StatusAutoHide) _statusHoverRevealed = false;
-        var fullscreen = WindowState == WindowState.FullScreen;
-        // Auto-hide also covers fullscreen: the bar is hidden anyway and only appears at the bottom edge.
-        var allowed = _settings.ShowStatusSurface && (!fullscreen || _settings.FullscreenStatusAlwaysOn || _settings.StatusAutoHide);
-        var expanded = allowed && !collapsedNow && !_statusSessionClosed;
-        // Windowed collapse keeps the bar present but collapsed to its own button: that same
-        // button turns into the expand arrow (UpdateCollapseButtonGlyphs) and clicking it again
-        // expands the bar. No separate restore arrow is left in the corner, and collapse never
-        // closes the bar (the X / CloseStatusClicked is the only close path). The corner button
-        // remains only for fullscreen, where the bar is suppressed rather than collapsed.
-        var collapsedOnly = _settings.ShowStatusSurface && collapsedNow && !_statusSessionClosed && !fullscreen;
-        // Auto-hide: the bar is fully hidden (no arrow, no button) until UpdateStatusHoverReveal reveals it.
-        var barVisible = StatusBarAutoHide.BarVisible(_settings.StatusAutoHide, _statusHoverRevealed);
-        ViewerStatusSurface.IsVisible = (expanded || collapsedOnly) && ImageView.IsVisible && barVisible;
-        if (_homeSurface is not null) _homeSurface.StatusSurface.IsVisible = (expanded || collapsedOnly) && HomeHost.IsVisible && (!fullscreen || _settings.StatusAutoHide) && barVisible;
-        StatusRestoreButton.IsVisible = _settings.ShowStatusSurface && fullscreen && !_settings.StatusAutoHide &&
-            (collapsedNow || !_settings.FullscreenStatusAlwaysOn) &&
-            (ImageView.IsVisible || HomeHost.IsVisible);
+        if (!StatusCollapsedNow && !StatusBarOptionsView.AutoHide) _statusHoverRevealed = false;
+        // The rules (windowed collapse keeps the bar as its own expand button, fullscreen leaves the corner restore
+        // button, Auto-hide hides until hover reveal) live in Glide.Core.Status.StatusChromePolicy.
+        var visibility = Glide.Core.Status.StatusChromePolicy.Decide(new Glide.Core.Status.StatusChromeInputs(
+            WholeAppOverlay: false,
+            ShowStatusSurface: StatusBarOptionsView.ShowStatusSurface,
+            AutoHide: StatusBarOptionsView.AutoHide,
+            Collapsed: _statusCollapsed,
+            SessionClosed: _statusSessionClosed,
+            Fullscreen: WindowState == WindowState.FullScreen,
+            FullscreenAlwaysOn: _settings.FullscreenStatusAlwaysOn,
+            HoverRevealed: _statusHoverRevealed,
+            ImageVisible: ImageView.IsVisible,
+            HomeVisible: HomeHost.IsVisible));
+        ViewerStatusSurface.IsVisible = visibility.ViewerSurface;
+        if (_homeSurface is not null) _homeSurface.StatusSurface.IsVisible = visibility.HomeSurface;
+        StatusRestoreButton.IsVisible = visibility.RestoreButton;
         UpdateCollapseButtonGlyphs();
         ApplyCollapsedStatusChrome();
         UpdateViewportStatusInset();
@@ -72,13 +70,12 @@ public partial class MainWindow
     private void ApplyCollapsedStatusChrome()
     {
         if (!_statusProbing) _statusProbeDirty = true;       // the bar's box (reveal area) is re-measured after any state change
-        var collapsedOnly = !_statusPreviewReveal && _settings.ShowStatusSurface && StatusCollapsedNow && !_statusHoverRevealed &&
-            !_statusSessionClosed && WindowState != WindowState.FullScreen && !_wholeAppOverlayMode;
-        var compact = collapsedOnly && _settings.StatusCollapsedToCorner;
-        var ghost = collapsedOnly && !_settings.StatusCollapsedToCorner;
+        var (collapsedOnly, compact, ghost) = Glide.Core.Status.StatusChromePolicy.CollapsedLook(
+            _statusPreviewReveal, StatusBarOptionsView.ShowStatusSurface, StatusCollapsedNow, _statusHoverRevealed,
+            _statusSessionClosed, WindowState == WindowState.FullScreen, _wholeAppOverlayMode, StatusBarOptionsView.CollapsedToCorner);
         if (StatusControlsPanel is not null) { StatusControlsPanel.IsVisible = !compact; SetGhosted(StatusControlsPanel, ghost); }
         if (StatusStatsHost is not null) { StatusStatsHost.IsVisible = !compact && Bounds.Width >= 260; SetGhosted(StatusStatsHost, ghost); }
-        if (StatusCloseButton is not null) { StatusCloseButton.IsVisible = !compact && _settings.StatusShowClose; SetGhosted(StatusCloseButton, ghost); }
+        if (StatusCloseButton is not null) { StatusCloseButton.IsVisible = !compact && StatusBarOptionsView.ShowClose; SetGhosted(StatusCloseButton, ghost); }
         // Corner mode: the collapsed bar is only the button, no empty strip, in the lower-right.
         if (compact) PinCollapsedSurfaceToCorner(ViewerStatusSurface);
         else ApplyStatusSurfaceAlignment(ViewerStatusSurface);
@@ -116,7 +113,7 @@ public partial class MainWindow
     /// </summary>
     private void ApplyCollapsedButtonLook(bool collapsedOnly)
     {
-        var look = StatusBarAutoHide.ExpandButtonLook(collapsedOnly, _settings.StatusCollapsedToCorner, _settings.StatusAutoHide, pointerOverButton: false);
+        var look = StatusBarAutoHide.ExpandButtonLook(collapsedOnly, StatusBarOptionsView.CollapsedToCorner, StatusBarOptionsView.AutoHide, pointerOverButton: false);
         var arrow = look == StatusButtonLook.Arrow;
         SetCollapsedArrowClass(StatusCollapseButton, arrow);
         SetCollapsedArrowClass(_homeSurface?.StatusCollapseButton, arrow);
@@ -130,7 +127,13 @@ public partial class MainWindow
     }
 
     /// <summary>Whether the collapse flag is honoured: Auto-hide replaces collapsing (the bar is simply hidden until revealed).</summary>
-    private bool StatusCollapsedNow => _statusCollapsed && !_settings.StatusAutoHide;
+    private bool StatusCollapsedNow => Glide.Core.Status.StatusChromePolicy.CollapsedNow(_statusCollapsed, StatusBarOptionsView.AutoHide);
+
+    /// <summary>
+    /// Stage D (2b): the single notification for "something the status chrome depends on changed" (settings,
+    /// fullscreen, overlay mode, surface switch, collapse/close). Callers no longer reach into the visibility code.
+    /// </summary>
+    private void NotifyStatusChromeChanged() => ApplyStatusVisibility();
 
     private bool _statusAutoHideApplied;
 
@@ -174,7 +177,7 @@ public partial class MainWindow
     {
         surface.Width = double.NaN;
         surface.Margin = new Thickness(14, 0, 14, 14);
-        surface.HorizontalAlignment = _settings.StatusBarAlignment switch
+        surface.HorizontalAlignment = StatusBarOptionsView.Alignment switch
         {
             "Left" => HorizontalAlignment.Left,
             "Right" => HorizontalAlignment.Right,
@@ -194,7 +197,7 @@ public partial class MainWindow
         void Apply(Button? button)
         {
             if (button?.Content is not GlideIconView glyph) return;
-            if (_settings.StatusAutoHide && !StatusCollapsedNow)
+            if (StatusBarOptionsView.AutoHide && !StatusCollapsedNow)
             {
                 // distinct glyph while auto-hide is on.
                 glyph.Kind = "Eye";
@@ -424,7 +427,7 @@ public partial class MainWindow
         if (platform is null || platform.Handle == IntPtr.Zero) return false;
         try
         {
-            SendMessageW(platform.Handle, WmSysCommand, (IntPtr)command, IntPtr.Zero);
+            Platform.Native.User32.SendMessage(platform.Handle, WmSysCommand, (IntPtr)command, IntPtr.Zero);
             return true;
         }
         catch { return false; }
@@ -659,9 +662,13 @@ public partial class MainWindow
         BeginNativeWindowDrag(e);
     }
 
+    /// <summary>Tests: observes native window-move requests instead of entering Windows' modal move loop.</summary>
+    internal Func<PointerPressedEventArgs, bool>? NativeWindowDragInterceptorForTests { get; set; }
+
     private void BeginNativeWindowDrag(PointerPressedEventArgs e)
     {
         if (WindowState == WindowState.FullScreen) return;
+        if (NativeWindowDragInterceptorForTests?.Invoke(e) == true) { e.Handled = true; return; }
         var point = e.GetCurrentPoint(this);
         var physicalButtons = PhysicalMouseButtons(point);
         try
@@ -695,7 +702,7 @@ public partial class MainWindow
 
     private void PrepareForNativeWindowMove(object? source)
     {
-        var nativeCapture = OperatingSystem.IsWindows() ? GetNativeCapture() : IntPtr.Zero;
+        var nativeCapture = OperatingSystem.IsWindows() ? Platform.Native.User32.GetCapture() : IntPtr.Zero;
         _diagnostics.Write("input", "native_window_move_prepare", new
         {
             source = source?.GetType().Name,
@@ -710,7 +717,7 @@ public partial class MainWindow
         Viewport.CancelInteraction();
         if (OperatingSystem.IsWindows())
         {
-            try { ReleaseNativeCapture(); } catch { /* pointer capture already released; nothing to undo */ }
+            try { Platform.Native.User32.ReleaseCapture(); } catch { /* pointer capture already released; nothing to undo */ }
         }
     }
 
@@ -730,7 +737,7 @@ public partial class MainWindow
         if (_wholeAppOverlayControlsHost is { } overlayControls) overlayControls.IsVisible = false;
         if (OperatingSystem.IsWindows())
         {
-            try { ReleaseNativeCapture(); } catch { /* pointer capture already released; nothing to undo */ }
+            try { Platform.Native.User32.ReleaseCapture(); } catch { /* pointer capture already released; nothing to undo */ }
         }
         _diagnostics.Write("input", "native_resize_begin", new { Position, Width, Height });
     }
@@ -749,7 +756,7 @@ public partial class MainWindow
         _windowsBrowserFrame?.SetSelectionZoomOutPressed(false);
         if (OperatingSystem.IsWindows())
         {
-            try { ReleaseNativeCapture(); } catch { /* pointer capture already released; nothing to undo */ }
+            try { Platform.Native.User32.ReleaseCapture(); } catch { /* pointer capture already released; nothing to undo */ }
         }
         Dispatcher.UIThread.Post(() =>
         {
@@ -757,7 +764,7 @@ public partial class MainWindow
             Viewport.CancelInteraction();
             Viewport.InvalidateVisual();
         }, DispatcherPriority.Input);
-        _diagnostics.Write("input", "native_resize_pointer_state_reset", new { physicalLeft = OperatingSystem.IsWindows() && (GetAsyncKeyState(VkLButton) & 0x8000) != 0, physicalRight = OperatingSystem.IsWindows() && (GetAsyncKeyState(VkRButton) & 0x8000) != 0 });
+        _diagnostics.Write("input", "native_resize_pointer_state_reset", new { physicalLeft = OperatingSystem.IsWindows() && (Platform.Native.User32.GetAsyncKeyState(VkLButton) & 0x8000) != 0, physicalRight = OperatingSystem.IsWindows() && (Platform.Native.User32.GetAsyncKeyState(VkRButton) & 0x8000) != 0 });
     }
 
     private void BeginDeferredRightWindowDrag(IPointer pointer, PixelPoint screenStart, PixelPoint screenCurrent)
@@ -788,22 +795,21 @@ public partial class MainWindow
         UpdateStatusHoverReveal(windowPointer);
         if (_nativeSizeMoveActive) return;
         if (_manualWindowDragPointer is null || e.Pointer != _manualWindowDragPointer) return;
-        if (!e.GetCurrentPoint(this).Properties.IsRightButtonPressed)
+        var held = e.GetCurrentPoint(this).Properties;
+        if (_manualWindowDragLeft ? !held.IsLeftButtonPressed : !held.IsRightButtonPressed)
         {
             EndManualWindowDrag();
             return;
         }
         var cursor = this.PointToScreen(e.GetPosition(this));
-        var dx = cursor.X - _manualWindowDragCursorStart.X;
-        var dy = cursor.Y - _manualWindowDragCursorStart.Y;
-        if (!_manualWindowDragMoved && Math.Abs(dx) < 4 && Math.Abs(dy) < 4)
-        {
-            e.Handled = true;
-            return;
-        }
-        _manualWindowDragMoved = true;
-        Position = new PixelPoint(_manualWindowDragWindowStart.X + dx, _manualWindowDragWindowStart.Y + dy);
+        var target = Glide.Core.OverlayWindowDragPolicy.DragTarget(
+            _manualWindowDragWindowStart.X, _manualWindowDragWindowStart.Y,
+            _manualWindowDragCursorStart.X, _manualWindowDragCursorStart.Y,
+            cursor.X, cursor.Y, _manualWindowDragMoved);
         e.Handled = true;
+        if (target is not { } t) return;
+        _manualWindowDragMoved = true;
+        Position = new PixelPoint(t.X, t.Y);
     }
 
     private void MainWindowPointerReleased(object? sender, PointerReleasedEventArgs e)
@@ -813,8 +819,10 @@ public partial class MainWindow
         var releasedProperties = e.GetCurrentPoint(this).Properties;
         _statusPointerButtonsDown = releasedProperties.IsLeftButtonPressed || releasedProperties.IsRightButtonPressed || releasedProperties.IsMiddleButtonPressed;
         if (_manualWindowDragPointer is null || e.Pointer != _manualWindowDragPointer) return;
-        var wasStationaryRightClick = !_manualWindowDragMoved;
+        var wasStationaryRightClick = !_manualWindowDragMoved && !_manualWindowDragLeft;
+        var wasOverlayLeftMove = _manualWindowDragLeft && _manualWindowDragMoved;
         EndManualWindowDrag();
+        if (wasOverlayLeftMove) { TrackNormalWindowPlacement(); SaveCurrentWholeAppOverlayPlacement(); }
         if (wasStationaryRightClick && ImageView.IsVisible) ShowViewerContextMenu();
         e.Handled = true;
     }
@@ -851,12 +859,13 @@ public partial class MainWindow
         // Leaving the window counts as leaving the bar at once (no delay); an open menu still keeps the bar (see below).
         _statusPointerButtonsDown = false;
         EvaluateStatusReveal(new Point(-10000, -10000), hideImmediately: true);
+        UpdateWholeAppOverlayDragStrip(false);   // the Overlay drag strip fades out when the pointer leaves
     }
 
     /// <summary>Auto-hide entry point (menu closed, pointer left, ...); the shared logic is <see cref="EvaluateStatusReveal"/>.</summary>
     private void UpdateStatusAutoHide(Point pointer)
     {
-        if (_settings.StatusAutoHide) EvaluateStatusReveal(pointer);
+        if (StatusBarOptionsView.AutoHide) EvaluateStatusReveal(pointer);
     }
 
     private void UpdateStatusHoverReveal(Point pointer)
@@ -889,9 +898,9 @@ public partial class MainWindow
     /// </summary>
     private void EvaluateStatusReveal(Point pointer, bool hideImmediately = false)
     {
-        var autoHide = _settings.StatusAutoHide;
-        if (!_settings.ShowStatusSurface || _statusSessionClosed || (!ImageView.IsVisible && !HomeHost.IsVisible) ||
-            (!autoHide && (!_statusCollapsed || !_settings.StatusShowOnHoverWhenClosed)))
+        var autoHide = StatusBarOptionsView.AutoHide;
+        if (!StatusBarOptionsView.ShowStatusSurface || _statusSessionClosed || (!ImageView.IsVisible && !HomeHost.IsVisible) ||
+            (!autoHide && (!_statusCollapsed || !StatusBarOptionsView.ShowOnHoverWhenClosed)))
         {
             // Hover reveal is not in play. A collapsed bar left revealed (the option was switched off) returns to its button.
             if (!autoHide && _statusHoverRevealed) { _statusHoverRevealed = false; _statusHoverCollapsedRect = null; ApplyCollapsedStatusChrome(); }
@@ -900,7 +909,7 @@ public partial class MainWindow
         }
 
         var barBox = CurrentStatusBarBox();
-        var zone = StatusBarAutoHide.RevealZone(barBox, Bounds.Width, Bounds.Height, _settings.StatusRevealZoneExpand);
+        var zone = StatusBarAutoHide.RevealZone(barBox, Bounds.Width, Bounds.Height, StatusBarOptionsView.RevealZoneExpand);
         var inZone = zone.Contains(pointer.X, pointer.Y);
         var overKeep = false;
         Rect? buttonRect = null;
@@ -959,7 +968,7 @@ public partial class MainWindow
     private void UpdateViewportStatusInset()
     {
         double inset = 0;
-        if (_settings.StatusReserveFitSpace && !StatusCollapsedNow && !_settings.StatusAutoHide && !_wholeAppOverlayMode &&
+        if (StatusBarOptionsView.ReserveFitSpace && !StatusCollapsedNow && !StatusBarOptionsView.AutoHide && !_wholeAppOverlayMode &&
             ViewerStatusSurface.IsVisible && ViewerStatusSurface.Bounds.Height > 1)
             inset = Math.Max(0, Viewport.Bounds.Bottom - ViewerStatusSurface.Bounds.Top);
         Viewport.FitBottomInset = inset;
@@ -977,7 +986,7 @@ public partial class MainWindow
 
     /// <summary>Whether the bar is currently shrunk to just its corner button (collapsed with the corner option on, not hover-revealed).</summary>
     private bool StatusBarCollapsedToCornerNow =>
-        _settings.ShowStatusSurface && StatusCollapsedNow && !_statusHoverRevealed && _settings.StatusCollapsedToCorner &&
+        StatusBarOptionsView.ShowStatusSurface && StatusCollapsedNow && !_statusHoverRevealed && StatusBarOptionsView.CollapsedToCorner &&
         !_statusSessionClosed && WindowState != WindowState.FullScreen && !_wholeAppOverlayMode;
 
     private bool _statusProbing;
@@ -1085,12 +1094,40 @@ public partial class MainWindow
         }
         _manualWindowDragPointer = null;
         _manualWindowDragMoved = false;
+        _manualWindowDragLeft = false;
     }
+
+    private bool _manualWindowDragLeft;
+
+    /// <summary>
+    /// Overlay left-drag window move (picture, bottom bar, drag strip, Alt+drag). The Overlay does NOT use Windows'
+    /// modal move loop: WM_ENTERSIZEMOVE hides the Overlay controls host and releases capture
+    /// (BeginNativeResizeInteraction), which drops the captured visual under the cursor and ends the loop after a
+    /// few pixels. Instead the window follows the cursor in screen space with the pointer captured by the window.
+    /// </summary>
+    private void BeginOverlayWindowDrag(PointerPressedEventArgs e)
+    {
+        if (WindowState != WindowState.Normal || WholeAppOverlayPositionLocked) { e.Handled = true; return; }
+        if (NativeWindowDragInterceptorForTests?.Invoke(e) == true) { e.Handled = true; return; }
+        EndManualWindowDrag();
+        Viewport.CancelInteraction();
+        _manualWindowDragPointer = e.Pointer;
+        _manualWindowDragLeft = true;
+        _manualWindowDragCursorStart = this.PointToScreen(e.GetPosition(this));
+        _manualWindowDragWindowStart = Position;
+        _manualWindowDragMoved = false;
+        e.Pointer.Capture(this);
+        e.Handled = true;
+        _diagnostics.Write("input", "overlay_window_drag_begin", new { position = Position.ToString() });
+    }
+
+    /// <summary>Class for custom hit targets (no Button/Slider underneath) that must not start a window drag.</summary>
+    internal const string InteractiveHitClass = "glideInteractiveHit";
 
     private static bool IsInteractiveSource(object? source)
     {
         for (var current = source as Control; current is not null; current = current.GetVisualParent() as Control)
-            if (current.Classes.Contains("tabHit") || current.Classes.Contains("glideTab")) return true;
+            if (current.Classes.Contains("tabHit") || current.Classes.Contains("glideTab") || current.Classes.Contains(InteractiveHitClass)) return true;
         for (var current = source as Control; current is not null; current = current.GetVisualParent() as Control)
             if (current is Button or TextBox or ComboBox or CheckBox or NumericUpDown or ScrollBar or ListBox or ListBoxItem or Slider) return true;
         return false;

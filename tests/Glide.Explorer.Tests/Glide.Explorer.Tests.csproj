@@ -13,5 +13,11 @@
   </ItemGroup>
   <ItemGroup>
     <Using Include="Xunit" />
+    <Using Include="Glide.Tests.Support" />
+    <Compile Include="..\TestSupport\*.cs" Link="TestSupport\%(Filename)%(Extension)" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Stage C: GlideSettingsState and its companions live in Glide.Core.Settings (Avalonia-free). -->
+    <Using Include="Glide.Core.Settings" />
   </ItemGroup>
 </Project>
