@@ -50,6 +50,17 @@ internal static class OverlayChromePolicy
     /// <summary>Height of the bottom button bar band that moves the Overlay window when dragged outside its buttons.</summary>
     public const double BottomBarDip = 46;
 
+    /// <summary>
+    /// The discovery zone for the drag handle (5.1.2): the middle quarter of the picture's top edge, down to just below
+    /// the handle. Pointing here shows the handle even when "Show drag strip" is off.
+    /// </summary>
+    public static bool IsInTopCentreGripZone(Rect picture, Point p)
+    {
+        var zoneWidth = picture.Width * 0.25;
+        var left = picture.X + (picture.Width - zoneWidth) / 2;
+        return p.X >= left && p.X <= left + zoneWidth && p.Y >= picture.Y && p.Y <= picture.Y + DragStripTopInsetDip + DragStripDip + 12;
+    }
+
     public static Rect BottomBarRect(Size size) => new(0, Math.Max(0, size.Height - BottomBarDip), size.Width, Math.Min(BottomBarDip, size.Height));
 
     public static Rect CloseRect(Size size) => new(Math.Max(0, size.Width - 34), 7, 27, 27);
@@ -69,16 +80,19 @@ internal static class OverlayChromePolicy
     // Whole-app Overlay opacity track: the drawn line runs from 10 DIP below the slider top to 10 DIP above its
     // bottom, and the minimum (35 %) sits at the bottom end, so the dot is always exactly under the pointer while
     // dragging (round 3 #22: the dot used to be drawn on a 0-100 % scale while the hit slider used 35-100 %).
+    // 5.1.2: the track runs to the dot radius + 1 from each pill end, so the dot reaches the very bottom (35 %) and top.
+    public const double WholeWindowOpacityTrackInsetDip = 6;
+
     public static double WholeWindowOpacityTrackY(Rect slider, double value)
     {
         var t = (ClampWholeWindowOpacity(value) - WholeWindowMinimumOpacity) / (1.0 - WholeWindowMinimumOpacity);
-        return slider.Bottom - 10 - Math.Max(0, slider.Height - 20) * t;
+        return slider.Bottom - WholeWindowOpacityTrackInsetDip - Math.Max(0, slider.Height - 2 * WholeWindowOpacityTrackInsetDip) * t;
     }
 
     public static double WholeWindowOpacityFromTrackY(Rect slider, double y)
     {
-        var span = Math.Max(1, slider.Height - 20);
-        var t = Math.Clamp((slider.Bottom - 10 - y) / span, 0, 1);
+        var span = Math.Max(1, slider.Height - 2 * WholeWindowOpacityTrackInsetDip);
+        var t = Math.Clamp((slider.Bottom - WholeWindowOpacityTrackInsetDip - y) / span, 0, 1);
         return WholeWindowMinimumOpacity + t * (1.0 - WholeWindowMinimumOpacity);
     }
 

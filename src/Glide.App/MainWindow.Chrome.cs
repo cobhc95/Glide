@@ -116,6 +116,13 @@ public partial class MainWindow
         FolderCounterText.FontWeight = weight;
         FolderCounterText.Opacity = CornerCounterText.Opacity * 0.7;
         ApplyTextOverlayBorder();
+        if (!PlaceTextOverlay())
+        {
+            // In the side tab pane or the title bar: no picture position, margins or offsets.
+            ApplyTextOverlayAlignment(OverlayOptionsView.PictureCounterAlignment);
+            UpdatePictureCounter();
+            return;
+        }
 
         var position = OverlayOptionsView.PictureCounterPosition ?? "Top right";
         CornerCounterHost.HorizontalAlignment = position.Contains("left", StringComparison.OrdinalIgnoreCase)
@@ -126,10 +133,29 @@ public partial class MainWindow
         CornerCounterHost.VerticalAlignment = position.StartsWith("Bottom", StringComparison.OrdinalIgnoreCase)
             ? Avalonia.Layout.VerticalAlignment.Bottom
             : Avalonia.Layout.VerticalAlignment.Top;
+        ApplyTextOverlayAlignment(OverlayOptionsView.PictureCounterAlignment);
+        var (offsetX, offsetY) = OverlayOptionsView.PictureCounterOffset;
+        CornerCounterHost.RenderTransform = offsetX == 0 && offsetY == 0 ? null : new TranslateTransform(offsetX, offsetY);
         CornerCounterHost.Margin = CornerCounterHost.VerticalAlignment == Avalonia.Layout.VerticalAlignment.Top
             ? new Thickness(15, 28, 15, 0)
             : new Thickness(15, 0, 15, StatusBarOptionsView.ShowStatusSurface ? 82 : 16);
         UpdatePictureCounter();
+    }
+
+    /// <summary>"Text overlay alignment": Automatic keeps the original layout (text left, folder position line right).</summary>
+    private void ApplyTextOverlayAlignment(string? alignment)
+    {
+        var (text, line) = alignment switch
+        {
+            "Left" => (TextAlignment.Left, Avalonia.Layout.HorizontalAlignment.Left),
+            "Center" => (TextAlignment.Center, Avalonia.Layout.HorizontalAlignment.Center),
+            "Right" => (TextAlignment.Right, Avalonia.Layout.HorizontalAlignment.Right),
+            _ => (TextAlignment.Left, Avalonia.Layout.HorizontalAlignment.Right)
+        };
+        CornerCounterText.TextAlignment = text;
+        CornerCounterShadowText.TextAlignment = text;
+        FolderCounterText.TextAlignment = text;
+        FolderCounterText.HorizontalAlignment = line;
     }
 
     /// <summary>

@@ -146,8 +146,10 @@ public sealed record GlideSettingsState
     public bool StatusShowOnHoverWhenClosed { get; set; } = true;
     public bool ShowScrollbars { get; set; } = true;
     public bool FullPathInTitle { get; set; }
-    public bool HideCursorFullscreen { get; set; } = true;
-    public int FullscreenHideCursorDelaySeconds { get; set; } = 2;
+    public bool HideCursorFullscreen { get; set; } = false;
+    public bool HideCursorNormalWindow { get; set; } = false;
+    public double FullscreenHideCursorDelaySeconds { get; set; } = 2;
+    public string HideCursorMode { get; set; } = "After a delay";
     public bool AutoHideFullscreenChrome { get; set; } = true;
     public bool TabsEnabled { get; set; } = true;
     // Explorer launches while another Glide instance is available.
@@ -456,6 +458,10 @@ public sealed record GlideSettingsState
     public int PictureCounterOpacity { get; set; } = 85;
     public string PictureCounterPosition { get; set; } = "Top right";
     public string PictureCounterColor { get; set; } = "White";
+    public string PictureCounterAlignment { get; set; } = "Automatic";
+    public string PictureCounterSideTabsPlacement { get; set; } = "Over the picture";
+    /// <summary>Per-anchor text overlay offsets (see TextOverlayOffsets); shown as "overlay.pictureOffsetX/Y" for the current position.</summary>
+    public string PictureCounterOffsets { get; set; } = string.Empty;
     public bool PictureCounterShadow { get; set; } = true;
     /// <summary>Encloses every line of the text overlay in one box styled like the Image information panel (5.0.6).</summary>
     public bool PictureCounterBorder { get; set; }
@@ -471,6 +477,7 @@ public sealed record GlideSettingsState
     public bool WholeAppOverlayUseWindowedInteractions { get; set; }
     // Round 3 #20: optional thin drag strip along the Overlay's top edge, and a lock that stops drag-moving the window.
     public bool WholeAppOverlayShowDragStrip { get; set; }
+    public bool WholeAppOverlayTopCentreGrip { get; set; } = true;
     public bool WholeAppOverlayLockPosition { get; set; }
     public bool OverlayKeyboardZoom { get; set; } = true;
     public bool OverlayWheelZoom { get; set; } = true;

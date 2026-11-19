@@ -25,7 +25,7 @@ public partial class MainWindow
     internal static readonly IReadOnlySet<string> TextOverlayStyleIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
         "overlay.pictureTemplate", "overlay.pictureFontSize", "overlay.pictureBold", "overlay.pictureOpacity",
-        "overlay.picturePosition", "overlay.pictureColor", "overlay.pictureShadow", "overlay.pictureBorder"
+        "overlay.picturePosition", "overlay.pictureAlignment", "overlay.pictureSideTabsPlacement", "overlay.pictureOffsetX", "overlay.pictureOffsetY", "overlay.pictureColor", "overlay.pictureShadow", "overlay.pictureBorder"
     };
 
     private sealed record SettingEffectHandler(IReadOnlySet<string> Ids, Action<MainWindow, IReadOnlyCollection<string>> Apply);
@@ -77,6 +77,8 @@ public partial class MainWindow
             "tabs.cycleOrder", "tabs.lastTabBehavior", "tabs.newTabPosition", "tabs.switchToNewTabs", "tabs.newTabPositionKey", "tabs.newTabForegroundKey", "tabs.middleClickSide", "tabs.middleClickPosition", "tabs.afterCloseCustomTarget",
             "tabs.afterCloseActivate", "explorer.scrollSpeed", "explorer.scrollMode", "explorer.scrollRows", "explorer.scrollPixels"), ReadAtUse),
         // Settings-window-only preferences: the main window never reads them.
+        [SettingEffectOwner.Fullscreen] = new(Ids("fullscreen.hideCursor", "fullscreen.hideCursorWindowed", "fullscreen.hideCursorDelay", "fullscreen.hideCursorMode"),
+            static (w, _) => w.ResetFullscreenCursorTimer()),
         [SettingEffectOwner.General] = new(Ids("general.confirmDiscardSettings", "search.showRelatedResults"), ReadAtUse),
     };
 

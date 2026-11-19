@@ -83,6 +83,7 @@ public partial class MainWindow
         SideTabResizeHandle.Margin = new Thickness(Math.Max(0, width - 3), 0, 0, 0);
         // A pinned side panel takes its own column of space; an auto-hide one overlays the image when revealed.
         WorkspaceLayer.Margin = new Thickness(side && !autoHide ? width : 0, 0, 0, 0);
+        ApplyPictureCounterVisuals();   // the text overlay may live in the side tab pane or the title bar
     }
 
     /// <summary>In the side pane the New tab button is a full-width row like a tab (icon left, "New tab" label).</summary>

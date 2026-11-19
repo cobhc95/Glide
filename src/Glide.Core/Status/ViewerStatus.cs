@@ -76,6 +76,7 @@ public static class ViewerStatusFormatter
         {
             ["{index}"] = model.Count > 0 ? (model.Index + 1).ToString(culture) : "0",
             ["{total}"] = model.Count.ToString(culture),
+            // {file} and {filename} are deliberately identical (name with extension); both are documented tokens. {path} is the full path.
             ["{file}"] = file,
             ["{filename}"] = file,
             ["{stem}"] = stem,

@@ -22,7 +22,12 @@ public static class SettingsStore
     /// </summary>
     private const int LaunchPolicySchema = 4;
     // 9 (5.0.0 Back / Forward): the one-time title-bar default migration below is gated on it.
-    internal const int CurrentSettingsSchema = 19;
+    internal const int CurrentSettingsSchema = 20;
+    /// <summary>
+    /// Settings schema (5.1.2) that made "Hide cursor in fullscreen" default to off. The feature never worked before, so a
+    /// stored "on" from an older schema is the untouched old default and moves to off once.
+    /// </summary>
+    internal const int HideCursorOffSchema = 20;
     /// <summary>
     /// Settings schema that made "Previously used tab" the default of "After closing a tab, activate" (5.0.6). Files
     /// from an older schema that store the old default "Match Ctrl+Tab order" move to the new default once.
@@ -518,6 +523,9 @@ public static class SettingsStore
             loaded.AfterTabCloseActivate = MigrateAfterTabCloseActivate(sourceSchema,
                 Glide.Core.Workspace.TabCloseActivation.Normalize(loaded.AfterTabCloseActivate));
             loaded.SwitchToNewTabs = MigrateSwitchToNewTabs(sourceSchema, loaded.SwitchToNewTabs);
+            if (sourceSchema < HideCursorOffSchema) loaded.HideCursorFullscreen = false;
+            loaded.FullscreenHideCursorDelaySeconds = Glide.Core.FullscreenCursorAutoHide.ClampDelaySeconds(loaded.FullscreenHideCursorDelaySeconds);
+            loaded.HideCursorMode = loaded.HideCursorMode == "Always while over the picture" ? loaded.HideCursorMode : "After a delay";
             bool? legacyNewTabModifiers =
                 document.RootElement.TryGetProperty(LegacyNewTabModifiersProperty, out var legacyModifiers) &&
                 legacyModifiers.ValueKind is JsonValueKind.True or JsonValueKind.False

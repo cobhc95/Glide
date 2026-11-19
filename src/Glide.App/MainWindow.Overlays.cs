@@ -368,7 +368,7 @@ public partial class MainWindow
     /// </summary>
     private void UpdateWholeAppOverlayDragStrip(bool pointerOver)
     {
-        var wanted = _wholeAppOverlayMode && _settings.WholeAppOverlayShowDragStrip;
+        var wanted = WholeAppOverlayDragStripWanted;
         if (!wanted && _wholeAppOverlayDragStrip is null) return;
         if (pointerOver) _dragStripPointerOver = true;
         else if (_dragStripPointerOver) { _dragStripPointerOver = false; _dragStripLeftTick = DragStripNow; }
@@ -376,9 +376,22 @@ public partial class MainWindow
         RefreshWholeAppOverlayDragStrip();
     }
 
+    /// <summary>"Show drag strip" shows the handle on hover anywhere; "top centre" shows it only in the top-centre zone.</summary>
+    private bool WholeAppOverlayDragStripWanted =>
+        _wholeAppOverlayMode && (_settings.WholeAppOverlayShowDragStrip || _settings.WholeAppOverlayTopCentreGrip);
+
+    /// <summary>The pointer counts as "over" for the handle: anywhere on the picture with the strip on, else the top-centre zone.</summary>
+    private bool DragStripPointerOver(Point windowPointer, bool overPixels)
+    {
+        if (!overPixels) return false;
+        if (_settings.WholeAppOverlayShowDragStrip) return true;
+        if (!_settings.WholeAppOverlayTopCentreGrip || !TryGetWholeAppOverlayPixelRect(out var rect)) return false;
+        return this.TranslatePoint(windowPointer, WorkspaceLayer) is { } p && OverlayChromePolicy.IsInTopCentreGripZone(rect, p);
+    }
+
     private void RefreshWholeAppOverlayDragStrip()
     {
-        var wanted = _wholeAppOverlayMode && _settings.WholeAppOverlayShowDragStrip;
+        var wanted = WholeAppOverlayDragStripWanted;
         var strip = EnsureWholeAppOverlayDragStrip();
         var fits = false;
         if (wanted && TryGetWholeAppOverlayPixelRect(out var rect) && OverlayChromePolicy.DragStripRect(rect) is { } pill)
@@ -643,7 +656,7 @@ public partial class MainWindow
         // The top frame band is the move handle of Windowed interactions only. In Overlay interactions the press
         // must reach the picture, so a zoomed picture pans there too (round 3 #20).
         if (_wholeAppOverlayDragBand is { } band) band.IsHitTestVisible = _settings.WholeAppOverlayUseWindowedInteractions;
-        UpdateWholeAppOverlayDragStrip(overPixels);
+        UpdateWholeAppOverlayDragStrip(DragStripPointerOver(pointer, overPixels));
     }
 
     private void ToggleAlwaysStartWholeAppOverlayMode()

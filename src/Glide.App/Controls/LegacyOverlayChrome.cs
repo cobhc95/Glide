@@ -58,9 +58,14 @@ public sealed class LegacyOverlayChrome : Control
         var slider = SliderRect(Bounds.Size);
         context.DrawRectangle(glassFill, null, slider, 10, 10);
         var sx = slider.Center.X;
-        context.DrawLine(new Pen(muted, 2), new Point(sx, slider.Top + 10), new Point(sx, slider.Bottom - 10));
+        var inset = OverlayChromePolicy.WholeWindowOpacityTrackInsetDip;
+        context.DrawLine(new Pen(muted, 2), new Point(sx, slider.Top + inset), new Point(sx, slider.Bottom - inset));
         var ty = OverlayChromePolicy.WholeWindowOpacityTrackY(slider, OpacityValue);
         context.DrawEllipse(accent, null, new Point(sx, ty), 5, 5);
+        // The bottom of the bar is the minimum opacity, not 0 %: label it.
+        var minLabel = new FormattedText($"{OverlayChromePolicy.WholeWindowMinimumOpacity * 100:0}%", System.Globalization.CultureInfo.CurrentCulture,
+            FlowDirection.LeftToRight, Typeface.Default, 9, muted);
+        context.DrawText(minLabel, new Point(sx - minLabel.Width / 2, slider.Bottom + 1));
 
         DrawZoomButton(context, ZoomOutRect(Bounds.Size), "−", glassFill, accent, muted);
         DrawZoomButton(context, ZoomInRect(Bounds.Size), "+", glassFill, accent, muted);

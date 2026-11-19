@@ -321,7 +321,9 @@ public partial class SettingsWindow : Window
     /// rather than a XAML attribute (5.0.6): the attribute held a raw line break where the two characters backslash-n belonged,
     /// and XML attribute normalisation turned it into a space, so the help read "Line break: &lt;br&gt; or ." .</summary>
     internal const string TextOverlayTemplateHelp =
-        @"Tokens: {index}, {total}, {file}, {filename}, {stem}, {extension}, {format}, {folder}, {folderpath}, {path}, {width}, {height}, {dimensions}, {megapixels}, {filesize}, {filesizebytes}, {zoom}. " +
+        @"Tokens: {index} position in the folder (1-based); {total} number of images; {file} and {filename} file name with extension (photo.jpg; the two are identical, both kept for compatibility); " +
+        @"{stem} file name without extension (photo); {extension} extension (jpg); {format} file type (JPG); {folder} folder name; {folderpath} full folder path; {path} full file path; " +
+        @"{width}, {height}, {dimensions} pixel size (4000×3000); {megapixels}; {filesize} (2.4 MB); {filesizebytes} size in bytes; {zoom} zoom (100%). " +
         @"Line break: <br> or \n. Example: {stem}  •  {dimensions}  •  {filesize}  •  {index}/{total}. To frame all the lines in one box, turn on Text overlay border below.";
 
     internal const string TextOverlayTemplateTip =
@@ -463,7 +465,8 @@ public partial class SettingsWindow : Window
             SelectByText(DefaultViewCombo, s.DefaultViewMode);
             ViewportZoomStepBox.Value = Glide.Core.ZoomStepPolicy.Clamp(s.ViewportZoomStepPercent);
             foreach (var (area, box) in TooltipDelayBoxes()) box.Value = Glide.Core.Settings.TooltipAreas.DelayMs(s, area.Id);
-            FullscreenHideCursorDelayBox.Value = Math.Clamp(s.FullscreenHideCursorDelaySeconds, 1, 30);
+            FullscreenHideCursorDelayBox.Value = (decimal)Glide.Core.FullscreenCursorAutoHide.ClampDelaySeconds(s.FullscreenHideCursorDelaySeconds);
+            SelectByText(HideCursorModeCombo, s.HideCursorMode == "Always while over the picture" ? "Always while over the picture" : "After a delay");
             _escRememberedChoice = string.IsNullOrWhiteSpace(s.EscWindowedRememberedChoice) ? "Ask" : s.EscWindowedRememberedChoice;
             ResetEscChoiceButton.IsEnabled = !string.Equals(_escRememberedChoice, "Ask", StringComparison.OrdinalIgnoreCase);
 
@@ -539,6 +542,11 @@ public partial class SettingsWindow : Window
             PictureFontSizeBox.Value = s.PictureCounterFontSize;
             PictureOpacityBox.Value = s.PictureCounterOpacity;
             SelectByText(PicturePositionCombo, s.PictureCounterPosition);
+            SelectByText(PictureAlignmentCombo, s.PictureCounterAlignment);
+            SelectByText(PictureSideTabsPlacementCombo, TextOverlayPlacements.Normalize(s.PictureCounterSideTabsPlacement));
+            var textOffset = TextOverlayOffsets.Get(s.PictureCounterOffsets, s.PictureCounterPosition);
+            PictureOffsetXBox.Value = textOffset.X;
+            PictureOffsetYBox.Value = textOffset.Y;
             SelectByText(PictureColorCombo, s.PictureCounterColor);
             OverlayOpacityBox.Value = s.OverlayDefaultOpacity;
             OverlayZoomStepBox.Value = s.OverlayZoomStepPercent;
@@ -684,7 +692,8 @@ public partial class SettingsWindow : Window
         state.ViewportZoomStepPercent = Glide.Core.ZoomStepPolicy.Clamp((int)(ViewportZoomStepBox.Value ?? Glide.Core.ZoomStepPolicy.DefaultStepPercent));
         foreach (var (area, box) in TooltipDelayBoxes())
             Glide.Core.Settings.TooltipAreas.SetDelayMs(state, area.Id, (int)(box.Value ?? area.DefaultMs));
-        state.FullscreenHideCursorDelaySeconds = (int)(FullscreenHideCursorDelayBox.Value ?? 2);
+        state.FullscreenHideCursorDelaySeconds = Glide.Core.FullscreenCursorAutoHide.ClampDelaySeconds((double)(FullscreenHideCursorDelayBox.Value ?? 2m));
+        state.HideCursorMode = SelectedText(HideCursorModeCombo, "After a delay");
         state.EscWindowedRememberedChoice = _escRememberedChoice;
 
         state.LeftWindowDragBehavior = SelectedText(LeftWindowDragBehaviorCombo, "Smart (normal window only)");
@@ -756,6 +765,10 @@ public partial class SettingsWindow : Window
         state.PictureCounterFontSize = (int)(PictureFontSizeBox.Value ?? 13);
         state.PictureCounterOpacity = (int)(PictureOpacityBox.Value ?? 85);
         state.PictureCounterPosition = SelectedText(PicturePositionCombo, "Top right");
+        state.PictureCounterAlignment = SelectedText(PictureAlignmentCombo, "Automatic");
+        state.PictureCounterSideTabsPlacement = SelectedText(PictureSideTabsPlacementCombo, TextOverlayPlacements.OverPicture);
+        state.PictureCounterOffsets = TextOverlayOffsets.Set(state.PictureCounterOffsets, state.PictureCounterPosition,
+            (int)(PictureOffsetXBox.Value ?? 0), (int)(PictureOffsetYBox.Value ?? 0));
         state.PictureCounterColor = SelectedText(PictureColorCombo, "White");
         state.OverlayDefaultOpacity = (int)(OverlayOpacityBox.Value ?? 100);
         state.OverlayZoomStepPercent = (int)(OverlayZoomStepBox.Value ?? 10);
@@ -849,7 +862,8 @@ public partial class SettingsWindow : Window
         else ScheduleLivePreview();
     }
 
-    private bool IsTextOverlayStyleSpinner(object? sender) => ReferenceEquals(sender, PictureFontSizeBox) || ReferenceEquals(sender, PictureOpacityBox);
+    private bool IsTextOverlayStyleSpinner(object? sender) => ReferenceEquals(sender, PictureFontSizeBox) || ReferenceEquals(sender, PictureOpacityBox) ||
+        ReferenceEquals(sender, PictureOffsetXBox) || ReferenceEquals(sender, PictureOffsetYBox);
 
     internal static readonly TimeSpan LivePreviewDebounce = TimeSpan.FromMilliseconds(110);
     private DispatcherTimer? _previewDebounceTimer;
@@ -2229,7 +2243,7 @@ public partial class SettingsWindow : Window
         M("general.showRecentOnHome", ShowRecentOnHomeCheck); M("general.confirmDiscardSettings", ConfirmDiscardSettingsCheck);
         M("updates.checkDaily", UpdateCheckDailyCheck); M("updates.dontRemind", UpdateDontRemindCheck);
         M("general.startupAction", StartupActionCombo); M("general.startupCustomPath", StartupCustomPathBox); M("general.newTabAction", NewTabActionCombo); M("general.newTabCustomPath", NewTabCustomPathBox); M("titlebar.customize", CustomizeTitleBarButton); M("settings.alwaysExpand", SettingsAlwaysExpandSwitch); M("escape.resetRememberedClose", ResetEscChoiceButton);
-        M("status.visible", StatusCheck); M("status.hoverWhenClosed", StatusHoverWhenClosedCheck); M("view.scrollbars", ShowScrollbarsCheck); M("window.fullPathTitle", FullPathTitleCheck); M("fullscreen.hideCursor", HideCursorFullscreenCheck); M("fullscreen.hideCursorDelay", FullscreenHideCursorDelayBox);
+        M("status.visible", StatusCheck); M("status.hoverWhenClosed", StatusHoverWhenClosedCheck); M("view.scrollbars", ShowScrollbarsCheck); M("window.fullPathTitle", FullPathTitleCheck); M("fullscreen.hideCursor", HideCursorFullscreenCheck); M("fullscreen.hideCursorWindowed", HideCursorNormalWindowCheck); M("fullscreen.hideCursorDelay", FullscreenHideCursorDelayBox); M("fullscreen.hideCursorMode", HideCursorModeCombo);
         M("explorer.itemInfoTooltip", ExplorerItemInfoTooltipCheck); M("explorer.addressBarOverPictures", AddressBarOverPicturesCheck); M("appearance.tooltipDelaySettings", TooltipDelaySettingsBox); M("appearance.tooltipDelayMain", TooltipDelayMainBox); M("appearance.tooltipDelayOverlay", TooltipDelayOverlayBox); M("appearance.tooltipDelayExplorer", TooltipDelayExplorerBox);
         M("fullscreen.autoHideChrome", AutoHideFullscreenChromeCheck); M("fullscreen.keepTabBarOpen", FullscreenKeepTabBarOpenCheck); M("fullscreen.keepTitleBarForExplorer", FullscreenKeepTitleBarForExplorerCheck); M("tabs.enabled", TabsCheck); M("window.showInExplorerTarget", ShowInExplorerTargetCombo); M("explorer.defaultView", ExplorerDefaultViewCombo); M("explorer.locateOpensIn", ExplorerLocateOpensInCombo); M("explorer.backReturnsToImage", ExplorerBackReturnsToImageCombo); M("explorer.showHidden", ExplorerShowHiddenFilesCheck); M("explorer.keepSelectionInView", ExplorerKeepSelectionInViewCheck); M("explorer.clickToRename", ExplorerClickToRenameCheck); M("explorer.onlyImages", ExplorerShowOnlyImagesCheck); M("explorer.infoDate", ExplorerInfoDateCheck); M("explorer.infoResolution", ExplorerInfoResolutionCheck); M("explorer.infoFileSize", ExplorerInfoFileSizeCheck); M("explorer.scrollSpeed", ExplorerScrollSpeedBox); M("explorer.scrollMode", ExplorerScrollModeCombo); M("explorer.scrollRows", ExplorerScrollRowsBox); M("explorer.scrollPixels", ExplorerScrollPixelsBox); M("explorer.navPaneWidth", ExplorerNavPaneWidthBox); M("explorer.altFileManagerPath", AlternativeFileManagerPathBox); M("explorer.altFileManagerArguments", AlternativeFileManagerArgumentsBox); M("tabs.showBackButton", TabBarBackButtonCheck); M("tabs.showForwardButton", TabBarForwardButtonCheck); M("fullscreen.statusAlways", FullscreenStatusAlwaysCheck);
         M("caption.windowedMinimize", CaptionWindowedMinimizeCombo); M("caption.windowedMaximize", CaptionWindowedMaximizeCombo); M("caption.windowedClose", CaptionWindowedCloseCombo);
@@ -2249,7 +2263,7 @@ public partial class SettingsWindow : Window
         M("performance.purgeOnMinimize", PurgeCacheCheck); M("developer.startupDiagnostics", StartupDiagnosticsCheck); M("performance.prefetchDepth", PrefetchDepthBox);
         M("performance.prefetchSiblingFolders", PrefetchSiblingFoldersCheck); M("performance.prefetchSiblingFolderCount", PrefetchSiblingFolderCountBox);
         M("performance.cacheItems", CacheItemsBox); M("performance.compressedCacheMb", CompressedCacheMbBox); M("performance.decodedCacheMb", DecodedCacheMbBox); M("performance.rapidPreviewSize", RapidPreviewBox); M("performance.rapidBrowsePreviewSize", RapidBrowsePreviewBox); M("performance.progressiveColor", ProgressiveColorCheck);
-        M("overlay.wholeAppAlwaysStart", WholeAppOverlayAlwaysStartCheck); M("overlay.wholeAppWindowedInteractions", WholeAppOverlayWindowedInteractionsCheck); M("overlay.wholeAppShowDragStrip", WholeAppOverlayShowDragStripCheck); M("overlay.wholeAppLockPosition", WholeAppOverlayLockPositionCheck);
+        M("overlay.wholeAppAlwaysStart", WholeAppOverlayAlwaysStartCheck); M("overlay.wholeAppWindowedInteractions", WholeAppOverlayWindowedInteractionsCheck); M("overlay.wholeAppShowDragStrip", WholeAppOverlayShowDragStripCheck); M("overlay.wholeAppTopCentreGrip", WholeAppOverlayTopCentreGripCheck); M("overlay.wholeAppLockPosition", WholeAppOverlayLockPositionCheck);
         M("status.size", StatusBarSizeCombo); M("status.alignment", StatusBarAlignmentCombo); M("status.navigation", StatusNavigationCheck); M("status.zoom", StatusZoomCheck); M("status.slideshow", StatusSlideshowCheck); M("status.fit", StatusFitCheck);
         M("status.fitScope", StatusFitScopeCombo);
         M("status.autoResize", StatusAutoFitCheck);
@@ -2263,8 +2277,8 @@ public partial class SettingsWindow : Window
         M("tabs.lastTabBehavior", LastTabBehaviorCombo); M("tabs.confirmCloseMultiple", ConfirmCloseMultipleTabsCheck); M("tabs.homePage", HomePageCombo); M("folderNav.group", FolderNavGroupCheck); M("folderNav.previous", FolderNavPreviousCheck);
         M("folderNav.showCounter", ShowFolderCounterCheck); M("folderNav.counterGrandparent", FolderCounterGrandparentCheck);
         M("folderNav.next", FolderNavNextCheck); M("folderNav.explore", FolderNavExploreCheck); M("folderNav.skipEmpty", FolderNavSkipEmptyCheck); M("folderNav.includeHidden", FolderNavIncludeHiddenCheck); M("folderNav.wrap", FolderNavWrapCheck); M("folderNav.openFirst", FolderNavFirstImageCheck); M("folderNav.order", FolderNavOrderCombo);
-        M("overlay.pictureCounter", PictureCounterCheck); M("overlay.pictureTemplate", PictureTemplateBox); M("overlay.pictureFontSize", PictureFontSizeBox);
-        M("overlay.pictureBold", PictureBoldCheck); M("overlay.pictureOpacity", PictureOpacityBox); M("overlay.picturePosition", PicturePositionCombo);
+        M("overlay.pictureCounter", PictureCounterCheck); M("overlay.pictureTemplate", PictureTemplateBox); M("overlay.pictureFontSize", PictureFontSizeBox); M("overlay.pictureOffsetX", PictureOffsetXBox); M("overlay.pictureOffsetY", PictureOffsetYBox);
+        M("overlay.pictureBold", PictureBoldCheck); M("overlay.pictureOpacity", PictureOpacityBox); M("overlay.picturePosition", PicturePositionCombo); M("overlay.pictureAlignment", PictureAlignmentCombo); M("overlay.pictureSideTabsPlacement", PictureSideTabsPlacementCombo);
         M("overlay.pictureColor", PictureColorCombo); M("overlay.pictureShadow", PictureShadowCheck); M("overlay.pictureBorder", PictureBorderCheck); M("overlay.defaultOpacity", OverlayOpacityBox); M("overlay.zoomStep", OverlayZoomStepBox);
         M("overlay.rememberFolder", OverlayRememberFolderCheck); M("overlay.scaleWithWindow", OverlayScaleWithWindowCheck); M("overlay.animationRegion", OverlayAnimationRegionCombo); M("overlay.animationSpeedDipsPerSecond", OverlayAnimationSpeedBox); M("overlay.animationTurnIntervalMs", OverlayAnimationTurnIntervalBox); M("overlay.animationTurnAngleDegrees", OverlayAnimationTurnAngleBox); M("overlay.animationPauseWhileInteracting", OverlayAnimationPauseCheck); M("overlay.animationAvoidOverlap", OverlayAnimationAvoidOverlapCheck); M("overlay.animationRefreshRateHz", OverlayAnimationRefreshRateCombo); M("overlay.defaultDirectory", OverlayDefaultDirectoryBox); M("profiles.defaultDirectory", ProfileDefaultDirectoryBox); M("overlay.persistSession", OverlayPersistSessionCheck); M("overlay.keyboardZoom", OverlayKeyboardZoomCheck); M("overlay.highlightSelected", OverlayHighlightCheck); M("overlay.rememberZoom", OverlayRememberZoomCheck);
         M("windows.externalOpenBehavior", ExternalOpenBehaviorCombo); M("windows.external1", External1Box); M("windows.external2", External2Box); M("windows.external3", External3Box);

@@ -633,15 +633,22 @@ public partial class MainWindow : Window
         AddHandler(InputElement.KeyDownEvent, OverlayKeyboardShortcut, RoutingStrategies.Tunnel, true);
 
         _fullscreenCursorTimer.Interval = FullscreenCursorAutoHide.TickInterval;
+        AddHandler(InputElement.PointerMovedEvent, CursorAutoHidePointerMoved, RoutingStrategies.Tunnel, true);
+        AddHandler(InputElement.PointerPressedEvent, CursorAutoHidePointerActivity, RoutingStrategies.Tunnel, true);
+        AddHandler(InputElement.PointerWheelChangedEvent, CursorAutoHidePointerActivity, RoutingStrategies.Tunnel, true);
         AttachPopupCursorGuard();
+        AttachTextOverlayDrag();
         _fullscreenCursorTimer.Tick += (_, _) =>
         {
-            if (WindowState != WindowState.FullScreen || !_settings.HideCursorFullscreen || !IsActive)
+            if (!CursorAutoHideEnabled || !IsActive)
             {
                 StopFullscreenCursorAutoHide();
                 return;
             }
             SyncPopupCursorState();
+            // A text box can take focus without a pointer move (keyboard shortcut): keep the cursor visible then.
+            if (_cursorAutoHide.SetSuppressed(IsTextInputFocused() || (WindowState != WindowState.FullScreen && !Viewport.IsPointerOver), DateTime.UtcNow))
+                ApplyFullscreenCursorVisibility();
             if (_cursorAutoHide.Tick(DateTime.UtcNow)) ApplyFullscreenCursorVisibility();
         };
 
@@ -706,7 +713,7 @@ public partial class MainWindow : Window
 
         Activated += (_, _) =>
         {
-            if (WindowState == WindowState.FullScreen) ResetFullscreenCursorTimer();
+            ResetFullscreenCursorTimer();
             ExternalLaunchBroker.MarkActive(this);
             ReassertNativeTopmost();
             if (SlideshowOptionsView.PauseWhenInactive) _slideshow?.ResumeFromInactivity();

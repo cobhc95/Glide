@@ -444,7 +444,8 @@ public sealed class OverlayRound3Tests
             Assert.True(bar.Opacity > 0.5, "lingers and fades instead of vanishing at once");
             Assert.True(((DispatcherTimer)GetField(window, "_dragStripFadeTimer")!).IsEnabled);
 
-            // Off again: the strip never shows.
+            // Off again (and the 5.1.2 top-centre discovery handle off): the strip never shows.
+            settings.WholeAppOverlayTopCentreGrip = false;
             FindTagged(window, "setting.overlay.wholeAppShowDragStrip").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
             Invoke(window, "UpdateWholeAppOverlayDragStrip", true);
             Assert.False(bar.IsVisible);

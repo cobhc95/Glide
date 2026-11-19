@@ -68,8 +68,8 @@ public sealed class PopupCursorVisibilityTests
         p.SetPopupOpen(true, T0.AddSeconds(1));
         p.Tick(T0.AddSeconds(60));
         Assert.False(p.SetPopupOpen(false, T0.AddSeconds(60)));
-        Assert.False(p.Tick(T0.AddSeconds(62.9)));       // countdown restarted at close, not hidden instantly
-        Assert.True(p.Tick(T0.AddSeconds(63)));           // the feature itself still works with no menu open
+        Assert.False(p.Tick(T0.AddSeconds(61.9)));       // countdown restarted at close, not hidden instantly
+        Assert.True(p.Tick(T0.AddSeconds(62)));           // the feature itself still works with no menu open
         Assert.True(p.IsHidden);
     }
 
@@ -184,12 +184,13 @@ public sealed class PopupCursorVisibilityTests
             var policy = (FullscreenCursorAutoHide)Get(window, "_cursorAutoHide")!;
             var settings = (GlideSettingsState)Get(window, "_settings")!;
             settings.HideCursorFullscreen = true;
+            settings.HideCursorNormalWindow = true;
             policy.Activate(DateTime.UtcNow.AddSeconds(-10));
             policy.OnPointerMoved(DateTime.UtcNow.AddSeconds(-10), 10, 10);
             Assert.True(policy.Tick(DateTime.UtcNow));              // idle for 10s: hidden over the image
             Call(window, "ApplyFullscreenCursorVisibility");
             Assert.True(policy.IsHidden);
-            Assert.NotNull(window.Cursor);                          // the window carries the hidden cursor
+            Assert.NotNull(((InputElement)Get(window, "Viewport")!).Cursor); // the picture carries the hidden cursor (normal window)
 
             var menu = (ContextMenu)Call(window, "BuildStatusSurfaceContextMenu")!;
             menu.Open(window);

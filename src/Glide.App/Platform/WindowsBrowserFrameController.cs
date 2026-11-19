@@ -210,6 +210,32 @@ internal sealed class WindowsBrowserFrameController : IDisposable
         catch { return null; }
     }
 
+    /// <summary>
+    /// Idle cursor auto-hide. Avalonia only applies its cursor when Windows sends WM_SETCURSOR, which does not happen
+    /// while the pointer is still, and this subclass (zoom magnifier) can answer WM_SETCURSOR before Avalonia does.
+    /// While hidden, WM_SETCURSOR over the client area answers SetCursor(NULL); hiding applies at once when the pointer
+    /// is over this window. Showing: the next pointer message restores the normal cursor.
+    /// </summary>
+    public void SetIdleCursorHidden(bool hidden)
+    {
+        if (_disposed || _idleCursorHidden == hidden) return;
+        _idleCursorHidden = hidden;
+        if (!GetCursorPos(out var p)) return;
+        var under = WindowFromPoint(p);
+        if (under == IntPtr.Zero || (under != _hwnd && GetAncestor(under, GaRoot) != _hwnd)) return;
+        if (hidden) SetCursor(IntPtr.Zero);
+        else SendMessageW(_hwnd, WmSetCursor, _hwnd, new IntPtr(HtClient | (0x0200 << 16)));
+    }
+
+    private bool _idleCursorHidden;
+    private const uint GaRoot = 2;
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr WindowFromPoint(NativePoint point);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
+
     public void SetSelectionZoomOutPressed(bool pressed)
     {
         if (_disposed) return;
@@ -332,6 +358,11 @@ internal sealed class WindowsBrowserFrameController : IDisposable
                 return _privacyBrush;
             case WmSetCursor:
             {
+                if (_idleCursorHidden && (unchecked((long)lParam) & 0xFFFF) == HtClient)
+                {
+                    SetCursor(IntPtr.Zero);
+                    return new IntPtr(1);
+                }
                 // Legacy 1.2.125 path: let Win32 own the +/- magnifier. Cursor movement is then
                 // composed by Windows and never causes an Avalonia property/layout/render update.
                 if ((unchecked((long)lParam) & 0xFFFF) == HtClient && GetCursorPos(out var cursorPoint))

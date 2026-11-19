@@ -786,7 +786,6 @@ public partial class MainWindow
     {
         var windowPointer = e.GetPosition(this);
         _lastWindowPointer = windowPointer;
-        HandleFullscreenCursorMove(e, windowPointer);
         UpdateFullscreenChromeHover(windowPointer);
         UpdateSideTabsAutoHide(windowPointer);
         UpdateWholeAppOverlayChromeHover(windowPointer);

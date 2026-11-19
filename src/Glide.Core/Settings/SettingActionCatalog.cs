@@ -29,6 +29,7 @@ public static class SettingActionCatalog
         ["windows.sameImageBehavior"] = ["Open new instance", "Refresh existing image", "Open new tab"],
         ["windows.alwaysOnTopMode"] = ["Soft", "Hard"],
         ["fullscreen.exitBehavior"] = ["Restore size and location", "Maximized", "Minimized"],
+        ["fullscreen.hideCursorMode"] = ["After a delay", "Always while over the picture"],
         ["view.defaultMode"] = ["Fit image", "Fit width", "Fit height", "Fit to window", "100%"],
         ["mouse.leftWindowDrag"] = ["Smart (normal window only)", "Never move window", "Allow move when maximized"],
         ["mouse.rightDragPan"] = ["Smart (pan image / move window)", "Pan image only", "Move window", "Do nothing"],
@@ -50,6 +51,8 @@ public static class SettingActionCatalog
         ["folderNav.order"] = ["Alphabetical", "Modified date (oldest first)", "Creation date (oldest first)"],
         ["overlay.picturePosition"] = ["Top left", "Top center", "Top right", "Bottom left", "Bottom center", "Bottom right"],
         ["overlay.pictureColor"] = ["White", "Soft gray", "Accent", "Amber"],
+        ["overlay.pictureAlignment"] = ["Automatic", "Left", "Center", "Right"],
+        ["overlay.pictureSideTabsPlacement"] = ["Over the picture", "Top of the tab bar", "Bottom of the tab bar", "Title bar"],   // = TextOverlayPlacements.All (test-checked)
         ["overlay.animationRegion"] = ["Anywhere", "Top half", "Bottom half", "Top left quarter", "Top right quarter", "Bottom left quarter", "Bottom right quarter"],
         ["tabs.newTabPosition"] = ["at the end", "next to the current tab"],
         ["tabs.switchToNewTabs"] = ["foreground", "background"],

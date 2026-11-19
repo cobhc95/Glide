@@ -311,6 +311,7 @@ public partial class MainWindow
         ApplyChromeSizingAfterFullscreenTransition();
         FinishFullscreenTransition();
         RefreshTabStripAfterFullscreenTransition();
+        ResetFullscreenCursorTimer();   // the normal-window setting takes over
         _diagnostics.Write("fullscreen", "exited", new
         {
             restoredState = WindowState.ToString(),
@@ -527,14 +528,19 @@ public partial class MainWindow
         Dispatcher.UIThread.Post(() => SelectionOverlay.SetSelection(null, default), DispatcherPriority.Render);
     }
 
-    /// <summary>Entering fullscreen / regaining focus: cursor visible, hide countdown starts.</summary>
+    /// <summary>Idle cursor hiding applies in the current window mode (fullscreen, or the normal window's picture area).</summary>
+    private bool CursorAutoHideEnabled => WindowState == WindowState.FullScreen ? _settings.HideCursorFullscreen : _settings.HideCursorNormalWindow;
+
+    /// <summary>Entering / leaving fullscreen, regaining focus or a setting change: cursor visible, hide countdown starts.</summary>
     private void ResetFullscreenCursorTimer()
     {
-        if (WindowState != WindowState.FullScreen || !_settings.HideCursorFullscreen)
+        if (!CursorAutoHideEnabled)
         {
             StopFullscreenCursorAutoHide();
             return;
         }
+        _cursorAutoHide.HideDelay = Glide.Core.FullscreenCursorAutoHide.DelayFromSeconds(_settings.FullscreenHideCursorDelaySeconds);
+        _cursorAutoHide.AlwaysHide = _settings.HideCursorMode == "Always while over the picture";
         _cursorAutoHide.Activate(DateTime.UtcNow);
         ApplyFullscreenCursorVisibility();
         _fullscreenCursorTimer.Start();
@@ -543,25 +549,59 @@ public partial class MainWindow
     private void StopFullscreenCursorAutoHide()
     {
         _fullscreenCursorTimer.Stop();
-        var wasHidden = _cursorAutoHide.IsHidden;
         _cursorAutoHide.Deactivate();
-        if (wasHidden || ReferenceEquals(Cursor, HiddenCursor)) Cursor = null;
+        ApplyFullscreenCursorVisibility();
     }
 
+    /// <summary>
+    /// Hidden: fullscreen hides over the whole window (window cursor, inherited by every child) and the viewport, whose
+    /// own hand cursor would otherwise win; the normal window hides over the picture (viewport) only.
+    /// </summary>
     private void ApplyFullscreenCursorVisibility()
     {
-        if (_cursorAutoHide.IsHidden) Cursor = HiddenCursor;
+        var hidden = _cursorAutoHide.IsHidden;
+        Viewport.SetIdleHiddenCursor(hidden ? HiddenCursor : null);
+        // Native backstop: Avalonia applies a cursor only on WM_SETCURSOR (pointer motion), and the frame subclass
+        // answers WM_SETCURSOR first; hide at once and keep answering NULL while hidden.
+        _windowsBrowserFrame?.SetIdleCursorHidden(hidden);
+        if (hidden && WindowState == WindowState.FullScreen) Cursor = HiddenCursor;
         else if (ReferenceEquals(Cursor, HiddenCursor)) Cursor = null;
     }
 
-    /// <summary>Only pointer motion feeds the policy; clicks and keys never reveal the cursor.</summary>
-    private void HandleFullscreenCursorMove(PointerEventArgs e, Point windowPointer)
+    /// <summary>Pointer motion (tunnel, handled events too): real movement shows the cursor at once.</summary>
+    private void CursorAutoHidePointerMoved(object? sender, PointerEventArgs e)
     {
         if (!_cursorAutoHide.IsActive) return;
+        var windowPointer = e.GetPosition(this);
         var now = DateTime.UtcNow;
-        var changed = _cursorAutoHide.SetSuppressed(IsPointerOverInteractiveChrome(e, windowPointer), now);
+        var changed = _cursorAutoHide.SetSuppressed(CursorAutoHideSuppressed(e, windowPointer), now);
         changed |= _cursorAutoHide.OnPointerMoved(now, windowPointer.X, windowPointer.Y);
         if (changed) ApplyFullscreenCursorVisibility();
+    }
+
+    /// <summary>Click or wheel: show the cursor at once.</summary>
+    private void CursorAutoHidePointerActivity(object? sender, PointerEventArgs e)
+    {
+        if (_cursorAutoHide.OnPointerActivity(DateTime.UtcNow)) ApplyFullscreenCursorVisibility();
+    }
+
+    /// <summary>Never hide during a drag (button held), while a text box has focus, over chrome, or outside the picture in the normal window.</summary>
+    private bool CursorAutoHideSuppressed(PointerEventArgs e, Point windowPointer)
+    {
+        var props = e.GetCurrentPoint(this).Properties;
+        if (props.IsLeftButtonPressed || props.IsRightButtonPressed || props.IsMiddleButtonPressed) return true;
+        if (IsTextInputFocused()) return true;
+        if (WindowState != WindowState.FullScreen && !IsPointerOverViewport(e)) return true;
+        return IsPointerOverInteractiveChrome(e, windowPointer);
+    }
+
+    private bool IsTextInputFocused() => FocusManager?.GetFocusedElement() is TextBox;
+
+    private bool IsPointerOverViewport(PointerEventArgs e)
+    {
+        for (var v = e.Source as Visual; v is not null; v = v.GetVisualParent())
+            if (ReferenceEquals(v, Viewport)) return true;
+        return false;
     }
 
     /// <summary>True when the pointer is over a visible control/overlay rather than the image surface.</summary>

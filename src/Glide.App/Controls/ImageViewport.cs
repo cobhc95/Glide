@@ -114,6 +114,23 @@ public sealed class ImageViewport : Control
     private double _panTravelPixels;
     private Color _accentColor = Color.Parse("#38A9F5");
     private readonly Cursor _handCursor = new(StandardCursorType.Hand);
+    private Cursor? _ownCursor;
+    private Cursor? _idleHiddenCursor;
+
+    /// <summary>
+    /// Idle cursor hiding (MainWindow's policy) overrides the viewport's own hand cursor. Passing null restores the
+    /// viewport's cursor. With no own cursor the local value is cleared (never set to null) so the window's inherited
+    /// cursor applies: a local null value used to block inheritance and kept the pointer visible over the picture.
+    /// </summary>
+    internal void SetIdleHiddenCursor(Cursor? hidden) { _idleHiddenCursor = hidden; ApplyOwnCursor(); }
+
+    private void SetOwnCursor(Cursor? cursor) { _ownCursor = cursor; ApplyOwnCursor(); }
+
+    private void ApplyOwnCursor()
+    {
+        if ((_idleHiddenCursor ?? _ownCursor) is { } cursor) Cursor = cursor;
+        else ClearValue(CursorProperty);
+    }
 
     public event EventHandler<int>? BrowseRequested;
     // Kept separate from click navigation so MainWindow can detect a wheel burst and switch to
@@ -219,7 +236,7 @@ public sealed class ImageViewport : Control
         _selectionImage = null;
         _selectionViewRect = null;
         _hoverSelection = false;
-        Cursor = null;
+        SetOwnCursor(null);
         _pan = default;
         _quarterTurns = 0;
         _flipHorizontal = false;
@@ -500,7 +517,7 @@ public sealed class ImageViewport : Control
         PointerExited += (_, _) =>
         {
             _hoverSelection = false;
-            Cursor = null;
+            SetOwnCursor(null);
             if (!_panning) _selectionViewToImage = null;
             InvalidateSelectionOverlayInteractive();
         };
@@ -534,7 +551,7 @@ public sealed class ImageViewport : Control
         _middlePressOnImage = false;
         _hoverSelection = false;
         _selectionViewToImage = null;
-        Cursor = null;
+        SetOwnCursor(null);
         EndInteractiveQuality();
         ReleaseCapture();
         InvalidateSelectionOverlay();
@@ -599,7 +616,7 @@ public sealed class ImageViewport : Control
         }
 
         _selectionViewToImage = null;
-        Cursor = null;
+        SetOwnCursor(null);
         InvalidateSelectionOverlayInteractive();
         RaiseViewChanged();
         return tiny;
@@ -777,7 +794,7 @@ public sealed class ImageViewport : Control
         _selectionImage = null;
         _selectionViewRect = null;
         _hoverSelection = false;
-        Cursor = null;
+        SetOwnCursor(null);
         InvalidateSelectionOverlayInteractive();
         RaiseViewChanged();
         return true;
@@ -1375,7 +1392,7 @@ public sealed class ImageViewport : Control
                 _selectionImage = null;
                 _selectionViewRect = null;
                 _hoverSelection = false;
-                Cursor = null;
+                SetOwnCursor(null);
                 EndInteractiveQuality();
                 InvalidateSelectionOverlay();
                 ZoomOutFromSelection(selected);
@@ -1443,7 +1460,7 @@ public sealed class ImageViewport : Control
                 _selectionImage = null;
                 _selectionViewRect = null;
                 _hoverSelection = false;
-                Cursor = null;
+                SetOwnCursor(null);
                 EndInteractiveQuality();
                 InvalidateSelectionOverlay();
                 ZoomToSelection(selection);
@@ -1509,7 +1526,7 @@ public sealed class ImageViewport : Control
         _lastPointer = position;
         e.Pointer.Capture(this);
         _capturedPointer = e.Pointer;
-        Cursor = _handCursor;
+        SetOwnCursor(_handCursor);
         e.Handled = true;
     }
 
@@ -1571,7 +1588,7 @@ public sealed class ImageViewport : Control
                 var presentationScale = GetScale();
                 _fitMode = FitMode.Manual;
                 _zoom = presentationScale;
-                Cursor = _handCursor;
+                SetOwnCursor(_handCursor);
 
                 var delta = pointer - _lastPointer;
                 _pan = ClampPan(_pan + delta);
@@ -1589,7 +1606,7 @@ public sealed class ImageViewport : Control
             _rightPressOnSelection = false;
             _rightPressOnImage = false;
             _hoverSelection = false;
-            Cursor = null;
+            SetOwnCursor(null);
             if (BackgroundWindowDragEnabled && ShouldMoveWindowOnRightDrag())
                 DeferredRightWindowDragRequested?.Invoke(e.Pointer, _pressPoint, pointer);
             e.Handled = true;
@@ -1660,7 +1677,7 @@ public sealed class ImageViewport : Control
             {
                 _panning = false;
                 _rightPanGesture = false;
-                Cursor = null;
+                SetOwnCursor(null);
                 EndInteractiveQuality();
                 RaiseViewChanged();
             }
@@ -1690,7 +1707,7 @@ public sealed class ImageViewport : Control
             var restore = _panStartView;
             _panning = false;
             _rightPanGesture = false;
-            Cursor = null;
+            SetOwnCursor(null);
             EndInteractiveQuality();
             ReleaseCapture();
 
@@ -1760,7 +1777,7 @@ public sealed class ImageViewport : Control
                 _selectionImage = null;
                 _selectionViewRect = null;
                 _hoverSelection = false;
-                Cursor = null;
+                SetOwnCursor(null);
                 EndInteractiveQuality();
                 InvalidateSelectionOverlay();
                 ZoomOutFromSelection(clickSelection);

@@ -122,6 +122,8 @@ public readonly struct OverlayOptions(GlideSettingsState settings)
     public int PictureCounterOpacity => settings.PictureCounterOpacity;
     public string PictureCounterPosition => settings.PictureCounterPosition;
     public string PictureCounterColor => settings.PictureCounterColor;
+    public string PictureCounterAlignment => settings.PictureCounterAlignment;
+    public (int X, int Y) PictureCounterOffset => TextOverlayOffsets.Get(settings.PictureCounterOffsets, settings.PictureCounterPosition);
     public bool PictureCounterShadow => settings.PictureCounterShadow;
     public bool PictureCounterBorder => settings.PictureCounterBorder;
     public int DefaultOpacity => settings.OverlayDefaultOpacity;

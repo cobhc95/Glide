@@ -4,6 +4,24 @@ All notable changes to Glide Image Viewer are documented here. The format is bas
 [Keep a Changelog](https://keepachangelog.com/), and the project uses dotted feature releases with
 hyphenated follow-up corrections (for example `4.2.0-1`).
 
+## [5.1.2] - 2026-11-19
+
+### Added
+- Hide cursor: the delay is now set in 0.5 s steps (0.5-30 s, default 2 s), and a new "Hide cursor" choice (After a delay / Always while over the picture) hides the pointer at once over the picture; menus, dialogs, text boxes and drags still show it. Applies to fullscreen and the normal window.
+- Overlay mode: pointing at the middle quarter of the top edge shows the drag handle even with "Show drag strip" off, so it can be discovered ("Show the drag handle when pointing at the top centre", on by default). "Show drag strip" still shows it on hover anywhere.
+- Text overlay alignment (Appearance & viewing): Automatic (unchanged layout), Left, Center or Right.
+- Text overlay offset: horizontal and vertical offset (px) from its default place, remembered per position; Alt+drag the text overlay to move it with the mouse.
+- "Text overlay with vertical tabs": keep it over the picture (default), or put it at the top or bottom of the vertical tab bar (the tabs make room for it) or in the title bar.
+- "Hide cursor in normal window" (Window & navigation, off by default, hotkey-bindable): hides the mouse pointer over the picture after the idle delay; title bar, tabs, status bar and Explorer are unaffected. The delay setting is now the shared "Hide cursor after (s)" (default 2).
+
+### Fixed
+- Overlay mode opacity slider: the track spans the whole bar so the dot follows the pointer to the very bottom (35 %), and the bottom value is labelled.
+- "Hide cursor in fullscreen" did nothing: the viewport set a local null cursor that blocked the window's hidden cursor, and the delay setting was ignored. The pointer now hides after the configured delay and shows at once on move, click or wheel; never during a menu, drag or text entry. Default is now off (stored old default migrated once).
+- Hide cursor in fullscreen / in the normal window: the idle pointer is now hidden natively (WM_SETCURSOR answered with no cursor while hidden, applied at once when the pointer is still), so it hides reliably even when the pointer is not moving and the magnifier cursor owns the window; moving, clicking or scrolling shows it again.
+
+### Changed
+- Text overlay token help explains every token; {file} and {filename} are documented as identical (file name with extension; {path} is the full path).
+
 ## [5.1.1] - 2026-11-19
 
 ### Changed
