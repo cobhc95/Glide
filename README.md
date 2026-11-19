@@ -1,6 +1,6 @@
 # Glide Image Viewer
 
-> **Glide 5.1.2:** [download](https://github.com/cobhc95/Glide/releases/latest) · hide the mouse pointer in fullscreen or the normal window (after a delay or always), easier-to-move Overlay mode and more text overlay layout options, on top of 5.1's instant tab switching, faster large-photo browsing with less memory, live Explorer tabs and browser-style tabs. [Release notes](docs/releases/release-notes-5.1.2.md) · [changelog](CHANGELOG.md)
+> **Glide 5.1.3:** [download](https://github.com/cobhc95/Glide/releases/latest) · text overlay placement per tab layout (picture, title bar or vertical tabs, never covering tabs), right-click the overlay for its settings, and the hidden pointer shows again over menus, bars and overlays, on top of 5.1's instant tab switching, faster large-photo browsing with less memory, live Explorer tabs and browser-style tabs. [Release notes](docs/releases/release-notes-5.1.3.md) · [changelog](CHANGELOG.md)
 
 ## Fast. Multi-tabbed. Multi-window. Highly customizable.
 
@@ -15,7 +15,7 @@
 Windows 10 1607 or later, x64. From the [latest release](https://github.com/cobhc95/Glide/releases/latest):
 
 * **`Glide.Setup.exe`**: installer (administrator rights; adds Open With and Explorer thumbnails).
-* **`Glide-5.1.2-Portable.zip`**: extract anywhere and run `Glide.exe`.
+* **`Glide-5.1.3-Portable.zip`**: extract anywhere and run `Glide.exe`.
 * **`Glide.Setup.sha256`**: checksum (`certutil -hashfile Glide.Setup.exe SHA256`).
 
 Upgrades keep your settings, key bindings and title bar.

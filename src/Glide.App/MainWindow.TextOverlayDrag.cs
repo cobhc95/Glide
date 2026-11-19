@@ -1,4 +1,5 @@
 using Avalonia;
+using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media;
@@ -24,22 +25,49 @@ public partial class MainWindow
         AddHandler(InputElement.PointerPressedEvent, TextOverlayDragPressed, RoutingStrategies.Tunnel);
         AddHandler(InputElement.PointerMovedEvent, TextOverlayDragMoved, RoutingStrategies.Tunnel);
         AddHandler(InputElement.PointerReleasedEvent, TextOverlayDragReleased, RoutingStrategies.Tunnel);
+        // 5.1.3: right-click on the overlay opens its settings instead of the picture / title-bar context menu.
+        AddHandler(InputElement.PointerReleasedEvent, TextOverlayRightReleased, RoutingStrategies.Tunnel);
+        AddHandler(Control.ContextRequestedEvent, (_, e) => { if (_textOverlayRightPressed) { _textOverlayRightPressed = false; e.Handled = true; } }, RoutingStrategies.Tunnel);
         AddHandler(InputElement.PointerCaptureLostEvent, (_, _) => EndTextOverlayDrag(save: true), RoutingStrategies.Bubble);
     }
 
     private bool IsPointerOnTextOverlay(PointerEventArgs e)
     {
-        if (CornerCounterHost is not { IsVisible: true } host || !ImageView.IsVisible || _wholeAppOverlayMode) return false;
+        if (CornerCounterHost is not { IsVisible: true } host || host.Opacity <= 0 || !ImageView.IsVisible || _wholeAppOverlayMode) return false;
         var p = e.GetPosition(host);
         return p.X >= 0 && p.Y >= 0 && p.X <= host.Bounds.Width && p.Y <= host.Bounds.Height;
     }
 
+    private bool _textOverlayRightPressed;
+
+    /// <summary>Setting id of the "Text overlay placement" card for the current tab layout (the "In use now" one).</summary>
+    internal static string TextOverlayPlacementSettingId(bool sideTabs) =>
+        sideTabs ? "overlay.picturePositionSideTabs" : "overlay.picturePositionTopTabs";
+
+    /// <summary>Opens Settings at the text overlay placement card for the current tab layout.</summary>
+    internal void OpenTextOverlaySettings() => OpenSettingsAtSetting(TextOverlayPlacementSettingId(SideTabsActive));
+
+    private void TextOverlayRightReleased(object? sender, PointerReleasedEventArgs e)
+    {
+        if (!_textOverlayRightPressed || e.InitialPressMouseButton != MouseButton.Right) return;
+        e.Handled = true;
+        // ContextRequested may follow this release; the flag swallows it and is cleared shortly after.
+        Avalonia.Threading.Dispatcher.UIThread.Post(() => _textOverlayRightPressed = false, Avalonia.Threading.DispatcherPriority.Background);
+        if (IsPointerOnTextOverlay(e)) OpenTextOverlaySettings();
+    }
+
     private void TextOverlayDragPressed(object? sender, PointerPressedEventArgs e)
     {
+        if (e.GetCurrentPoint(this).Properties.IsRightButtonPressed && IsPointerOnTextOverlay(e))
+        {
+            _textOverlayRightPressed = true;
+            e.Handled = true;
+            return;
+        }
         if ((e.KeyModifiers & KeyModifiers.Alt) == 0 || !e.GetCurrentPoint(this).Properties.IsLeftButtonPressed || !IsPointerOnTextOverlay(e)) return;
         _textOverlayDragPointer = e.Pointer;
         _textOverlayDragStart = e.GetPosition(this);
-        _textOverlayDragStartOffset = _textOverlayDragOffset = OverlayOptionsView.PictureCounterOffset;
+        _textOverlayDragStartOffset = _textOverlayDragOffset = OverlayOptionsView.PictureCounterOffset(SideTabsActive);
         e.Pointer.Capture(this);
         e.Handled = true;
     }
@@ -68,7 +96,7 @@ public partial class MainWindow
         if (_textOverlayDragPointer is null) return;
         _textOverlayDragPointer = null;
         if (!save || _textOverlayDragOffset == _textOverlayDragStartOffset) return;
-        _settings.PictureCounterOffsets = TextOverlayOffsets.Set(_settings.PictureCounterOffsets, _settings.PictureCounterPosition,
+        _settings.PictureCounterOffsets = TextOverlayOffsets.Set(_settings.PictureCounterOffsets, EffectiveTextOverlayPlacement,
             _textOverlayDragOffset.X, _textOverlayDragOffset.Y);
         SaveSettingsAndPublish();
     }

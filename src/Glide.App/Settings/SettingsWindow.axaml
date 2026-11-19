@@ -244,9 +244,44 @@
                 <Grid ColumnDefinitions="205,330,*" Margin="6,0,0,0"><TextBlock Text="Text overlay template" VerticalAlignment="Center"/><TextBox x:Name="PictureTemplateBox" Grid.Column="1" Width="320" Text="[{index}/{total}]"/></Grid>
                 <!-- Text and the template box tooltip come from code (TextOverlayTemplateHelp / Tip), where backslash-n cannot turn into a raw line break. -->
                 <TextBlock x:Name="PictureTemplateHelpText" Classes="phaseNote" Margin="6,-2,8,2" TextWrapping="Wrap"/>
-                <Grid ColumnDefinitions="245,220,*" Margin="6,0,0,0"><TextBlock Text="Text overlay position" VerticalAlignment="Center"/><ComboBox x:Name="PicturePositionCombo" Grid.Column="1" Width="210"><ComboBoxItem Content="Top left"/><ComboBoxItem Content="Top center"/><ComboBoxItem Content="Top right"/><ComboBoxItem Content="Bottom left"/><ComboBoxItem Content="Bottom center"/><ComboBoxItem Content="Bottom right"/></ComboBox></Grid>
-                <Grid ColumnDefinitions="245,220,*" Margin="6,0,0,0"><TextBlock Text="Text overlay alignment" VerticalAlignment="Center"/><ComboBox x:Name="PictureAlignmentCombo" Grid.Column="1" Width="210"><ComboBoxItem Content="Automatic"/><ComboBoxItem Content="Left"/><ComboBoxItem Content="Center"/><ComboBoxItem Content="Right"/></ComboBox></Grid>
-                <Grid ColumnDefinitions="245,220,*" Margin="6,0,0,0"><TextBlock Text="Text overlay with vertical tabs" VerticalAlignment="Center"/><ComboBox x:Name="PictureSideTabsPlacementCombo" Grid.Column="1" Width="210"><ComboBoxItem Content="Over the picture"/><ComboBoxItem Content="Top of the tab bar"/><ComboBoxItem Content="Bottom of the tab bar"/><ComboBoxItem Content="Title bar"/></ComboBox></Grid>
+                <!-- Text overlay placement (5.1.3): one card per tab layout; the card matching the Tabs position gets the accent outline and the "In use now" badge (UpdateTextOverlayPlacementCards). The WrapPanel stacks the cards when the window is narrow. -->
+                <WrapPanel Orientation="Horizontal" Margin="6,4,0,0"><TextBlock Text="Text overlay placement" FontWeight="SemiBold" Foreground="{DynamicResource BrushAccent}" Margin="0,0,14,0" VerticalAlignment="Center"/><TextBlock Classes="phaseNote" Text="Each tab layout has its own settings; Glide uses the one matching your tabs." TextWrapping="Wrap" VerticalAlignment="Center"/></WrapPanel>
+                <WrapPanel Orientation="Horizontal" Margin="6,0,0,0">
+                  <Border x:Name="TopTabsPlacementCard" Width="330" Margin="0,0,10,10" Padding="14,12" CornerRadius="8" BorderThickness="1" BorderBrush="{DynamicResource BrushBorder}" Background="{DynamicResource BrushCard}">
+                    <StackPanel Spacing="10">
+                      <Grid ColumnDefinitions="Auto,*,Auto">
+                        <Border Width="26" Height="20" BorderThickness="1.5" BorderBrush="{DynamicResource BrushMuted}" VerticalAlignment="Center"><Border Height="5" VerticalAlignment="Top" Background="{DynamicResource BrushMuted}"/></Border>
+                        <TextBlock Grid.Column="1" Text="Tabs along the top" FontWeight="SemiBold" FontSize="14" VerticalAlignment="Center" Margin="10,0,8,0"/>
+                        <Border x:Name="TopTabsInUseBadge" Grid.Column="2" Background="{DynamicResource BrushAccent}" CornerRadius="9" Padding="9,1" VerticalAlignment="Center" IsVisible="False"><TextBlock Text="In use now" Foreground="White" FontSize="11"/></Border>
+                      </Grid>
+                      <Grid ColumnDefinitions="90,*"><TextBlock Text="Position" VerticalAlignment="Center"/><ComboBox x:Name="TopTabsPositionCombo" Grid.Column="1" HorizontalAlignment="Stretch"><ComboBoxItem Content="Top left"/><ComboBoxItem Content="Top center"/><ComboBoxItem Content="Top right"/><ComboBoxItem Content="Bottom left"/><ComboBoxItem Content="Bottom center"/><ComboBoxItem Content="Bottom right"/><ComboBoxItem Content="Title bar – left"/><ComboBoxItem Content="Title bar – center"/><ComboBoxItem Content="Title bar – right"/></ComboBox></Grid>
+                      <Grid ColumnDefinitions="90,*"><TextBlock Text="Alignment" VerticalAlignment="Center"/><ComboBox x:Name="TopTabsAlignmentCombo" Grid.Column="1" HorizontalAlignment="Stretch"><ComboBoxItem Content="Automatic"/><ComboBoxItem Content="Left"/><ComboBoxItem Content="Center"/><ComboBoxItem Content="Right"/></ComboBox></Grid>
+                      <StackPanel Spacing="2">
+                        <TextBlock Classes="phaseNote" Text="Positions available:"/>
+                        <TextBlock Classes="phaseNote" Text="  • Over the picture: top / bottom × left, center, right" TextWrapping="Wrap"/>
+                        <TextBlock Classes="phaseNote" Text="  • Title bar – left, center, right"/>
+                      </StackPanel>
+                    </StackPanel>
+                  </Border>
+                  <Border x:Name="SideTabsPlacementCard" Width="330" Margin="0,0,10,10" Padding="14,12" CornerRadius="8" BorderThickness="1" BorderBrush="{DynamicResource BrushBorder}" Background="{DynamicResource BrushCard}">
+                    <StackPanel Spacing="10">
+                      <Grid ColumnDefinitions="Auto,*,Auto">
+                        <Border Width="26" Height="20" BorderThickness="1.5" BorderBrush="{DynamicResource BrushMuted}" VerticalAlignment="Center"><Border Width="6" HorizontalAlignment="Left" Background="{DynamicResource BrushMuted}"/></Border>
+                        <TextBlock Grid.Column="1" Text="Tabs at the side" FontWeight="SemiBold" FontSize="14" VerticalAlignment="Center" Margin="10,0,8,0"/>
+                        <Border x:Name="SideTabsInUseBadge" Grid.Column="2" Background="{DynamicResource BrushAccent}" CornerRadius="9" Padding="9,1" VerticalAlignment="Center" IsVisible="False"><TextBlock Text="In use now" Foreground="White" FontSize="11"/></Border>
+                      </Grid>
+                      <Grid ColumnDefinitions="90,*"><TextBlock Text="Position" VerticalAlignment="Center"/><ComboBox x:Name="SideTabsPositionCombo" Grid.Column="1" HorizontalAlignment="Stretch"><ComboBoxItem Content="Top left"/><ComboBoxItem Content="Top center"/><ComboBoxItem Content="Top right"/><ComboBoxItem Content="Bottom left"/><ComboBoxItem Content="Bottom center"/><ComboBoxItem Content="Bottom right"/><ComboBoxItem Content="Title bar – left"/><ComboBoxItem Content="Title bar – center"/><ComboBoxItem Content="Title bar – right"/><ComboBoxItem Content="Vertical tabs – top"/><ComboBoxItem Content="Vertical tabs – bottom"/></ComboBox></Grid>
+                      <Grid ColumnDefinitions="90,*"><TextBlock Text="Alignment" VerticalAlignment="Center"/><ComboBox x:Name="SideTabsAlignmentCombo" Grid.Column="1" HorizontalAlignment="Stretch"><ComboBoxItem Content="Automatic"/><ComboBoxItem Content="Left"/><ComboBoxItem Content="Center"/><ComboBoxItem Content="Right"/></ComboBox></Grid>
+                      <StackPanel Spacing="2">
+                        <TextBlock Classes="phaseNote" Text="Positions available:"/>
+                        <TextBlock Classes="phaseNote" Text="  • Over the picture: top / bottom × left, center, right" TextWrapping="Wrap"/>
+                        <TextBlock Classes="phaseNote" Text="  • Title bar – left, center, right"/>
+                        <TextBlock Classes="phaseNote" Text="  • Vertical tabs – top, bottom"/>
+                      </StackPanel>
+                    </StackPanel>
+                  </Border>
+                </WrapPanel>
+                <TextBlock Classes="phaseNote" Margin="6,-6,8,2" Text="Font, colour, opacity, shadow and border below stay shared by both." TextWrapping="Wrap"/>
                 <Grid ColumnDefinitions="245,150,*" Margin="6,0,0,0"><TextBlock Text="Text overlay font size" VerticalAlignment="Center"/><NumericUpDown x:Name="PictureFontSizeBox" Grid.Column="1" Minimum="8" Maximum="48"/></Grid>
                 <CheckBox x:Name="PictureBoldCheck" Content="Text overlay bold"/>
                 <Grid ColumnDefinitions="245,220,*" Margin="6,0,0,0"><TextBlock Text="Text overlay colour" VerticalAlignment="Center"/><ComboBox x:Name="PictureColorCombo" Grid.Column="1" Width="210"><ComboBoxItem Content="White"/><ComboBoxItem Content="Soft gray"/><ComboBoxItem Content="Accent"/><ComboBoxItem Content="Amber"/></ComboBox></Grid>

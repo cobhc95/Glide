@@ -591,28 +591,30 @@ public partial class MainWindow
         var props = e.GetCurrentPoint(this).Properties;
         if (props.IsLeftButtonPressed || props.IsRightButtonPressed || props.IsMiddleButtonPressed) return true;
         if (IsTextInputFocused()) return true;
-        if (WindowState != WindowState.FullScreen && !IsPointerOverViewport(e)) return true;
-        return IsPointerOverInteractiveChrome(e, windowPointer);
+        return !IsPointerOverBarePicture(windowPointer);
     }
 
     private bool IsTextInputFocused() => FocusManager?.GetFocusedElement() is TextBox;
 
-    private bool IsPointerOverViewport(PointerEventArgs e)
+    /// <summary>
+    /// The single hide-area predicate (Avalonia pointer path and native WM_SETCURSOR backstop): true only over the bare
+    /// picture. Window-in-Window overlays and their handles/buttons, the status/button bar, title bar/tab strip (incl.
+    /// a text overlay placed there), menus, Explorer and any open popup keep the cursor visible.
+    /// </summary>
+    internal bool IsPointerOverBarePicture(Point windowPoint)
     {
-        for (var v = e.Source as Visual; v is not null; v = v.GetVisualParent())
-            if (ReferenceEquals(v, Viewport)) return true;
-        return false;
+        var overViewport = false;
+        var overChrome = false;
+        for (var v = Avalonia.Input.InputExtensions.InputHitTest(this, windowPoint) as Visual; v is not null && !ReferenceEquals(v, this); v = v.GetVisualParent())
+        {
+            if (ReferenceEquals(v, Viewport)) { overViewport = true; break; }
+            if (v is Avalonia.Controls.Primitives.TemplatedControl or Avalonia.Controls.ContextMenu or Avalonia.Controls.Primitives.Popup) overChrome = true;
+        }
+        var overOverlay = (_wholeAppOverlayMode && IsPointerOverWholeAppOverlayPixels(windowPoint))
+            || (_overlays is { } overlays && this.TranslatePoint(windowPoint, ImageView) is { } hostPoint && overlays.IsOverOverlay(hostPoint));
+        return Glide.Core.FullscreenCursorAutoHide.MayHideAt(overViewport, overChrome, overOverlay, HasOpenPopupForCursor);
     }
 
-    /// <summary>True when the pointer is over a visible control/overlay rather than the image surface.</summary>
-    private bool IsPointerOverInteractiveChrome(PointerEventArgs e, Point windowPointer)
-    {
-        if (_wholeAppOverlayMode && IsPointerOverWholeAppOverlayPixels(windowPointer)) return true;
-        for (var v = e.Source as Visual; v is not null && !ReferenceEquals(v, this); v = v.GetVisualParent())
-        {
-            if (ReferenceEquals(v, Viewport)) return false;
-            if (v is Avalonia.Controls.Primitives.TemplatedControl or Avalonia.Controls.ContextMenu or Avalonia.Controls.Primitives.Popup) return true;
-        }
-        return false;
-    }
+    /// <summary>Native backstop hit test (screen pixels).</summary>
+    private bool IsScreenPointOverBarePicture(PixelPoint screenPoint) => IsPointerOverBarePicture(this.PointToClient(screenPoint));
 }

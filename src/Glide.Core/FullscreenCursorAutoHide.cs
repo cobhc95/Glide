@@ -23,6 +23,14 @@ public sealed class FullscreenCursorAutoHide
     /// <summary>Idle time before hiding (the shared "Hide cursor after (s)" setting).</summary>
     public TimeSpan HideDelay { get; set; } = DefaultHideDelay;
 
+    /// <summary>
+    /// Where the cursor may be hidden: only over the bare picture (inside the viewport, not over a Window-in-Window
+    /// overlay or its handles, not over any control/menu/bar, and with no popup open). Used by the Avalonia path and
+    /// the native WM_SETCURSOR backstop alike.
+    /// </summary>
+    public static bool MayHideAt(bool overViewport, bool overChrome, bool overOverlay, bool popupOpen) =>
+        overViewport && !overChrome && !overOverlay && !popupOpen;
+
     public bool IsHidden { get; private set; }
     public bool IsActive => _active;
 

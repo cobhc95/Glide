@@ -336,6 +336,12 @@ public static class AppActionRegistry
             Inputs = NoGesture,
             Description = "Opens Settings > Windows & developer > Back up and restore and saves the ticked items (settings, hotkeys, profiles, window positions, recent files, last session) to one .glidebackup file."
         },
+        // 5.1.3: also what right-clicking the text overlay does.
+        Cmd("app.textOverlaySettings", "Open text overlay settings", "Application", GlideCommand.OpenTextOverlaySettings, [],
+            ["text overlay", "picture counter", "counter", "overlay text", "placement", "position", "settings"]) with
+        {
+            Description = "Opens Settings at the Text overlay placement card for the current tab layout (Tabs along the top or Tabs at the side). Right-clicking the text overlay does the same."
+        },
         Cmd("app.importBackup", "Import Glide backup…", "Application", GlideCommand.ImportGlideBackup, [],
             ["backup", "back up", "restore", "import", "load settings", "transfer", "migrate", "move to new pc", "new computer", "settings file", "profile", "glidebackup"]) with
         {

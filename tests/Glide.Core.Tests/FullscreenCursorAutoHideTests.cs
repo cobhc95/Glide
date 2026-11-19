@@ -7,6 +7,15 @@ public sealed class FullscreenCursorAutoHideTests
     private static readonly DateTime T0 = new(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
     private static DateTime Ms(double ms) => T0.AddMilliseconds(ms);
 
+    [Theory]
+    [InlineData(true, false, false, false, true)]   // bare picture
+    [InlineData(false, false, false, false, false)] // status bar / title bar / Explorer
+    [InlineData(true, true, false, false, false)]   // control inside the viewport
+    [InlineData(true, false, true, false, false)]   // Window-in-Window overlay or handle
+    [InlineData(true, false, false, true, false)]   // popup / menu open
+    public void MayHideAt_OnlyOverBarePicture(bool viewport, bool chrome, bool overlay, bool popup, bool expected) =>
+        Assert.Equal(expected, FullscreenCursorAutoHide.MayHideAt(viewport, chrome, overlay, popup));
+
     private static FullscreenCursorAutoHide Hidden()
     {
         var p = new FullscreenCursorAutoHide();

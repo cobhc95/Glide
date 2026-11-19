@@ -223,11 +223,14 @@ internal sealed class WindowsBrowserFrameController : IDisposable
         if (!GetCursorPos(out var p)) return;
         var under = WindowFromPoint(p);
         if (under == IntPtr.Zero || (under != _hwnd && GetAncestor(under, GaRoot) != _hwnd)) return;
-        if (hidden) SetCursor(IntPtr.Zero);
+        if (hidden) { if (IdleCursorHideHitTest?.Invoke(new PixelPoint(p.X, p.Y)) != false) SetCursor(IntPtr.Zero); }
         else SendMessageW(_hwnd, WmSetCursor, _hwnd, new IntPtr(HtClient | (0x0200 << 16)));
     }
 
     private bool _idleCursorHidden;
+
+    /// <summary>Screen-pixel predicate: true only over the bare picture. Elsewhere WM_SETCURSOR falls through so the normal cursor shows.</summary>
+    public Func<PixelPoint, bool>? IdleCursorHideHitTest { get; set; }
     private const uint GaRoot = 2;
 
     [DllImport("user32.dll")]
@@ -358,7 +361,8 @@ internal sealed class WindowsBrowserFrameController : IDisposable
                 return _privacyBrush;
             case WmSetCursor:
             {
-                if (_idleCursorHidden && (unchecked((long)lParam) & 0xFFFF) == HtClient)
+                if (_idleCursorHidden && (unchecked((long)lParam) & 0xFFFF) == HtClient &&
+                    (IdleCursorHideHitTest is not { } hideTest || (GetCursorPos(out var hidePoint) && hideTest(new PixelPoint(hidePoint.X, hidePoint.Y)))))
                 {
                     SetCursor(IntPtr.Zero);
                     return new IntPtr(1);

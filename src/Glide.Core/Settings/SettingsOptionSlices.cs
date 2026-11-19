@@ -120,10 +120,11 @@ public readonly struct OverlayOptions(GlideSettingsState settings)
     public int PictureCounterFontSize => settings.PictureCounterFontSize;
     public bool PictureCounterBold => settings.PictureCounterBold;
     public int PictureCounterOpacity => settings.PictureCounterOpacity;
-    public string PictureCounterPosition => settings.PictureCounterPosition;
+    /// <summary>The position of the card matching the tab layout (<paramref name="sideTabs"/>: tabs at the side).</summary>
+    public string PictureCounterPosition(bool sideTabs) => TextOverlayPlacements.Position(settings, sideTabs);
     public string PictureCounterColor => settings.PictureCounterColor;
-    public string PictureCounterAlignment => settings.PictureCounterAlignment;
-    public (int X, int Y) PictureCounterOffset => TextOverlayOffsets.Get(settings.PictureCounterOffsets, settings.PictureCounterPosition);
+    public string PictureCounterAlignment(bool sideTabs) => TextOverlayPlacements.Alignment(settings, sideTabs);
+    public (int X, int Y) PictureCounterOffset(bool sideTabs) => TextOverlayOffsets.Get(settings.PictureCounterOffsets, PictureCounterPosition(sideTabs));
     public bool PictureCounterShadow => settings.PictureCounterShadow;
     public bool PictureCounterBorder => settings.PictureCounterBorder;
     public int DefaultOpacity => settings.OverlayDefaultOpacity;

@@ -25,7 +25,7 @@ public partial class MainWindow
     internal static readonly IReadOnlySet<string> TextOverlayStyleIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
         "overlay.pictureTemplate", "overlay.pictureFontSize", "overlay.pictureBold", "overlay.pictureOpacity",
-        "overlay.picturePosition", "overlay.pictureAlignment", "overlay.pictureSideTabsPlacement", "overlay.pictureOffsetX", "overlay.pictureOffsetY", "overlay.pictureColor", "overlay.pictureShadow", "overlay.pictureBorder"
+        "overlay.picturePositionTopTabs", "overlay.picturePositionSideTabs", "overlay.pictureAlignmentTopTabs", "overlay.pictureAlignmentSideTabs", "overlay.pictureOffsetX", "overlay.pictureOffsetY", "overlay.pictureColor", "overlay.pictureShadow", "overlay.pictureBorder"
     };
 
     private sealed record SettingEffectHandler(IReadOnlySet<string> Ids, Action<MainWindow, IReadOnlyCollection<string>> Apply);

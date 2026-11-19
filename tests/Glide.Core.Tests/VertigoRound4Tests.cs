@@ -23,12 +23,65 @@ public sealed class VertigoRound4Tests
     }
 
     [Fact]
-    public void Text_overlay_side_tab_placements_are_one_master_list()
+    public void Text_overlay_placements_are_one_master_list_per_tab_layout()
     {
-        Assert.Equal(Glide.Core.Settings.TextOverlayPlacements.All, Glide.Core.Settings.SettingActionCatalog.Choices["overlay.pictureSideTabsPlacement"]);
-        Assert.Equal("Over the picture", new Glide.Core.Settings.GlideSettingsState().PictureCounterSideTabsPlacement);
-        Assert.Equal("Title bar", Glide.Core.Settings.TextOverlayPlacements.Normalize(" title BAR "));
-        Assert.Equal("Over the picture", Glide.Core.Settings.TextOverlayPlacements.Normalize("nonsense"));
+        Assert.Equal(Glide.Core.Settings.TextOverlayPlacements.TopTabsPositions, Glide.Core.Settings.SettingActionCatalog.Choices["overlay.picturePositionTopTabs"]);
+        Assert.Equal(Glide.Core.Settings.TextOverlayPlacements.All, Glide.Core.Settings.SettingActionCatalog.Choices["overlay.picturePositionSideTabs"]);
+        Assert.Equal(Glide.Core.Settings.TextOverlayPlacements.Alignments, Glide.Core.Settings.SettingActionCatalog.Choices["overlay.pictureAlignmentTopTabs"]);
+        Assert.Equal(Glide.Core.Settings.TextOverlayPlacements.Alignments, Glide.Core.Settings.SettingActionCatalog.Choices["overlay.pictureAlignmentSideTabs"]);
+        Assert.DoesNotContain(Glide.Core.Settings.TextOverlayPlacements.TopTabsPositions, Glide.Core.Settings.TextOverlayPlacements.IsTabBar);
+        var state = new Glide.Core.Settings.GlideSettingsState();
+        Assert.Equal("Top right", state.PictureCounterPositionTopTabs);
+        Assert.Equal("Top right", state.PictureCounterPositionSideTabs);
+        Assert.Equal("Title bar – left", Glide.Core.Settings.TextOverlayPlacements.Normalize(" title BAR - left "));
+        Assert.Equal("Top right", Glide.Core.Settings.TextOverlayPlacements.Normalize("nonsense"));
+        Assert.Equal("Top right", Glide.Core.Settings.TextOverlayPlacements.NormalizeTopTabs("Vertical tabs – top"));
+    }
+
+    [Fact]
+    public void Text_overlay_uses_the_card_matching_the_tab_layout()
+    {
+        var s = new Glide.Core.Settings.GlideSettingsState
+        {
+            PictureCounterPositionTopTabs = "Title bar – center", PictureCounterAlignmentTopTabs = "Automatic",
+            PictureCounterPositionSideTabs = "Vertical tabs – top", PictureCounterAlignmentSideTabs = "Center"
+        };
+        Assert.Equal("Title bar – center", Glide.Core.Settings.TextOverlayPlacements.Position(s, sideTabs: false));
+        Assert.Equal("Automatic", Glide.Core.Settings.TextOverlayPlacements.Alignment(s, sideTabs: false));
+        Assert.Equal("Vertical tabs – top", Glide.Core.Settings.TextOverlayPlacements.Position(s, sideTabs: true));
+        Assert.Equal("Center", Glide.Core.Settings.TextOverlayPlacements.Alignment(s, sideTabs: true));
+        s.TabStripPosition = "Side";
+        Assert.True(Glide.Core.Settings.TextOverlayPlacements.SideTabsLayout(s));
+        s.TabsEnabled = false;
+        Assert.False(Glide.Core.Settings.TextOverlayPlacements.SideTabsLayout(s));
+    }
+
+    [Theory]
+    [InlineData("{\"SettingsSchemaVersion\":20,\"PictureCounterPosition\":\"Bottom left\",\"PictureCounterSideTabsPlacement\":\"Top of the tab bar\",\"PictureCounterAlignment\":\"Right\"}", "Bottom left", "Right", "Vertical tabs – top", "Right")]
+    [InlineData("{\"SettingsSchemaVersion\":20,\"PictureCounterPosition\":\"Bottom left\",\"PictureCounterSideTabsPlacement\":\"Bottom of the tab bar\"}", "Bottom left", "Automatic", "Vertical tabs – bottom", "Automatic")]
+    [InlineData("{\"SettingsSchemaVersion\":20,\"PictureCounterPosition\":\"Bottom left\",\"PictureCounterSideTabsPlacement\":\"Title bar\",\"PictureCounterAlignment\":\"Center\"}", "Bottom left", "Center", "Title bar – center", "Center")]
+    [InlineData("{\"SettingsSchemaVersion\":20,\"PictureCounterPosition\":\"Bottom left\",\"PictureCounterSideTabsPlacement\":\"Over the picture\"}", "Bottom left", "Automatic", "Bottom left", "Automatic")]
+    [InlineData("{\"SettingsSchemaVersion\":20,\"PictureCounterPosition\":\"Bottom left\",\"PictureCounterAlignment\":\"Left\"}", "Bottom left", "Left", "Bottom left", "Left")]
+    [InlineData("{\"SettingsSchemaVersion\":12,\"PictureCounterPosition\":\"Top center\"}", "Top center", "Automatic", "Top center", "Automatic")]
+    [InlineData("{\"SettingsSchemaVersion\":21,\"PictureCounterPosition\":\"Bottom center\",\"PictureCounterAlignment\":\"Right\",\"PictureCounterTitleBarAlignment\":\"Left\",\"PictureCounterTabBarAlignment\":\"Center\"}", "Bottom center", "Right", "Bottom center", "Right")]
+    [InlineData("{\"SettingsSchemaVersion\":21,\"PictureCounterPosition\":\"Title bar – right\",\"PictureCounterAlignment\":\"Right\",\"PictureCounterTitleBarAlignment\":\"Left\",\"PictureCounterTabBarAlignment\":\"Center\"}", "Title bar – right", "Left", "Title bar – right", "Left")]
+    [InlineData("{\"SettingsSchemaVersion\":21,\"PictureCounterPosition\":\"Vertical tabs – bottom\",\"PictureCounterAlignment\":\"Right\",\"PictureCounterTitleBarAlignment\":\"Left\",\"PictureCounterTabBarAlignment\":\"Center\"}", "Top right", "Right", "Vertical tabs – bottom", "Center")]
+    public void Text_overlay_placement_migrates_into_both_tab_layout_cards(string json, string topPosition, string topAlignment, string sidePosition, string sideAlignment)
+    {
+        var loaded = Glide.App.Settings.SettingsStore.MigrateFromJson(json, isSettingsFile: false);
+        Assert.Equal(topPosition, loaded.PictureCounterPositionTopTabs);
+        Assert.Equal(topAlignment, loaded.PictureCounterAlignmentTopTabs);
+        Assert.Equal(sidePosition, loaded.PictureCounterPositionSideTabs);
+        Assert.Equal(sideAlignment, loaded.PictureCounterAlignmentSideTabs);
+    }
+
+    [Fact]
+    public void Text_overlay_tab_layout_cards_survive_a_current_schema_round_trip()
+    {
+        var loaded = Glide.App.Settings.SettingsStore.MigrateFromJson("{\"SettingsSchemaVersion\":22,\"PictureCounterPositionTopTabs\":\"Vertical tabs – top\",\"PictureCounterPositionSideTabs\":\"Vertical tabs – bottom\",\"PictureCounterAlignmentSideTabs\":\"Right\"}", isSettingsFile: false);
+        Assert.Equal("Top right", loaded.PictureCounterPositionTopTabs);
+        Assert.Equal("Vertical tabs – bottom", loaded.PictureCounterPositionSideTabs);
+        Assert.Equal("Right", loaded.PictureCounterAlignmentSideTabs);
     }
 
     [Fact]

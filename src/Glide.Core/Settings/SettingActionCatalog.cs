@@ -49,10 +49,11 @@ public static class SettingActionCatalog
         ["tabs.lastTabBehavior"] = ["Open home page", "Keep last tab open", "Close program"],
         ["tabs.homePage"] = ["Welcome page", "Recent pictures page", "Explorer page"],
         ["folderNav.order"] = ["Alphabetical", "Modified date (oldest first)", "Creation date (oldest first)"],
-        ["overlay.picturePosition"] = ["Top left", "Top center", "Top right", "Bottom left", "Bottom center", "Bottom right"],
+        ["overlay.picturePositionTopTabs"] = ["Top left", "Top center", "Top right", "Bottom left", "Bottom center", "Bottom right", "Title bar – left", "Title bar – center", "Title bar – right"],   // = TextOverlayPlacements.TopTabsPositions (test-checked)
+        ["overlay.picturePositionSideTabs"] = ["Top left", "Top center", "Top right", "Bottom left", "Bottom center", "Bottom right", "Title bar – left", "Title bar – center", "Title bar – right", "Vertical tabs – top", "Vertical tabs – bottom"],   // = TextOverlayPlacements.All (test-checked)
         ["overlay.pictureColor"] = ["White", "Soft gray", "Accent", "Amber"],
-        ["overlay.pictureAlignment"] = ["Automatic", "Left", "Center", "Right"],
-        ["overlay.pictureSideTabsPlacement"] = ["Over the picture", "Top of the tab bar", "Bottom of the tab bar", "Title bar"],   // = TextOverlayPlacements.All (test-checked)
+        ["overlay.pictureAlignmentTopTabs"] = ["Automatic", "Left", "Center", "Right"],
+        ["overlay.pictureAlignmentSideTabs"] = ["Automatic", "Left", "Center", "Right"],
         ["overlay.animationRegion"] = ["Anywhere", "Top half", "Bottom half", "Top left quarter", "Top right quarter", "Bottom left quarter", "Bottom right quarter"],
         ["tabs.newTabPosition"] = ["at the end", "next to the current tab"],
         ["tabs.switchToNewTabs"] = ["foreground", "background"],

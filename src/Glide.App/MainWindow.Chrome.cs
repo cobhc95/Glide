@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Media;
 using Glide.App.Services;
 using Glide.Core;
+using Glide.Core.Settings;
 using Glide.Core.Status;
 
 namespace Glide.App;
@@ -118,13 +119,15 @@ public partial class MainWindow
         ApplyTextOverlayBorder();
         if (!PlaceTextOverlay())
         {
-            // In the side tab pane or the title bar: no picture position, margins or offsets.
-            ApplyTextOverlayAlignment(OverlayOptionsView.PictureCounterAlignment);
+            // In the side tab pane or the title bar: no picture position, margins or offsets. The lines form one block:
+            // Automatic aligns them together (title bar: by its left/center/right side; tab pane: left).
+            var barPlacement = EffectiveTextOverlayPlacement;
+            ApplyTextOverlayAlignment(EffectiveTextOverlayAlignment, BarAutomaticAlignment(barPlacement));
             UpdatePictureCounter();
             return;
         }
 
-        var position = OverlayOptionsView.PictureCounterPosition ?? "Top right";
+        var position = EffectiveTextOverlayPlacement;
         CornerCounterHost.HorizontalAlignment = position.Contains("left", StringComparison.OrdinalIgnoreCase)
             ? Avalonia.Layout.HorizontalAlignment.Left
             : position.Contains("center", StringComparison.OrdinalIgnoreCase)
@@ -133,8 +136,8 @@ public partial class MainWindow
         CornerCounterHost.VerticalAlignment = position.StartsWith("Bottom", StringComparison.OrdinalIgnoreCase)
             ? Avalonia.Layout.VerticalAlignment.Bottom
             : Avalonia.Layout.VerticalAlignment.Top;
-        ApplyTextOverlayAlignment(OverlayOptionsView.PictureCounterAlignment);
-        var (offsetX, offsetY) = OverlayOptionsView.PictureCounterOffset;
+        ApplyTextOverlayAlignment(EffectiveTextOverlayAlignment);   // the alignment of the card for the current tab layout
+        var (offsetX, offsetY) = OverlayOptionsView.PictureCounterOffset(SideTabsActive);
         CornerCounterHost.RenderTransform = offsetX == 0 && offsetY == 0 ? null : new TranslateTransform(offsetX, offsetY);
         CornerCounterHost.Margin = CornerCounterHost.VerticalAlignment == Avalonia.Layout.VerticalAlignment.Top
             ? new Thickness(15, 28, 15, 0)
@@ -143,8 +146,14 @@ public partial class MainWindow
     }
 
     /// <summary>"Text overlay alignment": Automatic keeps the original layout (text left, folder position line right).</summary>
-    private void ApplyTextOverlayAlignment(string? alignment)
+    /// <remarks>
+    /// In a bar (<paramref name="barAutomatic"/> set) Automatic must not split the lines: its picture layout puts the
+    /// counter at the left and the folder line at the right of the block, which in the title bar read as two labels
+    /// drifting apart (one up-left, one down-right). There Automatic aligns every line the same way instead.
+    /// </remarks>
+    private void ApplyTextOverlayAlignment(string? alignment, string? barAutomatic = null)
     {
+        if (barAutomatic is not null && alignment is not ("Left" or "Center" or "Right")) alignment = barAutomatic;
         var (text, line) = alignment switch
         {
             "Left" => (TextAlignment.Left, Avalonia.Layout.HorizontalAlignment.Left),
@@ -157,6 +166,13 @@ public partial class MainWindow
         FolderCounterText.TextAlignment = text;
         FolderCounterText.HorizontalAlignment = line;
     }
+
+    private static string BarAutomaticAlignment(string placement) => placement switch
+    {
+        TextOverlayPlacements.TitleBarCenter => "Center",
+        TextOverlayPlacements.TitleBarRight => "Right",
+        _ => "Left"
+    };
 
     /// <summary>
     /// "Text overlay border": one box around every line of the overlay (the counter and the folder position line), styled

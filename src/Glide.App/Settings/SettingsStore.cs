@@ -22,7 +22,18 @@ public static class SettingsStore
     /// </summary>
     private const int LaunchPolicySchema = 4;
     // 9 (5.0.0 Back / Forward): the one-time title-bar default migration below is gated on it.
-    internal const int CurrentSettingsSchema = 20;
+    internal const int CurrentSettingsSchema = 22;
+    /// <summary>
+    /// Settings schema (5.1.3) that split "Text overlay position" and "Text overlay alignment" by tab layout (tabs along the
+    /// top / at the side). Schema 21 (one position with an alignment per area) and older files (a picture position plus
+    /// "Text overlay with vertical tabs") are mapped by TextOverlayPlacements.MigrateLegacy from the retired JSON names below.
+    /// </summary>
+    internal const int TextOverlayTabLayoutSchema = 22;
+    internal const string LegacyTextOverlaySideTabsPlacementProperty = "PictureCounterSideTabsPlacement";
+    internal const string LegacyTextOverlayPositionProperty = "PictureCounterPosition";
+    internal const string LegacyTextOverlayAlignmentProperty = "PictureCounterAlignment";
+    internal const string LegacyTextOverlayTitleBarAlignmentProperty = "PictureCounterTitleBarAlignment";
+    internal const string LegacyTextOverlayTabBarAlignmentProperty = "PictureCounterTabBarAlignment";
     /// <summary>
     /// Settings schema (5.1.2) that made "Hide cursor in fullscreen" default to off. The feature never worked before, so a
     /// stored "on" from an older schema is the untouched old default and moves to off once.
@@ -538,6 +549,19 @@ public static class SettingsStore
                     ? legacyContinue.GetBoolean() : null;
             loaded.EndOfFolderAction = MigrateEndOfFolderAction(sourceSchema, legacyContinueSiblingFolders, loaded.EndOfFolderAction);
             loaded.StatusBarGroups = MigrateStatusBarGroups(sourceSchema, loaded.StatusBarGroups);
+            if (sourceSchema < TextOverlayTabLayoutSchema)
+            {
+                string? Legacy(string name) =>
+                    document.RootElement.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+                Glide.Core.Settings.TextOverlayPlacements.MigrateLegacy(loaded, sourceSchema,
+                    Legacy(LegacyTextOverlayPositionProperty), Legacy(LegacyTextOverlayAlignmentProperty),
+                    Legacy(LegacyTextOverlaySideTabsPlacementProperty), Legacy(LegacyTextOverlayTitleBarAlignmentProperty),
+                    Legacy(LegacyTextOverlayTabBarAlignmentProperty));
+            }
+            loaded.PictureCounterPositionTopTabs = Glide.Core.Settings.TextOverlayPlacements.NormalizeTopTabs(loaded.PictureCounterPositionTopTabs);
+            loaded.PictureCounterPositionSideTabs = Glide.Core.Settings.TextOverlayPlacements.Normalize(loaded.PictureCounterPositionSideTabs);
+            loaded.PictureCounterAlignmentTopTabs = Glide.Core.Settings.TextOverlayPlacements.NormalizeAlignment(loaded.PictureCounterAlignmentTopTabs);
+            loaded.PictureCounterAlignmentSideTabs = Glide.Core.Settings.TextOverlayPlacements.NormalizeAlignment(loaded.PictureCounterAlignmentSideTabs);
             // 4.8.0: the title-bar Show in Explorer button opens Glide's own Explorer tab by default. Files saved
             // before the setting existed omit it (so the new default applies; their hidden legacy
             // NavigateToFolderBehavior value never reflected a user choice); only an explicit

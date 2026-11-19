@@ -1,15 +1,112 @@
 namespace Glide.Core.Settings;
 
-/// <summary>Where the text overlay sits while the vertical (side) tab pane is showing (5.1.2). Master list for the setting.</summary>
+/// <summary>
+/// "Text overlay position" master lists (5.1.3). Each tab layout keeps its own position and alignment: tabs along the top
+/// (<see cref="TopTabsPositions"/>: the six picture positions and the title bar left/center/right) and tabs at the side
+/// (<see cref="All"/>: those plus the vertical tab pane top/bottom). Glide uses the pair matching the current tab layout.
+/// Before 5.1.3 the bar placements were a separate "Text overlay with vertical tabs" choice; settings schema 22 maps
+/// older files (see <see cref="MigrateLegacy"/>).
+/// </summary>
 public static class TextOverlayPlacements
 {
-    public const string OverPicture = "Over the picture";
-    public const string TabBarTop = "Top of the tab bar";
-    public const string TabBarBottom = "Bottom of the tab bar";
-    public const string TitleBar = "Title bar";
+    public const string TopLeft = "Top left";
+    public const string TopCenter = "Top center";
+    public const string TopRight = "Top right";
+    public const string BottomLeft = "Bottom left";
+    public const string BottomCenter = "Bottom center";
+    public const string BottomRight = "Bottom right";
+    public const string TitleBarLeft = "Title bar – left";
+    public const string TitleBarCenter = "Title bar – center";
+    public const string TitleBarRight = "Title bar – right";
+    public const string TabBarTop = "Vertical tabs – top";
+    public const string TabBarBottom = "Vertical tabs – bottom";
 
-    public static readonly string[] All = [OverPicture, TabBarTop, TabBarBottom, TitleBar];
+    public const string Default = TopRight;
+    public const string DefaultAlignment = "Automatic";
 
-    public static string Normalize(string? value) =>
-        All.FirstOrDefault(v => string.Equals(v, value?.Trim(), StringComparison.OrdinalIgnoreCase)) ?? OverPicture;
+    public static readonly string[] PicturePositions = [TopLeft, TopCenter, TopRight, BottomLeft, BottomCenter, BottomRight];
+    /// <summary>"Tabs along the top" card: no vertical-tab positions.</summary>
+    public static readonly string[] TopTabsPositions = [.. PicturePositions, TitleBarLeft, TitleBarCenter, TitleBarRight];
+    /// <summary>"Tabs at the side" card: every position.</summary>
+    public static readonly string[] All = [.. TopTabsPositions, TabBarTop, TabBarBottom];
+    public static readonly string[] Alignments = [DefaultAlignment, "Left", "Center", "Right"];
+
+    public static bool IsTitleBar(string? value) => value is TitleBarLeft or TitleBarCenter or TitleBarRight;
+    public static bool IsTabBar(string? value) => value is TabBarTop or TabBarBottom;
+    public static bool IsOverPicture(string? value) => !IsTitleBar(value) && !IsTabBar(value);
+
+    /// <summary>Exact match (case/space/dash-insensitive: "Title bar - left" works too); anything else is <see cref="Default"/>.</summary>
+    public static string Normalize(string? value)
+    {
+        var key = Key(value);
+        return All.FirstOrDefault(v => Key(v) == key) ?? Default;
+    }
+
+    /// <summary>A "Tabs along the top" position: as <see cref="Normalize"/>, but a vertical-tabs value becomes <see cref="Default"/>.</summary>
+    public static string NormalizeTopTabs(string? value)
+    {
+        var position = Normalize(value);
+        return IsTabBar(position) ? Default : position;
+    }
+
+    public static string NormalizeAlignment(string? value) =>
+        Alignments.FirstOrDefault(a => string.Equals(a, value?.Trim(), StringComparison.OrdinalIgnoreCase)) ?? DefaultAlignment;
+
+    /// <summary>True when the settings put the tabs at the side (the "Tabs at the side" card is the one in use).</summary>
+    public static bool SideTabsLayout(GlideSettingsState s) =>
+        s.TabsEnabled && string.Equals(s.TabStripPosition, "Side", StringComparison.OrdinalIgnoreCase);
+
+    public static string Position(GlideSettingsState s, bool sideTabs) =>
+        sideTabs ? Normalize(s.PictureCounterPositionSideTabs) : NormalizeTopTabs(s.PictureCounterPositionTopTabs);
+
+    public static string Alignment(GlideSettingsState s, bool sideTabs) =>
+        NormalizeAlignment(sideTabs ? s.PictureCounterAlignmentSideTabs : s.PictureCounterAlignmentTopTabs);
+
+    /// <summary>
+    /// Fills both cards from an older settings file. Schema ≤20: one picture position and alignment plus a separate
+    /// "Text overlay with vertical tabs" placement (<paramref name="legacySideTabsPlacement"/>) that only applied with side
+    /// tabs. Schema 21: one position (picture, title bar or vertical tabs) with an alignment per area.
+    /// </summary>
+    public static void MigrateLegacy(GlideSettingsState s, int sourceSchema, string? position, string? alignment,
+        string? legacySideTabsPlacement, string? titleBarAlignment, string? tabBarAlignment)
+    {
+        var pos = Normalize(position);
+        var align = NormalizeAlignment(alignment);
+        if (sourceSchema <= 20)
+        {
+            // The old position was always a picture position; the side-tabs placement applied only with side tabs.
+            pos = IsOverPicture(pos) ? pos : Default;
+            s.PictureCounterPositionTopTabs = pos;
+            s.PictureCounterAlignmentTopTabs = align;
+            s.PictureCounterPositionSideTabs = legacySideTabsPlacement?.Trim().ToLowerInvariant() switch
+            {
+                "top of the tab bar" => TabBarTop,
+                "bottom of the tab bar" => TabBarBottom,
+                "title bar" => TitleBarCenter,
+                _ => pos
+            };
+            s.PictureCounterAlignmentSideTabs = align;
+            return;
+        }
+
+        // Schema 21: a title-bar position applied with both layouts; a vertical-tabs one only with side tabs (with
+        // tabs along the top it fell back to Top right).
+        if (IsTabBar(pos))
+        {
+            s.PictureCounterPositionSideTabs = pos;
+            s.PictureCounterAlignmentSideTabs = NormalizeAlignment(tabBarAlignment ?? alignment);
+            s.PictureCounterPositionTopTabs = Default;
+            s.PictureCounterAlignmentTopTabs = align;
+            return;
+        }
+        var areaAlign = IsTitleBar(pos) ? NormalizeAlignment(titleBarAlignment ?? alignment) : align;
+        s.PictureCounterPositionTopTabs = pos;
+        s.PictureCounterPositionSideTabs = pos;
+        s.PictureCounterAlignmentTopTabs = areaAlign;
+        s.PictureCounterAlignmentSideTabs = areaAlign;
+    }
+
+    private static string Key(string? value) =>
+        string.Join(' ', (value ?? string.Empty).Replace('–', '-').Replace('-', ' ')
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries)).ToLowerInvariant();
 }

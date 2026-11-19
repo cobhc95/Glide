@@ -293,6 +293,7 @@ public partial class MainWindow : Window
                     BeginNativeResizeInteraction,
                     ResetPointerStateAfterNativeResize,
                     TitleActionHost);
+            if (_windowsBrowserFrame is { } frame) frame.IdleCursorHideHitTest = IsScreenPointOverBarePicture;
         };
         Closed += (_, _) =>
         {

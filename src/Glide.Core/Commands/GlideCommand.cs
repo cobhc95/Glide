@@ -129,5 +129,7 @@ public enum GlideCommand
     /// <summary>Explorer tab: show the folder (with the selected item selected) in the alternative file manager set in Settings. Appended (5.0.4).</summary>
     ShowInAlternativeFileManager,
     /// <summary>Turns "Loop this folder" on / off for the active tab (overrides "When the last image is reached"). Appended (5.0.7).</summary>
-    ToggleLoopFolder
+    ToggleLoopFolder,
+    /// <summary>Opens Settings at the text overlay placement card for the current tab layout (also right-click on the overlay). Appended (5.1.3).</summary>
+    OpenTextOverlaySettings
 }

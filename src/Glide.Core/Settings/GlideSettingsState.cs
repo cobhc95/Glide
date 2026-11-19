@@ -456,10 +456,13 @@ public sealed record GlideSettingsState
     public int PictureCounterFontSize { get; set; } = 13;
     public bool PictureCounterBold { get; set; } = true;
     public int PictureCounterOpacity { get; set; } = 85;
-    public string PictureCounterPosition { get; set; } = "Top right";
+    /// <summary>"Text overlay position" with tabs along the top (5.1.3; TextOverlayPlacements.TopTabsPositions).</summary>
+    public string PictureCounterPositionTopTabs { get; set; } = "Top right";
+    /// <summary>"Text overlay position" with tabs at the side (5.1.3; TextOverlayPlacements.All).</summary>
+    public string PictureCounterPositionSideTabs { get; set; } = "Top right";
     public string PictureCounterColor { get; set; } = "White";
-    public string PictureCounterAlignment { get; set; } = "Automatic";
-    public string PictureCounterSideTabsPlacement { get; set; } = "Over the picture";
+    public string PictureCounterAlignmentTopTabs { get; set; } = "Automatic";
+    public string PictureCounterAlignmentSideTabs { get; set; } = "Automatic";
     /// <summary>Per-anchor text overlay offsets (see TextOverlayOffsets); shown as "overlay.pictureOffsetX/Y" for the current position.</summary>
     public string PictureCounterOffsets { get; set; } = string.Empty;
     public bool PictureCounterShadow { get; set; } = true;

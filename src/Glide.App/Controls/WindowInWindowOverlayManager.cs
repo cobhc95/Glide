@@ -2004,6 +2004,9 @@ public sealed class WindowInWindowOverlayManager : IDisposable
         return -1;
     }
 
+    /// <summary>True when a point in input-host coordinates is over an overlay (body, handles or buttons).</summary>
+    public bool IsOverOverlay(Point inputHostPoint) => _items.Count > 0 && HitTest(inputHostPoint) >= 0;
+
     private int HitTest(Point p)
     {
         var chrome = HitTestChrome(p);

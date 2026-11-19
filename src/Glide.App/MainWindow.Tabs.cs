@@ -200,6 +200,7 @@ public partial class MainWindow
             }
         }
         Dispatcher.UIThread.Post(UpdateTabOverflowButtons, DispatcherPriority.Render);
+        LayoutTitleBarTextOverlay();
     }
 
     private static string? TabFullPath(TabState tab) => tab switch

@@ -226,6 +226,8 @@ public partial class SettingsWindow : Window
         ExplorerLocateOpensInCombo.SelectionChanged += (_, _) => UpdateLocateDependentControls();
         EndOfFolderActionCombo.SelectionChanged += (_, _) => UpdateEndOfFolderDependentControls();
         NewTabPositionCombo.SelectionChanged += (_, _) => UpdateNewTabKeyLabels();
+        TabPositionCombo.SelectionChanged += (_, _) => UpdateTextOverlayPlacementCards();
+        TabsCheck.IsCheckedChanged += (_, _) => UpdateTextOverlayPlacementCards();
         AfterTabCloseActivateCombo.SelectionChanged += (_, _) => UpdateAfterTabCloseCustomRow();
         SwitchToNewTabsCombo.SelectionChanged += (_, _) => UpdateNewTabKeyLabels();
         _searchDebounceTimer.Tick += (_, _) =>
@@ -521,6 +523,7 @@ public partial class SettingsWindow : Window
             SelectByText(TabPreviewResizeModifierCombo, Glide.Core.Workspace.TabPreviewSize.NormalizeModifier(s.TabPreviewResizeModifier));
             SelectByText(TabToolTipTextSizeCombo, s.TabToolTipTextSize is "Small" or "Large" ? s.TabToolTipTextSize : "Medium");
             SelectByText(TabPositionCombo, s.TabStripPosition == "Side" ? "Side" : "Top");
+            UpdateTextOverlayPlacementCards();
             ExplorerDefaultViewCombo.SelectedIndex = Glide.App.Explorer.ExplorerViewModes.IndexOf(ExplorerDefaultViews.Normalize(s.ExplorerDefaultView));
             SelectByText(ExplorerLocateOpensInCombo, Glide.Core.Navigation.ExplorerLocateTargets.Normalize(s.ExplorerLocateOpensIn));
             UpdateLocateDependentControls();
@@ -541,10 +544,13 @@ public partial class SettingsWindow : Window
             PictureTemplateBox.Text = s.PictureCounterTemplate;
             PictureFontSizeBox.Value = s.PictureCounterFontSize;
             PictureOpacityBox.Value = s.PictureCounterOpacity;
-            SelectByText(PicturePositionCombo, s.PictureCounterPosition);
-            SelectByText(PictureAlignmentCombo, s.PictureCounterAlignment);
-            SelectByText(PictureSideTabsPlacementCombo, TextOverlayPlacements.Normalize(s.PictureCounterSideTabsPlacement));
-            var textOffset = TextOverlayOffsets.Get(s.PictureCounterOffsets, s.PictureCounterPosition);
+            SelectByText(TopTabsPositionCombo, TextOverlayPlacements.Position(s, sideTabs: false));
+            SelectByText(TopTabsAlignmentCombo, TextOverlayPlacements.Alignment(s, sideTabs: false));
+            SelectByText(SideTabsPositionCombo, TextOverlayPlacements.Position(s, sideTabs: true));
+            SelectByText(SideTabsAlignmentCombo, TextOverlayPlacements.Alignment(s, sideTabs: true));
+            // The offset boxes show (and save) the offsets of the position in use when the window loaded.
+            _textOverlayOffsetPosition = TextOverlayPlacements.Position(s, TextOverlayPlacements.SideTabsLayout(s));
+            var textOffset = TextOverlayOffsets.Get(s.PictureCounterOffsets, _textOverlayOffsetPosition);
             PictureOffsetXBox.Value = textOffset.X;
             PictureOffsetYBox.Value = textOffset.Y;
             SelectByText(PictureColorCombo, s.PictureCounterColor);
@@ -764,10 +770,12 @@ public partial class SettingsWindow : Window
         state.PictureCounterTemplate = string.IsNullOrWhiteSpace(PictureTemplateBox.Text) ? "[{index}/{total}]" : PictureTemplateBox.Text!;
         state.PictureCounterFontSize = (int)(PictureFontSizeBox.Value ?? 13);
         state.PictureCounterOpacity = (int)(PictureOpacityBox.Value ?? 85);
-        state.PictureCounterPosition = SelectedText(PicturePositionCombo, "Top right");
-        state.PictureCounterAlignment = SelectedText(PictureAlignmentCombo, "Automatic");
-        state.PictureCounterSideTabsPlacement = SelectedText(PictureSideTabsPlacementCombo, TextOverlayPlacements.OverPicture);
-        state.PictureCounterOffsets = TextOverlayOffsets.Set(state.PictureCounterOffsets, state.PictureCounterPosition,
+        // Each tab layout has its own position and alignment (the two "Text overlay placement" cards).
+        state.PictureCounterPositionTopTabs = TextOverlayPlacements.NormalizeTopTabs(SelectedText(TopTabsPositionCombo, TextOverlayPlacements.Default));
+        state.PictureCounterAlignmentTopTabs = TextOverlayPlacements.NormalizeAlignment(SelectedText(TopTabsAlignmentCombo, TextOverlayPlacements.DefaultAlignment));
+        state.PictureCounterPositionSideTabs = TextOverlayPlacements.Normalize(SelectedText(SideTabsPositionCombo, TextOverlayPlacements.Default));
+        state.PictureCounterAlignmentSideTabs = TextOverlayPlacements.NormalizeAlignment(SelectedText(SideTabsAlignmentCombo, TextOverlayPlacements.DefaultAlignment));
+        state.PictureCounterOffsets = TextOverlayOffsets.Set(state.PictureCounterOffsets, _textOverlayOffsetPosition,
             (int)(PictureOffsetXBox.Value ?? 0), (int)(PictureOffsetYBox.Value ?? 0));
         state.PictureCounterColor = SelectedText(PictureColorCombo, "White");
         state.OverlayDefaultOpacity = (int)(OverlayOpacityBox.Value ?? 100);
@@ -2278,7 +2286,7 @@ public partial class SettingsWindow : Window
         M("folderNav.showCounter", ShowFolderCounterCheck); M("folderNav.counterGrandparent", FolderCounterGrandparentCheck);
         M("folderNav.next", FolderNavNextCheck); M("folderNav.explore", FolderNavExploreCheck); M("folderNav.skipEmpty", FolderNavSkipEmptyCheck); M("folderNav.includeHidden", FolderNavIncludeHiddenCheck); M("folderNav.wrap", FolderNavWrapCheck); M("folderNav.openFirst", FolderNavFirstImageCheck); M("folderNav.order", FolderNavOrderCombo);
         M("overlay.pictureCounter", PictureCounterCheck); M("overlay.pictureTemplate", PictureTemplateBox); M("overlay.pictureFontSize", PictureFontSizeBox); M("overlay.pictureOffsetX", PictureOffsetXBox); M("overlay.pictureOffsetY", PictureOffsetYBox);
-        M("overlay.pictureBold", PictureBoldCheck); M("overlay.pictureOpacity", PictureOpacityBox); M("overlay.picturePosition", PicturePositionCombo); M("overlay.pictureAlignment", PictureAlignmentCombo); M("overlay.pictureSideTabsPlacement", PictureSideTabsPlacementCombo);
+        M("overlay.pictureBold", PictureBoldCheck); M("overlay.pictureOpacity", PictureOpacityBox); M("overlay.picturePositionTopTabs", TopTabsPositionCombo); M("overlay.pictureAlignmentTopTabs", TopTabsAlignmentCombo); M("overlay.picturePositionSideTabs", SideTabsPositionCombo); M("overlay.pictureAlignmentSideTabs", SideTabsAlignmentCombo);
         M("overlay.pictureColor", PictureColorCombo); M("overlay.pictureShadow", PictureShadowCheck); M("overlay.pictureBorder", PictureBorderCheck); M("overlay.defaultOpacity", OverlayOpacityBox); M("overlay.zoomStep", OverlayZoomStepBox);
         M("overlay.rememberFolder", OverlayRememberFolderCheck); M("overlay.scaleWithWindow", OverlayScaleWithWindowCheck); M("overlay.animationRegion", OverlayAnimationRegionCombo); M("overlay.animationSpeedDipsPerSecond", OverlayAnimationSpeedBox); M("overlay.animationTurnIntervalMs", OverlayAnimationTurnIntervalBox); M("overlay.animationTurnAngleDegrees", OverlayAnimationTurnAngleBox); M("overlay.animationPauseWhileInteracting", OverlayAnimationPauseCheck); M("overlay.animationAvoidOverlap", OverlayAnimationAvoidOverlapCheck); M("overlay.animationRefreshRateHz", OverlayAnimationRefreshRateCombo); M("overlay.defaultDirectory", OverlayDefaultDirectoryBox); M("profiles.defaultDirectory", ProfileDefaultDirectoryBox); M("overlay.persistSession", OverlayPersistSessionCheck); M("overlay.keyboardZoom", OverlayKeyboardZoomCheck); M("overlay.highlightSelected", OverlayHighlightCheck); M("overlay.rememberZoom", OverlayRememberZoomCheck);
         M("windows.externalOpenBehavior", ExternalOpenBehaviorCombo); M("windows.external1", External1Box); M("windows.external2", External2Box); M("windows.external3", External3Box);
@@ -2805,6 +2813,23 @@ public partial class SettingsWindow : Window
     {
         var light = string.Equals(SelectedText(ThemeCombo), Glide.Core.Settings.SettingChoiceNames.Light, StringComparison.OrdinalIgnoreCase);
         return new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse(light ? Glide.App.ThemePalette.MutedLight : Glide.App.ThemePalette.MutedDark));
+    }
+
+    private string _textOverlayOffsetPosition = TextOverlayPlacements.Default;
+
+    /// <summary>
+    /// "Text overlay placement": the card matching the Tabs settings on this page (tabs on and at the side, or not) gets the
+    /// accent outline and the "In use now" badge; follows those controls live. Both cards stay editable.
+    /// </summary>
+    private void UpdateTextOverlayPlacementCards()
+    {
+        var side = TabsCheck.IsChecked == true && string.Equals(SelectedText(TabPositionCombo, "Top"), "Side", StringComparison.OrdinalIgnoreCase);
+        foreach (var (card, badge, inUse) in new[] { (TopTabsPlacementCard, TopTabsInUseBadge, !side), (SideTabsPlacementCard, SideTabsInUseBadge, side) })
+        {
+            badge.IsVisible = inUse;
+            card.BorderThickness = new Avalonia.Thickness(inUse ? 2 : 1);
+            card.Bind(Border.BorderBrushProperty, card.GetResourceObservable(inUse ? "BrushAccent" : "BrushBorder"));
+        }
     }
 
     private static string SelectedText(ComboBox combo, string fallback = "") =>

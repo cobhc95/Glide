@@ -855,6 +855,8 @@ public partial class MainWindow
         // 5.0.4 Back up and restore (MainWindow.Backup.cs): Settings at the card, then its Export / Import flow.
         actions[GlideCommand.ExportGlideBackup] = () => OpenBackupFromCommandAsync(import: false);
         actions[GlideCommand.ImportGlideBackup] = () => OpenBackupFromCommandAsync(import: true);
+        // 5.1.3: right-click on the text overlay, or this action: Settings at its placement card (MainWindow.TextOverlayDrag.cs).
+        actions[GlideCommand.OpenTextOverlaySettings] = () => { OpenTextOverlaySettings(); return Task.CompletedTask; };
         MainWindowCommandDispatcher.AssertComplete(actions.Keys);
         return new MainWindowCommandDispatcher(actions);
     }

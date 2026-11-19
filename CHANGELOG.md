@@ -4,6 +4,16 @@ All notable changes to Glide Image Viewer are documented here. The format is bas
 [Keep a Changelog](https://keepachangelog.com/), and the project uses dotted feature releases with
 hyphenated follow-up corrections (for example `4.2.0-1`).
 
+## [5.1.3] - 2026-11-19
+
+### Added
+- Right-clicking the text overlay (over the picture, in the title bar or in the vertical tab bar) opens Settings at its placement card for the current tab layout ("In use now"), not the context menu; also the action "Open text overlay settings".
+
+### Changed
+- A title-bar text overlay never overlaps tabs or buttons: "left" pushes the tabs right by its width, "right" reserves space before the title-bar buttons, "center" uses the free space after the tabs or else reserves space there (tabs shrink or scroll); it re-lays out as the text, tab count or window width changes.
+- Text overlay placement is split by tab layout: two cards, "Tabs along the top" (picture positions, Title bar – left/center/right) and "Tabs at the side" (those plus Vertical tabs – top/bottom), each with its own position and alignment; Glide uses the card matching your tabs, marked "In use now". Replaces the separate "Text overlay with vertical tabs" setting and the single position (migrated, settings schema 22). In a bar, Automatic lines the counter and folder lines up as one block instead of drifting apart.
+- Hide cursor: the pointer now always shows (in both modes, including Always while over the picture) over Window-in-Window overlays and their handles/buttons, the status/button bar, the title bar and tabs, menus, Explorer, popups and tooltips; it hides only over the bare picture and reappears at once when moved onto chrome.
+
 ## [5.1.2] - 2026-11-19
 
 ### Added
