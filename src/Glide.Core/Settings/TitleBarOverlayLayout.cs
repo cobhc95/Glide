@@ -15,10 +15,20 @@ public readonly record struct TitleBarOverlayLayout(double OverlayX, double Tabs
     /// <param name="chromeWidth">Width of the whole title-bar row.</param>
     /// <param name="buttonGroupWidth">Width of the right-hand group (title-bar actions and caption buttons).</param>
     /// <param name="tabsWidth">Width the tabs and New tab button want when unconstrained (0 with side tabs / no tabs).</param>
+    /// <summary>
+    /// Overlay content width from a measured DesiredSize (5.1.4). DesiredSize includes the margin, and the margin is where this
+    /// layout puts the overlay, so using it directly fed the position back into the width: Title bar right/center flickered
+    /// between two states. Always strip the margin.
+    /// </summary>
+    public static double ContentWidth(double desiredWidth, double marginLeft, double marginRight) =>
+        Math.Max(0, desiredWidth - Math.Max(0, marginLeft) - Math.Max(0, marginRight));
+
     public static TitleBarOverlayLayout Compute(string placement, double overlayWidth, double chromeWidth, double buttonGroupWidth, double tabsWidth)
     {
-        var w = Math.Max(0, overlayWidth);
-        var tabsArea = Math.Max(0, chromeWidth - Math.Max(0, buttonGroupWidth));
+        // Whole pixels (5.1.4): sub-pixel measuring jitter must not change the reserved width and trigger a tab rebuild.
+        var w = Math.Ceiling(Math.Max(0, overlayWidth));
+        chromeWidth = Math.Round(Math.Max(0, chromeWidth));
+        var tabsArea = Math.Max(0, chromeWidth - Math.Round(Math.Max(0, buttonGroupWidth)));
         var reserve = w + Padding;
         var rightX = Math.Max(0, tabsArea - w - Padding / 2);
         switch (placement)
@@ -28,7 +38,7 @@ public readonly record struct TitleBarOverlayLayout(double OverlayX, double Tabs
             case TextOverlayPlacements.TitleBarRight:
                 return new(rightX, 0, reserve);
             default:
-                var centerX = (chromeWidth - w) / 2;
+                var centerX = Math.Round((chromeWidth - w) / 2);
                 var tabsEnd = Math.Min(Math.Max(0, tabsWidth), tabsArea);
                 if (centerX >= tabsEnd + Padding && centerX + w + Padding <= tabsArea)
                     return new(centerX, 0, 0);

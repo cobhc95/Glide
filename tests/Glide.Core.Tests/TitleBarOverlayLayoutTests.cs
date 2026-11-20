@@ -35,4 +35,28 @@ public sealed class TitleBarOverlayLayoutTests
         Assert.True(crowded.TabsRightReserve >= 60);
         Assert.True(crowded.OverlayX >= 800 - crowded.TabsRightReserve && crowded.OverlayX + 60 <= 800);
     }
+
+    // 5.1.4 flicker: DesiredSize includes the margin the layout sets; feeding the result back must give the same result.
+    [Theory]
+    [InlineData(TextOverlayPlacements.TitleBarLeft)]
+    [InlineData(TextOverlayPlacements.TitleBarRight)]
+    [InlineData(TextOverlayPlacements.TitleBarCenter)]
+    public void Layout_is_stable_when_its_result_is_fed_back(string placement)
+    {
+        const double content = 87.4, chromeLeft = 4;
+        foreach (var tabs in new[] { 0.0, 300, 2000 })
+        {
+            double marginLeft = chromeLeft;
+            TitleBarOverlayLayout? previous = null;
+            for (var i = 0; i < 6; i++)
+            {
+                var desired = content + marginLeft + (i % 2) * 0.3; // measured with the current margin, plus sub-pixel jitter
+                var width = TitleBarOverlayLayout.ContentWidth(desired, marginLeft, 0);
+                var l = TitleBarOverlayLayout.Compute(placement, width, 1000.3, 200.2, tabs);
+                if (previous is { } p) Assert.Equal(p, l);
+                previous = l;
+                marginLeft = chromeLeft + l.OverlayX;
+            }
+        }
+    }
 }

@@ -555,7 +555,26 @@ public partial class SettingsWindow
         e.Handled = true;
         var shortcut = KeyboardShortcutText.From(e);
         if (string.IsNullOrWhiteSpace(shortcut) || IsModifierOnly(e.Key)) return;
-        AssignCapturedShortcut(shortcut);
+        // Applied on release (SettingsKeyUp), so the key's key-up / auto-repeat never reaches a conflict dialog.
+        _hotkeyCaptureRelease.Press(e.Key, shortcut);
+    }
+
+    private readonly HotkeyCaptureRelease<Key> _hotkeyCaptureRelease = new();
+
+    /// <summary>Tunnel key-up: the released captured key is swallowed and its shortcut applied.</summary>
+    private void SettingsKeyUp(object? sender, KeyEventArgs e)
+    {
+        if (!_hotkeyCaptureRelease.IsPending) return;
+        var shortcut = _hotkeyCaptureRelease.Release(e.Key);
+        e.Handled = true;
+        if (shortcut is not null && _hotkeyCaptureActionId is not null) AssignCapturedShortcut(shortcut);
+    }
+
+    /// <summary>Settings lost focus before the key-up arrived: apply the pending shortcut now.</summary>
+    private void FlushPendingHotkeyCapture()
+    {
+        var shortcut = _hotkeyCaptureRelease.Flush();
+        if (shortcut is not null && _hotkeyCaptureActionId is not null) AssignCapturedShortcut(shortcut);
     }
 
     private async void AssignCapturedShortcut(string shortcut)
@@ -618,6 +637,7 @@ public partial class SettingsWindow
         var wasSearch = _hotkeyCaptureFromSearch;
         var actionId = _hotkeyCaptureActionId;
         ClearHotkeyCaptureFlash();
+        _hotkeyCaptureRelease.Clear();
         _hotkeyCaptureActionId = null;
         _hotkeyCaptureOldShortcut = null;
         _hotkeyCaptureAdd = false;

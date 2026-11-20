@@ -254,12 +254,13 @@
                         <TextBlock Grid.Column="1" Text="Tabs along the top" FontWeight="SemiBold" FontSize="14" VerticalAlignment="Center" Margin="10,0,8,0"/>
                         <Border x:Name="TopTabsInUseBadge" Grid.Column="2" Background="{DynamicResource BrushAccent}" CornerRadius="9" Padding="9,1" VerticalAlignment="Center" IsVisible="False"><TextBlock Text="In use now" Foreground="White" FontSize="11"/></Border>
                       </Grid>
-                      <Grid ColumnDefinitions="90,*"><TextBlock Text="Position" VerticalAlignment="Center"/><ComboBox x:Name="TopTabsPositionCombo" Grid.Column="1" HorizontalAlignment="Stretch"><ComboBoxItem Content="Top left"/><ComboBoxItem Content="Top center"/><ComboBoxItem Content="Top right"/><ComboBoxItem Content="Bottom left"/><ComboBoxItem Content="Bottom center"/><ComboBoxItem Content="Bottom right"/><ComboBoxItem Content="Title bar – left"/><ComboBoxItem Content="Title bar – center"/><ComboBoxItem Content="Title bar – right"/></ComboBox></Grid>
+                      <Grid ColumnDefinitions="90,*"><TextBlock Text="Position" VerticalAlignment="Center"/><ComboBox x:Name="TopTabsPositionCombo" Grid.Column="1" HorizontalAlignment="Stretch"><ComboBoxItem Content="Top left"/><ComboBoxItem Content="Top center"/><ComboBoxItem Content="Top right"/><ComboBoxItem Content="Bottom left"/><ComboBoxItem Content="Bottom center"/><ComboBoxItem Content="Bottom right"/><ComboBoxItem Content="Title bar – left"/><ComboBoxItem Content="Title bar – center"/><ComboBoxItem Content="Title bar – right"/><ComboBoxItem Content="Custom"/></ComboBox></Grid>
                       <Grid ColumnDefinitions="90,*"><TextBlock Text="Alignment" VerticalAlignment="Center"/><ComboBox x:Name="TopTabsAlignmentCombo" Grid.Column="1" HorizontalAlignment="Stretch"><ComboBoxItem Content="Automatic"/><ComboBoxItem Content="Left"/><ComboBoxItem Content="Center"/><ComboBoxItem Content="Right"/></ComboBox></Grid>
                       <StackPanel Spacing="2">
                         <TextBlock Classes="phaseNote" Text="Positions available:"/>
                         <TextBlock Classes="phaseNote" Text="  • Over the picture: top / bottom × left, center, right" TextWrapping="Wrap"/>
                         <TextBlock Classes="phaseNote" Text="  • Title bar – left, center, right"/>
+                        <TextBlock Classes="phaseNote" Text="  • Custom: where you Alt+dragged it"/>
                       </StackPanel>
                     </StackPanel>
                   </Border>
@@ -270,13 +271,14 @@
                         <TextBlock Grid.Column="1" Text="Tabs at the side" FontWeight="SemiBold" FontSize="14" VerticalAlignment="Center" Margin="10,0,8,0"/>
                         <Border x:Name="SideTabsInUseBadge" Grid.Column="2" Background="{DynamicResource BrushAccent}" CornerRadius="9" Padding="9,1" VerticalAlignment="Center" IsVisible="False"><TextBlock Text="In use now" Foreground="White" FontSize="11"/></Border>
                       </Grid>
-                      <Grid ColumnDefinitions="90,*"><TextBlock Text="Position" VerticalAlignment="Center"/><ComboBox x:Name="SideTabsPositionCombo" Grid.Column="1" HorizontalAlignment="Stretch"><ComboBoxItem Content="Top left"/><ComboBoxItem Content="Top center"/><ComboBoxItem Content="Top right"/><ComboBoxItem Content="Bottom left"/><ComboBoxItem Content="Bottom center"/><ComboBoxItem Content="Bottom right"/><ComboBoxItem Content="Title bar – left"/><ComboBoxItem Content="Title bar – center"/><ComboBoxItem Content="Title bar – right"/><ComboBoxItem Content="Vertical tabs – top"/><ComboBoxItem Content="Vertical tabs – bottom"/></ComboBox></Grid>
+                      <Grid ColumnDefinitions="90,*"><TextBlock Text="Position" VerticalAlignment="Center"/><ComboBox x:Name="SideTabsPositionCombo" Grid.Column="1" HorizontalAlignment="Stretch"><ComboBoxItem Content="Top left"/><ComboBoxItem Content="Top center"/><ComboBoxItem Content="Top right"/><ComboBoxItem Content="Bottom left"/><ComboBoxItem Content="Bottom center"/><ComboBoxItem Content="Bottom right"/><ComboBoxItem Content="Title bar – left"/><ComboBoxItem Content="Title bar – center"/><ComboBoxItem Content="Title bar – right"/><ComboBoxItem Content="Vertical tabs – top"/><ComboBoxItem Content="Vertical tabs – bottom"/><ComboBoxItem Content="Custom"/></ComboBox></Grid>
                       <Grid ColumnDefinitions="90,*"><TextBlock Text="Alignment" VerticalAlignment="Center"/><ComboBox x:Name="SideTabsAlignmentCombo" Grid.Column="1" HorizontalAlignment="Stretch"><ComboBoxItem Content="Automatic"/><ComboBoxItem Content="Left"/><ComboBoxItem Content="Center"/><ComboBoxItem Content="Right"/></ComboBox></Grid>
                       <StackPanel Spacing="2">
                         <TextBlock Classes="phaseNote" Text="Positions available:"/>
                         <TextBlock Classes="phaseNote" Text="  • Over the picture: top / bottom × left, center, right" TextWrapping="Wrap"/>
                         <TextBlock Classes="phaseNote" Text="  • Title bar – left, center, right"/>
                         <TextBlock Classes="phaseNote" Text="  • Vertical tabs – top, bottom"/>
+                        <TextBlock Classes="phaseNote" Text="  • Custom: where you Alt+dragged it"/>
                       </StackPanel>
                     </StackPanel>
                   </Border>
@@ -286,7 +288,7 @@
                 <CheckBox x:Name="PictureBoldCheck" Content="Text overlay bold"/>
                 <Grid ColumnDefinitions="245,220,*" Margin="6,0,0,0"><TextBlock Text="Text overlay colour" VerticalAlignment="Center"/><ComboBox x:Name="PictureColorCombo" Grid.Column="1" Width="210"><ComboBoxItem Content="White"/><ComboBoxItem Content="Soft gray"/><ComboBoxItem Content="Accent"/><ComboBoxItem Content="Amber"/></ComboBox></Grid>
                 <Grid ColumnDefinitions="245,150,*" Margin="6,0,0,0"><TextBlock Text="Text overlay opacity (%)" VerticalAlignment="Center"/><NumericUpDown x:Name="PictureOpacityBox" Grid.Column="1" Minimum="10" Maximum="100"/></Grid>
-                <Grid ColumnDefinitions="245,150,*" Margin="6,0,0,0"><TextBlock Text="Text overlay horizontal offset (px)" VerticalAlignment="Center"/><NumericUpDown x:Name="PictureOffsetXBox" Grid.Column="1" Minimum="-4000" Maximum="4000"/><TextBlock Grid.Column="2" Classes="phaseNote" Margin="8,0,0,0" VerticalAlignment="Center" TextWrapping="Wrap" Text="Per position. Alt+drag the text overlay to move it."/></Grid>
+                <Grid ColumnDefinitions="245,150,*" Margin="6,0,0,0"><TextBlock Text="Text overlay horizontal offset (px)" VerticalAlignment="Center"/><NumericUpDown x:Name="PictureOffsetXBox" Grid.Column="1" Minimum="-4000" Maximum="4000"/><TextBlock Grid.Column="2" Classes="phaseNote" Margin="8,0,0,0" VerticalAlignment="Center" TextWrapping="Wrap" Text="For the Custom position. Alt+drag the text overlay to move it (the card switches to Custom); pick a preset to reset."/></Grid>
                 <Grid ColumnDefinitions="245,150,*" Margin="6,0,0,0"><TextBlock Text="Text overlay vertical offset (px)" VerticalAlignment="Center"/><NumericUpDown x:Name="PictureOffsetYBox" Grid.Column="1" Minimum="-4000" Maximum="4000"/></Grid>
                 <CheckBox x:Name="PictureShadowCheck" Content="Text overlay shadow"/>
                 <CheckBox x:Name="PictureBorderCheck" Content="Text overlay border" ToolTip.Tip="Encloses every line of the text overlay (the counter and the folder position line) in one box, styled like the Image information panel."/>

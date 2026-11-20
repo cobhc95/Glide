@@ -8,8 +8,9 @@ using Glide.Core.Settings;
 namespace Glide.App;
 
 /// <summary>
-/// Alt+drag the text overlay to move it (5.1.2). The offset is remembered per position anchor
-/// (<see cref="TextOverlayOffsets"/>) and is the same value as the "Text overlay horizontal / vertical offset" settings.
+/// Alt+drag the text overlay to move it (5.1.2). Since 5.1.4 a drop always switches the card in use to "Custom" over the
+/// picture (also when dragged out of the title bar or the vertical tab bar): the nearest picture anchor plus an offset
+/// (<see cref="TextOverlayLayout.CustomFromDrop"/>), the same offset as the "Text overlay horizontal / vertical offset" settings.
 /// Alt+drag only starts on the overlay's own box, so every other Alt+drag keeps its meaning.
 /// </summary>
 public partial class MainWindow
@@ -18,6 +19,7 @@ public partial class MainWindow
     private Point _textOverlayDragStart;
     private (int X, int Y) _textOverlayDragStartOffset;
     private (int X, int Y) _textOverlayDragOffset;
+    private Point? _textOverlayDragOrigin;   // overlay top-left in picture-area coordinates at press
 
     /// <summary>Called once from the constructor.</summary>
     private void AttachTextOverlayDrag()
@@ -67,7 +69,9 @@ public partial class MainWindow
         if ((e.KeyModifiers & KeyModifiers.Alt) == 0 || !e.GetCurrentPoint(this).Properties.IsLeftButtonPressed || !IsPointerOnTextOverlay(e)) return;
         _textOverlayDragPointer = e.Pointer;
         _textOverlayDragStart = e.GetPosition(this);
-        _textOverlayDragStartOffset = _textOverlayDragOffset = OverlayOptionsView.PictureCounterOffset(SideTabsActive);
+        _textOverlayDragStartOffset = _textOverlayDragOffset = ReferenceEquals(CornerCounterHost.Parent, ImageView)
+            ? OverlayOptionsView.PictureCounterOffset(SideTabsActive) : (0, 0);
+        _textOverlayDragOrigin = CornerCounterHost.TranslatePoint(new Point(0, 0), ImageView);
         e.Pointer.Capture(this);
         e.Handled = true;
     }
@@ -95,9 +99,14 @@ public partial class MainWindow
     {
         if (_textOverlayDragPointer is null) return;
         _textOverlayDragPointer = null;
-        if (!save || _textOverlayDragOffset == _textOverlayDragStartOffset) return;
-        _settings.PictureCounterOffsets = TextOverlayOffsets.Set(_settings.PictureCounterOffsets, EffectiveTextOverlayPlacement,
-            _textOverlayDragOffset.X, _textOverlayDragOffset.Y);
+        if (!save || _textOverlayDragOffset == _textOverlayDragStartOffset || _textOverlayDragOrigin is not { } origin)
+            return;
+        var dropX = origin.X + _textOverlayDragOffset.X - _textOverlayDragStartOffset.X;
+        var dropY = origin.Y + _textOverlayDragOffset.Y - _textOverlayDragStartOffset.Y;
+        var (anchor, x, y) = TextOverlayLayout.CustomFromDrop(ImageView.Bounds.Width, ImageView.Bounds.Height,
+            CornerCounterHost.Bounds.Width, CornerCounterHost.Bounds.Height, dropX, dropY,
+            TextOverlayPictureSideGap, TextOverlayPictureTopGap, TextOverlayBottomInset());
+        TextOverlayPlacements.SetCustom(_settings, SideTabsActive, anchor, x, y);
         SaveSettingsAndPublish();
     }
 }

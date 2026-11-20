@@ -127,7 +127,7 @@ public partial class MainWindow
             return;
         }
 
-        var position = EffectiveTextOverlayPlacement;
+        var position = OverlayOptionsView.PictureCounterAnchor(SideTabsActive);   // Custom: its anchor (+ offset below)
         CornerCounterHost.HorizontalAlignment = position.Contains("left", StringComparison.OrdinalIgnoreCase)
             ? Avalonia.Layout.HorizontalAlignment.Left
             : position.Contains("center", StringComparison.OrdinalIgnoreCase)
@@ -139,9 +139,7 @@ public partial class MainWindow
         ApplyTextOverlayAlignment(EffectiveTextOverlayAlignment);   // the alignment of the card for the current tab layout
         var (offsetX, offsetY) = OverlayOptionsView.PictureCounterOffset(SideTabsActive);
         CornerCounterHost.RenderTransform = offsetX == 0 && offsetY == 0 ? null : new TranslateTransform(offsetX, offsetY);
-        CornerCounterHost.Margin = CornerCounterHost.VerticalAlignment == Avalonia.Layout.VerticalAlignment.Top
-            ? new Thickness(15, 28, 15, 0)
-            : new Thickness(15, 0, 15, StatusBarOptionsView.ShowStatusSurface ? 82 : 16);
+        CornerCounterHost.Margin = TextOverlayPictureMargin();
         UpdatePictureCounter();
     }
 

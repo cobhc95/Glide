@@ -227,6 +227,10 @@ public partial class SettingsWindow : Window
         EndOfFolderActionCombo.SelectionChanged += (_, _) => UpdateEndOfFolderDependentControls();
         NewTabPositionCombo.SelectionChanged += (_, _) => UpdateNewTabKeyLabels();
         TabPositionCombo.SelectionChanged += (_, _) => UpdateTextOverlayPlacementCards();
+        TopTabsPositionCombo.SelectionChanged += (_, _) => TextOverlayPositionComboChanged(sideTabs: false);
+        SideTabsPositionCombo.SelectionChanged += (_, _) => TextOverlayPositionComboChanged(sideTabs: true);
+        PictureOffsetXBox.ValueChanged += (_, _) => TextOverlayOffsetBoxChanged();
+        PictureOffsetYBox.ValueChanged += (_, _) => TextOverlayOffsetBoxChanged();
         TabsCheck.IsCheckedChanged += (_, _) => UpdateTextOverlayPlacementCards();
         AfterTabCloseActivateCombo.SelectionChanged += (_, _) => UpdateAfterTabCloseCustomRow();
         SwitchToNewTabsCombo.SelectionChanged += (_, _) => UpdateNewTabKeyLabels();
@@ -284,6 +288,8 @@ public partial class SettingsWindow : Window
         {
             if (_hotkeyLookupCapturing || _hotkeyCaptureActionId is not null) SettingsKeyDown(sender, e);
         }, Avalonia.Interactivity.RoutingStrategies.Tunnel);
+        AddHandler(KeyUpEvent, SettingsKeyUp, Avalonia.Interactivity.RoutingStrategies.Tunnel);
+        Deactivated += (_, _) => FlushPendingHotkeyCapture();
         var startPage = GroupOf(_activeCategory);
         PageTitle.Text = startPage.Title;
         PageSubtitle.Text = startPage.Subtitle;
@@ -548,9 +554,11 @@ public partial class SettingsWindow : Window
             SelectByText(TopTabsAlignmentCombo, TextOverlayPlacements.Alignment(s, sideTabs: false));
             SelectByText(SideTabsPositionCombo, TextOverlayPlacements.Position(s, sideTabs: true));
             SelectByText(SideTabsAlignmentCombo, TextOverlayPlacements.Alignment(s, sideTabs: true));
-            // The offset boxes show (and save) the offsets of the position in use when the window loaded.
-            _textOverlayOffsetPosition = TextOverlayPlacements.Position(s, TextOverlayPlacements.SideTabsLayout(s));
-            var textOffset = TextOverlayOffsets.Get(s.PictureCounterOffsets, _textOverlayOffsetPosition);
+            // 5.1.4: the offset boxes edit the Custom position of the card in use when the window loaded (zero on a preset).
+            _textOverlayOffsetSideTabs = TextOverlayPlacements.SideTabsLayout(s);
+            _textOverlayOffsetsMap = s.PictureCounterOffsets;
+            _textOverlayPendingAnchor = null;
+            var textOffset = TextOverlayPlacements.Offset(s, _textOverlayOffsetSideTabs);
             PictureOffsetXBox.Value = textOffset.X;
             PictureOffsetYBox.Value = textOffset.Y;
             SelectByText(PictureColorCombo, s.PictureCounterColor);
@@ -775,8 +783,11 @@ public partial class SettingsWindow : Window
         state.PictureCounterAlignmentTopTabs = TextOverlayPlacements.NormalizeAlignment(SelectedText(TopTabsAlignmentCombo, TextOverlayPlacements.DefaultAlignment));
         state.PictureCounterPositionSideTabs = TextOverlayPlacements.Normalize(SelectedText(SideTabsPositionCombo, TextOverlayPlacements.Default));
         state.PictureCounterAlignmentSideTabs = TextOverlayPlacements.NormalizeAlignment(SelectedText(SideTabsAlignmentCombo, TextOverlayPlacements.DefaultAlignment));
-        state.PictureCounterOffsets = TextOverlayOffsets.Set(state.PictureCounterOffsets, _textOverlayOffsetPosition,
-            (int)(PictureOffsetXBox.Value ?? 0), (int)(PictureOffsetYBox.Value ?? 0));
+        int offsetX = (int)(PictureOffsetXBox.Value ?? 0), offsetY = (int)(PictureOffsetYBox.Value ?? 0);
+        if (_textOverlayPendingAnchor is not null && TextOverlayPlacements.Position(state, _textOverlayOffsetSideTabs) == TextOverlayPlacements.Custom)
+            TextOverlayPlacements.SetCustom(state, _textOverlayOffsetSideTabs, _textOverlayPendingAnchor, offsetX, offsetY);
+        else
+            TextOverlayPlacements.SetOffset(state, _textOverlayOffsetSideTabs, offsetX, offsetY);
         state.PictureCounterColor = SelectedText(PictureColorCombo, "White");
         state.OverlayDefaultOpacity = (int)(OverlayOpacityBox.Value ?? 100);
         state.OverlayZoomStepPercent = (int)(OverlayZoomStepBox.Value ?? 10);
@@ -2815,7 +2826,48 @@ public partial class SettingsWindow : Window
         return new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse(light ? Glide.App.ThemePalette.MutedLight : Glide.App.ThemePalette.MutedDark));
     }
 
-    private string _textOverlayOffsetPosition = TextOverlayPlacements.Default;
+    private bool _textOverlayOffsetSideTabs;
+    private string _textOverlayOffsetsMap = string.Empty;
+    /// <summary>Anchor for a Custom position started from the offset boxes on a picture preset (the preset left behind).</summary>
+    private string? _textOverlayPendingAnchor;
+    private bool _syncingTextOverlayOffsets;
+
+    private ComboBox TextOverlayOffsetCombo => _textOverlayOffsetSideTabs ? SideTabsPositionCombo : TopTabsPositionCombo;
+
+    /// <summary>
+    /// 5.1.4: picking a preset on the card in use zeroes the offset boxes (presets always reset); picking Custom shows its
+    /// stored offset again.
+    /// </summary>
+    private void TextOverlayPositionComboChanged(bool sideTabs)
+    {
+        if (_loadingControls || _syncingTextOverlayOffsets || sideTabs != _textOverlayOffsetSideTabs) return;
+        _syncingTextOverlayOffsets = true;
+        try
+        {
+            _textOverlayPendingAnchor = null;
+            var custom = TextOverlayOffsets.GetCustom(_textOverlayOffsetsMap, sideTabs);
+            var isCustom = SelectedText(TextOverlayOffsetCombo, TextOverlayPlacements.Default) == TextOverlayPlacements.Custom;
+            PictureOffsetXBox.Value = isCustom ? custom.X : 0;
+            PictureOffsetYBox.Value = isCustom ? custom.Y : 0;
+        }
+        finally { _syncingTextOverlayOffsets = false; }
+    }
+
+    /// <summary>A non-zero offset typed while the card in use shows a picture preset switches it to Custom at that preset.</summary>
+    private void TextOverlayOffsetBoxChanged()
+    {
+        if (_loadingControls || _syncingTextOverlayOffsets) return;
+        var selected = SelectedText(TextOverlayOffsetCombo, TextOverlayPlacements.Default);
+        if (selected == TextOverlayPlacements.Custom || !TextOverlayPlacements.PicturePositions.Contains(selected)) return;
+        if ((PictureOffsetXBox.Value ?? 0) == 0 && (PictureOffsetYBox.Value ?? 0) == 0) return;
+        _syncingTextOverlayOffsets = true;
+        try
+        {
+            SelectByText(TextOverlayOffsetCombo, TextOverlayPlacements.Custom);
+            _textOverlayPendingAnchor = selected;
+        }
+        finally { _syncingTextOverlayOffsets = false; }
+    }
 
     /// <summary>
     /// "Text overlay placement": the card matching the Tabs settings on this page (tabs on and at the side, or not) gets the

@@ -4,6 +4,16 @@ All notable changes to Glide Image Viewer are documented here. The format is bas
 [Keep a Changelog](https://keepachangelog.com/), and the project uses dotted feature releases with
 hyphenated follow-up corrections (for example `4.2.0-1`).
 
+## [5.1.4] - 2026-11-20
+
+### Changed
+- Text overlay placement cards have a "Custom" position (last in both lists and in the hotkey choices). Alt+dragging the overlay, also out of the title bar or vertical tab bar, switches the card in use to Custom over the picture at exactly the drop spot (nearest picture anchor + offset, so it follows resizes and stays above the status bar). Choosing any preset, even the same one again, puts the overlay exactly at that preset; the offset boxes now edit the Custom position. Settings schema 23 turns an old per-position offset on the card's current position into Custom at the same spot.
+
+### Fixed
+- Text overlay at a bottom position no longer hides behind the status bar: its vertical offset (setting or Alt+drag) is measured from the top edge of the status bar when shown, from the window bottom when hidden, and it follows the status bar live as it shows or hides.
+- Text overlay in the title bar (right or center, with top tabs) no longer flickers: its measured width included the position it was just moved to, so every layout pass moved it and rebuilt the tabs again. Widths are now whole pixels and the tabs are only rebuilt when the reserved space really changes.
+- Hotkeys: assigning Space (or Enter, or any key) that another action already uses now shows the Replace / Cancel question properly. The captured key is applied when released, so its key-up or auto-repeat no longer presses Cancel in the dialog.
+
 ## [5.1.3] - 2026-11-19
 
 ### Added

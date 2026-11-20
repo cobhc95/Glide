@@ -38,6 +38,13 @@ public partial class MainWindow
             _textOverlaySizeHooked = true;
             CornerCounterHost.SizeChanged += (_, _) => { ReserveSideTabSpaceForTextOverlay(); LayoutTitleBarTextOverlay(); };
             if (ChromeLayout is not null) ChromeLayout.SizeChanged += (_, _) => LayoutTitleBarTextOverlay();
+            // 5.1.4: bottom positions sit above the status bar; follow it as it shows/hides or changes size.
+            ViewerStatusSurface.PropertyChanged += (_, e) =>
+            {
+                if (e.Property == Visual.IsVisibleProperty || e.Property == Visual.BoundsProperty || e.Property == Visual.OpacityProperty)
+                    UpdateTextOverlayPictureMargin();
+            };
+            ImageView.SizeChanged += (_, _) => UpdateTextOverlayPictureMargin();
         }
         if (!overPicture)
         {
@@ -70,6 +77,32 @@ public partial class MainWindow
         return overPicture;
     }
 
+    private const double TextOverlayEdgeGap = 16;
+
+    /// <summary>
+    /// Margin of the text overlay over the picture (5.1.4). Bottom positions are measured from the top edge of the status
+    /// bar when it is shown (and from the window bottom when hidden), so the offset (setting or Alt+drag, a translation from
+    /// this place) is always relative to that reference and the overlay moves with the status bar.
+    /// </summary>
+    private Thickness TextOverlayPictureMargin()
+    {
+        if (CornerCounterHost.VerticalAlignment != VerticalAlignment.Bottom) return new Thickness(TextOverlayPictureSideGap, TextOverlayPictureTopGap, TextOverlayPictureSideGap, 0);
+        return new Thickness(TextOverlayPictureSideGap, 0, TextOverlayPictureSideGap, TextOverlayBottomInset());
+    }
+
+    private const double TextOverlayPictureSideGap = 15;
+    private const double TextOverlayPictureTopGap = 28;
+
+    private double TextOverlayBottomInset() => TextOverlayLayout.BottomInset(ImageView.Bounds.Height,
+        ViewerStatusSurface.IsVisible && ViewerStatusSurface.Opacity > 0, ViewerStatusSurface.Bounds.Top, TextOverlayEdgeGap);
+
+    private void UpdateTextOverlayPictureMargin()
+    {
+        if (CornerCounterHost is null || !ReferenceEquals(CornerCounterHost.Parent, ImageView)) return;
+        var wanted = TextOverlayPictureMargin();
+        if (CornerCounterHost.Margin != wanted) CornerCounterHost.Margin = wanted;
+    }
+
     /// <summary>The side tab pane leaves room for the text overlay at its top or bottom; also follows pane visibility (auto-hide).</summary>
     private void ReserveSideTabSpaceForTextOverlay()
     {
@@ -96,7 +129,10 @@ public partial class MainWindow
         var tabsMargin = default(Thickness);
         if (TextOverlayPlacements.IsTitleBar(placement) && CornerCounterHost.IsVisible)
         {
-            var overlayWidth = CornerCounterHost.DesiredSize.Width > 0 ? CornerCounterHost.DesiredSize.Width : CornerCounterHost.Bounds.Width;
+            // DesiredSize includes the margin this method sets (feedback loop -> flicker in 5.1.3); Bounds does not.
+            var overlayWidth = CornerCounterHost.DesiredSize.Width > 0
+                ? TitleBarOverlayLayout.ContentWidth(CornerCounterHost.DesiredSize.Width, CornerCounterHost.Margin.Left, CornerCounterHost.Margin.Right)
+                : CornerCounterHost.Bounds.Width;
             var chromeWidth = ChromeLayout.Bounds.Width > 0 ? ChromeLayout.Bounds.Width : Math.Max(0, Bounds.Width - 8);
             var groupWidth = 0.0;
             foreach (var child in ChromeLayout.Children)
@@ -115,7 +151,8 @@ public partial class MainWindow
             if (CornerCounterHost.Margin != wanted) CornerCounterHost.Margin = wanted;
             if (topTabsInChrome) tabsMargin = new Thickness(layout.TabsLeftReserve, 0, layout.TabsRightReserve, 0);
         }
-        if (TabOverflowHost.Margin != tabsMargin)
+        var old = TabOverflowHost.Margin;
+        if (Math.Abs(old.Left - tabsMargin.Left) >= 1 || Math.Abs(old.Right - tabsMargin.Right) >= 1 || (old != tabsMargin && tabsMargin == default))
         {
             TabOverflowHost.Margin = tabsMargin;
             // Tab widths follow the strip width: rebuild once the new margin has been laid out.

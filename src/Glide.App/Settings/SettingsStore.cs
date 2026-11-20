@@ -22,7 +22,12 @@ public static class SettingsStore
     /// </summary>
     private const int LaunchPolicySchema = 4;
     // 9 (5.0.0 Back / Forward): the one-time title-bar default migration below is gated on it.
-    internal const int CurrentSettingsSchema = 22;
+    internal const int CurrentSettingsSchema = 23;
+    /// <summary>
+    /// Settings schema (5.1.4) that added the "Custom" text overlay position: per-preset offsets are retired; a card whose
+    /// preset had an offset becomes Custom at the same spot (TextOverlayPlacements.MigratePerPresetOffsets).
+    /// </summary>
+    internal const int TextOverlayCustomPositionSchema = 23;
     /// <summary>
     /// Settings schema (5.1.3) that split "Text overlay position" and "Text overlay alignment" by tab layout (tabs along the
     /// top / at the side). Schema 21 (one position with an alignment per area) and older files (a picture position plus
@@ -562,6 +567,8 @@ public static class SettingsStore
             loaded.PictureCounterPositionSideTabs = Glide.Core.Settings.TextOverlayPlacements.Normalize(loaded.PictureCounterPositionSideTabs);
             loaded.PictureCounterAlignmentTopTabs = Glide.Core.Settings.TextOverlayPlacements.NormalizeAlignment(loaded.PictureCounterAlignmentTopTabs);
             loaded.PictureCounterAlignmentSideTabs = Glide.Core.Settings.TextOverlayPlacements.NormalizeAlignment(loaded.PictureCounterAlignmentSideTabs);
+            if (sourceSchema < TextOverlayCustomPositionSchema)
+                Glide.Core.Settings.TextOverlayPlacements.MigratePerPresetOffsets(loaded);
             // 4.8.0: the title-bar Show in Explorer button opens Glide's own Explorer tab by default. Files saved
             // before the setting existed omit it (so the new default applies; their hidden legacy
             // NavigateToFolderBehavior value never reflected a user choice); only an explicit

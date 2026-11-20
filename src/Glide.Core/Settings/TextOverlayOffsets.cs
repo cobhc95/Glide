@@ -3,8 +3,9 @@ using System.Globalization;
 namespace Glide.Core.Settings;
 
 /// <summary>
-/// Text overlay offsets (5.1.2), remembered per corner anchor ("Top right", "Bottom left", ...). Stored in one string,
-/// "Top right=12,-4;Bottom left=0,30": X positive moves right, Y positive moves down, in DIPs from the default place.
+/// Text overlay offsets. 5.1.2-5.1.3 remembered one per preset ("Top right=12,-4"); since 5.1.4 (schema 23) only the
+/// Custom position of each card is stored ("Custom top tabs@Bottom right=12,-4", see <see cref="GetCustom"/>): X positive
+/// moves right, Y positive moves down, in DIPs from the anchor's preset place.
 /// </summary>
 public static class TextOverlayOffsets
 {
@@ -36,6 +37,49 @@ public static class TextOverlayOffsets
         if (x != 0 || y != 0) kept.Add(string.Create(CultureInfo.InvariantCulture, $"{key}={x},{y}"));
         return string.Join(";", kept);
     }
+
+    private static string CustomPrefix(bool sideTabs) => sideTabs ? "Custom side tabs@" : "Custom top tabs@";
+
+    /// <summary>
+    /// 5.1.4: the Custom position of a card, stored as "Custom top tabs@Bottom right=12,-4" (anchor = a picture position;
+    /// offset from that anchor's preset place). Missing: Top right with no offset.
+    /// </summary>
+    public static (string Anchor, int X, int Y) GetCustom(string? map, bool sideTabs)
+    {
+        var prefix = CustomPrefix(sideTabs);
+        foreach (var entry in (map ?? string.Empty).Split(';', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var eq = entry.IndexOf('=');
+            if (eq <= 0) continue;
+            var key = entry[..eq].Trim();
+            if (!key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) continue;
+            var (x, y) = Get(entry, key);
+            return (PictureAnchor(key[prefix.Length..]), x, y);
+        }
+        return (TextOverlayPlacements.Default, 0, 0);
+    }
+
+    public static string SetCustom(string? map, bool sideTabs, string? anchor, int x, int y)
+    {
+        var prefix = CustomPrefix(sideTabs);
+        var kept = (map ?? string.Empty).Split(';', StringSplitOptions.RemoveEmptyEntries)
+            .Where(e => { var eq = e.IndexOf('='); return eq > 0 && !e[..eq].Trim().StartsWith(prefix, StringComparison.OrdinalIgnoreCase); })
+            .ToList();
+        x = Math.Clamp(x, -Limit, Limit); y = Math.Clamp(y, -Limit, Limit);
+        kept.Add(string.Create(CultureInfo.InvariantCulture, $"{prefix}{PictureAnchor(anchor)}={x},{y}"));
+        return string.Join(";", kept);
+    }
+
+    private static string PictureAnchor(string? anchor)
+    {
+        var a = TextOverlayPlacements.Normalize(anchor);
+        return TextOverlayPlacements.PicturePositions.Contains(a) ? a : TextOverlayPlacements.Default;
+    }
+
+    /// <summary>The map without the retired per-preset entries (schema 23 migration).</summary>
+    public static string OnlyCustom(string? map) =>
+        string.Join(";", (map ?? string.Empty).Split(';', StringSplitOptions.RemoveEmptyEntries)
+            .Where(e => e.TrimStart().StartsWith("Custom ", StringComparison.OrdinalIgnoreCase) && e.Contains('@')));
 
     public static string SetX(string? map, string? anchor, int x) => Set(map, anchor, x, Get(map, anchor).Y);
     public static string SetY(string? map, string? anchor, int y) => Set(map, anchor, Get(map, anchor).X, y);

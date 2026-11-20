@@ -124,7 +124,10 @@ public readonly struct OverlayOptions(GlideSettingsState settings)
     public string PictureCounterPosition(bool sideTabs) => TextOverlayPlacements.Position(settings, sideTabs);
     public string PictureCounterColor => settings.PictureCounterColor;
     public string PictureCounterAlignment(bool sideTabs) => TextOverlayPlacements.Alignment(settings, sideTabs);
-    public (int X, int Y) PictureCounterOffset(bool sideTabs) => TextOverlayOffsets.Get(settings.PictureCounterOffsets, PictureCounterPosition(sideTabs));
+    /// <summary>Offset from <see cref="PictureCounterAnchor"/>: non-zero only for the Custom position (presets always reset).</summary>
+    public (int X, int Y) PictureCounterOffset(bool sideTabs) => TextOverlayPlacements.Offset(settings, sideTabs);
+    /// <summary>The picture position the overlay is anchored at (the preset, or the Custom position's anchor).</summary>
+    public string PictureCounterAnchor(bool sideTabs) => TextOverlayPlacements.PictureAnchor(settings, sideTabs);
     public bool PictureCounterShadow => settings.PictureCounterShadow;
     public bool PictureCounterBorder => settings.PictureCounterBorder;
     public int DefaultOpacity => settings.OverlayDefaultOpacity;

@@ -20,15 +20,21 @@ public static class TextOverlayPlacements
     public const string TitleBarRight = "Title bar – right";
     public const string TabBarTop = "Vertical tabs – top";
     public const string TabBarBottom = "Vertical tabs – bottom";
+    /// <summary>
+    /// 5.1.4: a free spot over the picture, set by Alt+dragging the overlay (or the offset boxes). Stored per card as a
+    /// picture anchor plus an offset (<see cref="TextOverlayOffsets.GetCustom"/>), so it follows window resizes and a
+    /// bottom anchor stays above the status bar. Every other position is an exact preset with no offset.
+    /// </summary>
+    public const string Custom = "Custom";
 
     public const string Default = TopRight;
     public const string DefaultAlignment = "Automatic";
 
     public static readonly string[] PicturePositions = [TopLeft, TopCenter, TopRight, BottomLeft, BottomCenter, BottomRight];
     /// <summary>"Tabs along the top" card: no vertical-tab positions.</summary>
-    public static readonly string[] TopTabsPositions = [.. PicturePositions, TitleBarLeft, TitleBarCenter, TitleBarRight];
+    public static readonly string[] TopTabsPositions = [.. PicturePositions, TitleBarLeft, TitleBarCenter, TitleBarRight, Custom];
     /// <summary>"Tabs at the side" card: every position.</summary>
-    public static readonly string[] All = [.. TopTabsPositions, TabBarTop, TabBarBottom];
+    public static readonly string[] All = [.. PicturePositions, TitleBarLeft, TitleBarCenter, TitleBarRight, TabBarTop, TabBarBottom, Custom];
     public static readonly string[] Alignments = [DefaultAlignment, "Left", "Center", "Right"];
 
     public static bool IsTitleBar(string? value) => value is TitleBarLeft or TitleBarCenter or TitleBarRight;
@@ -58,6 +64,61 @@ public static class TextOverlayPlacements
 
     public static string Position(GlideSettingsState s, bool sideTabs) =>
         sideTabs ? Normalize(s.PictureCounterPositionSideTabs) : NormalizeTopTabs(s.PictureCounterPositionTopTabs);
+
+    /// <summary>The picture anchor of the card's position: the preset itself, or the stored anchor of Custom.</summary>
+    public static string PictureAnchor(GlideSettingsState s, bool sideTabs)
+    {
+        var position = Position(s, sideTabs);
+        return position == Custom ? TextOverlayOffsets.GetCustom(s.PictureCounterOffsets, sideTabs).Anchor : position;
+    }
+
+    /// <summary>Offset from the picture anchor: the Custom offset, or zero for every preset (presets always reset).</summary>
+    public static (int X, int Y) Offset(GlideSettingsState s, bool sideTabs)
+    {
+        if (Position(s, sideTabs) != Custom) return (0, 0);
+        var c = TextOverlayOffsets.GetCustom(s.PictureCounterOffsets, sideTabs);
+        return (c.X, c.Y);
+    }
+
+    /// <summary>Sets the card's position to Custom at <paramref name="anchor"/> + offset (Alt+drag drop).</summary>
+    public static void SetCustom(GlideSettingsState s, bool sideTabs, string anchor, int x, int y)
+    {
+        s.PictureCounterOffsets = TextOverlayOffsets.SetCustom(s.PictureCounterOffsets, sideTabs, anchor, x, y);
+        if (sideTabs) s.PictureCounterPositionSideTabs = Custom; else s.PictureCounterPositionTopTabs = Custom;
+    }
+
+    /// <summary>
+    /// The offset settings edit the Custom position: on Custom they change its offset; on a picture preset a non-zero value
+    /// turns the card into Custom anchored at that preset; on a bar position (or zero on a preset) nothing changes.
+    /// </summary>
+    public static void SetOffset(GlideSettingsState s, bool sideTabs, int? x, int? y)
+    {
+        var position = Position(s, sideTabs);
+        var current = Offset(s, sideTabs);
+        var nx = x ?? current.X; var ny = y ?? current.Y;
+        if (position == Custom) SetCustom(s, sideTabs, PictureAnchor(s, sideTabs), nx, ny);
+        else if (IsOverPicture(position) && (nx != 0 || ny != 0)) SetCustom(s, sideTabs, position, nx, ny);
+    }
+
+    /// <summary>
+    /// Settings schema 23 (5.1.4): offsets used to be remembered per preset. A card whose preset had a non-zero offset becomes
+    /// Custom at that same spot; every other per-preset offset is dropped (presets always reset).
+    /// </summary>
+    public static void MigratePerPresetOffsets(GlideSettingsState s)
+    {
+        var old = s.PictureCounterOffsets;
+        var map = TextOverlayOffsets.OnlyCustom(old);
+        foreach (var side in new[] { false, true })
+        {
+            var position = Position(s, side);
+            if (position == Custom || !IsOverPicture(position)) continue;
+            var (x, y) = TextOverlayOffsets.Get(old, position);
+            if (x == 0 && y == 0) continue;
+            map = TextOverlayOffsets.SetCustom(map, side, position, x, y);
+            if (side) s.PictureCounterPositionSideTabs = Custom; else s.PictureCounterPositionTopTabs = Custom;
+        }
+        s.PictureCounterOffsets = map;
+    }
 
     public static string Alignment(GlideSettingsState s, bool sideTabs) =>
         NormalizeAlignment(sideTabs ? s.PictureCounterAlignmentSideTabs : s.PictureCounterAlignmentTopTabs);
