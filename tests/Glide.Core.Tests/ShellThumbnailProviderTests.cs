@@ -179,7 +179,10 @@ public sealed class ShellThumbnailProviderTests : IDisposable
             var result = provider.Render(path, 256, quality);
             Assert.Equal((256, 192), (result.Width, result.Height));
             AssertColor(result.Pixel(128, 96), (220, 30, 30), $"centre (quality {quality})");
-            AssertColor(result.Pixel(8, 8), (255, 255, 255), $"transparent corner (quality {quality})");
+            // Transparency is kept (WTSAT_ARGB, premultiplied): never flattened onto white.
+            Assert.Equal(0, result.Alpha(8, 8));
+            AssertColor(result.Pixel(8, 8), (0, 0, 0), $"transparent corner (quality {quality})");
+            Assert.Equal(255, result.Alpha(128, 96));
         }
     }
 
@@ -192,7 +195,7 @@ public sealed class ShellThumbnailProviderTests : IDisposable
             new GifWriter.Frame(0, 0, 320, 240, Fill(320 * 240, 1), Transparent: 1),
             new GifWriter.Frame(40, 30, 240, 180, Fill(240 * 180, 0), Transparent: 1)));
         AssertColor(provider.Render(path, 256, Balanced).Pixel(128, 96), (30, 160, 30), "balanced shows frame 2");
-        AssertColor(provider.Render(path, 256, Fast).Pixel(128, 96), (255, 255, 255), "fast keeps frame 1");
+        Assert.Equal(0, provider.Render(path, 256, Fast).Alpha(128, 96)); // fast keeps frame 1 (transparent)
     }
 
     [Fact]
@@ -473,6 +476,8 @@ public sealed class ShellThumbnailProviderTests : IDisposable
             var i = (y * Width + x) * 4;
             return (Bgra[i + 2], Bgra[i + 1], Bgra[i]);
         }
+
+        public int Alpha(int x, int y) => Bgra[(y * Width + x) * 4 + 3];
     }
 
     /// <summary>Loads the freshly built provider DLL into the test process and calls it like Explorer.</summary>

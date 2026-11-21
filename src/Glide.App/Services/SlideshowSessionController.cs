@@ -95,6 +95,15 @@ public sealed class SlideshowSessionController : IDisposable
         _diagnostic("resumed", new { index = _index(), count = _count(), intervalMs = _intervalMs() });
     }
 
+    /// <summary>Restarts the full interval from now (a new image was shown). No-op when paused or stopped.</summary>
+    public void RestartInterval()
+    {
+        if (!IsActive || !IsRunning || _disposed) return;
+        _timer.Stop();
+        SetTimer();
+        _timer.Start();
+    }
+
     public void PauseForInactivity()
     {
         if (!IsActive || !IsRunning) return;

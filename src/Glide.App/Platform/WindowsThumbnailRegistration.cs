@@ -194,6 +194,11 @@ internal static class WindowsThumbnailRegistration
                     key?.SetValue(string.Empty, ProviderDllPath, RegistryValueKind.String);
                     key?.SetValue("ThreadingModel", "Apartment", RegistryValueKind.String);
                 }
+                // HKCU\Software\Classes shadows HKLM in HKCR: a per-user CLSID left by another copy (a dev/portable
+                // build) would keep Explorer loading that old DLL after a machine-wide install. Drop it when it
+                // points elsewhere; HKCU extension routes to the same CLSID then resolve to this DLL.
+                if (!perUser && IsStaleShadow(RegisteredDllPath(perUser: true), ProviderDllPath))
+                    Registry.CurrentUser.DeleteSubKeyTree(clsidPath, throwOnMissingSubKey: false);
                 foreach (var extension in list)
                 {
                     using var key = hive.CreateSubKey($@"Software\Classes\{extension}\ShellEx\{ThumbnailHandlerGuid}", writable: true);
@@ -248,6 +253,11 @@ internal static class WindowsThumbnailRegistration
         if (current is null || !IsClsid(current) || current.Equals(ProviderClsid, StringComparison.OrdinalIgnoreCase)) return null;
         return current;
     }
+
+    /// <summary>Pure: a per-user CLSID registration that points at a different DLL than this install's.</summary>
+    internal static bool IsStaleShadow(string? userPath, string providerPath)
+        => !string.IsNullOrWhiteSpace(userPath) &&
+           !string.Equals(Path.GetFullPath(userPath.Trim().Trim('"')), Path.GetFullPath(providerPath), StringComparison.OrdinalIgnoreCase);
 
     private static bool IsClsid(string value) => Guid.TryParse(value, out _) && value.Trim().StartsWith('{');
 

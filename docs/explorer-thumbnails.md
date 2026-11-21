@@ -156,7 +156,7 @@ Design rules, all enforced in `ThumbnailCore.cpp`:
    (1/2, 1/4, 1/8) to the smallest size at or above the target. For high-entropy JPEGs the Huffman
    decode, not the IDCT, dominates, so the gain is modest.
 5. **Premultiplied resampling.** Every resample runs on premultiplied BGRA, so transparent pixels
-   never bleed dark fringes; the result is composited onto white at the end.
+   never bleed dark fringes; the result keeps its transparency (premultiplied, WTSAT_ARGB) so Explorer blends it like its own PNG thumbnails.
 6. **Vectors render at the target size** — SVG is rasterised directly at the requested edge.
 7. **Hard caps**: 256 MP, 65535 per side, 1 GiB source; the longest side is capped at 2048 regardless
    of what Explorer asks for. Since 5.0 the requested thumbnail size itself is clamped to 2048 too

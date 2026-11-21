@@ -66,28 +66,10 @@ public partial class SettingsWindow
 
     private void RefreshThumbnailsClicked(object? sender, RoutedEventArgs e)
     {
-        // Windows owns the thumbnail cache. Delete the per-user thumbcache databases (best-effort;
-        // Explorer may hold them open) and ask the shell to rebuild thumbnails.
-        var removed = 0;
-        try
-        {
-            var cacheDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                                              "Microsoft", "Windows", "Explorer");
-            if (Directory.Exists(cacheDirectory))
-            {
-                foreach (var file in Directory.EnumerateFiles(cacheDirectory, "thumbcache_*.db"))
-                {
-                    try { File.Delete(file); removed++; } catch { /* a locked cache file is skipped and not counted as removed */ }
-                }
-            }
-        }
-        catch (Exception loggedEx) { Glide.Diagnostics.Runtime.LiveDiagnosticTrace.WriteException("thumbnails", "cache_clear_failed", loggedEx); }
-        try { SHChangeNotify(0x08000000, 0, IntPtr.Zero, IntPtr.Zero); } catch { /* shell refresh notification is cosmetic */ }
+        // Windows owns the thumbnail cache: delete this user's databases and ask the shell to rebuild.
+        var removed = Glide.App.Platform.ThumbnailCacheRefresher.Refresh();
         ThumbnailDiagnosticsText.Text = $"Thumbnail cache refresh requested ({removed} cache files removed). " +
                                         "Restart Explorer if thumbnails still appear stale.";
         PageSubtitle.Text = "Thumbnail cache refresh requested.";
     }
-
-    [System.Runtime.InteropServices.DllImport("shell32.dll")]
-    private static extern void SHChangeNotify(uint wEventId, uint uFlags, IntPtr dwItem1, IntPtr dwItem2);
 }

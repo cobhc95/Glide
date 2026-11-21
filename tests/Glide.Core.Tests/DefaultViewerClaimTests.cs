@@ -102,6 +102,34 @@ public sealed class DefaultViewerClaimTests
         Assert.Contains("ShellExecAsOriginalUser", iss);
     }
 
+    [Fact]
+    public void Installer_thumbnails_task_registers_or_unregisters_and_refreshes_as_the_original_user()
+    {
+        var iss = File.ReadAllText(Path.Combine(RepositoryRoot(), "installer", "Glide.iss"));
+        var tasks = iss.Split("[Tasks]")[1].Split("[Files]")[0];
+        Assert.Contains("Name: \"thumbnails\"; Description: \"Use Glide's thumbnails in File Explorer (recommended)\"", tasks);
+        var normalized = iss.Replace("\r", "");
+        Assert.Contains("if WizardIsTaskSelected('thumbnails') then\n      RegisterGlideThumbnails\n    else\n      UnregisterGlideThumbnails;", normalized);
+        Assert.Contains("RefreshGlideThumbnailsForUser(WizardIsTaskSelected('thumbnails'));", iss);
+        Assert.Contains("ExecAsOriginalUser(ExePath, Params", iss);
+        Assert.Contains("'--refresh-thumbnails'", iss);
+        Assert.Contains("' --disabled'", iss);
+    }
+
+    [Theory]
+    [InlineData(new[] { "--refresh-thumbnails" }, true)]
+    [InlineData(new[] { "--REFRESH-THUMBNAILS" }, true)]
+    [InlineData(new[] { "--refresh-thumbnails", "--disabled" }, false)]
+    public void Refresh_thumbnails_switch_parses_enabled_state(string[] args, bool expected)
+        => Assert.Equal(expected, ThumbnailCacheRefresher.ParseRefreshSwitch(args));
+
+    [Fact]
+    public void Refresh_thumbnails_switch_is_absent_for_other_arguments()
+    {
+        Assert.Null(ThumbnailCacheRefresher.ParseRefreshSwitch([]));
+        Assert.Null(ThumbnailCacheRefresher.ParseRefreshSwitch(["--register-thumbnails"]));
+    }
+
     // ------------------------------------------------------------ thumbnail handler policy ---------
 
     private const string PhotoProvider = WindowsThumbnailRegistration.WindowsPhotoThumbnailProvider;

@@ -355,7 +355,11 @@ public partial class MainWindow
             {
                 Viewport.SwapPresentedFrame(result.Bitmap, sourceWidth, sourceHeight, request.ImageRequestId, path);
             }
+            var imageChanged = !string.Equals(_presentedPath, path, StringComparison.OrdinalIgnoreCase);
             _presentedPath = path;
+            // A new image is on screen (manual or automatic navigation): the next slideshow advance
+            // waits a full interval from now, not the remainder of the previous one. Paused stays paused.
+            if (imageChanged) _slideshow?.RestartInterval();
             OverlayNavigationTrace.Mark(OverlayNavigationTrace.Kind.ImagePresented,
                 a: request.ImageRequestId, b: result.IsPreview ? 1 : 0,
                 x: sourceWidth, y: sourceHeight, detail: Path.GetExtension(path));

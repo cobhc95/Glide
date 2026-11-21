@@ -60,6 +60,15 @@ internal static class CommandLineTools
             return true;
         }
 
+        // Installer, as the installing user: record the Explorer thumbnails task in this user's thumbnail
+        // settings, then clear the thumbnail cache and notify the shell (same as Settings > Refresh thumbnails).
+        if (Platform.ThumbnailCacheRefresher.ParseRefreshSwitch(args) is bool thumbnailsEnabled)
+        {
+            exitCode = Platform.ThumbnailCacheRefresher.RunInstallerStep(thumbnailsEnabled, out var message);
+            Console.WriteLine(message);
+            return true;
+        }
+
         // Build-time fixture generation also runs before Avalonia initialization.
         if (args.Length >= 2 && args[0].Equals("--write-diagnostic-fixtures", StringComparison.OrdinalIgnoreCase))
         {

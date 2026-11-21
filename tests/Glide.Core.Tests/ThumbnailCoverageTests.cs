@@ -620,11 +620,11 @@ public sealed class ThumbnailCoverageTests : IDisposable
         return File.Exists(path) ? File.ReadAllBytes(path) : null;
     }
 
-    /// <summary>Non-blank: the thumbnail (composited on white) has pixels that are clearly not background.</summary>
+    /// <summary>Non-blank: the thumbnail (premultiplied BGRA, transparency kept) has visible pixels that are clearly not white.</summary>
     private static bool HasContent(byte[] bgra)
     {
         for (var i = 0; i + 3 < bgra.Length; i += 4)
-            if (255 - Math.Min(bgra[i], Math.Min(bgra[i + 1], bgra[i + 2])) > 60) return true;
+            if (bgra[i + 3] > 60 && bgra[i + 3] - Math.Min(bgra[i], Math.Min(bgra[i + 1], bgra[i + 2])) > 60) return true;
         return false;
     }
 

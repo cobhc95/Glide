@@ -1,6 +1,6 @@
 # Glide Image Viewer
 
-> **Glide 5.1.4:** [download](https://github.com/cobhc95/Glide/releases/latest) · a Custom text overlay position (Alt+drag it anywhere), the overlay stays above the status bar, and Space or Enter can be reassigned as hotkeys; plus 5.1.3's text overlay placement per tab layout, on top of 5.1's instant tab switching, faster large-photo browsing with less memory, live Explorer tabs and browser-style tabs. [Release notes](docs/releases/release-notes-5.1.4.md) · [changelog](CHANGELOG.md)
+> **Glide 5.1.5:** [download](https://github.com/cobhc95/Glide/releases/latest) · transparent Explorer thumbnails for every format, an installer choice between Glide's and Windows' thumbnails, and the slideshow timer restarts when you skip; plus 5.1.4's Custom text overlay position, on top of 5.1's instant tab switching, faster large-photo browsing with less memory, live Explorer tabs and browser-style tabs. [Release notes](docs/releases/release-notes-5.1.5.md) · [changelog](CHANGELOG.md)
 
 ## Fast. Multi-tabbed. Multi-window. Highly customizable.
 
@@ -15,7 +15,7 @@
 Windows 10 1607 or later, x64. From the [latest release](https://github.com/cobhc95/Glide/releases/latest):
 
 * **`Glide.Setup.exe`**: installer (administrator rights; adds Open With and Explorer thumbnails).
-* **`Glide-5.1.4-Portable.zip`**: extract anywhere and run `Glide.exe`.
+* **`Glide-5.1.5-Portable.zip`**: extract anywhere and run `Glide.exe`.
 * **`Glide.Setup.sha256`**: checksum (`certutil -hashfile Glide.Setup.exe SHA256`).
 
 Upgrades keep your settings, key bindings and title bar.

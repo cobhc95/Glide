@@ -42,6 +42,14 @@ public sealed class ThumbnailRegistrationTests
         => Assert.Equal("{6E3C1B2A-9F41-4E7C-9B1E-2C7A5D8F0A31}", WindowsThumbnailRegistration.ProviderClsid);
 
     [Fact]
+    public void Per_user_clsid_pointing_at_another_dll_is_a_stale_shadow()
+    {
+        Assert.True(WindowsThumbnailRegistration.IsStaleShadow(@"C:\dev\dist\Glide.ShellThumbnail.dll", @"C:\Program Files\Glide\Glide.ShellThumbnail.dll"));
+        Assert.False(WindowsThumbnailRegistration.IsStaleShadow(@"c:\program files\glide\Glide.ShellThumbnail.dll", @"C:\Program Files\Glide\Glide.ShellThumbnail.dll"));
+        Assert.False(WindowsThumbnailRegistration.IsStaleShadow(null, @"C:\Program Files\Glide\Glide.ShellThumbnail.dll"));
+    }
+
+    [Fact]
     public void Settings_defaults_are_safe()
     {
         var defaults = ThumbnailSettings.Default;

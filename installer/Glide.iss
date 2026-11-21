@@ -42,8 +42,12 @@ VersionInfoDescription=Glide Image Viewer Setup
 
 [Tasks]
 ; Ticked by default (also for silent installs). Unticked, Setup installs the files only: no Open With,
-; no Explorer thumbnails, no default-viewer claims (Settings -> Windows integration can add them later).
-Name: "integrate"; Description: "Integrate with Windows for all supported image formats (Open With, Explorer thumbnails, default viewer for formats no other app opens)"; GroupDescription: "Windows integration:"
+; no default-viewer claims (Settings -> Windows integration can add them later).
+Name: "integrate"; Description: "Integrate with Windows for all supported image formats (Open With, default viewer for formats no other app opens)"; GroupDescription: "Windows integration:"
+; Ticked by default (also silent: /MERGETASKS="!thumbnails" opts out). Remembered for upgrades like every
+; task. Unticked, Glide's provider is unregistered so Windows' own thumbnails are used; either way the
+; choice is written to the installing user's Explorer thumbnails setting and the thumbnail cache is cleared.
+Name: "thumbnails"; Description: "Use Glide's thumbnails in File Explorer (recommended)"; GroupDescription: "Windows integration:"
 
 [Files]
 Source: "..\dist\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -296,6 +300,21 @@ begin
     Exec(ExePath, '--unregister-thumbnails', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 end;
 
+procedure RefreshGlideThumbnailsForUser(Enabled: Boolean);
+var
+  ResultCode: Integer;
+  ExePath, Params: String;
+begin
+  { Same as Settings > Explorer thumbnails > Refresh thumbnails, plus the task choice saved to the
+    Settings toggle. The thumbnail cache and settings are per-user, so this runs as the original user;
+    registration above stays elevated. SHCNE_ASSOCCHANGED makes Explorer pick up the change. }
+  ExePath := ExpandConstant('{app}\Glide.exe');
+  Params := '--refresh-thumbnails';
+  if not Enabled then Params := Params + ' --disabled';
+  if FileExists(ExePath) then
+    ExecAsOriginalUser(ExePath, Params, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   AppDir: String;
@@ -318,10 +337,14 @@ begin
       { --register-file-associations: Open With for every recognised format, plus Glide as the default
         viewer for formats no other app handles (recorded, so uninstall removes exactly those). }
       RegisterGlideAssociations;
-      RegisterGlideThumbnails;
       if not WizardSilent then
         OpenDefaultAppsForGlide;
     end;
+    if WizardIsTaskSelected('thumbnails') then
+      RegisterGlideThumbnails
+    else
+      UnregisterGlideThumbnails;
+    RefreshGlideThumbnailsForUser(WizardIsTaskSelected('thumbnails'));
   end;
 end;
 

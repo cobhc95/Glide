@@ -4,6 +4,17 @@ All notable changes to Glide Image Viewer are documented here. The format is bas
 [Keep a Changelog](https://keepachangelog.com/), and the project uses dotted feature releases with
 hyphenated follow-up corrections (for example `4.2.0-1`).
 
+## [5.1.5] - 2026-11-21
+
+### Fixed
+- Slideshow: navigating manually (keys, mouse, wheel, buttons, gestures, thumbnails) restarts the full interval from when the new image is shown, instead of auto-advancing after the remainder of the previous interval. A paused slideshow stays paused.
+- Explorer thumbnails: transparent images (PNG, APNG, WebP, GIF, AVIF, HEIF, JXL, TIFF, ICO, 32-bit BMP/TGA, PSD, DDS, QOI, EXR and other formats with alpha) show as transparent again instead of on a white square. The shell thumbnail provider no longer flattens the thumbnail onto white; it returns premultiplied ARGB. Refresh thumbnails (Settings > Explorer thumbnails) to replace already cached ones.
+- Explorer thumbnails: installing machine-wide now removes a per-user thumbnail-provider registration left by another Glide copy (portable or dev build). That registration takes precedence over the installed one, so Explorer kept loading the old provider DLL and the transparency fix above did not take effect.
+
+### Added
+- Installer: a "Use Glide's thumbnails in File Explorer (recommended)" checkbox, ticked by default and remembered for upgrades (silent installs: `/MERGETASKS="!thumbnails"` opts out). Unticked, Glide's thumbnail provider is not registered (and a previous registration is removed) so Windows' own thumbnails are used. The choice is written to the installing user's Settings > Explorer thumbnails toggle.
+- Installer: every install or upgrade clears the installing user's thumbnail cache and notifies Explorer (the same as Settings > Refresh thumbnails, new command-line switch `--refresh-thumbnails [--disabled]`), so new thumbnails show without visiting Settings.
+
 ## [5.1.4] - 2026-11-20
 
 ### Changed

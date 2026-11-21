@@ -861,8 +861,8 @@ namespace glide::thumb
         /// GIF: composites frame 0 onto the logical screen (frames may be smaller than the canvas
         /// and offset), working at thumbnail scale so a large canvas is never materialised. When
         /// frame 0 is fully transparent (fade-in animations), later frames are composited, honouring
-        /// disposal, up to the preset's frame budget. Transparent areas stay transparent and are
-        /// composited onto white by ComposeThumbnail like every other format.
+        /// disposal, up to the preset's frame budget. Transparent areas stay transparent all the way
+        /// to Explorer (WTSAT_ARGB), like every other format.
         bool DecodeGif(IWICImagingFactory* factory, IWICBitmapDecoder* decoder,
                        const Edges& edges, const QualityProfile& profile, Image& out,
                        std::uint32_t& sourceWidth, std::uint32_t& sourceHeight)
@@ -1152,7 +1152,8 @@ namespace glide::thumb
                         return true;
                     }
                     if (!r.Bytes(bgra, pixelBytes)) return false;
-                    bgra[3] = pixelBytes >= 4 ? bgra[3] : 255;
+                    // 32-bit TGA without declared alpha bits stores an unused byte (often 0): opaque.
+                    bgra[3] = pixelBytes >= 4 && (descriptor & 0x0F) != 0 ? bgra[3] : 255;
                     return true;
                 }
                 if (gray)
@@ -2672,22 +2673,17 @@ namespace glide::thumb
             if (!ok) return {};
         }
 
-        // Composite onto opaque white so Explorer never shows a broken alpha thumbnail.
-        const bool premultiplied = composed.premultiplied;
+        // Keep transparency: the provider returns WTSAT_ARGB, which Explorer expects as premultiplied
+        // BGRA and blends itself (like its own PNG thumbnails). Never flatten onto a background.
+        Premultiply(composed);
+        // Premultiplied invariant: colour never exceeds alpha (guards rounding in resamplers).
         for (std::size_t i = 0; i < composed.pixels.size(); i += 4)
         {
-            const unsigned alpha = composed.pixels[i + 3];
+            const std::uint8_t alpha = composed.pixels[i + 3];
             if (alpha == 255) continue;
-            const unsigned background = 255 - alpha;
             for (int c = 0; c < 3; ++c)
-            {
-                const unsigned value = composed.pixels[i + c];
-                const unsigned colour = premultiplied ? value : (value * alpha + 127) / 255;
-                composed.pixels[i + c] = static_cast<std::uint8_t>(std::min(255u, colour + background));
-            }
-            composed.pixels[i + 3] = 255;
+                if (composed.pixels[i + c] > alpha) composed.pixels[i + c] = alpha;
         }
-        composed.premultiplied = true;
         return composed;
     }
 }
