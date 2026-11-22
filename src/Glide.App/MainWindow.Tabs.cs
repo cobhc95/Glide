@@ -1059,6 +1059,8 @@ public partial class MainWindow
         var closedTab = closedIndex >= 0 ? _workspace.Tabs[closedIndex] : null;
         var closedWasActive = _workspace.Active?.Id == id;
         var activation = TabCloseActivationMode;
+        SnapshotTabForClosedHistory(id);
+        closedTab = _workspace.Tabs.FirstOrDefault(t => t.Id == id) ?? closedTab;
         if (!_workspace.Close(id, ensureHome: false, activation, RecentlyUsedTabs())) return;
         _diagnostics.Write("tabs", "closed", new { id, source, remaining = _workspace.Tabs.Count });
         // 5.1.0 "Custom…": a new tab of the chosen kind takes the closed active tab's place (only while other tabs remain;
@@ -1481,9 +1483,35 @@ public partial class MainWindow
         return active is null ? Task.CompletedTask : CloseTabWithPolicyAsync(active.Id, "active_command");
     }
 
+    /// <summary>
+    /// 5.1.6: before a tab closes, commit its live state (image zoom/pan, Explorer folder, selection, scroll, folder
+    /// history) into its record and attach its Back / Forward history, so Reopen closed tab brings it back as it was.
+    /// </summary>
+    private void SnapshotTabForClosedHistory(Guid id)
+    {
+        try
+        {
+            if (_workspace.Active?.Id == id && _workspace.Active is { } active) SyncCurrentHistoryEntry(active);
+            CaptureTabRuntimeState(id);
+            if (_workspace.Tabs.FirstOrDefault(t => t.Id == id) is not { } tab) return;
+            if (_tabHistories.TryGet(id, out var history) && history.Count > 0)
+                _workspace.ReplaceTab(tab with { History = history.Snapshot() });
+        }
+        catch (Exception ex)
+        {
+            _diagnostics.Write("tabs", "close_snapshot_failed", new { id, error = ex.Message });
+        }
+    }
+
     private async Task RestoreClosedTabAsync()
     {
-        if (_workspace.RestoreClosed() is not null) await ActivateWorkspaceAsync();
+        if (_workspace.RestoreClosed() is not { } restored) return;
+        // The tab's history travels in its record: drop any stale live copy, adopt it, then clear the travelling copy.
+        _tabHistories.Take(restored.Id);
+        _tabHistories.For(restored);
+        _workspace.ReplaceTab(restored with { History = null });
+        RebuildTabStrip();
+        await ActivateWorkspaceAsync();
     }
 
     private void CopyWindowGeometryTo(MainWindow child)

@@ -42,6 +42,66 @@ public sealed class WorkspaceStateTests
     }
 
     [Fact]
+    public void CloseAndRestore_KeepsFullStateIndexAndHistory()
+    {
+        var workspace = new WorkspaceState();
+        var a = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "a.jpg"));
+        var b = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "b.jpg"));
+        workspace.AddImage(a);
+        var history = new Glide.Core.Navigation.NavigationHistoryState(
+            [Glide.Core.Navigation.NavigationEntry.Image(a), Glide.Core.Navigation.NavigationEntry.Image(b)], 0);
+        var original = (ImageTabState)workspace.Active! with { ViewState = new ImageTabViewState("Custom", 2.5, 10, -4), History = history };
+        workspace.ReplaceTab(original);
+        workspace.AddHome();
+        workspace.Select(original.Id);
+
+        Assert.True(workspace.Close(original.Id));
+        Assert.Equal(2, workspace.Tabs.Count);
+        var restored = workspace.RestoreClosed();
+
+        Assert.Equal(original, restored);
+        Assert.Equal(1, workspace.Tabs.ToList().FindIndex(t => t.Id == original.Id));
+        Assert.Equal(original.Id, workspace.Active?.Id);
+        Assert.Equal(0, workspace.ClosedCount);
+    }
+
+    [Fact]
+    public void RestoreClosed_IsLifoAndClampsIndex()
+    {
+        var workspace = new WorkspaceState();
+        var first = workspace.AddBrowser(Path.GetTempPath()) as BrowserTabState;
+        var view = first! with { View = new BrowserTabViewState("x.jpg", 120), Navigation = new BrowserNavigationState([Path.GetTempPath()], 0) };
+        workspace.ReplaceTab(view);
+        var second = workspace.AddHome();
+        workspace.Close(view.Id);   // index 1
+        workspace.Close(second.Id); // index 1
+        var home = workspace.Tabs[0];
+        workspace.Close(home.Id);   // index 0, ensureHome adds a fresh Home
+
+        Assert.Equal(home.Id, workspace.RestoreClosed()!.Id);
+        Assert.Equal(0, workspace.ActiveIndex);
+        Assert.Equal(second.Id, workspace.RestoreClosed()!.Id);
+        Assert.Equal(1, workspace.ActiveIndex);
+        Assert.Equal(view, workspace.RestoreClosed());
+        Assert.Equal(1, workspace.ActiveIndex);
+        Assert.Null(workspace.RestoreClosed());
+    }
+
+    [Fact]
+    public void RestoreClosed_ClampsIndexWhenFewerTabsRemain()
+    {
+        var workspace = new WorkspaceState();
+        workspace.AddHome();
+        var last = workspace.AddHome();
+        workspace.Close(last.Id);
+        workspace.RemoveForTransfer(workspace.Tabs[1].Id); // not in closed history
+        var restored = workspace.RestoreClosed();
+        Assert.Equal(last.Id, restored!.Id);
+        Assert.Equal(1, workspace.ActiveIndex);
+        Assert.Equal(2, workspace.Tabs.Count);
+    }
+
+    [Fact]
     public void SelectRelative_WrapsInBothDirections()
     {
         var workspace = new WorkspaceState();

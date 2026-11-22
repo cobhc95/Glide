@@ -4,7 +4,8 @@ namespace Glide.Core.Workspace;
 public sealed class WorkspaceState
 {
     private readonly List<TabState> _tabs = new();
-    private readonly Stack<TabState> _closed = new();
+    // Closed tabs, most recent on top, with the strip index each had (5.1.6: Reopen restores the full tab in place).
+    private readonly Stack<(TabState Tab, int Index)> _closed = new();
     public int ClosedHistoryLimit { get; set; } = 20;
     public IReadOnlyList<TabState> Tabs => _tabs;
     public int ActiveIndex { get; private set; } = -1;
@@ -94,7 +95,7 @@ public sealed class WorkspaceState
         if (index < 0) return false;
         var closing = _tabs[index];
         _tabs.RemoveAt(index);
-        _closed.Push(closing);
+        _closed.Push((closing, index));
         TrimClosedHistory();
 
         if (_tabs.Count == 0)
@@ -205,18 +206,21 @@ public sealed class WorkspaceState
         ActiveIndex = Math.Clamp(activeIndex, 0, _tabs.Count - 1);
     }
 
+    /// <summary>The most recently closed tab (null when none), without reopening it.</summary>
+    public TabState? PeekClosed() => _closed.Count == 0 ? null : _closed.Peek().Tab;
+
+    /// <summary>
+    /// Reopens the most recently closed tab as it was: same id and full state (history, view, Explorer state), at its
+    /// former strip index (clamped to the current count), and active.
+    /// </summary>
     public TabState? RestoreClosed()
     {
         if (_closed.Count == 0) return null;
-        var old = _closed.Pop();
-        TabState? restored = old switch
-        {
-            HomeTabState => new HomeTabState(Guid.NewGuid()),
-            ImageTabState image => new ImageTabState(Guid.NewGuid(), image.Path),
-            BrowserTabState browser => new BrowserTabState(Guid.NewGuid(), browser.Folder),
-            _ => null
-        };
-        return restored is null ? null : Add(restored);
+        var (tab, index) = _closed.Pop();
+        // Should the id be open again (never expected), the copy gets a fresh one so ids stay unique.
+        if (_tabs.Any(t => t.Id == tab.Id)) tab = tab with { Id = Guid.NewGuid() };
+        _backgroundOpener = null;
+        return InsertTransferred(tab, index, activate: true);
     }
 
     /// <summary>

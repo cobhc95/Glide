@@ -4,6 +4,11 @@ All notable changes to Glide Image Viewer are documented here. The format is bas
 [Keep a Changelog](https://keepachangelog.com/), and the project uses dotted feature releases with
 hyphenated follow-up corrections (for example `4.2.0-1`).
 
+## [5.1.6] - 2026-11-22
+
+### Fixed
+- Tabs: Reopen closed tab (Ctrl+Shift+T) restores the tab as it was: at its former position in the tab strip, with its Back / Forward history and place in it, its image and zoom/pan, or its Explorer folder, selection and scroll, and makes it the active tab. Several closed tabs reopen most recent first. Before, it reopened a bare tab at the end of the strip.
+
 ## [5.1.5] - 2026-11-21
 
 ### Fixed
