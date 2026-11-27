@@ -278,16 +278,47 @@ public sealed class OverlayRound3Tests
     // ---- #20 moving the Overlay window ----------------------------------------------------------------------------
 
     [Theory]
-    // zoomed, alt, handle, locked -> expected
-    [InlineData(false, false, false, false, OverlayLeftDrag.MoveWindow)]  // picture fits: drag anywhere moves
-    [InlineData(true, false, false, false, OverlayLeftDrag.Pan)]          // zoomed: drag pans
-    [InlineData(true, true, false, false, OverlayLeftDrag.MoveWindow)]    // zoomed + Alt moves
-    [InlineData(true, false, true, false, OverlayLeftDrag.MoveWindow)]    // zoomed, on bottom bar / drag strip moves
-    [InlineData(false, false, false, true, OverlayLeftDrag.Nothing)]      // locked: no move
-    [InlineData(false, true, true, true, OverlayLeftDrag.Nothing)]        // locked beats Alt and handles
-    [InlineData(true, true, true, true, OverlayLeftDrag.Pan)]             // locked + zoomed still pans
-    public void Drag_policy_follows_the_approved_decision(bool zoomed, bool alt, bool handle, bool locked, OverlayLeftDrag expected) =>
-        Assert.Equal(expected, OverlayWindowDragPolicy.Resolve(zoomed, alt, handle, locked));
+    // 5.2.2: a left-drag always moves the window (zoomed, cropped or not); only Lock position stops it, and it never pans.
+    [InlineData(false, OverlayLeftDrag.MoveWindow)]
+    [InlineData(true, OverlayLeftDrag.Nothing)]
+    public void Left_drag_always_moves_the_window_unless_the_position_is_locked(bool locked, OverlayLeftDrag expected) =>
+        Assert.Equal(expected, OverlayWindowDragPolicy.Resolve(locked));
+
+    [Fact]
+    public void Overlay_left_press_never_hands_the_press_to_the_viewport_pan_and_chrome_keeps_its_own_behaviour()
+    {
+        var overlays = SourceText.Read(Path.Combine(RepoRoot(), "src", "Glide.App", "MainWindow.Overlays.cs"));
+        var press = overlays[overlays.IndexOf("private void WholeAppOverlayBodyPointerPressed", StringComparison.Ordinal)..];
+        press = press[..press.IndexOf("private bool IsWholeAppOverlayChromeSource", StringComparison.Ordinal)];
+        // Zoom state no longer decides: no ImageExceedsViewport / Alt / handle inputs reach the policy.
+        Assert.DoesNotContain("ImageExceedsViewport", press, StringComparison.Ordinal);
+        Assert.DoesNotContain("OverlayLeftDrag.Pan", press, StringComparison.Ordinal);
+        Assert.Contains("OverlayWindowDragPolicy.Resolve(positionLocked: _settings.WholeAppOverlayLockPosition)", press, StringComparison.Ordinal);
+        // Chrome (handles, buttons, slider, drag strip) is an interactive source: it returns before the policy and keeps its handlers.
+        Assert.True(press.IndexOf("IsInteractiveSource(e.Source)", StringComparison.Ordinal) < press.IndexOf("OverlayWindowDragPolicy.Resolve(", StringComparison.Ordinal));
+        // Windowed interactions keep the user's own left-drag binding (drag.leftImage): the policy is only reached in Overlay interactions.
+        Assert.True(press.IndexOf("WholeAppOverlayUseWindowedInteractions", StringComparison.Ordinal) < press.IndexOf("OverlayWindowDragPolicy.Resolve(", StringComparison.Ordinal));
+        // Right-drag still pans a zoomed or cropped picture.
+        var viewport = SourceText.Read(Path.Combine(RepoRoot(), "src", "Glide.App", "Controls", "ImageViewport.cs"));
+        Assert.Contains("RightImageDragMode.Smart or RightImageDragMode.PanImageOnly", viewport, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Overlay_settings_text_says_left_drag_moves_and_right_drag_pans()
+    {
+        var catalog = SourceText.Read(Path.Combine(RepoRoot(), "src", "Glide.Core", "Settings", "SettingsCatalog.cs"));
+        Assert.Contains("left-drag always moves the Overlay window (also when the picture is zoomed in or cropped); right-click, hold and drag pans", catalog, StringComparison.Ordinal);
+        Assert.DoesNotContain("when zoomed in, left-drag pans", catalog, StringComparison.Ordinal);
+        var axaml = SourceText.Read(Path.Combine(RepoRoot(), "src", "Glide.App", "Settings", "SettingsWindow.axaml"));
+        Assert.Contains("left-drag always moves the Overlay window, even when zoomed in or cropped", axaml, StringComparison.Ordinal);
+    }
+
+    private static string RepoRoot()
+    {
+        for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
+            if (File.Exists(Path.Combine(directory.FullName, "AGENTS.md"))) return directory.FullName;
+        throw new DirectoryNotFoundException("Could not locate the repository root.");
+    }
 
     [Fact]
     public void Window_drag_follows_the_cursor_in_screen_space_on_both_axes()
@@ -329,7 +360,7 @@ public sealed class OverlayRound3Tests
     }
 
     [Fact]
-    public async Task Left_drag_moves_the_window_when_the_picture_fits_and_pans_when_zoomed()
+    public async Task Left_drag_always_moves_the_window_also_when_zoomed_or_cropped()
     {
         await OnOverlayWithPicture(window =>
         {
@@ -345,20 +376,21 @@ public sealed class OverlayRound3Tests
             Assert.True(PressOn(window, viewport, host, pointer, middle), "fits: the press moves the window");
             Assert.Equal(1, moves);
 
-            _dest = new Rect(-400, -300, viewport.Bounds.Width * 2, viewport.Bounds.Height * 2);   // zoomed
-            Assert.False(PressOn(window, viewport, host, pointer, middle), "zoomed: the press is left to the viewport to pan");
-            Assert.Equal(1, moves);
+            _dest = new Rect(-400, -300, viewport.Bounds.Width * 2, viewport.Bounds.Height * 2);   // zoomed or cropped
+            Assert.True(PressOn(window, viewport, host, pointer, middle), "zoomed: the left press still moves the window (the right-drag pans)");
+            Assert.Equal(2, moves);
             Assert.True(PressOn(window, viewport, host, pointer, middle, KeyModifiers.Alt), "zoomed + Alt moves");
             Assert.True(PressOn(window, viewport, host, pointer, bottomBar), "zoomed: the bottom bar moves");
-            Assert.Equal(3, moves);
+            Assert.Equal(4, moves);
 
-            // Lock position: nothing moves the window.
+            // Lock position: nothing moves the window, zoomed or not, and the press never reaches the viewport's pan.
             Settings(window).WholeAppOverlayLockPosition = true;
             Assert.False(PressOn(window, viewport, host, pointer, bottomBar));
             Assert.False(PressOn(window, viewport, host, pointer, middle, KeyModifiers.Alt));
+            Assert.False(PressOn(window, viewport, host, pointer, middle));
             _dest = new Rect(0, 0, viewport.Bounds.Width, viewport.Bounds.Height);
             PressOn(window, viewport, host, pointer, middle);
-            Assert.Equal(3, moves);
+            Assert.Equal(4, moves);
         });
     }
 

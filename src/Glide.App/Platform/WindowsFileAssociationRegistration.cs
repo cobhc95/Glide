@@ -47,6 +47,15 @@ internal static class WindowsFileAssociationRegistration
         return (exists ?? File.Exists)(path) ? path : null;
     }
 
+    internal const string GenericIconFile = "generic.ico";
+
+    /// <summary>DefaultIcon of <c>Applications\Glide.exe</c>: the unlabelled document icon when it ships, else the app icon.</summary>
+    internal static string ApplicationDefaultIcon(string executable, Func<string, bool>? exists = null)
+    {
+        var generic = Path.Combine(Path.GetDirectoryName(executable) ?? AppContext.BaseDirectory, FileTypeIconFolder, GenericIconFile);
+        return (exists ?? File.Exists)(generic) ? $"\"{generic}\",0" : $"\"{executable}\",0";
+    }
+
     private static string ProgIdFor(string extension, string executable) =>
         ProgIdFor(extension, FileTypeIconPath(Path.GetDirectoryName(executable) ?? AppContext.BaseDirectory, extension) is not null);
 
@@ -228,6 +237,11 @@ internal static class WindowsFileAssociationRegistration
             using (var app = hive.CreateSubKey($@"Software\Classes\Applications\{ApplicationExe}", writable: true))
             {
                 app?.SetValue("FriendlyAppName", ApplicationName, RegistryValueKind.String);
+                // The class Windows uses when the user chose Glide through "Open with" (UserChoice =
+                // Applications\Glide.exe) instead of a per-extension ProgID. It cannot be per extension, so it gets the
+                // unlabelled document icon rather than the bare app icon.
+                using (var appIcon = app?.CreateSubKey("DefaultIcon", writable: true))
+                    appIcon?.SetValue(string.Empty, ApplicationDefaultIcon(executable), RegistryValueKind.String);
                 using var supported = app?.CreateSubKey("SupportedTypes", writable: true);
                 if (supported is not null)
                     foreach (var extension in ImageFormatRegistry.Extensions)

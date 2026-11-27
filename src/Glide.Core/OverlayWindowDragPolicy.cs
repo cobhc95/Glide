@@ -3,27 +3,23 @@ namespace Glide.Core;
 /// <summary>What a left-press on the whole-app Overlay picture does.</summary>
 public enum OverlayLeftDrag
 {
-    /// <summary>Let the press through (the viewport pans a zoomed picture).</summary>
-    Pan,
     /// <summary>Move the Overlay window.</summary>
     MoveWindow,
-    /// <summary>Swallow the press: nothing to pan and the position is locked.</summary>
+    /// <summary>Swallow the press: the position is locked (a left-drag never pans in Overlay mode).</summary>
     Nothing
 }
 
 /// <summary>
-/// Round 3 #20 (user decision): in Overlay interactions a left-drag anywhere moves the window while the picture fits;
-/// when zoomed in, left-drag pans and the window moves by dragging the bottom button bar, the optional drag strip or
-/// with Alt+drag. "Lock position" stops every drag from moving the window.
+/// 5.2.2 (user decision, replaces round 3 #20): in Overlay interactions a left-drag anywhere on the picture ALWAYS moves the
+/// window, also when the picture is zoomed in or cropped. Panning is the right-drag (right-click, hold, drag), so the two no longer
+/// duplicate each other. "Lock position" stops every left drag from moving the window (and it does not pan either). Presses on the
+/// chrome (handles, buttons, slider) never reach this policy: they keep their own behaviour. Windowed interactions
+/// ("Use normal windowed image interactions") keep the user's own left-drag binding and do not use this policy.
 /// </summary>
 public static class OverlayWindowDragPolicy
 {
-    public static OverlayLeftDrag Resolve(bool zoomedBeyondWindow, bool altDown, bool onMoveHandle, bool positionLocked)
-    {
-        if (positionLocked) return zoomedBeyondWindow ? OverlayLeftDrag.Pan : OverlayLeftDrag.Nothing;
-        if (altDown || onMoveHandle) return OverlayLeftDrag.MoveWindow;
-        return zoomedBeyondWindow ? OverlayLeftDrag.Pan : OverlayLeftDrag.MoveWindow;
-    }
+    public static OverlayLeftDrag Resolve(bool positionLocked) =>
+        positionLocked ? OverlayLeftDrag.Nothing : OverlayLeftDrag.MoveWindow;
 
     /// <summary>Pixels the cursor must travel before an Overlay window drag starts moving.</summary>
     public const int DragThresholdPx = 4;

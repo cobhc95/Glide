@@ -260,7 +260,7 @@ public static class SiblingFolderNavigationService
         try
         {
             // Same order as the open folder itself (Explorer-style natural name order by default).
-            return Glide.Core.ImageSortOrder.Sort(Directory.EnumerateFiles(folder).Where(isSupported), Glide.Core.ImageSortOrder.CreateComparer());
+            return Glide.Core.ImageSortOrder.Sort(Glide.Core.Workspace.PendingDeleteHideList.Filter(Directory.EnumerateFiles(folder)).Where(isSupported), Glide.Core.ImageSortOrder.CreateComparer());
         }
         catch { return null; }
     }

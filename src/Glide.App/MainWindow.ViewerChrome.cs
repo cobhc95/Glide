@@ -333,9 +333,16 @@ public partial class MainWindow
         catch { return path; }
     }
 
-    private void SaveCurrentWholeAppOverlayPlacement(string? path = null)
+    /// <summary>Environment.TickCount64 until which size / position events are the Overlay hand-off settling and must not be remembered.</summary>
+    private long _wholeAppOverlayPlacementSettleTick;
+
+    /// <param name="force">Explicit saves (leaving the mode, the end of a resize drag, the Size menu) are never skipped as hand-off noise.</param>
+    private void SaveCurrentWholeAppOverlayPlacement(string? path = null, bool force = false)
     {
         if (!_wholeAppOverlayMode || _applyingWholeAppOverlayPlacement || WindowState != WindowState.Normal || Bounds.Width < 80 || Bounds.Height < 80) return;
+        // Transient geometry must not become the remembered size: the intermediate sizes of a resize drag (its end saves the final one)
+        // and the layout events that trail the hand-off into Overlay mode (Bounds can still be the old window's size then).
+        if (!force && (WholeAppOverlayResizing || Environment.TickCount64 < _wholeAppOverlayPlacementSettleTick)) return;
         path ??= _wholeAppOverlayPlacementPath ?? _currentPath;
         if (string.IsNullOrWhiteSpace(path)) return;
         var key = NormalizeOverlayPlacementKey(path);
@@ -370,12 +377,25 @@ public partial class MainWindow
         double width;
         double height;
         PixelPoint position;
+        var rememberedPosition = remembered is null ? default : new PixelPoint(remembered.X, remembered.Y);
+        (double Width, double Height)? rememberedSize = null;
         if (remembered is not null && remembered.Width >= 80 && remembered.Height >= 80 &&
-            IsSafeSavedWindowPosition(new PixelPoint(remembered.X, remembered.Y), remembered.Width, remembered.Height, scale))
+            IsSafeSavedWindowPosition(rememberedPosition, remembered.Width, remembered.Height, scale))
         {
-            width = remembered.Width;
-            height = remembered.Height;
-            position = new PixelPoint(remembered.X, remembered.Y);
+            // The overlay's previous size, but never larger than the work area of the screen it is going to (a stale or oversized
+            // remembered size used to bring the window back far bigger than the picture's frame).
+            var target = Screens.ScreenFromPoint(rememberedPosition) ?? Screens.Primary;
+            rememberedSize = target is null
+                ? (remembered.Width, remembered.Height)
+                : OverlayWindowSizing.RestoreSize(remembered.Width, remembered.Height, ToPixelBox(target.WorkingArea), scale);
+        }
+        if (rememberedSize is { } restored)
+        {
+            width = restored.Width;
+            height = restored.Height;
+            position = rememberedPosition;
+            if (Math.Abs(restored.Width - remembered!.Width) > 0.5 || Math.Abs(restored.Height - remembered.Height) > 0.5)
+                _diagnostics.Write("window", "whole_app_overlay_restore_size_clamped", new { rememberedWidth = remembered.Width, rememberedHeight = remembered.Height, restoredWidth = restored.Width, restoredHeight = restored.Height });
         }
         else
         {
@@ -412,6 +432,7 @@ public partial class MainWindow
             // open fully inside the work area so the bottom button bar is always reachable (round 3 #26).
             KeepWholeAppOverlayInsideWorkArea();
             _wholeAppOverlayPlacementPath = path;
+            _wholeAppOverlayPlacementSettleTick = Environment.TickCount64 + 500;
             Viewport.Fit();
             Dispatcher.UIThread.Post(AlignWholeAppOverlayChromeToPixels, DispatcherPriority.Render);
         }

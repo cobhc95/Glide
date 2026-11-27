@@ -81,6 +81,18 @@ public sealed class WindowInWindowOverlayManager : IDisposable
 
     public event Action<string, object?>? Diagnostic;
     public event Action? OverlayCountChanged;
+
+    /// <summary>
+    /// Raised after anything that changes where overlay frames are or whether they drift (add, remove, move, resize, animation start / stop).
+    /// Overlay mode uses it to keep its input region (the window's visible area) in step with the overlays inside it.
+    /// </summary>
+    public event Action? LayoutChanged;
+
+    /// <summary>True while any overlay drifts on its own (its window moves without a UI-thread state change).</summary>
+    public bool IsAnimating => _animations.Values.Any(a => a.IsRunning);
+
+    /// <summary>The frame of every overlay in input-host (viewer) DIP coordinates: the exact area of its click-through window.</summary>
+    public IReadOnlyList<Rect> FrameRects() => _items.Select(i => new Rect(i.State.X, i.State.Y, i.State.Width, i.State.Height)).ToArray();
     public double DefaultOpacity { get; set; } = 1.0;
     public bool WheelZoomEnabled { get; set; } = true;
     public bool CtrlWheelZoomEnabled { get; set; } = true;
@@ -547,6 +559,7 @@ public sealed class WindowInWindowOverlayManager : IDisposable
         _animations.Remove(id);
         ReleaseItem(_items[i]);
         _items.RemoveAt(i);
+        LayoutChanged?.Invoke();
         if (_selected == id) _selected = _items.Count == 0 ? null : _items[Math.Min(i, _items.Count - 1)].State.Id;
         if (_hovered == id) _hovered = null;
         if (_chromeVisibleId == id) _chromeVisibleId = null;
@@ -1576,6 +1589,7 @@ public sealed class WindowInWindowOverlayManager : IDisposable
         animation.LastTick = Stopwatch.GetTimestamp();
         if (_surface.UsesCompositionRenderer) RefreshCompositionSnapshot();
         RequestAnimationFrame();
+        LayoutChanged?.Invoke();
         Diagnostic?.Invoke("overlay_animation_start", new { id, region = animation.Region, speed = animation.SpeedDipsPerSecond });
     }
 
@@ -1596,6 +1610,7 @@ public sealed class WindowInWindowOverlayManager : IDisposable
     {
         if (!_animations.TryGetValue(id, out var animation) || !animation.IsRunning) return;
         animation.IsRunning = false;
+        LayoutChanged?.Invoke();
         if (_surface.UsesCompositionRenderer) RefreshCompositionSnapshot();
         // A queued frame cannot be cancelled through Avalonia. Leave the pending flag intact so
         // a stop/start sequence reuses that callback instead of creating duplicate frame loops.
@@ -1607,6 +1622,7 @@ public sealed class WindowInWindowOverlayManager : IDisposable
         foreach (var id in _animations.Keys.ToArray())
             Diagnostic?.Invoke("overlay_animation_stop", new { id, reason });
         _animations.Clear();
+        LayoutChanged?.Invoke();
         _nativeAnimationControlTimer.Stop();
         if (_surface.UsesCompositionRenderer) RefreshCompositionSnapshot();
     }
@@ -2020,6 +2036,7 @@ public sealed class WindowInWindowOverlayManager : IDisposable
 
     private void Invalidate()
     {
+        LayoutChanged?.Invoke();
         UpdateAreaAdorner();
         if (_surface.UsesCompositionRenderer) RefreshCompositionSnapshot();
         else _surface.InvalidateVisual();

@@ -1,3 +1,5 @@
+using Glide.Core.Workspace;
+
 namespace Glide.Core;
 
 /// <summary>
@@ -23,7 +25,7 @@ public sealed class ImageNavigator
         if (!string.IsNullOrWhiteSpace(directory) && Directory.Exists(directory))
         {
             _order = ImageSortOrder.CreateComparer();
-            _paths.AddRange(ImageSortOrder.Sort(Directory.EnumerateFiles(directory).Where(IsSupported), _order));
+            _paths.AddRange(ImageSortOrder.Sort(PendingDeleteHideList.Filter(Directory.EnumerateFiles(directory)).Where(IsSupported), _order));
         }
 
         Index = _paths.FindIndex(p => string.Equals(p, full, StringComparison.OrdinalIgnoreCase));
@@ -49,7 +51,7 @@ public sealed class ImageNavigator
         var currentFull = Path.GetFullPath(currentPath);
         _order = ImageSortOrder.CreateComparer();
         _paths.Clear();
-        _paths.AddRange(orderedPaths.Select(Path.GetFullPath).Distinct(StringComparer.OrdinalIgnoreCase));
+        _paths.AddRange(PendingDeleteHideList.Filter(orderedPaths).Select(Path.GetFullPath).Distinct(StringComparer.OrdinalIgnoreCase));
         Index = _paths.FindIndex(p => string.Equals(p, currentFull, StringComparison.OrdinalIgnoreCase));
         if (Index < 0)
         {
@@ -92,7 +94,7 @@ public sealed class ImageNavigator
         foreach (var raw in added)
         {
             var full = Path.GetFullPath(raw);
-            if (!IsSupported(full)) continue;
+            if (!IsSupported(full) || PendingDeleteHideList.IsHidden(full)) continue;
             var pos = BinarySearch(full);
             if (pos >= 0) continue;
             // Fall back to a linear dedupe for case-variant paths.
@@ -140,7 +142,7 @@ public sealed class ImageNavigator
         if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory)) return [full];
         var order = ImageSortOrder.CreateComparer();
         if (maxCount is not > 0)
-            return ImageSortOrder.Sort(Directory.EnumerateFiles(directory).Where(IsSupported), order);
+            return ImageSortOrder.Sort(PendingDeleteHideList.Filter(Directory.EnumerateFiles(directory)).Where(IsSupported), order);
 
         var limit = Math.Max(1, maxCount.Value);
         if (limit == 1) return [full];
@@ -154,7 +156,7 @@ public sealed class ImageNavigator
         var reverseOrder = Comparer<string>.Create((x, y) => order.Compare(y, x));
         var upper = new PriorityQueue<string, string>(reverseOrder);
 
-        foreach (var candidate in Directory.EnumerateFiles(directory))
+        foreach (var candidate in PendingDeleteHideList.Filter(Directory.EnumerateFiles(directory)))
         {
             if (!IsSupported(candidate) || string.Equals(candidate, full, StringComparison.OrdinalIgnoreCase)) continue;
             var comparison = order.Compare(candidate, full);

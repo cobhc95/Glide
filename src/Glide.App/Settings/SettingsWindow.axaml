@@ -466,6 +466,13 @@
                 </Grid>
             </StackPanel>
           </controls:SettingsCard>
+            <controls:SettingsCard CardId="window-delete" Title="Deleting files" Subtitle="What Shift+Delete does in the image view" Icon="Close" IsExpanded="False">
+              <StackPanel Classes="settingsCardBody" Spacing="10">
+                <CheckBox x:Name="DelayedPermanentDeleteCheck" Content="Delayed permanent delete (Shift+Delete with undo)" Margin="6,0,0,0"
+                          ToolTip.Tip="After you confirm Shift+Delete, Glide shows the next picture at once and deletes the file only after about 5 seconds. Undo in the notice brings it back."/>
+                <TextBlock Classes="phaseNote" Text="Off: Shift+Delete deletes the file permanently as soon as you confirm. On: you get about 5 seconds to click Undo; pending deletes are carried out when you close the window." TextWrapping="Wrap" Margin="6,-4,8,2"/>
+              </StackPanel>
+            </controls:SettingsCard>
             <controls:SettingsCard CardId="window-explorer" Title="Explorer tab" Subtitle="The view and which files Glide's own Explorer tab lists" Icon="Browser" IsExpanded="False">
               <StackPanel Classes="settingsCardBody" Spacing="10">
                 <Grid ColumnDefinitions="260,230,*" Margin="6,0,0,0">
@@ -916,7 +923,7 @@
               <StackPanel Classes="settingsCardBody" Spacing="10">
                 <TextBlock Text="Whole-app Overlay mode removes ordinary Glide chrome and requests real transparent window composition. Transparent PNG regions can reveal the desktop where the platform compositor supports transparency. Normal Glide remains the default." Classes="phaseNote" TextWrapping="Wrap"/>
                 <CheckBox x:Name="WholeAppOverlayAlwaysStartCheck" Content="Always start Glide in Overlay / Window-in-Window mode" ToolTip.Tip="Off by default. You can also toggle this from the Overlay-mode context menu."/>
-                <CheckBox x:Name="WholeAppOverlayWindowedInteractionsCheck" Content="Use normal windowed image interactions while in Overlay mode" ToolTip.Tip="Off by default. Off = Window-in-Window behavior: left-drag moves the Overlay window. On = normal Glide selection/pan/click behavior. This can also be toggled from Overlay mode's right-click menu."/>
+                <CheckBox x:Name="WholeAppOverlayWindowedInteractionsCheck" Content="Use normal windowed image interactions while in Overlay mode" ToolTip.Tip="Off by default. Off = Window-in-Window behavior: left-drag always moves the Overlay window, even when zoomed in or cropped; right-click, hold and drag pans. On = normal Glide selection/pan/click behavior. This can also be toggled from Overlay mode's right-click menu."/>
                 <CheckBox x:Name="WholeAppOverlayShowDragStripCheck" Content="Show a drag handle near the top" ToolTip.Tip="Off by default. A small rounded handle with a grip line, centred just below the top edge, shown while the mouse is over the Overlay and fading out when it leaves. Drag it to move the window, even when zoomed in. Also in Overlay mode's right-click menu."/>
                 <CheckBox x:Name="WholeAppOverlayTopCentreGripCheck" Content="Show the drag handle when pointing at the top centre"/>
                 <!-- A link: the tooltip delays live on Appearance &amp; viewing > Tooltips. -->
@@ -930,7 +937,7 @@
                     </StackPanel>
                   </Grid>
                 </Button>
-                <CheckBox x:Name="WholeAppOverlayLockPositionCheck" Content="Lock the Overlay window position" ToolTip.Tip="Off by default. Dragging no longer moves the Overlay window (left-drag, Alt+drag, bottom bar, drag strip); panning a zoomed picture still works. Also in Overlay mode's right-click menu."/>
+                <CheckBox x:Name="WholeAppOverlayLockPositionCheck" Content="Lock the Overlay window position" ToolTip.Tip="Off by default. Dragging no longer moves the Overlay window (left-drag, Alt+drag, bottom bar, drag strip); panning a zoomed picture with the right-drag still works. Also in Overlay mode's right-click menu."/>
             </StackPanel>
           </controls:SettingsCard>
           </StackPanel>

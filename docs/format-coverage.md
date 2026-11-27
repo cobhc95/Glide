@@ -65,7 +65,7 @@ crashes, hangs or fabricates pixels.
 | GPU textures (other) | .basis .tex .vtf .wal .spr .dpx .cin | provider / Shell | ⚠️ optional codec | — |
 | Scientific / misc (other) | .ff .xyze .xwd .cut .mac .img .pic .pict .pct .pict2 .iff .lbm .ilbm .ras .sun | provider / Shell | ⚠️ optional codec | — |
 
-**Counts:** 196 recognised suffixes; **about 112 decode on a clean PC** — the 10-suffix core fast path,
+**Counts:** 196 recognised suffixes; **131 decode on a clean PC** (5.2.0 count) — the 10-suffix core fast path,
 **16 suffixes through the bundled codec module** (AVIF/HEIF/JPEG XL/JPEG 2000) and **86 bundled built-in suffixes** (SVG/SVGZ, 26 legacy raster + Photoshop, EXR,
 40 camera RAW, 4 layered-editor, 9 medical/scientific, 4 GPU texture). These are the
 `DecodeEnabled` rows of `CodecCapabilityRegistry`; WIC aliases such as .jfif/.dib/.dds/.jxr also open

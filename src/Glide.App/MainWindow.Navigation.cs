@@ -1210,6 +1210,8 @@ public partial class MainWindow
         // A job posted before the window closed can run after its frame was disposed.
         if (_windowLifetimeCts.IsCancellationRequested) return;
         if (_presentedPath is null || Viewport.Bitmap is null) return;
+        // An Overlay resize drag only transforms the frame on screen (one decision, with the final size, when the drag ends).
+        if (_wholeAppOverlayResize is { } overlayResize) { overlayResize.Trace?.OnRefineDeferred(); return; }
         var (frame, needed) = PresentedFrameWidths();
         // Undersized, or a staged/reduced preview (fit-sized but not final): both get the full frame now.
         if (!DisplayFrameSufficiency.NeedsRefinement(frame, needed, _currentFrameIsPreview, _currentDecodeRoute)) return;

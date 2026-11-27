@@ -27,7 +27,7 @@ public sealed class LegacyOverlayChrome : Control
     /// room outside its bounds, so the frame sits <see cref="OverlayFrameGeometry.GlowReach"/> inside and the glow fills the gap.
     /// </summary>
     internal OverlayFrameChromeSpec BuildSpec(Size size) =>
-        OverlayFrameGeometry.BuildSpec(new Rect(default, size), OpacityValue, glow: true, frameInset: OverlayFrameGeometry.GlowReach);
+        OverlayFrameGeometry.BuildSpec(new Rect(default, size), OpacityValue, glow: true, frameInset: OverlayFrameGeometry.GlowReach, adaptToSize: true);
 
     public override void Render(DrawingContext context)
     {

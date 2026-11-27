@@ -14,7 +14,9 @@ Outputs:
 Needs Pillow. Every frame size of the old .ico is kept: 16 20 24 32 40 48 64 128 256.
 """
 import argparse
+import io
 import os
+import struct
 import sys
 
 from PIL import Image, ImageDraw, ImageFont
@@ -25,9 +27,19 @@ APP_ICO = os.path.join(ROOT, "src", "Glide.App", "Assets", "Glide.ico")
 FILE_TYPE_DIR = os.path.join(ROOT, "src", "Glide.App", "FileTypeIcons")
 SIZES = [16, 20, 24, 32, 40, 48, 64, 128, 256]
 MASTER = 1024
+# File-type icon frames (size, palette colours or 0 for truecolour). Explorer scales from the nearest frame.
+GENERIC_ICON = "generic.ico"
+FILE_TYPE_LAYERS = [(16, 0), (24, 0), (32, 0), (48, 0), (256, 64)]
+# Less-known extensions get a minimal set (Windows upscales it for huge views); the common ones keep the full set.
+RARE_LAYERS = [(16, 0), (32, 64), (48, 64)]
+COMMON = set("jpg jpeg jpe jfif png apng gif webp heic heif hif avif jxl bmp dib ico tif tiff svg svgz psd "
+             "dng cr2 cr3 crw nef nrw arw orf raf rw2 pef srw".split())
 TILE = (27, 31, 38)
 
 # Extension -> (label, band colour). Families share a colour so a folder of mixed files reads at a glance.
+# The extension set itself is read from ImageFormatRegistry.cs (DeclaredExtensions), so a new format gets an icon
+# the next time this runs, and a test fails until it does. Compound suffixes (.nii.gz, .ome.tif) are skipped: the
+# shell only ever sees the last dot (.gz, .tif), so they cannot own an icon.
 JPEG = (232, 96, 60)
 PNG = (46, 160, 214)
 GIF = (156, 89, 209)
@@ -36,22 +48,47 @@ HEIF = (230, 160, 30)
 TIFF = (90, 110, 140)
 RAW = (120, 85, 60)
 VEC = (220, 70, 140)
+LAYERED = (96, 84, 196)
+SCIENCE = (24, 130, 130)
+TEXTURE = (160, 120, 40)
 MISC = (70, 80, 95)
-FILE_TYPES = {
-    ".jpg": ("JPG", JPEG), ".jpeg": ("JPEG", JPEG), ".jpe": ("JPE", JPEG), ".jfif": ("JFIF", JPEG),
-    ".png": ("PNG", PNG), ".apng": ("APNG", PNG),
-    ".gif": ("GIF", GIF),
-    ".webp": ("WEBP", WEB), ".avif": ("AVIF", WEB), ".jxl": ("JXL", WEB),
-    ".heic": ("HEIC", HEIF), ".heif": ("HEIF", HEIF), ".hif": ("HIF", HEIF),
-    ".bmp": ("BMP", MISC), ".dib": ("DIB", MISC), ".ico": ("ICO", MISC), ".cur": ("CUR", MISC),
-    ".tif": ("TIF", TIFF), ".tiff": ("TIFF", TIFF), ".jxr": ("JXR", TIFF), ".wdp": ("WDP", TIFF),
-    ".jp2": ("JP2", TIFF), ".j2k": ("J2K", TIFF),
-    ".svg": ("SVG", VEC), ".svgz": ("SVGZ", VEC),
-    ".psd": ("PSD", MISC), ".tga": ("TGA", MISC), ".dds": ("DDS", MISC), ".exr": ("EXR", MISC),
-    ".hdr": ("HDR", MISC), ".qoi": ("QOI", MISC),
-    ".dng": ("DNG", RAW), ".cr2": ("CR2", RAW), ".cr3": ("CR3", RAW), ".nef": ("NEF", RAW),
-    ".arw": ("ARW", RAW), ".orf": ("ORF", RAW), ".rw2": ("RW2", RAW), ".raf": ("RAF", RAW),
-}
+FAMILIES = [
+    (JPEG, "jpg jpeg jpe jfif jif jfi pjpeg pjpg mpo jps pns"),
+    (PNG, "png apng mng jng"),
+    (GIF, "gif"),
+    (WEB, "webp avif avifs jxl"),
+    (HEIF, "heic heif heics heifs hif"),
+    (TIFF, "tif tiff btf jxr wdp hdp jp2 j2k j2c jpc jpx jpf jpm mj2"),
+    (VEC, "svg svgz eps epsf ai pdf emf wmf emz wmz cdr cmx cpt dwg dxf skp"),
+    (LAYERED, "psd psb pdd xcf ora kra afphoto afdesign afpub clip csp pdn psp pspimage"),
+    (SCIENCE, "dcm dicom ima nii mha mhd nrrd ndpi svs vms vmu scn mrxs bif czi lif lsm vsi fits fit fts"),
+    (TEXTURE, "dds ktx ktx2 pvr astc basis tex vtf wal spr"),
+    (RAW, "dng cr2 cr3 crw nef nrw arw srf sr2 raf orf ori rw2 rwl pef ptx 3fr fff iiq cap eip mef mos mrw x3f erf kdc "
+           "dcr k25 bay srw rwz gpr mdc raw r3d ari cinema dcs drf dsc r2d rw1"),
+]
+FAMILY_OF = {ext: colour for colour, names in FAMILIES for ext in names.split()}
+
+
+def declared_extensions():
+    """Every single-dot extension in ImageFormatRegistry.DeclaredExtensions, in declaration order."""
+    path = os.path.join(ROOT, "src", "Glide.Core", "ImageFormatRegistry.cs")
+    with open(path, encoding="utf-8") as handle:
+        text = handle.read()
+    block = text[text.index('DeclaredExtensions = """') + len('DeclaredExtensions = """'):]
+    block = block[:block.index('"""')]
+    found = []
+    for item in block.replace(chr(10), ",").split(","):
+        item = item.strip().lower()
+        if item.startswith(".") and item.count(".") == 1 and item not in found:
+            found.append(item)
+    return found
+
+
+def build_file_types():
+    return {ext: (ext[1:].upper(), FAMILY_OF.get(ext[1:], MISC)) for ext in declared_extensions()}
+
+
+FILE_TYPES = build_file_types()
 
 
 def font(px):
@@ -123,8 +160,15 @@ def file_type_master(label, colour, detail=True):
     band_top, band_bottom = round(s * 0.56), round(s * 0.86)
     d.rounded_rectangle((round(s * 0.04), band_top, round(s * 0.90), band_bottom), radius=round(s * 0.04), fill=colour + (255,))
     if detail:
-        f = font(round(s * (0.25 if len(label) <= 3 else 0.205)))
+        # Largest size that fits the band: 0.25 for short labels, shrinking for AFPHOTO / PSPIMAGE.
+        limit = (round(s * 0.90) - round(s * 0.04)) * 0.9
+        px = round(s * (0.25 if len(label) <= 3 else 0.205))
+        f = font(px)
         tb = d.textbbox((0, 0), label, font=f)
+        while tb[2] - tb[0] > limit and px > 20:
+            px -= 8
+            f = font(px)
+            tb = d.textbbox((0, 0), label, font=f)
         cx = (round(s * 0.04) + round(s * 0.90)) / 2
         cy = (band_top + band_bottom) / 2
         d.text((cx - (tb[0] + tb[2]) / 2, cy - (tb[1] + tb[3]) / 2), label, font=f, fill=(255, 255, 255, 255))
@@ -137,6 +181,35 @@ def save_ico(master_for_size, path):
     frames = [master_for_size(size).resize((size, size), Image.LANCZOS) for size in SIZES]
     os.makedirs(os.path.dirname(path), exist_ok=True)
     frames[-1].save(path, format="ICO", sizes=[(s, s) for s in SIZES], append_images=frames[:-1])
+
+
+def png_bytes(image, colours):
+    """Optimised PNG of one icon frame; colours > 0 quantises to an 8-bit palette with alpha (flat art, no visible loss)."""
+    if colours:
+        # Transparent pixels carry the outline grey, so the octree does not blend black into the antialiased edge.
+        grey = Image.new("RGBA", image.size, (120, 126, 136, 0))
+        grey.alpha_composite(image)
+        image = grey.quantize(colors=colours, method=Image.FASTOCTREE, dither=Image.NONE)
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG", optimize=True)
+    return buffer.getvalue()
+
+
+def save_compact_ico(master_for_size, path, layers):
+    """File-type icon: fewer frames (Explorer scales between them) and palette PNGs for the large ones."""
+    entries = []
+    for size, colours in layers:
+        frame = master_for_size(size).resize((size, size), Image.LANCZOS)
+        entries.append((size, png_bytes(frame, colours)))
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    header = struct.pack("<HHH", 0, 1, len(entries))
+    offset = 6 + 16 * len(entries)
+    directory = b""
+    for size, data in entries:
+        directory += struct.pack("<BBBBHHII", size % 256, size % 256, 0, 0, 1, 32, len(data), offset)
+        offset += len(data)
+    with open(path, "wb") as handle:
+        handle.write(header + directory + b"".join(data for _, data in entries))
 
 
 APP_MASTER_CACHE = []
@@ -156,7 +229,12 @@ def main():
     for ext, (label, colour) in FILE_TYPES.items():
         # The label is unreadable below 32 px: the band colour and the mark carry the type there.
         masters = {True: file_type_master(label, colour, True), False: file_type_master(label, colour, False)}
-        save_ico(lambda size: masters[size >= 32], os.path.join(FILE_TYPE_DIR, ext.lstrip(".") + ".ico"))
+        save_compact_ico(lambda size: masters[size >= 32], os.path.join(FILE_TYPE_DIR, ext.lstrip(".") + ".ico"),
+                         FILE_TYPE_LAYERS if ext.lstrip(".") in COMMON else RARE_LAYERS)
+    # generic.ico: the same page without a label, for Applications\Glide.exe (the class Windows uses when the user picked
+    # Glide through "Open with" instead of a per-extension ProgID: it cannot be per extension).
+    generic = file_type_master("", MISC, False)
+    save_compact_ico(lambda size: generic, os.path.join(FILE_TYPE_DIR, GENERIC_ICON), FILE_TYPE_LAYERS)
     with open(os.path.join(FILE_TYPE_DIR, "stamp.txt"), "w", encoding="ascii") as stamp:
         stamp.write(" ".join(sorted(FILE_TYPES)) + "\n")
 

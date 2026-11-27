@@ -653,6 +653,12 @@ public partial class MainWindow
             if (!delete) return;
             if (dontAskAgain) _permanentDeleteConfirmations.DontAskAgain(tab.Id, folder);
         }
+        if (NavigationOptionsView.DelayedPermanentDelete)
+        {
+            // 5.2.1 G2 (opt-in): same question as above, then hide the file, show the next picture and delete after a delay unless Undo is clicked.
+            await BeginDelayedPermanentDeleteAsync(oldPath, folder, oldIndex);
+            return;
+        }
         var result = await Glide.App.Explorer.ExplorerFileOperations.DeleteAsync([oldPath], permanent: true);
         if (result.Errors.Count > 0 || result.Deleted.Count == 0)
         {
@@ -699,7 +705,7 @@ public partial class MainWindow
             try
             {
                 if (!Directory.Exists(folder)) return null;
-                var remaining = Directory.EnumerateFiles(folder).Where(ImageNavigator.IsSupported)
+                var remaining = Glide.Core.Workspace.PendingDeleteHideList.Filter(Directory.EnumerateFiles(folder)).Where(ImageNavigator.IsSupported)
                     .OrderBy(p => p, Glide.Core.ImageSortOrder.CreateComparer()).ToList();
                 return remaining.Count > 0 ? remaining[Math.Min(oldIndex, remaining.Count - 1)] : null;
             }

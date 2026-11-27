@@ -20,7 +20,10 @@ internal readonly record struct OverlayFrameChromeSpec(
     Rect? ResizeGrip = null,
     Rect? WidthHandle = null,
     Rect? HeightHandle = null,
-    bool ShowFrame = true);
+    bool ShowFrame = true,
+    bool ShowClose = true,
+    bool ShowSlider = true,
+    bool ShowZoom = true);
 
 /// <summary>
 /// The one painter for overlay window chrome: frame + hover glow, round close button, resize grip, crop handles,
@@ -76,10 +79,13 @@ internal static class OverlayFrameChromePainter
             canvas.Rect(new Rect(frame.X - 2, frame.Y - 2, frame.Width + 4, frame.Height + 4), null, Palette.Glow, 2, Palette.FrameRadius + 2);
         if (spec.ShowFrame) canvas.Rect(frame, null, accent, Palette.FrameStroke, Palette.FrameRadius);
 
-        var cc = spec.Close.Center;
-        canvas.Ellipse(cc, 13, Palette.Panel);
-        canvas.Line(new Point(cc.X - 4, cc.Y - 4), new Point(cc.X + 4, cc.Y + 4), fg, 1.8);
-        canvas.Line(new Point(cc.X + 4, cc.Y - 4), new Point(cc.X - 4, cc.Y + 4), fg, 1.8);
+        if (spec.ShowClose)
+        {
+            var cc = spec.Close.Center;
+            canvas.Ellipse(cc, 13, Palette.Panel);
+            canvas.Line(new Point(cc.X - 4, cc.Y - 4), new Point(cc.X + 4, cc.Y + 4), fg, 1.8);
+            canvas.Line(new Point(cc.X + 4, cc.Y - 4), new Point(cc.X - 4, cc.Y + 4), fg, 1.8);
+        }
 
         if (spec.ResizeGrip is { } resize)
         {
@@ -110,12 +116,16 @@ internal static class OverlayFrameChromePainter
             canvas.Line(new Point(hc.X, hc.Y + 6), new Point(hc.X + 4, hc.Y + 2), fg, 2);
         }
 
-        var slider = spec.Slider;
-        canvas.Rect(slider, Palette.Glass, null, 0, 10);
-        var sx = slider.Center.X;
-        canvas.Line(new Point(sx, slider.Top + OverlayFrameGeometry.OpacityTrackInset), new Point(sx, slider.Bottom - OverlayFrameGeometry.OpacityTrackInset), fg, 2);
-        canvas.Ellipse(new Point(sx, spec.KnobY), 5, accent);
+        if (spec.ShowSlider)
+        {
+            var slider = spec.Slider;
+            canvas.Rect(slider, Palette.Glass, null, 0, 10);
+            var sx = slider.Center.X;
+            canvas.Line(new Point(sx, slider.Top + OverlayFrameGeometry.OpacityTrackInset), new Point(sx, slider.Bottom - OverlayFrameGeometry.OpacityTrackInset), fg, 2);
+            canvas.Ellipse(new Point(sx, spec.KnobY), 5, accent);
+        }
 
+        if (!spec.ShowZoom) return;
         DrawZoomButton(canvas, spec.ZoomOut, plus: false, accent);
         DrawZoomButton(canvas, spec.ZoomIn, plus: true, accent);
     }

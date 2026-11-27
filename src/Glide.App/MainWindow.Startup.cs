@@ -95,6 +95,8 @@ public partial class MainWindow
         };
         overlays.Diagnostic += (name, data) => _diagnostics.Write("overlay", name, data);
         overlays.OverlayCountChanged += UpdateOverlayStatusButtons;
+        overlays.OverlayCountChanged += QueueWholeAppOverlayRegionUpdate;   // Overlay mode: picture-in-picture frames are part of its input region
+        overlays.LayoutChanged += QueueWholeAppOverlayRegionUpdate;
         overlays.ContextMenuVisibilityChanged += open =>
         {
             if (open) _overlayContextTopmostScope ??= EnterTopmostTransient();

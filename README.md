@@ -6,7 +6,7 @@
 
 ![Glide main window: an image with the stacked status bar, Back and Forward title-bar buttons and tab strip](docs/screenshots/5.0/hero.jpg)
 
-**Glide is a Windows image viewer built to feel instant**: tabs and multiple windows, a built-in Explorer tab, 196 recognised file extensions (about 112 open on a clean Windows install), Save As to about 30 formats, printing, overlays, a hotkey or gesture for almost everything, and Explorer thumbnails. No telemetry, no .NET runtime to install.
+**Glide is a Windows image viewer built to feel instant**: tabs and multiple windows, a built-in Explorer tab, 196 recognised file extensions (131 decode on a clean Windows install with nothing else installed), Save As to about 30 formats, printing, overlays, a hotkey or gesture for almost everything, and Explorer thumbnails. No telemetry, no .NET runtime to install.
 
 [Download](#download-and-install) · [What changed in 5.2.0](#what-changed-in-520) · [Performance](#performance) · [Feature tour](#feature-tour) · [Shortcuts](#default-shortcuts) · [Formats](#formats) · [Build](#building-from-source) · [Docs](#documentation)
 

@@ -10,6 +10,16 @@ internal enum OverlayResizeMode { Proportional, WidthOnly, HeightOnly }
 internal enum OverlayChromeZone { None, Close, ZoomOut, ZoomIn, Grip, WidthHandle, HeightHandle, Slider }
 
 /// <summary>
+/// Which chrome controls fit a frame of a given size without overlapping each other or leaving the frame (Overlay mode only; a
+/// picture-in-picture item keeps its full chrome at every size). See <see cref="OverlayFrameGeometry.PartsFor"/>.
+/// </summary>
+internal readonly record struct OverlayChromeParts(bool Close, bool Grip, bool WidthHandle, bool HeightHandle, bool Slider, bool Zoom)
+{
+    /// <summary>Every control (a frame big enough for the full chrome).</summary>
+    public static OverlayChromeParts All { get; } = new(true, true, true, true, true, true);
+}
+
+/// <summary>
 /// The one definition of an overlay frame's chrome geometry. A picture-in-picture item passes its rectangle in viewer
 /// coordinates; Overlay mode passes the picture rectangle of its window. Drawing (<see cref="OverlayFrameChromePainter"/>),
 /// hit testing, the resize handles and the opacity track all read these rectangles, so the two hosts cannot drift apart.
@@ -29,6 +39,47 @@ internal static class OverlayFrameGeometry
     public static Rect WidthHandle(Rect frame) => new(frame.X + frame.Width - 22, frame.Y + frame.Height / 2 - 22, 22, 44);
     /// <summary>Top-centre handle: crops (or resizes) the height only, anchored at the bottom edge.</summary>
     public static Rect HeightHandle(Rect frame) => new(frame.X + frame.Width / 2 - 22, frame.Y, 44, 22);
+    /// <summary>
+    /// The rectangle of Overlay mode's frame / chrome host: the picture rectangle, clipped to the window's workspace so no handle,
+    /// button or border can lie outside the window (and outside the window region cut from the same rectangle).
+    /// </summary>
+    public static Rect HostRect(Rect picture, Size workspace) =>
+        workspace.Width > 0 && workspace.Height > 0 ? picture.Intersect(new Rect(default, workspace)) : picture;
+
+    // ---- small frames (Overlay mode) ---------------------------------------------------------------------------------
+    // At the 80 x 60 minimum the full chrome collides: the top handle sits on the close button, the right handle on the close
+    // button and the corner grip, the opacity pill is taller than the frame and the zoom buttons cover it. Below these sizes the
+    // secondary controls are left out (close and the corner grip stay as long as they fit), so every drawn control and hit area
+    // lies inside the frame and none overlaps another. Derived from the rectangles above:
+    //   close fits            : 41 x 41 (its box ends 7 + 27 = 34 from the top, 7 from the right)
+    //   grip clear of close   : H >= 72  (grip box starts H - 28, close ends at 34, plus a gap)
+    //   top handle clear of close : W >= 120 (W / 2 + 22 <= W - 34 - gap)
+    //   right handle clear of close and grip : H >= 116 (H / 2 - 22 >= 34 + gap and H / 2 + 22 <= H - 36 - gap)
+    //   zoom buttons clear of the grip and the close button : W >= 132, H >= 76
+    //   opacity pill (70 high at least) above the zoom buttons : H >= 150
+    public const double CloseMinSide = 41;
+    public const double GripMinHeight = 72;
+    public const double HeightHandleMinWidth = 120;
+    public const double WidthHandleMinHeight = 116;
+    public const double ZoomMinWidth = 132;
+    public const double ZoomMinHeight = 76;
+    public const double SliderMinHeight = 150;
+
+    /// <summary>The controls that fit a frame of <paramref name="size"/>; hidden ones are neither drawn nor hit-testable.</summary>
+    public static OverlayChromeParts PartsFor(Size size)
+    {
+        var w = size.Width;
+        var h = size.Height;
+        var close = w >= CloseMinSide && h >= CloseMinSide;
+        return new OverlayChromeParts(
+            Close: close,
+            Grip: close && h >= GripMinHeight,
+            WidthHandle: w >= CloseMinSide && h >= WidthHandleMinHeight,
+            HeightHandle: w >= HeightHandleMinWidth && h >= CloseMinSide,
+            Slider: w >= ZoomMinWidth && h >= SliderMinHeight,
+            Zoom: w >= ZoomMinWidth && h >= ZoomMinHeight);
+    }
+
     public static Rect Slider(Rect frame, bool video = false) => ToHost(frame, OverlayVideoChromeLayout.OpacitySlider(frame.Width, frame.Height, video));
     public static Rect ZoomOut(Rect frame, bool video = false) => ToHost(frame, OverlayVideoChromeLayout.ZoomOut(frame.Width, frame.Height, video));
     public static Rect ZoomIn(Rect frame, bool video = false) => ToHost(frame, OverlayVideoChromeLayout.ZoomIn(frame.Width, frame.Height, video));
@@ -68,8 +119,10 @@ internal static class OverlayFrameGeometry
     /// The chrome of one overlay frame. <paramref name="bounds"/> places every control; <paramref name="frameInset"/> pulls the
     /// drawn frame (and with it the glow) inward when the host is a window with no room outside its bounds.
     /// </summary>
-    public static OverlayFrameChromeSpec BuildSpec(Rect bounds, double opacity, bool glow, bool video = false, bool showFrame = true, double frameInset = 0)
+    public static OverlayFrameChromeSpec BuildSpec(Rect bounds, double opacity, bool glow, bool video = false, bool showFrame = true, double frameInset = 0,
+        bool adaptToSize = false)
     {
+        var parts = adaptToSize ? PartsFor(bounds.Size) : OverlayChromeParts.All;
         var slider = Slider(bounds, video);
         return new OverlayFrameChromeSpec(
             Frame: frameInset > 0 ? bounds.Deflate(frameInset) : bounds,
@@ -79,11 +132,14 @@ internal static class OverlayFrameGeometry
             ZoomOut: ZoomOut(bounds, video),
             ZoomIn: ZoomIn(bounds, video),
             Glow: glow,
-            ResizeGrip: GripVisual(bounds),
+            ResizeGrip: parts.Grip ? GripVisual(bounds) : null,
             // The lower-right corner remains the true resize control. The centred right and top handles change one axis only.
-            WidthHandle: WidthHandle(bounds),
-            HeightHandle: HeightHandle(bounds),
-            ShowFrame: showFrame);
+            WidthHandle: parts.WidthHandle ? WidthHandle(bounds) : null,
+            HeightHandle: parts.HeightHandle ? HeightHandle(bounds) : null,
+            ShowFrame: showFrame,
+            ShowClose: parts.Close,
+            ShowSlider: parts.Slider,
+            ShowZoom: parts.Zoom);
     }
 }
 

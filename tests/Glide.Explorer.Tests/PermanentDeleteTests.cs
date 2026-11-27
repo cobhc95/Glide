@@ -1,6 +1,7 @@
-using Avalonia.Controls;
+﻿using Avalonia.Controls;
 using Avalonia.Headless;
 using Avalonia.Input;
+using Avalonia.LogicalTree;
 using Glide.App;
 using Glide.Core.Workspace;
 
@@ -60,6 +61,111 @@ public sealed class PermanentDeleteTests
         Assert.False(c.ShouldAsk(tab, folder + Path.DirectorySeparatorChar));
         Assert.True(c.ShouldAsk(Guid.NewGuid(), folder));
         Assert.True(c.ShouldAsk(tab, Path.Combine(Path.GetTempPath(), "y")));
+    }
+
+    // ---- 5.2.1 G2: "Delayed permanent delete (Shift+Delete with undo)" -----------------------------------------------
+
+    private static void Confirm(ExplorerHarness h) =>
+        h.Window.PermanentDeleteConfirmOverride = _ => Task.FromResult((true, false));
+
+    private static bool InNavigator(ExplorerHarness h, string path) =>
+        h.Get<Glide.App.Services.NavigationCoordinator>("_navigator").Paths.Any(p => string.Equals(p, path, StringComparison.OrdinalIgnoreCase));
+
+    // The first key press right after a picture opens is sometimes lost in the headless window (focus not settled yet): retry
+    // until the expected effect shows (a press only acts once, so a retry after success never happens).
+    private static async Task ShiftDeleteUntilAsync(ExplorerHarness h, Func<bool> done)
+    {
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            h.Key(Key.Delete, RawInputModifiers.Shift);
+            if (await Wait.TryUntilAsync(done, 2500, h.Pump, pollMs: 15)) return;
+        }
+        Assert.True(done(), "Shift+Delete had no effect");
+    }
+
+    [Fact]
+    public async Task Delayed_delete_is_off_by_default_and_Shift_Delete_then_deletes_at_once()
+    {
+        await ExplorerHarness.Run(async h =>
+        {
+            Assert.False(new Glide.Core.Settings.GlideSettingsState().DelayedPermanentDelete);
+            Confirm(h);
+            await OpenImageAsync(h, "a.png");
+            var a = Path.Combine(h.Root, "a.png");
+            await ShiftDeleteUntilAsync(h, () => !File.Exists(a));
+            Assert.Equal(0, h.Window.PendingPermanentDeletes.Count);
+        });
+    }
+
+    [Fact]
+    public async Task Delayed_delete_on_hides_the_file_shows_the_next_picture_and_Undo_restores_it()
+    {
+        await ExplorerHarness.Run(async h =>
+        {
+            h.Settings.DelayedPermanentDelete = true;
+            Confirm(h);
+            await OpenImageAsync(h, "a.png");
+            var a = Path.Combine(h.Root, "a.png");
+            await ShiftDeleteUntilAsync(h, () => h.Window.PendingPermanentDeletes.Count == 1);
+            await h.WaitUntil(() => h.Get<string?>("_currentPath") is { } p && !string.Equals(p, a, StringComparison.OrdinalIgnoreCase), "moved on");
+            Assert.True(File.Exists(a));                                   // still on disk during the delay
+            Assert.False(InNavigator(h, a));
+            var notices = h.Window.FindControl<StackPanel>("PendingDeleteNotices")!;
+            Assert.True(notices.IsVisible);
+            Assert.Contains("Deleting a.png permanently", string.Join(" ", notices.GetLogicalDescendants().OfType<TextBlock>().Select(t => t.Text)));
+
+            await h.Window.UndoPendingDeleteAsync(h.Window.PendingPermanentDeletes.Entries[0].Id);
+            Assert.True(File.Exists(a));
+            Assert.Equal(0, h.Window.PendingPermanentDeletes.Count);
+            Assert.False(notices.IsVisible);
+            Assert.Equal(a, h.Get<string?>("_currentPath"), ignoreCase: true);   // shown again
+            Assert.True(InNavigator(h, a));
+        });
+    }
+
+    [Fact]
+    public async Task Delayed_delete_deletes_after_the_delay_and_several_pending_each_work()
+    {
+        var delay = MainWindow.PendingDeleteDelayMs;
+        MainWindow.PendingDeleteDelayMs = 400;
+        try
+        {
+            await ExplorerHarness.Run(async h =>
+            {
+                h.Settings.DelayedPermanentDelete = true;
+                Confirm(h);
+                await OpenImageAsync(h, "a.png");
+                var a = Path.Combine(h.Root, "a.png"); var b = Path.Combine(h.Root, "b.png");
+                await ShiftDeleteUntilAsync(h, () => h.Window.PendingPermanentDeletes.Count == 1 || !File.Exists(a));
+                await h.WaitUntil(() => string.Equals(h.Get<string?>("_currentPath"), b, StringComparison.OrdinalIgnoreCase), "b shown");
+                await ShiftDeleteUntilAsync(h, () => !File.Exists(b) || h.Window.PendingPermanentDeletes.Count == 2 || (!File.Exists(a) && h.Window.PendingPermanentDeletes.Count == 1));
+                await h.WaitUntil(() => h.Window.PendingPermanentDeletes.Count == 0 && !File.Exists(a) && !File.Exists(b), "both completed", 6000);
+                Assert.False(File.Exists(a)); Assert.False(File.Exists(b));
+                Assert.Empty(h.Recycled);
+            });
+        }
+        finally { MainWindow.PendingDeleteDelayMs = delay; }
+    }
+
+    [Fact]
+    public async Task Closing_the_window_carries_out_pending_deletes_and_leaves_changed_files_alone()
+    {
+        await ExplorerHarness.Run(async h =>
+        {
+            h.Settings.DelayedPermanentDelete = true;
+            Confirm(h);
+            await OpenImageAsync(h, "a.png");
+            var a = Path.Combine(h.Root, "a.png"); var b = Path.Combine(h.Root, "b.png");
+            await ShiftDeleteUntilAsync(h, () => h.Window.PendingPermanentDeletes.Count == 1);
+            await h.WaitUntil(() => string.Equals(h.Get<string?>("_currentPath"), b, StringComparison.OrdinalIgnoreCase), "b shown");
+            await ShiftDeleteUntilAsync(h, () => h.Window.PendingPermanentDeletes.Count == 2);
+            File.AppendAllText(b, "changed after confirming");
+            Assert.True(File.Exists(a));
+            h.Window.FlushPendingDeletes();                                // what Closed / the standby close call
+            Assert.False(File.Exists(a));
+            Assert.True(File.Exists(b));                                   // changed meanwhile: kept
+            Assert.Equal(0, h.Window.PendingPermanentDeletes.Count);
+        });
     }
 
     [Fact]

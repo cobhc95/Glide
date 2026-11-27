@@ -189,6 +189,11 @@
           </Grid>
         </Border>
 
+        <!-- Delayed permanent delete (5.2.1 G2, MainWindow.DelayedDelete.cs): one notice per pending Shift+Delete, "Deleting <name>
+             permanently... Undo", stacked above the status bar. Notices are added and removed in code. -->
+        <StackPanel x:Name="PendingDeleteNotices" IsVisible="False" Spacing="6"
+                    HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="16,0,16,72" ZIndex="1471"/>
+
         <Border x:Name="SlideshowQualityIndicator" IsVisible="False" IsHitTestVisible="False"
                 HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,18,0,0" ZIndex="1500"
                 Width="42" Height="42" Background="#D9181B20" BorderBrush="#D95BB7F5"

@@ -78,10 +78,45 @@ public sealed class OverlayFrameChromeSharingTests
         var overlays = ReadSource("src", "Glide.App", "MainWindow.Overlays.cs");
         var update = overlays[overlays.IndexOf("private void UpdateWholeAppOverlayResize", StringComparison.Ordinal)..];
         update = update[..update.IndexOf("private void ApplyWholeAppOverlayResizeBox", StringComparison.Ordinal)];
-        Assert.Contains("ApplyWholeAppOverlayResizeBox(", update, StringComparison.Ordinal);
+        Assert.Contains("ApplyWholeAppOverlayResizeBox(", overlays, StringComparison.Ordinal);
         Assert.DoesNotContain(" Width = Math.Max(MinWidth", update, StringComparison.Ordinal);
         Assert.DoesNotContain("Position = ", update, StringComparison.Ordinal);
         Assert.Contains("Platform.Native.User32.SetWindowPos(", overlays, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Overlay_mode_resize_is_coalesced_to_one_frame_and_lays_the_chrome_out_in_that_frame()
+    {
+        var overlays = ReadSource("src", "Glide.App", "MainWindow.Overlays.cs");
+        var update = overlays[overlays.IndexOf("private void UpdateWholeAppOverlayResize", StringComparison.Ordinal)..];
+        update = update[..update.IndexOf("private void ApplyWholeAppOverlayResizeBox", StringComparison.Ordinal)];
+        // Pointer moves only record the newest target and queue one frame callback; they never touch the window themselves.
+        Assert.Contains("RequestAnimationFrame(", update, StringComparison.Ordinal);
+        Assert.DoesNotContain("ApplyWholeAppOverlayResizeBox(", update, StringComparison.Ordinal);
+        Assert.DoesNotContain("Viewport.UpdateEdgeCrop(", update, StringComparison.Ordinal);
+        var flush = overlays[overlays.IndexOf("private void FlushWholeAppOverlayResize", StringComparison.Ordinal)..];
+        flush = flush[..flush.IndexOf("private void ApplyChromeSizingAfterWholeAppOverlayResize", StringComparison.Ordinal)];
+        Assert.True(flush.IndexOf("Viewport.UpdateEdgeCrop(", StringComparison.Ordinal) < flush.IndexOf("ApplyWholeAppOverlayResizeBox(", StringComparison.Ordinal));
+        Assert.True(flush.IndexOf("ApplyWholeAppOverlayResizeBox(", StringComparison.Ordinal) < flush.IndexOf("AlignWholeAppOverlayChromeToPixels();", StringComparison.Ordinal));
+        Assert.Contains("UpdateLayout();", flush, StringComparison.Ordinal);
+        // Releasing the handle applies the last target before the session ends; the native call never copies stale client bits.
+        var end = overlays[overlays.IndexOf("private bool EndWholeAppOverlayResize", StringComparison.Ordinal)..];
+        Assert.True(end.IndexOf("FlushWholeAppOverlayResize();", StringComparison.Ordinal) < end.IndexOf("_wholeAppOverlayResize = null;", StringComparison.Ordinal));
+        Assert.Contains("SwpNoCopyBits", overlays, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Overlay_resize_skips_per_step_status_bar_and_tab_strip_work()
+    {
+        var window = ReadSource("src", "Glide.App", "MainWindow.axaml.cs");
+        var sizeChanged = window[window.IndexOf("SizeChanged += (_, _) =>", StringComparison.Ordinal)..];
+        sizeChanged = sizeChanged[..sizeChanged.IndexOf("PositionChanged +=", StringComparison.Ordinal)];
+        var guard = sizeChanged.IndexOf("if (WholeAppOverlayResizing) return;", StringComparison.Ordinal);
+        Assert.True(guard >= 0);
+        Assert.True(guard < sizeChanged.IndexOf("ApplyStatusBarSize();", StringComparison.Ordinal));
+        Assert.True(guard < sizeChanged.IndexOf("RebuildTabStrip();", StringComparison.Ordinal));
+        var overlays = ReadSource("src", "Glide.App", "MainWindow.Overlays.cs");
+        Assert.Contains("ApplyChromeSizingAfterWholeAppOverlayResize();", overlays, StringComparison.Ordinal);
     }
 
     [Fact]

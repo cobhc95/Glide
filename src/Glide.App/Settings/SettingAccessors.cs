@@ -28,6 +28,7 @@ internal static class SettingAccessors
         ["general.singleInstance"] = Bool(s => s.ReuseSingleInstance, (s, v) => s.ReuseSingleInstance = v),
         ["navigation.hierarchicalFolders"] = Bool(s => s.HierarchicalFolderTraversal, (s, v) => s.HierarchicalFolderTraversal = v),
         ["navigation.confirmHierarchicalBoundary"] = Bool(s => s.ConfirmHierarchicalFolderTraversal, (s, v) => s.ConfirmHierarchicalFolderTraversal = v),
+        ["navigation.delayedPermanentDelete"] = Bool(s => s.DelayedPermanentDelete, (s, v) => s.DelayedPermanentDelete = v),
         ["navigation.skipHint"] = Bool(s => s.NavigationSkipHint, (s, v) => s.NavigationSkipHint = v),
         ["navigation.rateLimitIndicator"] = Bool(s => s.NavigationRateLimitShowIndicator, (s, v) => s.NavigationRateLimitShowIndicator = v),
         ["navigation.rateLimitWindowed"] = Bool(s => s.NavigationRateLimitWindowed, (s, v) => s.NavigationRateLimitWindowed = v),

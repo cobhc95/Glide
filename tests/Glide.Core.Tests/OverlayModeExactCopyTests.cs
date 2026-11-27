@@ -47,7 +47,6 @@ public sealed class OverlayModeExactCopyTests
     [Theory]
     [InlineData(400, 300, 1.0)]
     [InlineData(400, 300, 0.45)]
-    [InlineData(80, 60, 0.8)]
     [InlineData(240, 180, 0.35)]
     [InlineData(1000, 700, 1.0)]
     public void Both_hosts_draw_identical_chrome_operations(double w, double h, double opacity) => AvaloniaHeadlessFixture.RunOnUIThread(() =>

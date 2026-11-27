@@ -55,6 +55,28 @@ public static class OverlayWindowSizing
     }
 
     /// <summary>
+    /// The size to give the Overlay window when it is entered again with a remembered placement: the remembered size, never larger
+    /// than the work area (shrunk with its aspect ratio) and never smaller than the minimum. A size that is not a finite positive
+    /// number yields null (the caller uses the default placement instead).
+    /// </summary>
+    public static (double Width, double Height)? RestoreSize(double rememberedWidth, double rememberedHeight, PixelBox workArea, double scale,
+        double minWidth = 80, double minHeight = 80)
+    {
+        if (!double.IsFinite(rememberedWidth) || !double.IsFinite(rememberedHeight) || rememberedWidth <= 0 || rememberedHeight <= 0) return null;
+        scale = scale > 0 ? scale : 1.0;
+        double width = rememberedWidth, height = rememberedHeight;
+        var maxWidth = Math.Max(minWidth, workArea.Width / scale);
+        var maxHeight = Math.Max(minHeight, workArea.Height / scale);
+        if (width > maxWidth || height > maxHeight)
+        {
+            var shrink = Math.Min(maxWidth / width, maxHeight / height);
+            width *= shrink;
+            height *= shrink;
+        }
+        return (Math.Max(minWidth, width), Math.Max(minHeight, height));
+    }
+
+    /// <summary>
     /// The Size-menu choice the window currently matches (within about 1.5 % or 2 px), or null when the window was
     /// resized to something else. A choice capped by the work area matches when the window is at that cap.
     /// </summary>

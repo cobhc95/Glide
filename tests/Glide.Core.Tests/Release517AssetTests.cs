@@ -11,7 +11,6 @@ namespace Glide.Core.Tests;
 [Trait("Area", "Shell")]
 public sealed class Release517AssetTests
 {
-    private static readonly int[] DocumentIconSizes = { 16, 20, 24, 32, 40, 48, 64, 128, 256 };
 
     private sealed record IconFrame(int Width, int Height, int BitCount, int Bytes, int Offset);
 
@@ -66,17 +65,20 @@ public sealed class Release517AssetTests
     }
 
     [Fact]
-    public void Thirty_nine_document_icons_ship_each_with_all_nine_sizes_and_each_names_a_format_Glide_registers()
+    public void Every_document_icon_ships_with_its_tier_of_sizes_and_each_names_a_format_Glide_registers()
     {
         var folder = Path.Combine(AppContext.BaseDirectory, WindowsFileAssociationRegistration.FileTypeIconFolder);
         var icons = Directory.GetFiles(folder, "*.ico");
-        Assert.Equal(39, icons.Length);
+        var singleDot = ImageFormatRegistry.Extensions.Count(e => e.LastIndexOf('.') == 0);
+        Assert.Equal(singleDot + 1, icons.Length); // one per single-dot extension + generic.ico
         foreach (var icon in icons)
         {
+            if (Path.GetFileName(icon) == WindowsFileAssociationRegistration.GenericIconFile) continue;
             var extension = "." + Path.GetFileNameWithoutExtension(icon);
             Assert.Contains(extension, ImageFormatRegistry.Extensions);
             var (frames, data) = ReadIco(icon);
-            Assert.Equal(DocumentIconSizes, frames.Select(f => f.Width).OrderBy(x => x).ToArray());
+            var sizes = frames.Select(f => f.Width).OrderBy(x => x).ToArray();
+            Assert.True(sizes.SequenceEqual(new[] { 16, 32, 48 }) || sizes.SequenceEqual(new[] { 16, 24, 32, 48, 256 }), string.Join(",", sizes));
             AssertFramesAreRealImages(icon, frames, data);
         }
         // The icons the changelog names.
@@ -104,7 +106,7 @@ public sealed class Release517AssetTests
                 Assert.Equal("Glide.Image", WindowsFileAssociationRegistration.ProgIdFor(extension, hasTypeIcon: false));
             }
         }
-        Assert.Equal(39, withIcon.Count);
+        Assert.Equal(ImageFormatRegistry.Extensions.Count(e => e.LastIndexOf('.') == 0), withIcon.Count);
         Assert.NotEmpty(without);                                              // other formats keep the generic Glide ProgID and icon
         Assert.All(withIcon, e => Assert.True(WindowsFileAssociationRegistration.IsGlideProgId(WindowsFileAssociationRegistration.ProgIdFor(e, true))));
         Assert.All(without, e => Assert.True(WindowsFileAssociationRegistration.IsGlideProgId(WindowsFileAssociationRegistration.ProgIdFor(e, false))));

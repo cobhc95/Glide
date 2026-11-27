@@ -4,7 +4,7 @@ Released 2026-11-27. Thumbnails for every format Glide opens, a much faster 45 M
 
 ## 🙏 Thank you, Vertigo220
 
-Thank you to **Vertigo220** for round 4 of detailed testing and suggestions in [issue #1](https://github.com/cobhc95/Glide/issues/1). Every numbered item below came from that report and shipped in this release, except G2 (a delayed permanent delete), which was declined by choice in favour of a plain confirmation dialog.
+Thank you to **Vertigo220** for round 4 of detailed testing and suggestions in [issue #1](https://github.com/cobhc95/Glide/issues/1). Every numbered item below came from that report and shipped in this release, except G2 (a delayed permanent delete with undo): this release adds the confirmation dialog, and the delayed delete is coming in a later update as an opt-in setting.
 
 ### 🧾 Vertigo's round 4, item by item
 
@@ -32,7 +32,7 @@ Thank you to **Vertigo220** for round 4 of detailed testing and suggestions in [
 | F1 | 📋 Duplicate tab keeps its Back / Forward history | ✅ done |
 | F2 | ⚙️ Duplicate tab options | ✅ done |
 | G1 | 🗑️ Shift+Delete deletes permanently, with a confirmation | ✅ done |
-| G2 | ⏳ Delayed permanent delete | ➖ declined by choice (confirm dialog only) |
+| G2 | ⏳ Delayed permanent delete | 🔜 coming in a later update, as an opt-in setting (5.2.0 has the confirmation dialog) |
 | H1 | ⌨️ Space no longer reopens Settings | ✅ fixed |
 | H2 | ⏸️ A paused GIF stays paused when you switch tabs | ✅ fixed |
 | I1 | 🗂️ File icons show the extension (JPG, PNG, WEBP...) | ✅ done |
@@ -101,7 +101,7 @@ Everything else (plain JPEG, PNG, GIF, BMP, WebP, JPEG XR, RAW, PSD, EXR, DDS...
 
 ### 🪟 Overlay mode and picture-in-picture
 - Overlay mode draws the same chrome as a picture-in-picture overlay, with the same menu and drag strip.
-- Resizing is smooth: one native window move per step, no flicker.
+- Resizing is smoother: one native window move per step instead of separate moves and resizes.
 - The hover highlight is a ring around the border, not a fill over the picture.
 - **Preserve aspect ratio** on: edge handles crop the picture (the opposite edge stays put). Off: the picture is stretched. Overlay mode has the same toggle.
 
@@ -120,7 +120,14 @@ Everything else (plain JPEG, PNG, GIF, BMP, WebP, JPEG XR, RAW, PSD, EXR, DDS...
 
 Batch rename dialog placement and scrolling (including the Numbers box fitting its fields), tab tear-off and re-attach, paused GIFs across tabs, Space reopening Settings, the "File no longer on disk" badge, the text overlay offsets and hint, development and portable builds taking over the installed file associations, thumbnail timeouts on slow disks, and more: see the [changelog](https://github.com/cobhc95/Glide/blob/main/CHANGELOG.md).
 
+## ⚠️ Known issue
+
+- 🗂️ **Tearing a tab off takes a long pull.** A tab has to be dragged quite far out of the tab bar before it detaches into its own window. This will be fixed in the next update.
+- 🪟 **A few flickers when resizing in overlay mode.** Resizing is smoother than before but can still flicker now and then. This will be fixed in the next update.
+- 🖼️ **Not every file type shows its own icon yet.** JPG and others show a file-type icon, but some (for example PNG) still show the plain Glide icon in Windows Explorer. Every supported extension will get its own icon in the next update.
+
 ## Downloads
 
 - `Glide.Setup.exe`: installer (Windows 10 1607 or later, x64)
+- `Glide-5.2.0-Portable.zip`: portable build (SHA256 `17A75E5BAFEE46C3E6E9AF67C592B57C54D83E6A8AC2559D78D922C8F25D23DB`)
 - `Glide.Setup.sha256`: checksum (SHA256 `D76B540CECE45E524B0A7554554B36471855201E378AC9EBDCE7A4819E8F972B`)

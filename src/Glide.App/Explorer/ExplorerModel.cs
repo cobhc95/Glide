@@ -1,5 +1,6 @@
 using Glide.Imaging;
 using Glide.Core;
+using Glide.Core.Workspace;
 
 namespace Glide.App.Explorer;
 
@@ -265,6 +266,7 @@ internal static class ExplorerModel
             token.ThrowIfCancellationRequested();
             try
             {
+                if (PendingDeleteHideList.IsHidden(item.FullName)) continue;
                 var attributes = item.Attributes;
                 if (!showHidden && (attributes & (FileAttributes.Hidden | FileAttributes.System)) != 0) continue;
                 var directory = (attributes & FileAttributes.Directory) != 0;

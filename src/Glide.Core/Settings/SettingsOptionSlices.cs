@@ -24,6 +24,7 @@ public readonly struct NavigationOptions(GlideSettingsState settings)
     public bool RateLimitFullscreen => settings.NavigationRateLimitFullscreen;
     public bool RateLimitSlideshow => settings.NavigationRateLimitSlideshow;
     public bool SkipHint => settings.NavigationSkipHint;
+    public bool DelayedPermanentDelete => settings.DelayedPermanentDelete;
     public bool Counter => settings.ShowFolderCounter;
     public bool FolderCounterIncludeGrandparent => settings.FolderCounterIncludeGrandparent;
     public bool FolderNavShowGroup => settings.FolderNavShowGroup;

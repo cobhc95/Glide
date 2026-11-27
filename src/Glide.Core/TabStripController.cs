@@ -125,15 +125,22 @@ public sealed class TabStripController
     }
 
     /// <summary>
-    /// Tear-off decision: outside the window always tears off; otherwise the pointer must leave the strip by a generous
-    /// slack (sideways for side tabs) so a sloppy reorder never detaches the tab.
+    /// Distance, in DIPs, the pointer must be pulled beyond the strip's edge (perpendicular to it) before a tab tears off,
+    /// like Chrome/Edge. Reordering along the strip never counts, and the cross-axis wobble of a reorder stays well inside it.
+    /// </summary>
+    public const double TearOffDistanceDip = 36;
+
+    /// <summary>
+    /// Tear-off decision: outside the window always tears off; otherwise the pointer must leave the strip by
+    /// <see cref="TearOffDistanceDip"/> DIPs (converted with <paramref name="renderScale"/>; vertically for the horizontal
+    /// strip, sideways for side tabs) so a sloppy reorder never detaches the tab but a clear pull-out does.
     /// </summary>
     public static bool BeyondTearOffThreshold(bool insideWindow, bool sideTabs, int x, int y,
         int stripX, int stripY, int stripWidth, int stripHeight, double renderScale)
     {
         if (!insideWindow) return true;
         if (renderScale <= 0) renderScale = 1.0;
-        var tolerance = Math.Max(48, (int)Math.Round(64 * renderScale));
+        var tolerance = (int)Math.Round(TearOffDistanceDip * renderScale);
         if (sideTabs) return x < stripX - tolerance || x > stripX + stripWidth + tolerance;
         return y < stripY - tolerance || y > stripY + stripHeight + tolerance;
     }

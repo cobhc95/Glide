@@ -92,16 +92,23 @@ public sealed class TabStripControllerTests
     }
 
     [Fact]
-    public void Tear_off_needs_a_generous_slack_away_from_the_strip()
+    public void Tear_off_triggers_about_36_dip_beyond_the_strip_edge()
     {
-        // strip at y 100..140, scale 1 => tolerance 64
-        Assert.False(TabStripController.BeyondTearOffThreshold(true, false, 500, 200, 0, 100, 1000, 40, 1.0));
-        Assert.True(TabStripController.BeyondTearOffThreshold(true, false, 500, 205, 0, 100, 1000, 40, 1.0));
+        Assert.Equal(36, TabStripController.TearOffDistanceDip);
+        // horizontal strip at y 100..140, scale 1 => tolerance 36 beyond either edge
+        Assert.False(TabStripController.BeyondTearOffThreshold(true, false, 500, 176, 0, 100, 1000, 40, 1.0));
+        Assert.True(TabStripController.BeyondTearOffThreshold(true, false, 500, 177, 0, 100, 1000, 40, 1.0));
+        Assert.False(TabStripController.BeyondTearOffThreshold(true, false, 500, 64, 0, 100, 1000, 40, 1.0));
+        Assert.True(TabStripController.BeyondTearOffThreshold(true, false, 500, 63, 0, 100, 1000, 40, 1.0));
+        // reordering along the strip never detaches, however far
+        Assert.False(TabStripController.BeyondTearOffThreshold(true, false, 99999, 120, 0, 100, 1000, 40, 1.0));
         Assert.True(TabStripController.BeyondTearOffThreshold(false, false, 500, 120, 0, 100, 1000, 40, 1.0));
-        // side tabs tear off sideways; 2x scale => 128
-        Assert.False(TabStripController.BeyondTearOffThreshold(true, true, 300, 9999, 0, 0, 200, 800, 2.0));
-        Assert.True(TabStripController.BeyondTearOffThreshold(true, true, 329, 0, 0, 0, 200, 800, 2.0));
-        // invalid scale falls back to 1 (and never under 48)
-        Assert.False(TabStripController.BeyondTearOffThreshold(true, false, 0, 204, 0, 100, 1000, 40, 0));
+        // side tabs tear off sideways (strip x 0..200); 2x scale => 72 physical px
+        Assert.False(TabStripController.BeyondTearOffThreshold(true, true, 272, 9999, 0, 0, 200, 800, 2.0));
+        Assert.True(TabStripController.BeyondTearOffThreshold(true, true, 273, 0, 0, 0, 200, 800, 2.0));
+        Assert.True(TabStripController.BeyondTearOffThreshold(true, true, -73, 0, 0, 0, 200, 800, 2.0));
+        // invalid scale falls back to 1
+        Assert.False(TabStripController.BeyondTearOffThreshold(true, false, 0, 176, 0, 100, 1000, 40, 0));
+        Assert.True(TabStripController.BeyondTearOffThreshold(true, false, 0, 177, 0, 100, 1000, 40, 0));
     }
 }

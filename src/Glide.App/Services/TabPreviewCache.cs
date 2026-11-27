@@ -91,7 +91,7 @@ internal sealed class TabPreviewCache : IDisposable
     {
         try
         {
-            return Directory.EnumerateFiles(folder)
+            return Glide.Core.Workspace.PendingDeleteHideList.Filter(Directory.EnumerateFiles(folder))
                 .Where(p => ImageNavigator.IsSupported(p) && (File.GetAttributes(p) & FileAttributes.Hidden) == 0)
                 .Take(64)
                 .OrderBy(p => p, ImageSortOrder.CreateComparer())

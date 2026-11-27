@@ -882,9 +882,35 @@ public sealed class ImageViewport : Control
     /// <summary>On-screen width (DIPs) of the image at the last render; 0 before the first draw.</summary>
     public double LastImageDestWidth => _lastImageDest.Width;
 
+    /// <summary>Number of times the viewport drew its bitmap (a cheap draw of the retained bitmap at its transform); diagnostics only.</summary>
+    public long RenderCount { get; private set; }
+
+    private bool _resizeQualityActive;
+
+    /// <summary>
+    /// A window resize drag (Overlay mode) only moves and scales the bitmap that is already on screen: it samples with the cheap
+    /// interactive settings while the drag runs (the same switch a pan uses; "Full quality" keeps the configured sampling).
+    /// <see cref="EndResizeQuality"/> restores the configured sampling and draws once at full quality.
+    /// </summary>
+    public void BeginResizeQuality()
+    {
+        if (_resizeQualityActive || _interactiveQualityActive) return;
+        _resizeQualityActive = true;
+        BeginInteractiveQuality();
+    }
+
+    public void EndResizeQuality()
+    {
+        if (!_resizeQualityActive) return;
+        _resizeQualityActive = false;
+        EndInteractiveQuality();
+        InvalidateVisual();
+    }
+
     public override void Render(DrawingContext context)
     {
         base.Render(context);
+        RenderCount++;
         if (!_suppressBackgroundFill && Background is { } background) context.FillRectangle(background, Bounds);
         var frame = _presentedFrame;
         var interaction = _interactionFrame;

@@ -43,6 +43,9 @@ public sealed record GlideSettingsState
     // navigation.skipHint (5.0.6): show the "Skipping several pictures at once?" toast when a key press seems to skip
     // pictures (a sticky or bouncing next / previous key). The toast's "Don't remind me again" turns it off.
     public bool NavigationSkipHint { get; set; } = true;
+    // navigation.delayedPermanentDelete (5.2.1, G2): Shift+Delete hides the file, shows "Deleting <name> permanently... Undo" and
+    // deletes after about 5 seconds instead of at once. Off = the 5.2.0 immediate permanent delete.
+    public bool DelayedPermanentDelete { get; set; }
     public bool RememberLastOpenLocation { get; set; } = true;
     // New Explorer tabs have their own navigation-memory scope. Default = last Explorer-tab folder.
     public bool NewExplorerTabsUseLastLocation { get; set; } = true;

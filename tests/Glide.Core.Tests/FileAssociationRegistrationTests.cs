@@ -76,7 +76,45 @@ public sealed class FileAssociationRegistrationTests
         {
             var bytes = File.ReadAllBytes(icon);
             Assert.Equal(1, BitConverter.ToUInt16(bytes, 2));
-            Assert.Equal(9, BitConverter.ToUInt16(bytes, 4)); // 16 20 24 32 40 48 64 128 256
+            var frames = BitConverter.ToUInt16(bytes, 4);
+            Assert.InRange(frames, 3, 5); // rare types 16/32/48, common ones 16/24/32/48/256
+            var sizes = Enumerable.Range(0, frames).Select(i => (int)bytes[6 + 16 * i]).ToList();
+            Assert.Contains(16, sizes);
+            Assert.Contains(32, sizes);
+            Assert.Contains(48, sizes);
         }
+    }
+
+    private static IEnumerable<string> SingleDotExtensions() =>
+        ImageFormatRegistry.Extensions.Where(extension => extension.LastIndexOf('.') == 0);
+
+    [Fact]
+    public void Every_supported_extension_ships_its_own_document_icon()
+    {
+        var folder = Path.Combine(AppContext.BaseDirectory, WindowsFileAssociationRegistration.FileTypeIconFolder);
+        var missing = SingleDotExtensions()
+            .Where(extension => WindowsFileAssociationRegistration.FileTypeIconPath(AppContext.BaseDirectory, extension) is null)
+            .ToList();
+        Assert.True(missing.Count == 0, $"No icon in {folder} for: {string.Join(' ', missing)} (run python tools/generate-icons.py --file-types)");
+        Assert.True(File.Exists(Path.Combine(folder, WindowsFileAssociationRegistration.GenericIconFile)));
+    }
+
+    [Fact]
+    public void Every_supported_extension_registers_a_typed_progid_with_a_default_icon()
+    {
+        // Registration writes Glide.Image.<ext> + DefaultIcon for each extension that has an icon file (test above).
+        foreach (var extension in SingleDotExtensions())
+            Assert.Equal("Glide.Image." + extension.TrimStart('.'), WindowsFileAssociationRegistration.ProgIdFor(extension, hasTypeIcon: true));
+        var source = File.ReadAllText(Path.Combine(SourceText.RepoRoot, "src", "Glide.App", "Platform", "WindowsFileAssociationRegistration.cs"));
+        Assert.Contains("typed?.CreateSubKey(\"DefaultIcon\"", source); // typed ProgID icon
+        Assert.Contains("appIcon?.SetValue(string.Empty, ApplicationDefaultIcon(executable)", source); // Applications\Glide.exe (UserChoice via Open with)
+    }
+
+    [Fact]
+    public void Applications_class_gets_the_generic_document_icon_when_it_ships()
+    {
+        Assert.Equal("\"" + Path.Combine(@"C:\Glide", "FileTypes", "generic.ico") + "\",0",
+            WindowsFileAssociationRegistration.ApplicationDefaultIcon(@"C:\Glide\Glide.exe", _ => true));
+        Assert.Equal(@"""C:\Glide\Glide.exe"",0", WindowsFileAssociationRegistration.ApplicationDefaultIcon(@"C:\Glide\Glide.exe", _ => false));
     }
 }

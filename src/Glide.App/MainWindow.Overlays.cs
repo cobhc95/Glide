@@ -170,20 +170,24 @@ public partial class MainWindow
         {
             var size = host.Bounds.Size;
             var frame = new Rect(default, size);
-            void Place(Control control, Rect rect)
+            // Only the controls that fit a frame this small are drawn (OverlayFrameGeometry.PartsFor); their hit areas follow.
+            var parts = OverlayFrameGeometry.PartsFor(size);
+            void Place(Control control, Rect rect, bool shown)
             {
-                // Hit areas never reach outside the window (the corner grip's hit box overhangs the frame by 4 DIP).
-                rect = rect.Intersect(frame);
+                // Hit areas never reach outside the window (the corner grip's hit box overhangs the frame by 4 DIP). A hidden control
+                // keeps a zero-size box (not IsVisible=false: a handle that is being dragged keeps its pointer capture).
+                rect = shown ? rect.Intersect(frame) : default;
                 control.Margin = new Thickness(rect.X, rect.Y, 0, 0);
                 control.Width = rect.Width;
                 control.Height = rect.Height;
             }
-            Place(opacityHit, OverlayFrameGeometry.Slider(frame));
-            Place(zoomOutHit, OverlayFrameGeometry.ZoomOut(frame));
-            Place(zoomInHit, OverlayFrameGeometry.ZoomIn(frame));
-            Place(gripHit, OverlayFrameGeometry.GripHit(frame));
-            Place(widthHit, OverlayFrameGeometry.WidthHandle(frame));
-            Place(heightHit, OverlayFrameGeometry.HeightHandle(frame));
+            closeHit.IsVisible = parts.Close;
+            Place(opacityHit, OverlayFrameGeometry.Slider(frame), parts.Slider);
+            Place(zoomOutHit, OverlayFrameGeometry.ZoomOut(frame), parts.Zoom);
+            Place(zoomInHit, OverlayFrameGeometry.ZoomIn(frame), parts.Zoom);
+            Place(gripHit, OverlayFrameGeometry.GripHit(frame), parts.Grip);
+            Place(widthHit, OverlayFrameGeometry.WidthHandle(frame), parts.WidthHandle);
+            Place(heightHit, OverlayFrameGeometry.HeightHandle(frame), parts.HeightHandle);
         };
         WorkspaceLayer.Children.Add(host);
 
@@ -194,8 +198,59 @@ public partial class MainWindow
 
     // ---- corner grip and edge handles: resize the real window like a picture-in-picture overlay ------------------
 
-    private sealed record WholeAppOverlayResizeSession(OverlayResizeMode Mode, IPointer Pointer, PixelPoint CursorStart, Size StartSize, PixelPoint StartPosition,
-        bool Crop = false, Size CropView = default, Size CropImage = default);
+    private sealed class WholeAppOverlayResizeSession
+    {
+        public OverlayResizeMode Mode { get; }
+        public IPointer Pointer { get; }
+        public PixelPoint CursorStart { get; }
+        public Size StartSize { get; }
+        public PixelPoint StartPosition { get; }
+        public double Scale { get; }
+        public bool Crop { get; }
+        public Size CropView { get; }
+        public Size CropImage { get; }
+        public OverlayResizeStage Stage { get; }
+        public Avalonia.Layout.HorizontalAlignment SavedImageHAlign { get; }
+        public Avalonia.Layout.VerticalAlignment SavedImageVAlign { get; }
+        public double SavedImageWidth { get; }
+        public double SavedImageHeight { get; }
+        public Thickness SavedImageMargin { get; }
+        public PixelPoint CurrentOrigin { get; set; }
+        public Size CurrentSize { get; set; }
+        public OverlayResizeSyncTrace Trace { get; }
+        public long StartRenders { get; }
+        public long StartRequestId { get; }
+        public Avalonia.Media.Imaging.Bitmap? StartBitmap { get; }
+
+        public WholeAppOverlayResizeSession(OverlayResizeMode mode, IPointer pointer, PixelPoint cursorStart, Size startSize, PixelPoint startPosition,
+            double scale, bool crop, Size cropView, Size cropImage, OverlayResizeStage stage,
+            Avalonia.Layout.HorizontalAlignment savedHAlign, Avalonia.Layout.VerticalAlignment savedVAlign,
+            double savedWidth, double savedHeight, Thickness savedMargin,
+            OverlayResizeSyncTrace trace, long startRenders, long startRequestId, Avalonia.Media.Imaging.Bitmap? startBitmap)
+        {
+            Mode = mode;
+            Pointer = pointer;
+            CursorStart = cursorStart;
+            StartSize = startSize;
+            StartPosition = startPosition;
+            Scale = scale;
+            Crop = crop;
+            CropView = cropView;
+            CropImage = cropImage;
+            Stage = stage;
+            SavedImageHAlign = savedHAlign;
+            SavedImageVAlign = savedVAlign;
+            SavedImageWidth = savedWidth;
+            SavedImageHeight = savedHeight;
+            SavedImageMargin = savedMargin;
+            CurrentOrigin = startPosition;
+            CurrentSize = startSize;
+            Trace = trace;
+            StartRenders = startRenders;
+            StartRequestId = startRequestId;
+            StartBitmap = startBitmap;
+        }
+    }
 
     private WholeAppOverlayResizeSession? _wholeAppOverlayResize;
 
@@ -235,6 +290,26 @@ public partial class MainWindow
         return hit;
     }
 
+    private (double MaxWidth, double MaxHeight) WholeAppOverlayResizeMaxBounds(PixelPoint startPosition, Size startSize, double scale,
+        bool crop, Size cropView, Size cropImage)
+    {
+        double maxWidth = double.PositiveInfinity, maxHeight = double.PositiveInfinity;
+        var box = new PixelBox(startPosition.X, startPosition.Y,
+            (int)Math.Round(startSize.Width * scale), (int)Math.Round(startSize.Height * scale));
+        if (WholeAppOverlayScreenFor(box) is { } screen)
+        {
+            maxWidth = screen.WorkingArea.Width / scale;
+            maxHeight = screen.WorkingArea.Height / scale;
+        }
+        if (crop)
+        {
+            // Like picture-in-picture: the window can grow back only to the full picture, never past its edge.
+            maxWidth = Math.Min(maxWidth, startSize.Width + Math.Max(0, cropImage.Width - cropView.Width));
+            maxHeight = Math.Min(maxHeight, startSize.Height + Math.Max(0, cropImage.Height - cropView.Height));
+        }
+        return (maxWidth, maxHeight);
+    }
+
     private void BeginWholeAppOverlayResize(OverlayResizeMode mode, Control hit, PointerPressedEventArgs e)
     {
         if (!_wholeAppOverlayMode || _nativeSizeMoveActive || !e.GetCurrentPoint(hit).Properties.IsLeftButtonPressed) return;
@@ -246,11 +321,61 @@ public partial class MainWindow
         // The edge handles crop like picture-in-picture: the picture keeps its size and zoom, only the visible edge moves.
         Size cropView = default, cropImage = default;
         var crop = mode != OverlayResizeMode.Proportional && _wholeAppOverlayPreserveAspect && Viewport.BeginEdgeCrop(out cropView, out cropImage);
+        var scale = RenderScaling > 0 ? RenderScaling : 1.0;
+        var startSize = new Size(double.IsNaN(Width) ? Bounds.Width : Width, double.IsNaN(Height) ? Bounds.Height : Height);
+        var startPos = Position;
+        var (maxWidth, maxHeight) = WholeAppOverlayResizeMaxBounds(startPos, startSize, scale, crop, cropView, cropImage);
+        var stage = OverlayResizeStage.Compute(mode, startPos, startSize, maxWidth, maxHeight, scale);
         _wholeAppOverlayResize = new WholeAppOverlayResizeSession(mode, e.Pointer, this.PointToScreen(e.GetPosition(this)),
-            new Size(double.IsNaN(Width) ? Bounds.Width : Width, double.IsNaN(Height) ? Bounds.Height : Height), Position,
-            crop, cropView, cropImage);
+            startSize, startPos, scale, crop, cropView, cropImage, stage,
+            ImageView.HorizontalAlignment, ImageView.VerticalAlignment, ImageView.Width, ImageView.Height, ImageView.Margin,
+            new OverlayResizeSyncTrace(), Viewport.RenderCount, Volatile.Read(ref _imageRequestId), Viewport.Bitmap);
+        // A resize drag only transforms the bitmap that is already on screen: cheap sampling while it runs, one full-quality draw and one
+        // sufficiency check when it ends. The window region (click-through) is suspended: it is re-applied once at the end, because a
+        // region that changes with every size step makes DWM compose an old region with a new frame (ghost / spill past the border).
+        Viewport.BeginResizeQuality();
+        UpdateWholeAppOverlayInputRegion();
+        EnsureOverlayWndProcHook();
+        if (stage.Active)
+        {
+            // Pin ImageView to its exact current screen rect inside the transparent stage HWND. Expanding the HWND once up front
+            // avoids calling SetWindowPos on every drag frame (which in RedirectionSurface mode makes DWM clip the previous
+            // redirection bitmap against the new HWND bounds before Avalonia's async render thread paints the new size).
+            ImageView.HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Left;
+            ImageView.VerticalAlignment = Avalonia.Layout.VerticalAlignment.Top;
+            ImageView.Width = startSize.Width;
+            ImageView.Height = startSize.Height;
+            ImageView.Margin = stage.ContentMargin(startPos, scale);
+            if (stage.Origin != startPos || Math.Abs(stage.Size.Width - startSize.Width) > 0.5 || Math.Abs(stage.Size.Height - startSize.Height) > 0.5)
+            {
+                ApplyWholeAppOverlayResizeBox(stage.Origin, stage.Size.Width, stage.Size.Height, scale, preserveBits: stage.Origin == startPos);
+                UpdateLayout();
+                AlignWholeAppOverlayChromeToPixels();
+                UpdateLayout();
+            }
+        }
         e.Pointer.Capture(hit);
-        _diagnostics.Write("input", "overlay_window_resize_begin", new { mode = mode.ToString(), Width, Height });
+        _diagnostics.Write("input", "overlay_window_resize_begin", new { mode = mode.ToString(), Width, Height, staged = stage.Active });
+    }
+
+    private bool _overlayWndProcHookInstalled;
+
+    /// <summary>Watches WM_SIZE / WM_PAINT of the main window to count the unpainted steps of an Overlay resize drag (diagnostics only); every other message costs one field read.</summary>
+    private void EnsureOverlayWndProcHook()
+    {
+        if (_overlayWndProcHookInstalled || !OperatingSystem.IsWindows()) return;
+        _overlayWndProcHookInstalled = true;
+        try { Win32Properties.AddWndProcHookCallback(this, OverlayWndProcHook); }
+        catch (Exception ex) { _overlayWndProcHookInstalled = false; _diagnostics.Write("window", "overlay_wndproc_hook_failed", new { ex.Message }); }
+    }
+
+    private IntPtr OverlayWndProcHook(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam, ref bool handled)
+    {
+        if (_wholeAppOverlayResize?.Trace is not { } trace) return IntPtr.Zero;
+        const uint WmSize = 0x0005, WmPaint = 0x000F;
+        if (message == WmSize) trace.OnSize();
+        else if (message == WmPaint) trace.OnPaint();
+        return IntPtr.Zero;
     }
 
     private void UpdateWholeAppOverlayResize(PointerEventArgs e)
@@ -258,23 +383,13 @@ public partial class MainWindow
         if (_wholeAppOverlayResize is not { } session || !ReferenceEquals(e.Pointer, session.Pointer)) return;
         if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed) { EndWholeAppOverlayResize(e.Pointer); return; }
         e.Handled = true;
-        var scale = RenderScaling > 0 ? RenderScaling : 1.0;
+        var scale = session.Scale;
         var cursor = this.PointToScreen(e.GetPosition(this));
         var dx = (cursor.X - session.CursorStart.X) / scale;
         var dy = (cursor.Y - session.CursorStart.Y) / scale;
-        // Largest window: the work area of the screen the window is on.
-        double maxWidth = double.PositiveInfinity, maxHeight = double.PositiveInfinity;
-        if (WholeAppOverlayScreenFor(CurrentWindowPixelBox()) is { } screen)
-        {
-            maxWidth = screen.WorkingArea.Width / scale;
-            maxHeight = screen.WorkingArea.Height / scale;
-        }
-        if (session.Crop)
-        {
-            // Like picture-in-picture: the window can grow back only to the full picture, never past its edge.
-            maxWidth = Math.Min(maxWidth, session.StartSize.Width + Math.Max(0, session.CropImage.Width - session.CropView.Width));
-            maxHeight = Math.Min(maxHeight, session.StartSize.Height + Math.Max(0, session.CropImage.Height - session.CropView.Height));
-        }
+        // Largest window: the work area of the screen the window is on (and full picture edge when cropping).
+        var (maxWidth, maxHeight) = WholeAppOverlayResizeMaxBounds(session.StartPosition, session.StartSize, scale,
+            session.Crop, session.CropView, session.CropImage);
         // Ratio on: the corner keeps the ratio it had when grabbed. Ratio off: every handle stretches freely.
         var size = OverlayResizeMath.Compute(session.Mode, session.StartSize.Width, session.StartSize.Height, dx, dy,
             _wholeAppOverlayPreserveAspect, maxWidth, maxHeight);
@@ -282,27 +397,37 @@ public partial class MainWindow
         var newHeight = Math.Max(MinHeight, size.Height);
         var origin = session.Mode == OverlayResizeMode.HeightOnly
             ? new PixelPoint(session.StartPosition.X, session.StartPosition.Y + (int)Math.Round(size.TopShift * scale))
-            : Position;
-        if (session.Crop)
-            Viewport.UpdateEdgeCrop(new Size(session.CropView.Width + (newWidth - session.StartSize.Width),
-                session.CropView.Height + (newHeight - session.StartSize.Height)), session.Mode == OverlayResizeMode.WidthOnly);
-        ApplyWholeAppOverlayResizeBox(origin, newWidth, newHeight, scale);
+            : session.StartPosition;
+        // Pointer moves arrive faster than frames (1000 Hz mice): only the newest target is kept and it is applied once per frame.
+        _wholeAppOverlayResizePending = new PendingOverlayResize(origin, newWidth, newHeight, scale,
+            session.Crop ? new Size(session.CropView.Width + (newWidth - session.StartSize.Width),
+                session.CropView.Height + (newHeight - session.StartSize.Height)) : null,
+            session.Mode == OverlayResizeMode.WidthOnly);
+        if (_wholeAppOverlayResizeFrameQueued) return;
+        _wholeAppOverlayResizeFrameQueued = true;
+        RequestAnimationFrame(_ => { _wholeAppOverlayResizeFrameQueued = false; FlushWholeAppOverlayResize(); });
     }
+
+    private sealed record PendingOverlayResize(PixelPoint Origin, double Width, double Height, double Scale, Size? CropViewSize, bool Horizontal);
+
+    private PendingOverlayResize? _wholeAppOverlayResizePending;
+    private bool _wholeAppOverlayResizeFrameQueued;
 
     /// <summary>
     /// Moves and sizes the window in ONE native SetWindowPos. Setting Position, Width and Height separately made Windows place the
     /// window up to three times per pointer move (the top handle moved the top edge first and resized after, so the picture jumped
     /// and flickered while dragging); one call shows exactly one frame per move.
     /// </summary>
-    private void ApplyWholeAppOverlayResizeBox(PixelPoint origin, double width, double height, double scale)
+    private void ApplyWholeAppOverlayResizeBox(PixelPoint origin, double width, double height, double scale, bool preserveBits = false)
     {
         if (OperatingSystem.IsWindows() && TryGetPlatformHandle() is { } handle && handle.Handle != IntPtr.Zero)
         {
-            const uint SwpNoZOrder = 0x0004, SwpNoActivate = 0x0010, SwpNoOwnerZOrder = 0x0200;
+            const uint SwpNoZOrder = 0x0004, SwpNoActivate = 0x0010, SwpNoCopyBits = 0x0100, SwpNoOwnerZOrder = 0x0200;
+            var flags = SwpNoZOrder | SwpNoActivate | SwpNoOwnerZOrder | (preserveBits ? 0u : SwpNoCopyBits);
             try
             {
                 if (Platform.Native.User32.SetWindowPos(handle.Handle, IntPtr.Zero, origin.X, origin.Y,
-                        (int)Math.Round(width * scale), (int)Math.Round(height * scale), SwpNoZOrder | SwpNoActivate | SwpNoOwnerZOrder))
+                        (int)Math.Round(width * scale), (int)Math.Round(height * scale), flags))
                     return;
             }
             catch { /* native call unavailable; fall back to the Avalonia properties below */ }
@@ -312,16 +437,92 @@ public partial class MainWindow
         Height = height;
     }
 
+    /// <summary>
+    /// Applies the newest pending resize target: edge-crop pan first, then the staged ImageView box (keeping the transparent
+    /// stage HWND fixed so DWM never composites a resized HWND against a stale redirection bitmap), or a fallback SetWindowPos
+    /// when unstaged, then layout, then chrome alignment and layout in the same pass.
+    /// </summary>
+    private void FlushWholeAppOverlayResize()
+    {
+        if (_wholeAppOverlayResizePending is not { } p) return;
+        _wholeAppOverlayResizePending = null;
+        if (_wholeAppOverlayResize is not { } session) return;
+        // One frame, in this order: crop pan -> staged ImageView box (no HWND resize during the drag) -> layout (the viewport now
+        // has its new bounds and picture rect) -> chrome and picture frame from that rect -> layout of the chrome. Both the image
+        // and the chrome paint atomically in the same Avalonia compositor pass on the unchanged redirection surface.
+        if (p.CropViewSize is { } cropView) Viewport.UpdateEdgeCrop(cropView, p.Horizontal);
+        if (session.Stage.Active)
+        {
+            ImageView.Width = p.Width;
+            ImageView.Height = p.Height;
+            ImageView.Margin = session.Stage.ContentMargin(p.Origin, p.Scale);
+        }
+        else
+        {
+            ApplyWholeAppOverlayResizeBox(p.Origin, p.Width, p.Height, p.Scale);
+        }
+        session.CurrentOrigin = p.Origin;
+        session.CurrentSize = new Size(p.Width, p.Height);
+        UpdateLayout();
+        AlignWholeAppOverlayChromeToPixels();
+        UpdateLayout();
+        session.Trace.OnFlush();
+    }
+
+    /// <summary>The title-bar / status-bar / tab-strip sizing that SizeChanged skips on every step of an Overlay resize, run once at the end.</summary>
+    private void ApplyChromeSizingAfterWholeAppOverlayResize()
+    {
+        ApplyStatusBarSize();
+        if (_tabDrag.IsActive || _physicalDraggedTabId is not null || Math.Abs(Bounds.Width - _lastTabLayoutWidth) < 24) return;
+        _lastTabLayoutWidth = Bounds.Width;
+        if (!TryResizeTabStripInPlace()) RebuildTabStrip();
+    }
+
     private bool EndWholeAppOverlayResize(IPointer pointer)
     {
         if (_wholeAppOverlayResize is not { } session || !ReferenceEquals(pointer, session.Pointer)) return false;
+        FlushWholeAppOverlayResize();
+        if (session.Stage.Active)
+        {
+            // Restore ImageView to fill the window and commit the final tight HWND box in one native SetWindowPos.
+            ImageView.HorizontalAlignment = session.SavedImageHAlign;
+            ImageView.VerticalAlignment = session.SavedImageVAlign;
+            ImageView.Width = session.SavedImageWidth;
+            ImageView.Height = session.SavedImageHeight;
+            ImageView.Margin = session.SavedImageMargin;
+            ApplyWholeAppOverlayResizeBox(session.CurrentOrigin, session.CurrentSize.Width, session.CurrentSize.Height, session.Scale,
+                preserveBits: session.CurrentOrigin == session.Stage.Origin);
+        }
         _wholeAppOverlayResize = null;
+        // The one full-quality draw of the drag, then the chrome and the window region (click-through) for the final layout.
+        Viewport.EndResizeQuality();
+        ApplyChromeSizingAfterWholeAppOverlayResize();
         if (session.Crop) Viewport.EndEdgeCrop();
         try { pointer.Capture(null); } catch { /* pointer capture already released; nothing to undo */ }
-        try { TrackNormalWindowPlacement(); SaveCurrentWholeAppOverlayPlacement(); }
+        try { TrackNormalWindowPlacement(); SaveCurrentWholeAppOverlayPlacement(force: true); }
         catch (Exception ex) { _diagnostics.Write("window", "overlay_resize_end_failed", new { ex.Message }); }
+        ScheduleResizeInputReset();
+        UpdateLayout();
+        AlignWholeAppOverlayChromeToPixels();
         Dispatcher.UIThread.Post(AlignWholeAppOverlayChromeToPixels, DispatcherPriority.Render);
-        _diagnostics.Write("input", "overlay_window_resize_end", new { Width, Height });
+        // Decodes and viewport demand were held back while the drag ran: one check now, with the final size.
+        PublishViewportDemand();
+        EnsurePresentedFrameSufficient("overlay_resize_end");
+        // Steps that were superseded before any WM_PAINT presented them are the frames the compositor shows stretched or cropped.
+        var t = session.Trace;
+        _diagnostics.Write("input", "overlay_window_resize_end", new
+        {
+            mode = session.Mode.ToString(), Width, Height, staged = session.Stage.Active,
+            sizeSteps = t.Steps, paintedSteps = t.Paints, unpaintedSteps = t.UnpaintedSteps, unpaintedPercent = t.UnpaintedPercent,
+            // Cost of the drag: the retained bitmap is only redrawn at its new transform (viewportRenders ~ frames), nothing is decoded
+            // or re-uploaded (fullRendersOrDecodes should be 0), the region is cut once (suspended) and the chrome aligned once per frame.
+            viewportRenders = Math.Max(0, Viewport.RenderCount - session.StartRenders),
+            presentRequests = OverlayResizeSyncTrace.CountDelta(Volatile.Read(ref _imageRequestId), session.StartRequestId),
+            bitmapSwaps = ReferenceEquals(session.StartBitmap, Viewport.Bitmap) ? 0 : 1,
+            deferredRefineChecks = t.DeferredRefines,
+            fullRendersOrDecodes = OverlayResizeSyncTrace.CountDelta(Volatile.Read(ref _imageRequestId), session.StartRequestId) + (ReferenceEquals(session.StartBitmap, Viewport.Bitmap) ? 0 : 1),
+            regionApplies = t.RegionApplies, chromeAligns = t.ChromeAligns, frames = t.Flushes
+        });
         return true;
     }
 
@@ -353,14 +554,75 @@ public partial class MainWindow
         return true;
     }
 
+    // ---- input region: only the visible frame takes mouse input --------------------------------------------------
+
+    private IReadOnlyList<RegionRect>? _wholeAppOverlayAppliedRegion;
+    private bool _wholeAppOverlayRegionQueued;
+
+    /// <summary>Re-aligns the chrome and the window region on the next render pass (coalesced; safe to call from any layout-changing event).</summary>
+    private void QueueWholeAppOverlayRegionUpdate()
+    {
+        // A resize drag aligns the chrome itself every frame and re-applies the region once when it ends.
+        if (!_wholeAppOverlayMode || _wholeAppOverlayRegionQueued || WholeAppOverlayResizing) return;
+        _wholeAppOverlayRegionQueued = true;
+        Dispatcher.UIThread.Post(() => { _wholeAppOverlayRegionQueued = false; AlignWholeAppOverlayChromeToPixels(); }, DispatcherPriority.Render);
+    }
+
+    /// <summary>
+    /// Overlay mode's window is a transparent top-level surface that is usually larger than what is visible (a smaller picture inside it,
+    /// zoomed out, letterbox). Windows hands every click on the whole HWND to Glide, so the see-through part swallowed clicks meant for the
+    /// windows beneath (WM_NCHITTEST / HTTRANSPARENT cannot help: it only reaches windows of the same thread). The window region is cut
+    /// to the visible frame: the picture (the chrome, handles and drag strip all lie inside it) plus the picture-in-picture overlays
+    /// inside the window. Outside the region the window does not exist for hit testing or painting. No region (the whole window) when the
+    /// picture fills the window, when nothing is laid out, and while an overlay drifts by itself; cleared when Overlay mode ends.
+    /// </summary>
+    private void UpdateWholeAppOverlayInputRegion()
+    {
+        if (!OperatingSystem.IsWindows() || TryGetPlatformHandle() is not { } handle || handle.Handle == IntPtr.Zero) return;
+        try
+        {
+            IReadOnlyList<RegionRect>? wanted = null;
+            // While a resize handle is dragged the region is suspended (wanted stays null: the whole window, set once at the start of
+            // the drag) and re-applied once when the drag ends; it is also what keeps the compositor from combining an old region with
+            // a frame of the new size.
+            if (_wholeAppOverlayMode && WindowState == WindowState.Normal && !WholeAppOverlayResizing)
+            {
+                var frames = new List<Rect>();
+                if (TryGetWholeAppOverlayPixelRect(out var picture) && WorkspaceLayer.TranslatePoint(picture.TopLeft, this) is { } pictureOrigin)
+                    frames.Add(new Rect(pictureOrigin, picture.Size));
+                if (_overlays is { HasOverlays: true } overlays)
+                {
+                    if (overlays.IsAnimating) frames.Clear();   // drifting windows move without a UI-thread event: do not clip them
+                    else
+                        foreach (var frame in overlays.FrameRects())
+                            if (ImageView.TranslatePoint(frame.TopLeft, this) is { } origin) frames.Add(new Rect(origin, frame.Size));
+                }
+                var scale = RenderScaling > 0 ? RenderScaling : 1.0;
+                wanted = OverlayInputRegion.Compute(frames, scale, (int)Math.Round(Bounds.Width * scale), (int)Math.Round(Bounds.Height * scale));
+            }
+            if (OverlayInputRegion.Same(_wholeAppOverlayAppliedRegion, wanted)) return;
+            if (Platform.OverlayWindowRegion.Apply(handle.Handle, wanted)) _wholeAppOverlayAppliedRegion = wanted;
+            _wholeAppOverlayResize?.Trace?.OnRegionApplied();
+        }
+        catch (Exception ex) { _diagnostics.Write("window", "overlay_region_failed", new { ex.Message }); }
+    }
+
     private void AlignWholeAppOverlayChromeToPixels()
     {
-        if (_wholeAppOverlayControlsHost is not { } controls || !TryGetWholeAppOverlayPixelRect(out var rect)) return;
-        controls.HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Left;
-        controls.VerticalAlignment = Avalonia.Layout.VerticalAlignment.Top;
-        controls.Width = rect.Width;
-        controls.Height = rect.Height;
-        controls.Margin = new Thickness(rect.X, rect.Y, 0, 0);
+        if (_wholeAppOverlayControlsHost is { } controls && TryGetWholeAppOverlayPixelRect(out var rect))
+        {
+            // The frame / chrome host IS the picture rectangle (clipped to the window, so no handle can lie outside it).
+            rect = OverlayFrameGeometry.HostRect(rect, WorkspaceLayer.Bounds.Size);
+            controls.HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Left;
+            controls.VerticalAlignment = Avalonia.Layout.VerticalAlignment.Top;
+            controls.Width = rect.Width;
+            controls.Height = rect.Height;
+            controls.Margin = new Thickness(rect.X, rect.Y, 0, 0);
+        }
+        // The drag strip is placed from the same picture rectangle, so it moves with the chrome.
+        if (_wholeAppOverlayDragStrip is { IsVisible: true } && WholeAppOverlayDragStripWanted) RefreshWholeAppOverlayDragStrip();
+        _wholeAppOverlayResize?.Trace?.OnChromeAligned();
+        UpdateWholeAppOverlayInputRegion();
     }
 
     private bool IsPointerOverWholeAppOverlayPixels(Point windowPoint)
@@ -400,11 +662,8 @@ public partial class MainWindow
             return;
         }
         if (!onHandle && !IsPointerOverWholeAppOverlayPixels(e.GetPosition(this))) return;
-        var decision = OverlayWindowDragPolicy.Resolve(
-            zoomedBeyondWindow: Viewport.ImageExceedsViewport,
-            altDown: (e.KeyModifiers & KeyModifiers.Alt) != 0,
-            onMoveHandle: onHandle,
-            positionLocked: _settings.WholeAppOverlayLockPosition);
+        // A left press on the picture always moves the window (zoomed or cropped too); the right-drag pans. Locked: it does neither.
+        var decision = OverlayWindowDragPolicy.Resolve(positionLocked: _settings.WholeAppOverlayLockPosition);
         switch (decision)
         {
             case OverlayLeftDrag.MoveWindow:
@@ -412,9 +671,8 @@ public partial class MainWindow
                 e.Handled = true;
                 break;
             case OverlayLeftDrag.Nothing:
-                e.Handled = true;   // locked and nothing to pan: the press must not reach the viewport's window move
+                e.Handled = true;   // locked: the press must not reach the viewport's pan or window move
                 break;
-            // Pan: the viewport pans the zoomed picture.
         }
     }
 
@@ -669,9 +927,11 @@ public partial class MainWindow
     private void ExitWholeAppOverlayMode()
     {
         if (!_wholeAppOverlayMode) return;
+        if (_wholeAppOverlayResize is { } activeResize) EndWholeAppOverlayResize(activeResize.Pointer);
         var snapshot = _wholeAppOverlaySnapshot;
-        SaveCurrentWholeAppOverlayPlacement();
+        SaveCurrentWholeAppOverlayPlacement(force: true);
         _wholeAppOverlayMode = false;
+        UpdateWholeAppOverlayInputRegion();   // mode is off: the window region is cleared, the whole window takes input again
         ApplyWholeAppOverlayAspect();
         _wholeAppOverlayPlacementPath = null;
         _wholeAppOverlaySnapshot = null;
@@ -782,6 +1042,7 @@ public partial class MainWindow
         if (!_wholeAppOverlayMode || !IsActive || _nativeSizeMoveActive) return;
         var controls = _wholeAppOverlayControlsHost;
         if (controls is null) return;
+        if (WholeAppOverlayResizing) { controls.IsVisible = true; return; }   // the resize frame callback aligns the chrome itself
         AlignWholeAppOverlayChromeToPixels();
         var overPixels = IsPointerOverWholeAppOverlayPixels(pointer);
         // Overlay chrome/glow belongs to the rendered pixels, not the transparent top-level window.
@@ -918,7 +1179,7 @@ public partial class MainWindow
         var box = OverlayWindowSizing.ForPercent(percent, sourceWidth, sourceHeight, ToPixelBox(screen.WorkingArea), scale, current);
         _wholeAppOverlayChosenPercent = percent;
         ApplyWholeAppOverlayPixelBox(box, scale);
-        SaveCurrentWholeAppOverlayPlacement();
+        SaveCurrentWholeAppOverlayPlacement(force: true);
     }
 
     private int? _wholeAppOverlayChosenPercent;

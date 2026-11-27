@@ -304,6 +304,7 @@ public partial class MainWindow : Window
         };
         Closed += (_, _) =>
         {
+            FlushPendingDeletes();   // 5.2.1 G2: delayed permanent deletes still waiting are carried out now
             _gifPlayer?.Stop();
             try { _windowLifetimeCts.Cancel(); } catch { }
             CancelAsyncWorkspaceWork();
@@ -454,6 +455,10 @@ public partial class MainWindow : Window
         PointerReleased += MainWindowPointerReleased;
         SizeChanged += (_, _) =>
         {
+            // An Overlay resize drag lays the chrome frame out itself in the same frame as the new size (FlushWholeAppOverlayResize) and
+            // runs the status-bar / tab-strip sizing and the input reset once when it ends; per-step work here only delays and
+            // desynchronises the frames (and CancelInteraction would drop the viewport's cheap drag sampling every step).
+            if (WholeAppOverlayResizing) return;
             // Native non-client resizing can end without a normal Avalonia release sequence. Clear
             // transient pointer ownership both during and just after the resize so a stale secondary
             // button/capture can never make the next physical left click behave like a right click.
@@ -583,6 +588,7 @@ public partial class MainWindow : Window
         {
             UpdateViewportScrollbars(); NotifyViewerStatusChanged(); UpdateWindowTitle();
             PublishViewportDemand();
+            if (_wholeAppOverlayMode) QueueWholeAppOverlayRegionUpdate();   // zoom / pan / fit moves the visible picture
         };
         // Resize / maximize / DPI change: the frame drawn at Fit may now need more physical pixels.
         Viewport.PropertyChanged += (_, args) =>
@@ -816,7 +822,10 @@ public partial class MainWindow : Window
             // the resident Launch Speed Boost design.
             var enterSpeedBoostStandby = ShouldEnterSpeedBoostStandby();
             if (enterSpeedBoostStandby)
+            {
                 e.Cancel = true;
+                FlushPendingDeletes();   // the window stays resident but hidden: nobody could undo any more
+            }
 
             // The internal Speed Boost standby close must not overwrite the user's placement.
             if (!_closeForSpeedBoostStandby)
