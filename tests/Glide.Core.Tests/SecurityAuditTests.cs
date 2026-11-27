@@ -193,9 +193,12 @@ public sealed class SecurityAuditTests : IDisposable
     [Fact]
     public void External_open_pipe_is_current_user_only_on_both_ends()
     {
-        Assert.True(Glide.App.Services.ExternalLaunchBroker.ClientPipeOptions.HasFlag(System.IO.Pipes.PipeOptions.CurrentUserOnly));
-        Assert.True(Glide.App.Services.ExternalLaunchBroker.ServerPipeOptions.HasFlag(System.IO.Pipes.PipeOptions.CurrentUserOnly));
+        // 5.1.7: enforced by the user-SID ACL and PipePeerIdentity checks (CurrentUserOnly compared token owners).
         Assert.True(Glide.App.Services.ExternalLaunchBroker.ClientPipeOptions.HasFlag(System.IO.Pipes.PipeOptions.Asynchronous));
+        var other = new Glide.App.Services.PipePeer("S-1-5-21-9-9-9-1002", 1, false);
+        var self = new Glide.App.Services.PipePeer("S-1-5-21-1-2-3-1001", 1, false);
+        Assert.False(Glide.App.Services.PipePeerIdentity.ClientAccepts(self, other));
+        Assert.False(Glide.App.Services.PipePeerIdentity.ServerAccepts(self, other));
     }
 
     [Fact]

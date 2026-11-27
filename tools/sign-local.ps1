@@ -1,5 +1,5 @@
 <#
-  Code-signs Glide's binaries (Glide*.exe / Glide*.dll in dist, dist-installer and the root Glide-*.exe).
+  Code-signs Glide's binaries (Glide*.exe / Glide*.dll in .artifacts\stage, dist-installer and the root Glide-*.exe).
   See docs\code-signing.md for the full guide.
 
   REAL SIGNING (releases). Supply an existing code-signing certificate through environment variables; this
@@ -25,7 +25,7 @@
     powershell -ExecutionPolicy Bypass -File tools\sign-local.ps1 -RemoveLocalTrust
 #>
 param(
-    [string[]]$Path = @('dist', 'dist-installer', 'Glide-*.exe'),
+    [string[]]$Path = @('.artifacts\stage', 'dist-installer', 'Glide-*.exe'),
     [switch]$SelfSigned,
     [switch]$TrustOnThisPc,
     [switch]$RemoveLocalTrust,

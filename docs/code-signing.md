@@ -38,14 +38,14 @@ $env:GLIDE_SIGN_TIMESTAMP_URL   = 'http://timestamp.example-ca.com'   # from you
 ```
 
 With either `GLIDE_SIGN_CERT_THUMBPRINT` or `GLIDE_SIGN_PFX` set, `build.cmd` signs every `Glide*.exe` and
-`Glide*.dll` in `dist\` right after publishing (before the portable ZIP, the fixtures and the installer are
+`Glide*.dll` in `.artifacts\stage\` right after publishing (before the fixtures and the installer are
 made, so all of them contain the signed files), and `tools\build-installer.cmd` signs `Glide Setup.exe`
 before writing `Glide Setup.sha256`. Without those variables the build is unchanged.
 
 You can also sign by hand at any time:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File tools\sign-local.ps1 -Path dist, dist-installer
+powershell -ExecutionPolicy Bypass -File tools\sign-local.ps1 -Path .artifactsstage, dist-installer
 ```
 
 Check a signature with `Get-AuthenticodeSignature dist\Glide.exe` (Status should be `Valid`) or

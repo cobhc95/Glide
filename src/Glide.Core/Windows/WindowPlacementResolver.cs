@@ -174,6 +174,32 @@ public static class WindowPlacementResolver
         return (x, y);
     }
 
+    /// <summary>
+    /// Like <see cref="CenterOnOwner"/> but also shrinks a dialog that is larger than the working area (never below
+    /// <paramref name="minWidth"/>/<paramref name="minHeight"/>, unless the area itself is smaller), and keeps the
+    /// top <paramref name="topInset"/> pixels (title bar, in case the reported position is the client origin) inside the
+    /// area. All values are device-pixel outer-frame sizes. The result lies fully inside <paramref name="ownerScreen"/>.
+    /// </summary>
+    public static (int X, int Y, int Width, int Height) FitDialog(int ownerX, int ownerY, int ownerWidth, int ownerHeight, int dialogWidth, int dialogHeight, int minWidth, int minHeight, int topInset, ScreenWorkArea? ownerScreen)
+    {
+        if (ownerScreen is not { IsEmpty: false } area)
+        {
+            var (px, py) = CenterOnOwner(ownerX, ownerY, ownerWidth, ownerHeight, dialogWidth, dialogHeight, null);
+            return (px, py, dialogWidth, dialogHeight);
+        }
+        topInset = Math.Max(0, Math.Min(topInset, area.Height / 4));
+        var availHeight = area.Height - topInset;
+        var w = Math.Min(dialogWidth, area.Width);
+        var h = Math.Min(dialogHeight, availHeight);
+        if (dialogWidth > area.Width) w = Math.Max(w, Math.Min(minWidth, area.Width));
+        if (dialogHeight > availHeight) h = Math.Max(h, Math.Min(minHeight, availHeight));
+        var x = ownerX + (ownerWidth - w) / 2;
+        var y = ownerY + (ownerHeight - h) / 2;
+        x = Math.Max(area.X, Math.Min(x, area.Right - w));
+        y = Math.Max(area.Y + topInset, Math.Min(y, area.Bottom - h));
+        return (x, y, w, h);
+    }
+
     private static double ScaleOf(ScreenWorkArea screen) => screen.Scale > 0 && !double.IsNaN(screen.Scale) ? screen.Scale : 1;
 
     private static double Finite(double value) => double.IsNaN(value) || double.IsInfinity(value) || value < 0 ? 0 : value;

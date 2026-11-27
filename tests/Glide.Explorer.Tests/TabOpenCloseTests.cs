@@ -19,16 +19,9 @@ public sealed class TabOpenCloseTests
 {
     private static string Img(ExplorerHarness h, string name) => Path.Combine(h.Root, name);
 
-    /// <summary>
-    /// These tests drive the general new-tab rules through a middle-click. Since 5.1.0 middle-click has its own side and
-    /// position settings, so the click first sets them to follow the general ones (as they were before 5.1.0).
-    /// </summary>
-    private static void MiddleClick(ExplorerHarness h, string name, RawInputModifiers modifiers = RawInputModifiers.None)
-    {
-        h.Settings.MiddleClickNewTabPosition = MiddleClickPositions.SameAsNewTabs;
-        h.Settings.MiddleClickNewTabSide = h.Settings.SwitchToNewTabs ? MiddleClickSides.Foreground : MiddleClickSides.Background;
+    /// <summary>These tests drive the general new-tab rules through a middle-click (round 4 D1: middle-click follows them).</summary>
+    private static void MiddleClick(ExplorerHarness h, string name, RawInputModifiers modifiers = RawInputModifiers.None) =>
         h.Click(name, MouseButton.Middle, modifiers);
-    }
 
     /// <summary>Adds a Home tab to the right of the Explorer tab without activating it: [Home, Explorer, Home].</summary>
     private static Guid AddHomeToTheRight(ExplorerHarness h)
@@ -271,7 +264,7 @@ public sealed class TabOpenCloseTests
             AddHomeToTheRight(h);
             var entry = h.Entries.Single(e => e.Name == "c.png");
             var menu = (ContextMenu)h.Call("BuildExplorerContextMenu", entry)!;
-            var item = ((IEnumerable<MenuItem>)menu.ItemsSource!).Single(i => (i.Header as string) == "Open in new tab");
+            var item = ((IEnumerable<MenuItem>)menu.ItemsSource!).Single(i => (i.Header as string) == "Open in new tab (Shift: foreground; Alt: at end)");
             Glide.App.Platform.ModifierKeyState.OverrideForTests = () => KeyModifiers.Shift;
             try
             {
@@ -401,13 +394,14 @@ public sealed class TabOpenCloseTests
             MiddleClick(h, "b.png");
             await h.WaitUntil(() => h.Workspace.Tabs.OfType<ImageTabState>().Any(), "new image tab");
             await ClickTabAsync(h, ImageTab(h, "b.png").Id);
+            var closedIndex = h.Workspace.ActiveIndex;
             await CtrlWAsync(h);
             Assert.Equal(explorer, h.Workspace.Active!.Id);
-            // Reopen it (Ctrl+Shift+T opens it at the end and switches to it), then close it again.
+            // Reopen it (Ctrl+Shift+T restores it at its former position and switches to it), then close it again.
             h.Key(Key.T, RawInputModifiers.Control | RawInputModifiers.Shift);
             await h.WaitUntil(() => h.Workspace.Active is ImageTabState, "reopened tab active");
             await h.SettleAsync();
-            Assert.Equal(h.Workspace.Tabs.Count - 1, h.Workspace.ActiveIndex);
+            Assert.Equal(closedIndex, h.Workspace.ActiveIndex);
             await CtrlWAsync(h);
             Assert.Equal(explorer, h.Workspace.Active!.Id);
         });

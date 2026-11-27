@@ -1,0 +1,278 @@
+﻿[
+    {
+        "phase":  "thumb-start",
+        "cpu":  8,
+        "busy":  false,
+        "at":  "08:35:53"
+    },
+    {
+        "phase":  "thumb-end",
+        "cpu":  7,
+        "busy":  false,
+        "at":  "08:36:06"
+    },
+    {
+        "phase":  "cold-avif-4k.avif",
+        "cpu":  5,
+        "busy":  false,
+        "at":  "08:36:08"
+    },
+    {
+        "phase":  "cold-bmp-24mp.bmp",
+        "cpu":  8,
+        "busy":  false,
+        "at":  "08:36:11"
+    },
+    {
+        "phase":  "cold-bmp-4k.bmp",
+        "cpu":  6,
+        "busy":  false,
+        "at":  "08:36:13"
+    },
+    {
+        "phase":  "cold-gif-4k.gif",
+        "cpu":  4,
+        "busy":  false,
+        "at":  "08:36:16"
+    },
+    {
+        "phase":  "cold-heic-4k.heic",
+        "cpu":  3,
+        "busy":  false,
+        "at":  "08:36:18"
+    },
+    {
+        "phase":  "cold-ico-256.ico",
+        "cpu":  3,
+        "busy":  false,
+        "at":  "08:36:20"
+    },
+    {
+        "phase":  "cold-jpeg-base-12mp.jpg",
+        "cpu":  4,
+        "busy":  false,
+        "at":  "08:36:22"
+    },
+    {
+        "phase":  "cold-jpeg-base-24mp.jpg",
+        "cpu":  2,
+        "busy":  false,
+        "at":  "08:36:25"
+    },
+    {
+        "phase":  "cold-jpeg-camera-mpf-24mp.jpg",
+        "cpu":  12,
+        "busy":  false,
+        "at":  "08:36:27"
+    },
+    {
+        "phase":  "cold-jpeg-prog-12mp.jpg",
+        "cpu":  4,
+        "busy":  false,
+        "at":  "08:36:30"
+    },
+    {
+        "phase":  "cold-jpeg-prog-24mp.jpg",
+        "cpu":  9,
+        "busy":  false,
+        "at":  "08:36:33"
+    },
+    {
+        "phase":  "cold-png-24mp.png",
+        "cpu":  5,
+        "busy":  false,
+        "at":  "08:36:36"
+    },
+    {
+        "phase":  "cold-png-4k.png",
+        "cpu":  2,
+        "busy":  false,
+        "at":  "08:36:39"
+    },
+    {
+        "phase":  "cold-png-alpha-4k.png",
+        "cpu":  15,
+        "busy":  false,
+        "at":  "08:36:42"
+    },
+    {
+        "phase":  "cold-tiff-lzw-24mp.tif",
+        "cpu":  7,
+        "busy":  false,
+        "at":  "08:36:44"
+    },
+    {
+        "phase":  "cold-tiff-lzw-4k.tif",
+        "cpu":  1,
+        "busy":  false,
+        "at":  "08:36:47"
+    },
+    {
+        "phase":  "cold-tiff-raw-24mp.tif",
+        "cpu":  14,
+        "busy":  false,
+        "at":  "08:36:49"
+    },
+    {
+        "phase":  "cold-tiff-raw-4k.tif",
+        "cpu":  5,
+        "busy":  false,
+        "at":  "08:36:51"
+    },
+    {
+        "phase":  "cold-webp-24mp.webp",
+        "cpu":  2,
+        "busy":  false,
+        "at":  "08:36:54"
+    },
+    {
+        "phase":  "cold-webp-4k.webp",
+        "cpu":  12,
+        "busy":  false,
+        "at":  "08:36:57"
+    },
+    {
+        "phase":  "cold-webp-alpha-4k.webp",
+        "cpu":  4,
+        "busy":  false,
+        "at":  "08:36:59"
+    },
+    {
+        "phase":  "firstpaint-cold-avif-4k.avif",
+        "cpu":  3,
+        "busy":  false,
+        "at":  "08:37:03"
+    },
+    {
+        "phase":  "firstpaint-cold-bmp-24mp.bmp",
+        "cpu":  18,
+        "busy":  false,
+        "at":  "08:37:05"
+    },
+    {
+        "phase":  "firstpaint-cold-bmp-4k.bmp",
+        "cpu":  13,
+        "busy":  false,
+        "at":  "08:37:06"
+    },
+    {
+        "phase":  "firstpaint-cold-gif-4k.gif",
+        "cpu":  1,
+        "busy":  false,
+        "at":  "08:37:08"
+    },
+    {
+        "phase":  "firstpaint-cold-heic-4k.heic",
+        "cpu":  14,
+        "busy":  false,
+        "at":  "08:37:12"
+    },
+    {
+        "phase":  "firstpaint-cold-ico-256.ico",
+        "cpu":  6,
+        "busy":  false,
+        "at":  "08:37:14"
+    },
+    {
+        "phase":  "firstpaint-cold-jpeg-base-12mp.jpg",
+        "cpu":  1,
+        "busy":  false,
+        "at":  "08:37:16"
+    },
+    {
+        "phase":  "firstpaint-cold-jpeg-base-24mp.jpg",
+        "cpu":  0,
+        "busy":  false,
+        "at":  "08:37:18"
+    },
+    {
+        "phase":  "firstpaint-cold-jpeg-camera-mpf-24mp.jpg",
+        "cpu":  42,
+        "busy":  true,
+        "at":  "08:37:20"
+    },
+    {
+        "phase":  "firstpaint-cold-jpeg-prog-12mp.jpg",
+        "cpu":  3,
+        "busy":  false,
+        "at":  "08:37:22"
+    },
+    {
+        "phase":  "firstpaint-cold-jpeg-prog-24mp.jpg",
+        "cpu":  2,
+        "busy":  false,
+        "at":  "08:37:26"
+    },
+    {
+        "phase":  "firstpaint-cold-png-24mp.png",
+        "cpu":  4,
+        "busy":  false,
+        "at":  "08:37:29"
+    },
+    {
+        "phase":  "firstpaint-cold-png-4k.png",
+        "cpu":  6,
+        "busy":  false,
+        "at":  "08:37:31"
+    },
+    {
+        "phase":  "firstpaint-cold-png-alpha-4k.png",
+        "cpu":  6,
+        "busy":  false,
+        "at":  "08:37:34"
+    },
+    {
+        "phase":  "firstpaint-cold-tiff-lzw-24mp.tif",
+        "cpu":  8,
+        "busy":  false,
+        "at":  "08:37:36"
+    },
+    {
+        "phase":  "firstpaint-cold-tiff-lzw-4k.tif",
+        "cpu":  2,
+        "busy":  false,
+        "at":  "08:37:38"
+    },
+    {
+        "phase":  "firstpaint-cold-tiff-raw-24mp.tif",
+        "cpu":  10,
+        "busy":  false,
+        "at":  "08:37:40"
+    },
+    {
+        "phase":  "firstpaint-cold-tiff-raw-4k.tif",
+        "cpu":  16,
+        "busy":  false,
+        "at":  "08:37:42"
+    },
+    {
+        "phase":  "firstpaint-cold-webp-24mp.webp",
+        "cpu":  4,
+        "busy":  false,
+        "at":  "08:37:45"
+    },
+    {
+        "phase":  "firstpaint-cold-webp-4k.webp",
+        "cpu":  9,
+        "busy":  false,
+        "at":  "08:37:48"
+    },
+    {
+        "phase":  "firstpaint-cold-webp-alpha-4k.webp",
+        "cpu":  4,
+        "busy":  false,
+        "at":  "08:37:51"
+    },
+    {
+        "phase":  "decode-start",
+        "cpu":  2,
+        "busy":  false,
+        "at":  "08:37:52"
+    },
+    {
+        "phase":  "decode-end",
+        "cpu":  10,
+        "busy":  false,
+        "at":  "08:38:12"
+    }
+]

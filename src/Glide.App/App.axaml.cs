@@ -38,9 +38,40 @@ public partial class App : Application
 
     internal static void NoteWindowOpened()
     {
+        Volatile.Write(ref _speedBoostResident, 0);
         if (Interlocked.Exchange(ref _anyWindowOpened, 1) == 0)
             StartupTrace.Write("first_window_opened");
     }
+
+    private static int _speedBoostResident;
+
+    /// <summary>The last window went into Speed Boost standby: the process stays resident on purpose.</summary>
+    internal static void NoteSpeedBoostStandbyEntered() => Volatile.Write(ref _speedBoostResident, 1);
+
+    /// <summary>
+    /// Issue #5: the desktop lifetime is OnExplicitShutdown, so a process whose last window closed without entering
+    /// Speed Boost standby (a follower process, or Speed Boost off) used to keep running with no window, and with the
+    /// tray icon. Called after a window closed without standby: once no window of this process is left (checked after
+    /// the close has settled, so a window being replaced, e.g. by a tab detach, keeps the process), the process exits.
+    /// </summary>
+    internal static void ExitIfNoWindowsRemain()
+    {
+        if (Current?.ApplicationLifetime is not IClassicDesktopStyleApplicationLifetime) return;
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (Current?.ApplicationLifetime is not IClassicDesktopStyleApplicationLifetime desktop) return;
+            if (!ShouldExitWithoutWindows(IsShuttingDown, Volatile.Read(ref _speedBoostResident) != 0,
+                    Platform.GlideWindowRegistry.Snapshot().Count, desktop.Windows.Count,
+                    Volatile.Read(ref _pendingWindowCreation) != 0 || ExternalLaunchBroker.HasPendingExternalRequests()))
+                return;
+            StartupTrace.Write("last_window_closed");
+            ShutdownApplication("last_window_closed");
+        }, DispatcherPriority.Background);
+    }
+
+    /// <summary>Pure half of <see cref="ExitIfNoWindowsRemain"/>.</summary>
+    internal static bool ShouldExitWithoutWindows(bool shuttingDown, bool speedBoostResident, int glideWindows, int openTopLevels, bool windowPending)
+        => !shuttingDown && !speedBoostResident && glideWindows == 0 && openTopLevels == 0 && !windowPending;
 
     /// <summary>
     /// The first step of every application exit. Stops the external-launch broker (releases the presence object
@@ -181,6 +212,7 @@ public partial class App : Application
             desktop.ShutdownRequested += (_, e) => { if (!e.Cancel) BeginApplicationShutdown("shutdown_requested"); };
             desktop.Exit += (_, _) => BeginApplicationShutdown("lifetime_exit");
             InitializeTrayIcon();
+            StartSettingsFileWatcher();
 
             var paths = StartupPaths.Count > 0 ? StartupPaths : (!string.IsNullOrWhiteSpace(StartupPath) ? new[] { StartupPath! } : Array.Empty<string>());
             var hasExplicitOpen = paths.Count > 0;
@@ -205,7 +237,12 @@ public partial class App : Application
                 {
                     // Background startup must not leave a live Avalonia composition target merely
                     // hidden. Enter the same dormant-window lifecycle used by Speed Boost close.
-                    window.EnterSpeedBoostStandby(persistSession: false);
+                    // Only the single-instance owner may stay resident (issue #5); a background start
+                    // that is not the owner has nothing to do and exits.
+                    if (ExternalLaunchBroker.IsPresenceOwner)
+                        window.EnterSpeedBoostStandby(persistSession: false);
+                    else
+                        ShutdownApplication("background_not_owner");
                 };
             }
 
@@ -245,7 +282,11 @@ public partial class App : Application
             !string.IsNullOrWhiteSpace(AutoExportDiagnosticsFolder))
             return;
         Dispatcher.UIThread.Post(
-            () => _ = Task.Run(Platform.WindowsFileAssociationRegistration.EnsureRegisteredQuietly),
+            () =>
+            {
+                _ = Task.Run(Platform.WindowsFileAssociationRegistration.EnsureRegisteredQuietly);
+                _ = Task.Run(Platform.ThumbnailSettingsStore.EnsureMigrationApplied);
+            },
             DispatcherPriority.Background);
     }
 
@@ -255,11 +296,13 @@ public partial class App : Application
         try
         {
             if (TrayIconInstance is not null) return;
-            var settings = TryGetStartupSettings() ?? new GlideSettingsState();
+            // Issue #5: while the settings file is still loading the icon starts hidden (it used to start visible
+            // with the defaults, i.e. "Always", whatever the user chose); it is updated once the settings are live.
+            var settings = TryGetStartupSettings();
             var icon = new TrayIcon
             {
                 ToolTipText = "Glide Image Viewer (Speed Boost)",
-                IsVisible = ShouldShowTrayIcon(settings)
+                IsVisible = settings is not null && ShouldShowTrayIcon(settings)
             };
 
             try
@@ -297,6 +340,9 @@ public partial class App : Application
             var icons = new TrayIcons { icon };
             TrayIcon.SetIcons(Current!, icons);
             TrayIconInstance = icon;
+            // Every publish (startup adoption, Settings preview / OK, standby, another process' change picked up by
+            // the settings-file watcher) re-evaluates the icon, so no path can leave it out of date.
+            Glide.App.Settings.SettingsService.Changed += (_, e) => UpdateTrayIconState(e.Current);
         }
         catch { /* tray icon is optional; the app runs without it */ }
     }
@@ -304,9 +350,72 @@ public partial class App : Application
     public static void UpdateTrayIconState(GlideSettingsState? settings = null)
     {
         if (TrayIconInstance is null) return;
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            Dispatcher.UIThread.Post(() => UpdateTrayIconState(settings));
+            return;
+        }
         settings ??= TryGetStartupSettings();
         if (settings is null) return;
         TrayIconInstance.IsVisible = ShouldShowTrayIcon(settings);
+    }
+
+    /// <summary>Held for the process lifetime (a collected watcher stops raising events).</summary>
+    internal static FileSystemWatcher? SettingsFileWatcher { get; private set; }
+    private static Timer? _settingsReloadTimer;
+
+    /// <summary>
+    /// Issue #5: a resident Speed Boost process kept the settings it had when it started, so a change saved by another
+    /// Glide process (for example the tray icon set to "Never") never reached it. Watch the settings file; when it
+    /// changes, reload it and make it live while this process has no visible window (standby: nobody is editing here),
+    /// or else only re-evaluate the tray icon from it.
+    /// </summary>
+    private static void StartSettingsFileWatcher()
+    {
+        if (!OperatingSystem.IsWindows() || CapturePrintDialogImage is not null || BenchmarkExitAfterFirstFrame ||
+            NotifyFirstFrameEventName is not null || AutoExportDiagnostics || !string.IsNullOrWhiteSpace(AutoExportDiagnosticsFolder))
+            return;
+        try
+        {
+            var path = Glide.App.Settings.SettingsStore.GetSettingsPath();
+            var directory = Path.GetDirectoryName(path);
+            if (string.IsNullOrEmpty(directory) || !Directory.Exists(directory)) return;
+            _settingsReloadTimer = new Timer(_ => ReloadSettingsFromDisk(), null, Timeout.Infinite, Timeout.Infinite);
+            var watcher = new FileSystemWatcher(directory, Path.GetFileName(path))
+            {
+                NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.Size
+            };
+            FileSystemEventHandler changed = (_, _) => _settingsReloadTimer?.Change(400, Timeout.Infinite);
+            watcher.Changed += changed;
+            watcher.Created += changed;
+            watcher.Renamed += (_, _) => _settingsReloadTimer?.Change(400, Timeout.Infinite);
+            watcher.EnableRaisingEvents = true;
+            SettingsFileWatcher = watcher;
+        }
+        catch { /* best effort: without the watcher only this process' own changes apply live */ }
+    }
+
+    private static void ReloadSettingsFromDisk()
+    {
+        if (IsShuttingDown) return;
+        GlideSettingsState loaded;
+        // Not SettingsStore.Load: it falls back to the defaults on a read error, and a file caught mid-write must
+        // never make the defaults live. A failed read is simply skipped (the write's own event follows).
+        try
+        {
+            var path = Glide.App.Settings.SettingsStore.GetSettingsPath();
+            if (!File.Exists(path)) return;
+            loaded = Glide.App.Settings.SettingsStore.MigrateFromJson(File.ReadAllText(path), isSettingsFile: false);
+        }
+        catch { return; }
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (IsShuttingDown) return;
+            if (!Platform.GlideWindowRegistry.Snapshot().Any(window => window.IsVisible))
+                Glide.App.Settings.SettingsService.Publish(loaded); // re-evaluates the tray icon (Changed)
+            else
+                UpdateTrayIconState(loaded);
+        });
     }
 
     /// <summary>Tray icon mode, honouring the legacy ShowTrayIcon=false switch as "Never".</summary>
@@ -321,13 +430,21 @@ public partial class App : Application
     }
 
     private static bool ShouldShowTrayIcon(GlideSettingsState settings)
+        => ShouldShowTrayIconPolicy(settings, ExternalLaunchBroker.IsPresenceOwner,
+            () => Platform.GlideWindowRegistry.Snapshot().Any(window => window.IsVisible));
+
+    /// <summary>
+    /// The tray icon decision. Issue #5: only the single-instance owner (the one process that can stay resident in Speed
+    /// Boost) shows it; a follower process showed a second icon that stayed after its window closed.
+    /// </summary>
+    internal static bool ShouldShowTrayIconPolicy(GlideSettingsState settings, bool ownsLaunchBroker, Func<bool> anyWindowVisible)
     {
-        if (!settings.SpeedBoostEnabled) return false;
+        if (!settings.SpeedBoostEnabled || !ownsLaunchBroker) return false;
         return EffectiveTrayIconMode(settings) switch
         {
             "Never" => false,
             // Only while no Glide window is on screen, i.e. the warm instance is in standby.
-            "Only while Glide is closed" => !Platform.GlideWindowRegistry.Snapshot().Any(window => window.IsVisible),
+            "Only while Glide is closed" => !anyWindowVisible(),
             _ => true
         };
     }

@@ -273,6 +273,7 @@ public partial class MainWindow
                 // Otherwise Windows can bury Settings/confirmation dialogs behind the owner.
                 Topmost = Topmost,
                 PlacementChanged = SaveSettingsWindowPlacement,
+                ViewMemoryChanged = SaveSettingsWindowViewMemory,
                 // The Updates card shows the live state of the update checker (null in tests, which never start one).
                 Updates = UpdateService.Current
             };
@@ -332,6 +333,12 @@ public partial class MainWindow
         _diagnostics.Write("settings", "open_at_setting", new { settingId });
         OpenSettingsThen(window => window.RevealSettingFromCommand(settingId));
     }
+
+    /// <summary>
+    /// Remembers which page, sections and scroll the Settings window was left on. Only stored here (the live settings keep it for
+    /// the next opening in this session); the placement callback that follows saves the settings file.
+    /// </summary>
+    private void SaveSettingsWindowViewMemory(string memory) => _settings.SettingsViewMemory = memory ?? string.Empty;
 
     /// <summary>Remembers where the user left the Settings window (size, position, maximized) for its next opening.</summary>
     private void SaveSettingsWindowPlacement(SettingsWindowPlacement placement)
@@ -573,6 +580,8 @@ public partial class MainWindow
         UpdateGifStatusUi();
         ApplyExplorerNavPaneWidth();
         ApplyExplorerTileInfo();
+        ApplyThumbnailLoadSettings();
+        UpdateTagSidebar();
         KeyboardNavigation.SetTabNavigation(this, _settings.EnableTabFocusNavigation ? KeyboardNavigationMode.Continue : KeyboardNavigationMode.None);
         // Window.Background is a compositor contract, not the normal theme surface. Keep the
         // top-level transparent for the lifetime of the HWND and paint the ordinary application
@@ -658,7 +667,7 @@ public partial class MainWindow
         UpdateOverlayStatusButtons();
         ApplyStatusBarSize();
         UpdateViewportStatusInset();
-        CornerCounterHost.IsVisible = OverlayOptionsView.PictureCounterEnabled && !_wholeAppOverlayMode;
+        CornerCounterHost.IsVisible = TextOverlayWanted;
         ApplyPictureCounterVisuals();
 
         // Keep fullscreen overlay chrome in sync when its auto-hide setting changes live.
@@ -712,6 +721,10 @@ public partial class MainWindow
     }
 
     private static readonly string[] StatusSizeClasses = { "statusTiny", "statusVerySmall", "statusSmall", "statusMedium", "statusLarge", "statusExtraLarge" };
+
+    private double _statusIconSizeWalked = double.NaN;
+    private object? _statusIconSizeWalkedHome;
+    private double _statusIconSizeWalkedHomeSize = double.NaN;
 
     private void ApplyStatusBarSize()
     {
@@ -814,10 +827,16 @@ public partial class MainWindow
         // A group is atomic: it never wraps internally; the arranger moves whole groups instead.
         NavigationGroup.MaxWidth = double.PositiveInfinity;
         OverlayGroup.MaxWidth = double.PositiveInfinity;
-        foreach (var button in ViewerStatusSurface.GetVisualDescendants().OfType<Button>().Where(x => x.Classes.Contains("legacyStatusIcon")))
+        // The icon size changes only with the status size / scale / auto-fit, not with each pixel of a window drag: walk the whole
+        // visual tree of the bar for its buttons only then (ArrangeStatusControls sizes any group it newly attaches itself).
+        if (_statusIconSizeWalked != iconSize)
         {
-            button.Width = iconSize;
-            button.Height = iconSize;
+            _statusIconSizeWalked = iconSize;
+            foreach (var button in ViewerStatusSurface.GetVisualDescendants().OfType<Button>().Where(x => x.Classes.Contains("legacyStatusIcon")))
+            {
+                button.Width = iconSize;
+                button.Height = iconSize;
+            }
         }
         ArrangeStatusControls(surfaceWidth, showStats, statsCap, iconSize);
 
@@ -830,10 +849,15 @@ public partial class MainWindow
             _homeSurface.StatusSurface.Height = homeStacked ? double.NaN : metrics.Height * scale;
             _homeSurface.StatusSurface.MinHeight = homeStacked ? metrics.Height * scale : 0;
             _homeSurface.StatusSurface.MaxWidth = metrics.MaxWidth * scale;
-            foreach (var button in _homeSurface.StatusSurface.GetVisualDescendants().OfType<Button>().Where(x => x.Classes.Contains("legacyStatusIcon")))
+            if (!ReferenceEquals(_statusIconSizeWalkedHome, _homeSurface) || _statusIconSizeWalkedHomeSize != iconSize)
             {
-                button.Width = iconSize;
-                button.Height = iconSize;
+                _statusIconSizeWalkedHome = _homeSurface;
+                _statusIconSizeWalkedHomeSize = iconSize;
+                foreach (var button in _homeSurface.StatusSurface.GetVisualDescendants().OfType<Button>().Where(x => x.Classes.Contains("legacyStatusIcon")))
+                {
+                    button.Width = iconSize;
+                    button.Height = iconSize;
+                }
             }
         }
         ApplyCollapsedStatusChrome();

@@ -29,6 +29,7 @@ public sealed class WindowPlacementGuardTests
             return new PrintWindow(new PrintWindowArgs("x.jpg", bitmap, 8, 8, 96, 96, _ => throw new InvalidOperationException()),
                 new PrintQueryCache(FakePrintQueries.Standard()));
         },
+        [typeof(Glide.App.Controls.BatchRenameDialog)] = () => new Glide.App.Controls.BatchRenameDialog([new Glide.Core.Renaming.BatchRenameSource(@"C:\x\a.jpg", false)]),
         [typeof(TitleBarCustomizerWindow)] = () => new TitleBarCustomizerWindow(TitleBarButtonCatalog.DefaultButtonIds),
         [typeof(StatusBarCustomizerWindow)] = () => new StatusBarCustomizerWindow(string.Empty),
         [typeof(ResetConfirmWindow)] = () => new ResetConfirmWindow(ResetPlanner.Plan(

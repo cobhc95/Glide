@@ -76,6 +76,12 @@ read-only in the hotkey list, found by Settings search and by "Search hotkey", a
 shortcut column from them. Code that handles such keys must be on the allow-list in
 `HotkeyEndToEndTests.Hardcoded_key_handling_only_exists_in_allow_listed_places`, with the reason.
 
+**Type-to-select (Windows wins).** While the Explorer list has the keyboard, unmodified (or Shift-only) letters, unshifted
+digits, number-pad digits and `- . ,` are characters of the name being typed (fixed entry `explorer.typeAhead`): the window's
+hotkey route skips them (`IsExplorerTypeAheadKey`, first check in `RouteHotkeyAsync`), so a user binding of a single letter
+does not fire from the Explorer list (it still does in the viewer, from the toolbar, and with Ctrl / Alt). `Shift+digit`
+chords (external programs 1-3) stay hotkeys. Compared with Windows File Explorer: `docs/audits/explorer-windows-parity.md`.
+
 ## Actions on "the image" in an Explorer tab
 
 Viewer-only actions are blocked in Explorer / Home tabs (`IsActionAvailableHere`). *Open in external program 1-3* are the
@@ -111,6 +117,7 @@ opened image or an earlier selection. Tests: `ExternalProgramExplorerTests` (Gli
   lacks a row gets its defaults minus any key another row of that map already uses
   (`HotkeyDefaultMigrations.AddMissingRows`): a user binding is never taken away. They never fire from a text box.
   `explorer.back` / `explorer.forward` run the same tab history. Details: `docs/NAVIGATION-HISTORY.md`.
+- A default key added to an action whose saved row is already empty (`tags.toggleSidebar` gained Ctrl+Shift+G after files were saved with `[]`) is granted by the schema number: `HotkeyDefaultMigrations.GrantDefaultWhenUnassigned` gives the key to a file older than the schema that introduced it, only when the row is empty and no other action uses the key; a binding the user set is kept, and an empty row saved at that schema or later is a real removal. Add one `Migrate...` method per new default, call it from `SettingsStore.MigrateDefaultsSchema8` and bump `CurrentSettingsSchema` (25 for the tag sidebar).
 - `folder.exploreParent` ("Explore/Browse containing folder") has the default **Ctrl+E** (settings schema 10,
   `HotkeyDefaultMigrations.MigrateExploreParent`): its row already exists in old files with no key, so `AddMissingRows` cannot
   add it. A file older than schema 10 gets the key only when the action has no key and no other action uses Ctrl+E; a

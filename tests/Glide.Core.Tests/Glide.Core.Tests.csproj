@@ -22,6 +22,7 @@
     <None Include="Fixtures\Codecs\*" Exclude="Fixtures\Codecs\*.py" CopyToOutputDirectory="PreserveNewest" />
     <None Include="Fixtures\Pdn\*" CopyToOutputDirectory="PreserveNewest" />
     <None Include="Fixtures\Jpeg\*.jpg" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="Fixtures\Tiff\*.tif" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
   <ItemGroup>
     <!-- Stage C: GlideSettingsState and its companions live in Glide.Core.Settings (Avalonia-free). -->

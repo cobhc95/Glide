@@ -192,7 +192,7 @@ internal static class WindowsThumbnailRegistration
                 using (var key = hive.CreateSubKey($@"{clsidPath}\InprocServer32", writable: true))
                 {
                     key?.SetValue(string.Empty, ProviderDllPath, RegistryValueKind.String);
-                    key?.SetValue("ThreadingModel", "Apartment", RegistryValueKind.String);
+                    key?.SetValue("ThreadingModel", "Both", RegistryValueKind.String);
                 }
                 // HKCU\Software\Classes shadows HKLM in HKCR: a per-user CLSID left by another copy (a dev/portable
                 // build) would keep Explorer loading that old DLL after a machine-wide install. Drop it when it

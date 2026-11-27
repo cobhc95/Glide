@@ -39,7 +39,8 @@ public sealed class ExplorerRemovalAndOverlayChromeContractTests
         Assert.Contains("_workspace.AddBrowser(", Body(main, "private TabState CreateConfiguredHomeDestination()"), StringComparison.Ordinal);
         // 4.8.0: the open-image choice is the Explorer gesture rows (double-click / Enter and middle-click).
         var open = Body(main, "private async Task OpenBrowserEntryAsync(string path, bool alternate, KeyModifiers modifiers = KeyModifiers.None, bool fromMenu = false)");
-        Assert.Contains("alternate ? \"explorer.middleClick\" : \"explorer.doubleClick\"", open, StringComparison.Ordinal);
+        // Round 4 C3: double-click resolves through its plain / Alt / Ctrl / Shift rows (ResolveExplorerDoubleClick).
+        Assert.Contains("alternate ? ResolveGestureSlot(\"explorer.middleClick\", modifiers) : ResolveExplorerDoubleClick(modifiers).Action", open, StringComparison.Ordinal);
         Assert.Contains("var newTab = action == GestureCatalog.OpenInNewTab;", open, StringComparison.Ordinal);
         Assert.Contains("IsMiddleButtonPressed", Body(main, "private async void BrowserItemPointerPressed("), StringComparison.Ordinal);
 
@@ -82,9 +83,12 @@ public sealed class ExplorerRemovalAndOverlayChromeContractTests
         var overlay = ReadSource("src", "Glide.App", "Controls", "WindowInWindowOverlayManager.cs");
 
         Assert.Contains("DrawChrome(context, s,", overlay, StringComparison.Ordinal);
-        Assert.Contains("private static Rect ResizeRect(OverlayState s) => new(s.X + s.Width - 36", overlay, StringComparison.Ordinal);
-        Assert.Contains("private static Rect ResizeWidthRect(OverlayState s) => new(s.X + s.Width - 22", overlay, StringComparison.Ordinal);
-        Assert.Contains("private static Rect ResizeHeightRect(OverlayState s) => new(s.X + s.Width / 2 - 22, s.Y, 44, 22)", overlay, StringComparison.Ordinal);
+        // The handle rectangles live in the geometry both picture-in-picture and Overlay mode share.
+        var geometry = ReadSource("src", "Glide.App", "Controls", "OverlayFrameGeometry.cs");
+        Assert.Contains("GripHit(Rect frame) => new(frame.X + frame.Width - 36", geometry, StringComparison.Ordinal);
+        Assert.Contains("WidthHandle(Rect frame) => new(frame.X + frame.Width - 22", geometry, StringComparison.Ordinal);
+        Assert.Contains("HeightHandle(Rect frame) => new(frame.X + frame.Width / 2 - 22, frame.Y, 44, 22)", geometry, StringComparison.Ordinal);
+        Assert.Contains("OverlayFrameGeometry.GripHit(Frame(s))", overlay, StringComparison.Ordinal);
         Assert.Contains("current.PreserveAspectRatio", overlay, StringComparison.Ordinal);
         Assert.Contains("resize.Mode is ResizeMode.WidthOnly or ResizeMode.HeightOnly", overlay, StringComparison.Ordinal);
         Assert.Contains("ContentScale = resize.ContentScale", overlay, StringComparison.Ordinal);

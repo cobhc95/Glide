@@ -184,6 +184,8 @@ public partial class MainWindow
     private void ExplorerBeginRenameSelection()
     {
         var selected = SelectedExplorerEntries();
+        // Several items: one dialog renames them all (a pattern, a live preview, all or nothing).
+        if (selected.Count > 1) { _ = ExplorerBatchRenameAsync(selected); return; }
         var target = selected.Count == 1 ? selected[0]
             : _browserCurrentIndex >= 0 && _browserCurrentIndex < _browserEntries.Count && selected.Count > 0 ? _browserEntries[_browserCurrentIndex] : null;
         if (target is null) return;
@@ -296,6 +298,7 @@ public partial class MainWindow
             {
                 var renamed = ExplorerFileOperations.Rename(path, newName);
                 _explorerCutPaths.Remove(path);
+                FollowRenamedPictures(new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { [path] = renamed });
                 EndExplorerRenameEditor(box);
                 _explorerPendingSelection = new List<string> { renamed };
                 RefreshManagedBrowser(folder);

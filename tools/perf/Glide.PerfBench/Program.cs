@@ -8,6 +8,7 @@ using Glide.PerfBench;
 //   navigate   --data <corpus> --out <dir> --label <name> [--repeats 3]
 //   render     --data <corpus> --out <dir> --label <name> [--frames 40]
 //   ui         --data <corpus> --out <dir> --label <name> [--repeats 7]
+//   thumb-pipeline / thumb-read-scaling  --dir <folder> ...   (Explorer thumbnail I/O + decode pipeline, see ThumbPipelineBench.cs)
 // tools\perf\run-perf.ps1 orchestrates all modes (one process per mode) and the app first-frame launches.
 if (args.Length == 0)
 {
@@ -17,7 +18,7 @@ if (args.Length == 0)
 
 ThreadPool.SetMinThreads(Math.Max(8, Environment.ProcessorCount), 8); // same as Glide's Program.Main
 var mode = args[0].ToLowerInvariant();
-if (mode is "decode" or "decode-one" or "navigate" or "direct-probe")
+if (mode is "decode" or "decode-one" or "navigate" or "direct-probe" or "thumb" or "thumb-one" or "webp-stress" or "png-probe" or "grid" or "thumb-pipeline" or "thumb-read-scaling" or "thumb-wincache" or "thumb-progressive")
 {
     // Decode-only modes need Skia bitmaps but no UI thread: set Avalonia up exactly like the
     // Core.Tests headless fixture does.
@@ -40,6 +41,15 @@ try
         "render" => RenderBench.Run(args),
         "ui" => UiBench.Run(args),
         "direct-probe" => DirectProbe.Run(args[1]),
+        "thumb" => ThumbBench.Run(args),
+        "grid" => ThumbBench.Grid(args),
+        "thumb-pipeline" => ThumbPipelineBench.Run(args),
+        "thumb-read-scaling" => ThumbPipelineBench.ReadScaling(args),
+        "thumb-wincache" => WinCacheProbeBench.Run(args),
+        "thumb-progressive" => ProgressiveJpegBench.Run(args),
+        "png-probe" => ThumbBench.PngProbe(args[1]),
+        "webp-stress" => ThumbBench.Stress(args[1], Args.GetInt(args, "--width", 2283), Args.GetInt(args, "--threads", 4), Args.GetInt(args, "--each", 25)),
+        "thumb-one" => ThumbBench.RunOne(args[1], Args.GetInt(args, "--width", 236), Args.Get(args, "--json"), args.Contains("--preload")),
         _ => 2
     };
     Console.Out.Flush();

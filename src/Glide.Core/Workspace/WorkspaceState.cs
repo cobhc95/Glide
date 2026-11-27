@@ -29,6 +29,15 @@ public sealed class WorkspaceState
         _ => null
     };
 
+    /// <summary>Round 4 D1: a copy of the active tab placed and activated as <paramref name="opening"/> says ("Duplicated tabs open").</summary>
+    public TabState? DuplicateActive(NewTabOpening opening) => Active switch
+    {
+        HomeTabState => OpenTab(new HomeTabState(Guid.NewGuid()), opening),
+        ImageTabState image => OpenTab(new ImageTabState(Guid.NewGuid(), Path.GetFullPath(image.Path)), opening),
+        BrowserTabState browser => OpenTab(new BrowserTabState(Guid.NewGuid(), Path.GetFullPath(browser.Folder)), opening),
+        _ => null
+    };
+
     public bool ReplaceActiveImage(string path)
     {
         if (Active is not ImageTabState image) return false;

@@ -54,7 +54,8 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _hardTopmostTimer = new() { Interval = TimeSpan.FromMilliseconds(350) };
     private int _topmostTransientDepth;
     private IDisposable? _overlayContextTopmostScope;
-    private CancellationTokenSource? _resizeInputResetCts;
+    private long _resizeInputResetDeadlineTicks;
+    private bool _resizeInputResetArmed;
     private CancellationTokenSource? _navigationBoundaryNoticeCts;
     private CancellationTokenSource? _navigationRateLimitNoticeCts;
     private long _lastRateLimitedNavigationTimestamp;
@@ -126,7 +127,13 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _browserThumbnailCts;
     // Explorer thumbnail decode lanes scale with the machine (a quarter of the logical CPUs, 2..6);
     // was a fixed 4.
-    private readonly SemaphoreSlim _browserThumbnailGate = new(ImagePerformanceGovernor.ThumbnailDecodeLanes, ImagePerformanceGovernor.ThumbnailDecodeLanes);
+    // 5.2.0: a priority queue instead of a first-come lane gate: visible tiles first, cheapest format / size first, look-ahead last,
+    // a per-file timeout, and a remembered failure per file version (Services/ThumbnailScheduler.cs).
+    private readonly ThumbnailScheduler _browserThumbnails = new(ImagePerformanceGovernor.ThumbnailDecodeLanes, new ThumbnailPipeline(), ThumbnailScheduler.DefaultIoLanes(ImagePerformanceGovernor.ThumbnailDecodeLanes))
+    {
+        MemoryCache = new ThumbnailMemoryCache(256L * 1024 * 1024),
+    };
+    private int _browserPrefetchedUpTo = -1;
     // TODO(perf): a trivial shared thumbnail MemoryCache could reuse decoded bitmaps across folder
     // revisits. Deliberately not re-architecting virtualization here (too risky); ItemsRepeater
     // realization stays the single owner of per-tile CTS/bitmap lifetime.
@@ -441,6 +448,7 @@ public partial class MainWindow : Window
         KeyDown += OnKeyDown;
         KeyUp += OnKeyUp;
         AddHandler(InputElement.KeyDownEvent, GlobalKeyDown, RoutingStrategies.Tunnel, true);
+        AddHandler(InputElement.KeyUpEvent, GlobalKeyUp, RoutingStrategies.Tunnel);
         PointerMoved += MainWindowPointerMoved;
         PointerExited += MainWindowPointerExited;
         PointerReleased += MainWindowPointerReleased;
@@ -451,23 +459,7 @@ public partial class MainWindow : Window
             // button/capture can never make the next physical left click behave like a right click.
             EndManualWindowDrag();
             Viewport.CancelInteraction();
-            _resizeInputResetCts?.Cancel();
-            _resizeInputResetCts?.Dispose();
-            var resizeReset = _resizeInputResetCts = new CancellationTokenSource();
-            _ = Task.Run(async () =>
-            {
-                try
-                {
-                    await Task.Delay(90, resizeReset.Token).ConfigureAwait(false);
-                    Dispatcher.UIThread.Post(() =>
-                    {
-                        if (resizeReset.IsCancellationRequested) return;
-                        EndManualWindowDrag();
-                        Viewport.CancelInteraction();
-                    }, DispatcherPriority.Input);
-                }
-                catch (OperationCanceledException) { }
-            });
+            ScheduleResizeInputReset();
 
             TrackNormalWindowPlacement();
             SaveCurrentWholeAppOverlayPlacement();
@@ -485,7 +477,7 @@ public partial class MainWindow : Window
             if (_tabDrag.IsActive || _physicalDraggedTabId is not null) return;
             if (Math.Abs(Bounds.Width - _lastTabLayoutWidth) < 24) return;
             _lastTabLayoutWidth = Bounds.Width;
-            RebuildTabStrip();
+            if (!TryResizeTabStripInPlace()) RebuildTabStrip();
         };
         // PositionChanged is raised from inside Windows' modal move loop (WM_WINDOWPOSCHANGED). An
         // exception escaping here crosses the native WndProc boundary and fast-fails the process, so
@@ -709,7 +701,12 @@ public partial class MainWindow : Window
                     desktop.MainWindow = null;
             }
             else
+            {
                 ExternalLaunchBroker.Unregister(this);
+                // The lifetime is OnExplicitShutdown: without this, a process whose last window closed
+                // without standby (a follower, or Speed Boost off) stayed alive with no window (issue #5).
+                App.ExitIfNoWindowsRemain();
+            }
         };
 
         Activated += (_, _) =>

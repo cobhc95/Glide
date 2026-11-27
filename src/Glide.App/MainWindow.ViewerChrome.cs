@@ -423,11 +423,6 @@ public partial class MainWindow
         var active = ActiveAlwaysOnTop;
         Topmost = active;
         _overlays?.SetTopmost(active);
-        if (_wholeAppOverlayChromeVisual is { } overlayChrome)
-        {
-            overlayChrome.TopmostActive = active;
-            overlayChrome.InvalidateVisual();
-        }
         if (active && HardAlwaysOnTop && _topmostTransientDepth == 0)
         {
             if (!_hardTopmostTimer.IsEnabled) _hardTopmostTimer.Start();

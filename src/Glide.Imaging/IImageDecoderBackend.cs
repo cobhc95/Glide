@@ -87,7 +87,9 @@ public sealed class AvaloniaImageDecoderBackend : IImageDecoderBackend, IPathOpt
         var nativeMissed = false;
         if (OperatingSystem.IsWindows() && !string.IsNullOrWhiteSpace(sourcePath))
         {
-            if (NativeImageDecoder.SupportsDirectNativeDecode(sourcePath))
+            // WebP full frames stay with Skia (5.1.7 benchmark: libwebp 177 ms against Skia's 97 ms for 24 MP); only its reduced
+            // first view and thumbnails use the bridge's libwebp.
+            if (NativeImageDecoder.SupportsDirectNativeDecode(sourcePath) && !NativeImageDecoder.IsWebpPath(sourcePath))
             {
                 NativeImageDecoder.ResetAllocationFailure();
                 if (NativeImageDecoder.TryDecode(sourcePath, 0, out var native))
@@ -236,6 +238,17 @@ public sealed class AvaloniaImageDecoderBackend : IImageDecoderBackend, IPathOpt
         // ahead of Shell-cache probing so a cold cache miss cannot add COM/Shell latency to the
         // exact class that exposed the regression. This mirrors legacy's fastest JPEG path while
         // keeping Shell cache as a fallback if the native transform is unavailable on that PC.
+        // 5.2.0: a TIFF with a reduced-resolution level that covers the box (SubIFD or reduced page) shows that level at once; the full
+        // frame follows on demand. Without such a level a TIFF is decoded in full as before (ImageLoadCoordinator.PrefersFullFirstFrame).
+        if (NativeImageDecoder.IsTiffPath(path) && NativeImageDecoder.TiffReducedLevelCovers(path, maxWidth, maxHeight) &&
+            NativeImageDecoder.TryDecodeBounded(path, maxWidth, maxHeight, progressiveColorFirstPreview, out var tiffLevel))
+        {
+            var tiffPixels = (long)tiffLevel.PixelSize.Width * tiffLevel.PixelSize.Height;
+            var tiffSource = (long)Math.Max(1, source.Width) * Math.Max(1, source.Height);
+            if (GlidePerformanceTrace.Enabled)
+                GlidePerformanceTrace.Mark("tiff_pyramid_preview_ready", $"output={tiffLevel.PixelSize.Width}x{tiffLevel.PixelSize.Height}");
+            return new PathPreviewDecodeResult(tiffLevel, tiffPixels < tiffSource, "tiff-pyramid-level");
+        }
         if (NativeImageDecoder.SupportsNativeScaledPreview(path))
         {
             var nativeStarted = System.Diagnostics.Stopwatch.GetTimestamp();
@@ -393,6 +406,8 @@ public static partial class NativeImageDecoder
     internal static void MarkNativeCodecUnavailable(string? path)
     {
         if (string.IsNullOrWhiteSpace(path)) return;
+        // WebP decodes through the bridge's own libwebp (5.1.7), not WIC: a declined (animated or damaged) file says nothing about the format.
+        if (IsWebpPath(path)) return;
         var extension = ImageFormatRegistry.GetLongestExtension(path);
         if (string.IsNullOrEmpty(extension)) return;
         if (NativeMisses.AddOrUpdate(extension, 1, (_, n) => n + 1) >= 3) NativeUnavailable.TryAdd(extension, 0);
@@ -654,6 +669,193 @@ public static partial class NativeImageDecoder
     /// <summary>Bounded, orientation-aware, decoder-scaled decode (colour-first progressive level).</summary>
     internal static int RawGlideDecodeImageBounded(string path, uint maxWidth, uint maxHeight, out NativeDecodedImage image)
         => GlideDecodeImageBoundedExW(path, maxWidth, maxHeight, 1, out image);
+
+    /// <summary>
+    /// Explorer tab thumbnails (5.1.7): a JPEG decoded by libjpeg-turbo at the smallest DCT scale (1/2, 1/4, 1/8) whose
+    /// display width still reaches <paramref name="width"/> (or the camera's MPF preview when it does), EXIF orientation
+    /// applied. False when the native bridge is missing or declines the file (CMYK, 12-bit, tiny, corrupt): the caller
+    /// then uses its general decoder. The bitmap may be up to about 2x wider than asked.
+    /// </summary>
+    internal static bool TryDecodeJpegThumbnail(string path, int width, out Bitmap? bitmap)
+    {
+        bitmap = null;
+        if (width <= 0) return false;
+        try
+        {
+            var status = GlideDecodeJpegThumbnailW(path, (uint)width, 65535, out var decoded);
+            if (!TryCreateBitmap(decoded, status, out var created)) return false;
+            bitmap = created;
+            return true;
+        }
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException) { return false; }
+    }
+
+    /// <summary>
+    /// <see cref="TryDecodeJpegThumbnail"/> for a JPEG whose bytes the caller already read (5.2.0 thumbnail pipeline: the I/O
+    /// stage reads the file, a decode lane decodes the bytes, so a slow first open is not paid on a decode lane). False when
+    /// the bridge is older than this build (no export), or declines the file; the caller then decodes from the path.
+    /// </summary>
+    internal static unsafe bool TryDecodeJpegThumbnailFromMemory(ReadOnlySpan<byte> jpeg, int width, out Bitmap? bitmap)
+    {
+        bitmap = null;
+        if (width <= 0 || jpeg.Length < 4 || !OperatingSystem.IsWindows()) return false;
+        try
+        {
+            fixed (byte* data = jpeg)
+            {
+                var status = GlideDecodeJpegThumbnailMemory(data, (ulong)jpeg.Length, (uint)width, 65535, out var decoded);
+                if (!TryCreateBitmap(decoded, status, out var created)) return false;
+                bitmap = created;
+                return true;
+            }
+        }
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException) { return false; }
+    }
+
+    /// <summary>
+    /// Formats the Explorer tab decodes through the native thumbnail bridge (5.1.7) instead of Skia: still WebP (libwebp
+    /// decodes straight to the tile size), TIFF and BMP (parallel banded decode with a box reduction; Skia cannot read TIFF at
+    /// all and decodes a large BMP at full size first) and JPEG XR (decoder-native size).
+    /// </summary>
+    internal static bool SupportsNativeThumbnail(string? path)
+    {
+        if (!OperatingSystem.IsWindows() || string.IsNullOrWhiteSpace(path)) return false;
+        return IsTiffPath(path) || IsBmpPath(path) || IsWebpPath(path) || IsJpegXrPath(path);
+    }
+
+    /// <summary>
+    /// A thumbnail at most <paramref name="width"/> pixels wide (aspect preserved, EXIF orientation
+    /// applied, never upscaled) from Glide.Native: libjpeg-turbo for JPEG, libwebp for WebP, WIC otherwise (embedded
+    /// thumbnail, banded TIFF / BMP, decoder-native size). False when the bridge is missing, an older bridge lacks the export,
+    /// or the file is declined; the caller then uses its general decoder.
+    /// </summary>
+    internal static bool TryDecodeThumbnail(string path, int width, out Bitmap? bitmap)
+    {
+        bitmap = null;
+        if (width <= 0 || !OperatingSystem.IsWindows()) return false;
+        try
+        {
+            var status = GlideDecodeThumbnailW(path, (uint)width, 65535, out var decoded);
+            if (!TryCreateBitmap(decoded, status, out var created)) return false;
+            bitmap = created;
+            return true;
+        }
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException) { return false; }
+    }
+
+    /// <summary>What Glide.Native's own TIFF reader (5.2.0: parallel tiles, SubIFD / reduced-page pyramids, BigTIFF) would do for a display box.</summary>
+    internal readonly record struct TiffPlan(int LevelWidth, int LevelHeight, int Reduction, int Levels, bool Tiled, bool BigTiff, bool PyramidLevel, bool OwnReader);
+
+    /// <summary>The native TIFF reader's plan for <paramref name="path"/> and a display box; false when it does not handle the file (WIC does) or the bridge is older.</summary>
+    internal static bool TryGetTiffPlan(string? path, int boxWidth, int boxHeight, out TiffPlan plan)
+    {
+        plan = default;
+        if (!OperatingSystem.IsWindows() || !IsTiffPath(path) || boxWidth <= 0 || boxHeight <= 0) return false;
+        try
+        {
+            if (GlideTiffPlanW(path!, (uint)boxWidth, (uint)boxHeight, out var native) != 1) return false;
+            plan = new TiffPlan((int)native.LevelWidth, (int)native.LevelHeight, (int)native.Reduction, (int)native.Levels,
+                (native.Flags & 1) != 0, (native.Flags & 2) != 0, (native.Flags & 4) != 0, (native.Flags & 8) != 0);
+            return true;
+        }
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException) { return false; }
+    }
+
+    /// <summary>
+    /// True when the TIFF carries a reduced-resolution level (SubIFD or reduced page) that covers the display box: the first view then
+    /// decodes that level (a few milliseconds) instead of the whole picture, and the full frame follows on demand.
+    /// </summary>
+    internal static bool TiffReducedLevelCovers(string? path, int boxWidth, int boxHeight)
+        => TryGetTiffPlan(path, boxWidth, boxHeight, out var plan) && plan.PyramidLevel;
+
+    /// <summary>Tests: the native TIFF reader's decode (0 x 0 = full size) even for files WIC would normally decode; false when it declines the file.</summary>
+    internal static bool TryDecodeTiffOwnForTests(string path, int maxWidth, int maxHeight, out Bitmap? bitmap)
+    {
+        bitmap = null;
+        try
+        {
+            var status = GlideTiffDecodeOwnW(path, (uint)Math.Max(0, maxWidth), (uint)Math.Max(0, maxHeight), out var decoded);
+            if (!TryCreateBitmap(decoded, status, out var created)) return false;
+            bitmap = created;
+            return true;
+        }
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException) { return false; }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeTiffPlan
+    {
+        public uint LevelWidth;
+        public uint LevelHeight;
+        public uint Reduction;
+        public uint Levels;
+        public uint Flags;
+    }
+
+    [LibraryImport("Glide.Native", EntryPoint = "GlideTiffPlanW", StringMarshalling = StringMarshalling.Utf16)]
+    private static partial int GlideTiffPlanW(string path, uint maxWidth, uint maxHeight, out NativeTiffPlan plan);
+
+    [LibraryImport("Glide.Native", EntryPoint = "GlideTiffDecodeOwnW", StringMarshalling = StringMarshalling.Utf16)]
+    private static partial int GlideTiffDecodeOwnW(string path, uint maxWidth, uint maxHeight, out NativeDecodedImage image);
+
+    /// <summary>Tests: the DC-only 1/8 decode of a progressive JPEG (libjpeg buffered-image mode); false when the file is not one it handles.</summary>
+    internal static bool TryDecodeProgressiveDcForTests(string path, out Bitmap? bitmap)
+    {
+        bitmap = null;
+        try
+        {
+            var status = GlideJpegProgressiveDcW(path, out var decoded);
+            if (!TryCreateBitmap(decoded, status, out var created)) return false;
+            bitmap = created;
+            return true;
+        }
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException) { return false; }
+    }
+
+    /// <summary>
+    /// Tests and benchmarks (5.2.0): Glide's own DC-only reader of a progressive JPEG in memory (no libjpeg coefficient buffer),
+    /// the first route the Explorer thumbnail of a progressive file takes. False when it declines the file.
+    /// </summary>
+    internal static unsafe bool TryDecodeJpegDcOnlyForTests(ReadOnlySpan<byte> jpeg, out Bitmap? bitmap)
+    {
+        bitmap = null;
+        try
+        {
+            fixed (byte* data = jpeg)
+            {
+                var status = GlideJpegDcOnlyMemory(data, (ulong)jpeg.Length, out var decoded);
+                if (!TryCreateBitmap(decoded, status, out var created)) return false;
+                bitmap = created;
+                return true;
+            }
+        }
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException) { return false; }
+    }
+
+    /// <summary>The route the last Explorer JPEG thumbnail decode on this thread took: 1 own DC reader, 2 libjpeg DC, 3 DCT-scaled, 4 embedded preview, 0 declined; -1 without the export.</summary>
+    internal static int LastJpegThumbnailRouteForTests()
+    {
+        try { return GlideJpegLastThumbnailRoute(); }
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException) { return -1; }
+    }
+
+    [LibraryImport("Glide.Native", EntryPoint = "GlideJpegDcOnlyMemory")]
+    private static unsafe partial int GlideJpegDcOnlyMemory(byte* data, ulong size, out NativeDecodedImage image);
+
+    [LibraryImport("Glide.Native", EntryPoint = "GlideJpegLastThumbnailRoute")]
+    private static partial int GlideJpegLastThumbnailRoute();
+
+    [LibraryImport("Glide.Native", EntryPoint = "GlideJpegProgressiveDcW", StringMarshalling = StringMarshalling.Utf16)]
+    private static partial int GlideJpegProgressiveDcW(string path, out NativeDecodedImage image);
+
+    [LibraryImport("Glide.Native", EntryPoint = "GlideDecodeThumbnailW", StringMarshalling = StringMarshalling.Utf16)]
+    private static partial int GlideDecodeThumbnailW(string path, uint maxWidth, uint maxHeight, out NativeDecodedImage image);
+
+    [LibraryImport("Glide.Native", EntryPoint = "GlideDecodeJpegThumbnailMemory")]
+    private static unsafe partial int GlideDecodeJpegThumbnailMemory(byte* data, ulong size, uint maxWidth, uint maxHeight, out NativeDecodedImage image);
+
+    [LibraryImport("Glide.Native", EntryPoint = "GlideDecodeJpegThumbnailW", StringMarshalling = StringMarshalling.Utf16)]
+    private static partial int GlideDecodeJpegThumbnailW(string path, uint maxWidth, uint maxHeight, out NativeDecodedImage image);
 
     internal static void RawGlideFreeBuffer(IntPtr data)
         => GlideFreeImageBuffer(data);

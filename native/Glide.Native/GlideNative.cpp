@@ -11,6 +11,9 @@
 #include <vector>
 #include <atomic>
 #include "GlideJpeg.h"
+#include "GlideCmyk.h"
+#include "GlideTiff.h"
+#include "GlideWebp.h"
 
 struct GlideImageInfo
 {
@@ -165,6 +168,12 @@ extern "C" __declspec(dllexport) int __cdecl GlideProbeImageW(const wchar_t* pat
     if (decoder) decoder->Release();
     if (factory) factory->Release();
     if (mustUninit) CoUninitialize();
+    // 5.2.0: WIC cannot read BigTIFF; the native TIFF reader knows the size (one frame).
+    if (!ok && GlideIsTiffPath(path))
+    {
+        std::uint32_t tw = 0, th = 0;
+        if (GlideTiffProbe(path, &tw, &th, nullptr)) { info->width = tw; info->height = th; info->frameCount = 1; ok = 1; }
+    }
     return ok;
 }
 
@@ -389,6 +398,22 @@ static int DecodeImageBoundedW(const wchar_t* path, std::uint32_t maxWidth, std:
 {
     if (!path || !image) return 0;
     *image = {};
+    // 5.1.7: a bounded still WebP through the vendored, threaded libwebp (decoder-native reduced size; WIC has no WebP codec
+    // without the optional Store extension). Full resolution stays with Skia, which is faster there. Animated, transparent or
+    // damaged files return 0 and the caller decodes them with Skia.
+    if (GlideIsWebpPath(path))
+    {
+        if (maxWidth > 0 && maxHeight > 0 && GlideWebpDecodeBounded(path, maxWidth, maxHeight, false, image)) return 1;
+        *image = {};
+        return 0; // WIC has no WebP codec on most PCs: a failed attempt costs ~7 ms; the caller's Skia decode takes over at once
+    }
+    *image = {};
+    // 5.2.0: TIFF through the native reader (parallel tiles, pyramid levels, BigTIFF) when it is the better choice for the file.
+    if (maxWidth > 0 && maxHeight > 0 && GlideIsTiffPath(path))
+    {
+        if (GlideTiffDecodeBounded(path, maxWidth, maxHeight, false, image)) return 1;
+        *image = {};
+    }
     // A WIC early scan can have source dimensions while missing most JPEG detail.
     // Decode all scans even for bounded JPEG requests, retaining decoder-native size limits.
     const bool usePreviewLevel = stagedProgressivePreview && !GlideIsJpegPath(path);
@@ -665,11 +690,16 @@ static unsigned ParallelBandCount(IWICBitmapDecoder* decoder, UINT width, UINT h
 extern "C" __declspec(dllexport) int __cdecl GlideDecodeImageIntoW(const wchar_t* path, GlideSurfaceAllocator allocate, void* context)
 {
     if (!path || !allocate) return 0;
+    if (GlideIsWebpPath(path)) return 0; // 5.1.7: WebP full frames are decoded by Skia (see DecodeImageBoundedW)
     // 5.0.7: JPEG through libjpeg-turbo (GlideJpeg.cpp). If it declines before asking for a surface, WIC runs as
     // before; if it fails after the surface exists, WIC decodes into that same surface (never a second one).
     std::uint8_t* turboSurface = nullptr;
     std::uint32_t turboStride = 0, turboWidth = 0, turboHeight = 0;
     if (GlideTurboDecodeInto(path, allocate, context, &turboSurface, &turboStride, &turboWidth, &turboHeight)) return 1;
+    // 5.2.0: tiled and BigTIFF files through the native reader (parallel tiles). It declines before asking for a surface when it is
+    // not the better choice; if it fails after the surface exists, WIC decodes into that same surface.
+    if (!turboSurface && GlideIsTiffPath(path) &&
+        GlideTiffDecodeInto(path, allocate, context, &turboSurface, &turboStride, &turboWidth, &turboHeight)) return 1;
     const HRESULT init = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     const bool mustUninit = SUCCEEDED(init);
     if (FAILED(init) && init != RPC_E_CHANGED_MODE) return 0;
@@ -741,12 +771,333 @@ extern "C" __declspec(dllexport) int __cdecl GlideDecodeImageBoundedW(const wcha
     return DecodeImageBoundedW(path, maxWidth, maxHeight, true, true, image);
 }
 
+// Area-averages a decoded frame (32bpp, CoTaskMem) down to fit the box, aspect preserved, never upscaled. Keeps the larger
+// frame when the output cannot be allocated. Exact, alias-free output for a source up to a few times the box.
+static void AreaAverageToBox(GlideDecodedImage* image, std::uint32_t maxWidth, std::uint32_t maxHeight)
+{
+    // The DCT scale leaves up to 2x the box: area-average down to the box so the tile gets an exact, alias-free bitmap.
+    const double ratio = std::min(static_cast<double>(maxWidth) / image->width, static_cast<double>(maxHeight) / image->height);
+    if (ratio >= 1.0) return;
+    const std::uint32_t sw = image->width, sh = image->height;
+    const std::uint32_t dw = std::max<std::uint32_t>(1, static_cast<std::uint32_t>(sw * ratio + 0.5));
+    const std::uint32_t dh = std::max<std::uint32_t>(1, static_cast<std::uint32_t>(sh * ratio + 0.5));
+    auto* out = static_cast<std::uint8_t*>(CoTaskMemAlloc(static_cast<std::size_t>(dw) * dh * 4));
+    if (!out) return; // keep the larger bitmap rather than fail
+    std::vector<float> row(static_cast<std::size_t>(dw) * 4);
+    const double fx = static_cast<double>(sw) / dw, fy = static_cast<double>(sh) / dh;
+    // Horizontal spans (source columns and their weights) for each output column.
+    std::vector<std::uint32_t> x0(dw), x1(dw);
+    std::vector<float> w0(dw), w1(dw);
+    for (std::uint32_t x = 0; x < dw; ++x)
+    {
+        const double a = x * fx, b = std::min<double>(sw, (x + 1) * fx);
+        x0[x] = static_cast<std::uint32_t>(a);
+        x1[x] = std::min<std::uint32_t>(sw - 1, static_cast<std::uint32_t>(std::ceil(b)) - 1);
+        w0[x] = static_cast<float>(1.0 - (a - x0[x]));
+        w1[x] = static_cast<float>(b - x1[x]);
+    }
+    for (std::uint32_t y = 0; y < dh; ++y)
+    {
+        std::fill(row.begin(), row.end(), 0.0f);
+        const double a = y * fy, b = std::min<double>(sh, (y + 1) * fy);
+        const std::uint32_t ya = static_cast<std::uint32_t>(a), yb = std::min<std::uint32_t>(sh - 1, static_cast<std::uint32_t>(std::ceil(b)) - 1);
+        float total = 0;
+        for (std::uint32_t sy = ya; sy <= yb; ++sy)
+        {
+            float wy = 1.0f;
+            if (sy == ya) wy = static_cast<float>(1.0 - (a - ya));
+            if (sy == yb) wy = std::min(wy, static_cast<float>(b - yb));
+            if (wy <= 0) continue;
+            total += wy;
+            const std::uint8_t* src = static_cast<const std::uint8_t*>(image->data) + static_cast<std::size_t>(sy) * image->stride;
+            for (std::uint32_t x = 0; x < dw; ++x)
+            {
+                float acc[4] = { 0, 0, 0, 0 }, wsum = 0;
+                for (std::uint32_t sx = x0[x]; sx <= x1[x]; ++sx)
+                {
+                    float wx = 1.0f;
+                    if (sx == x0[x]) wx = w0[x];
+                    if (sx == x1[x]) wx = std::min(wx, w1[x]);
+                    if (wx <= 0) continue;
+                    const std::uint8_t* px = src + sx * 4;
+                    acc[0] += px[0] * wx; acc[1] += px[1] * wx; acc[2] += px[2] * wx; acc[3] += px[3] * wx;
+                    wsum += wx;
+                }
+                float* r = row.data() + x * 4;
+                const float k = wy / (wsum > 0 ? wsum : 1);
+                r[0] += acc[0] * k; r[1] += acc[1] * k; r[2] += acc[2] * k; r[3] += acc[3] * k;
+            }
+        }
+        std::uint8_t* dst = out + static_cast<std::size_t>(y) * dw * 4;
+        const float inv = total > 0 ? 1.0f / total : 1.0f;
+        for (std::uint32_t i = 0; i < dw * 4; ++i) dst[i] = static_cast<std::uint8_t>(std::min(255.0f, row[i] * inv + 0.5f));
+    }
+    CoTaskMemFree(image->data);
+    image->data = out;
+    image->width = dw;
+    image->height = dh;
+    image->stride = dw * 4;
+    image->bufferBytes = static_cast<std::uint64_t>(dw) * dh * 4;
+}
+
+// Explorer tab thumbnails (5.1.7): JPEG only, libjpeg-turbo DCT-scaled (or the camera's MPF preview when it covers the
+// box), fast IDCT, EXIF orientation applied. 0 = not handled here (caller uses its general decoder).
+extern "C" __declspec(dllexport) int __cdecl GlideDecodeJpegThumbnailW(const wchar_t* path, std::uint32_t maxWidth, std::uint32_t maxHeight,
+                                                                       GlideDecodedImage* image)
+{
+    if (!path || !image || maxWidth == 0 || maxHeight == 0) return 0;
+    *image = {};
+    if (!GlideTurboDecodeBounded(path, maxWidth, maxHeight, true, image, true)) { *image = {}; return 0; }
+    // The DCT scale leaves up to 2x the box: area-average down to the box so the tile gets an exact, alias-free bitmap.
+    AreaAverageToBox(image, maxWidth, maxHeight);
+    return 1;
+}
+
+// 5.2.0 Explorer thumbnails from memory: the same decode as GlideDecodeJpegThumbnailW for a JPEG the caller already read (the
+// thumbnail pipeline's I/O stage), so the slow first open of the file is not paid on a decode lane. 0 = not handled here.
+extern "C" __declspec(dllexport) int __cdecl GlideDecodeJpegThumbnailMemory(const std::uint8_t* data, std::uint64_t size, std::uint32_t maxWidth,
+                                                                            std::uint32_t maxHeight, GlideDecodedImage* image)
+{
+    if (!data || !image || size == 0 || maxWidth == 0 || maxHeight == 0) return 0;
+    *image = {};
+    if (!GlideTurboDecodeBoundedMemory(data, static_cast<std::size_t>(size), maxWidth, maxHeight, image)) { *image = {}; return 0; }
+    AreaAverageToBox(image, maxWidth, maxHeight);
+    return 1;
+}
+
 extern "C" __declspec(dllexport) int __cdecl GlideDecodeImageBoundedExW(const wchar_t* path, std::uint32_t maxWidth, std::uint32_t maxHeight,
                                                                           int progressiveColourFirst, GlideDecodedImage* image)
 {
     return DecodeImageBoundedW(path, maxWidth, maxHeight, true, progressiveColourFirst != 0, image);
 }
 
+
+// ---- 5.1.7 Explorer thumbnails for formats Skia cannot decode (TIFF) or decodes slowly (large BMP), and for every other
+// WIC codec on the PC (JPEG XR, HEIC/AVIF with the Store extensions). Order: embedded thumbnail that covers the box, banded
+// parallel decode with an integer box reduction per band (TIFF / BMP of 2 MP and more), otherwise the bounded WIC decode
+// (decoder-native size when the codec offers it, else a Fant scaler). Always ends in an exact area-averaged fit.
+
+// One horizontal band of the banded decode: decodes rows in cache-sized chunks and box-reduces each chunk by k into `out`.
+static bool DecodeBoxBand(const wchar_t* path, UINT width, UINT height, std::uint32_t k, UINT outWidth, UINT outRowBegin, UINT outRowEnd,
+                          std::uint8_t* out)
+{
+    const HRESULT init = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    const bool mustUninit = SUCCEEDED(init);
+    IWICImagingFactory* factory = nullptr;
+    IWICBitmapDecoder* decoder = nullptr;
+    IWICBitmapFrameDecode* frame = nullptr;
+    IWICFormatConverter* converter = nullptr;
+    HRESULT hr = (FAILED(init) && init != RPC_E_CHANGED_MODE) ? init : S_OK;
+    if (SUCCEEDED(hr)) hr = CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&factory));
+    if (SUCCEEDED(hr)) hr = factory->CreateDecoderFromFilename(path, nullptr, GENERIC_READ, WICDecodeMetadataCacheOnDemand, &decoder);
+    if (SUCCEEDED(hr)) hr = decoder->GetFrame(0, &frame);
+    UINT w = 0, h = 0;
+    if (SUCCEEDED(hr)) hr = frame->GetSize(&w, &h);
+    if (SUCCEEDED(hr) && (w != width || h != height)) hr = E_FAIL; // the file changed under us
+    if (SUCCEEDED(hr)) hr = factory->CreateFormatConverter(&converter);
+    if (SUCCEEDED(hr)) hr = converter->Initialize(frame, GUID_WICPixelFormat32bppPBGRA, WICBitmapDitherTypeNone, nullptr, 0.0, WICBitmapPaletteTypeCustom);
+    if (SUCCEEDED(hr))
+    {
+        const UINT chunkOut = std::max<UINT>(1u, 64u / k); // about 64 source rows per decode call
+        std::vector<std::uint8_t> chunk;
+        try { chunk.resize(static_cast<std::size_t>(width) * 4 * chunkOut * k); }
+        catch (...) { hr = E_OUTOFMEMORY; } // a std::bad_alloc must never leave a band thread (it would terminate the process)
+        for (UINT oy = outRowBegin; oy < outRowEnd && SUCCEEDED(hr); oy += chunkOut)
+        {
+            const UINT oyEnd = std::min(outRowEnd, oy + chunkOut);
+            const UINT y0 = oy * k, y1 = std::min(height, oyEnd * k);
+            const WICRect rect{ 0, static_cast<INT>(y0), static_cast<INT>(width), static_cast<INT>(y1 - y0) };
+            hr = converter->CopyPixels(&rect, width * 4, static_cast<UINT>(static_cast<std::size_t>(width) * 4 * (y1 - y0)), chunk.data());
+            if (FAILED(hr)) break;
+            for (UINT r = oy; r < oyEnd; ++r)
+            {
+                const UINT sy0 = r * k, sy1 = std::min(height, sy0 + k);
+                std::uint8_t* dst = out + static_cast<std::size_t>(r) * outWidth * 4;
+                for (UINT bx = 0; bx < outWidth; ++bx)
+                {
+                    const UINT sx0 = bx * k, sx1 = std::min(width, sx0 + k);
+                    std::uint32_t b = 0, g = 0, rd = 0, a = 0;
+                    for (UINT sy = sy0; sy < sy1; ++sy)
+                    {
+                        const std::uint8_t* p = chunk.data() + (static_cast<std::size_t>(sy - y0) * width + sx0) * 4;
+                        for (UINT sx = sx0; sx < sx1; ++sx, p += 4) { b += p[0]; g += p[1]; rd += p[2]; a += p[3]; }
+                    }
+                    const std::uint32_t n = (sy1 - sy0) * (sx1 - sx0);
+                    std::uint8_t* d = dst + static_cast<std::size_t>(bx) * 4;
+                    d[0] = static_cast<std::uint8_t>((b + n / 2) / n);
+                    d[1] = static_cast<std::uint8_t>((g + n / 2) / n);
+                    d[2] = static_cast<std::uint8_t>((rd + n / 2) / n);
+                    d[3] = static_cast<std::uint8_t>((a + n / 2) / n);
+                }
+            }
+        }
+    }
+    if (converter) converter->Release();
+    if (frame) frame->Release();
+    if (decoder) decoder->Release();
+    if (factory) factory->Release();
+    if (mustUninit) CoUninitialize();
+    return SUCCEEDED(hr);
+}
+
+// Whole frame decoded in parallel row bands, each reduced by the integer factor k (ceil(width/k) x ceil(height/k) result).
+static bool DecodeBandedBoxReduced(const wchar_t* path, UINT width, UINT height, std::uint32_t k, GlideDecodedImage* image)
+{
+    const UINT outWidth = (width + k - 1) / k, outHeight = (height + k - 1) / k;
+    const std::uint64_t bytes = static_cast<std::uint64_t>(outWidth) * outHeight * 4ull;
+    if (bytes == 0 || bytes > std::numeric_limits<UINT>::max()) return false;
+    auto* out = static_cast<std::uint8_t*>(CoTaskMemAlloc(static_cast<std::size_t>(bytes)));
+    if (!out) return false;
+    SYSTEM_INFO si{};
+    GetSystemInfo(&si);
+    const unsigned cores = std::clamp<unsigned>(si.dwNumberOfProcessors, 1u, 8u);
+    const unsigned bands = std::max(1u, std::min(cores, outHeight / 8u));
+    const UINT rowsPerBand = (outHeight + bands - 1) / bands;
+    std::atomic<bool> ok{ true };
+    auto run = [&](unsigned band)
+    {
+        const UINT begin = band * rowsPerBand;
+        if (begin >= outHeight) return;
+        try
+        {
+            if (!DecodeBoxBand(path, width, height, k, outWidth, begin, std::min(outHeight, begin + rowsPerBand), out)) ok = false;
+        }
+        catch (...) { ok = false; }
+    };
+    std::vector<std::thread> workers;
+    try { for (unsigned band = 1; band < bands; ++band) workers.emplace_back(run, band); }
+    catch (...) { ok = false; }
+    run(0);
+    for (auto& worker : workers) worker.join();
+    if (!ok) { CoTaskMemFree(out); return false; }
+    image->width = outWidth;
+    image->height = outHeight;
+    image->stride = outWidth * 4;
+    image->bufferBytes = bytes;
+    image->data = out;
+    return true;
+}
+
+// The picture's own embedded thumbnail (WIC GetThumbnail: EXIF / TIFF / HEIC thumbnail), when it matches the picture's
+// aspect ratio and is at least the size of the box fit: used as is, no decode of the main image.
+static bool TryEmbeddedThumbnail(IWICImagingFactory* factory, IWICBitmapFrameDecode* frame, UINT width, UINT height,
+                                 UINT boxWidth, UINT boxHeight, GlideDecodedImage* image)
+{
+    IWICBitmapSource* thumbnail = nullptr;
+    if (FAILED(frame->GetThumbnail(&thumbnail)) || !thumbnail) return false;
+    UINT tw = 0, th = 0;
+    bool ok = false;
+    IWICFormatConverter* converter = nullptr;
+    if (SUCCEEDED(thumbnail->GetSize(&tw, &th)) && tw > 0 && th > 0 && WithinDecodeCap(tw, th))
+    {
+        const double ratio = std::min(1.0, std::min(static_cast<double>(boxWidth) / width, static_cast<double>(boxHeight) / height));
+        const double aspect = static_cast<double>(width) / height;
+        const bool sameAspect = std::fabs(static_cast<double>(tw) / th - aspect) / aspect < 0.015;
+        if (sameAspect && tw >= std::floor(width * ratio) && th >= std::floor(height * ratio) && tw <= 4096 && th <= 4096 &&
+            SUCCEEDED(factory->CreateFormatConverter(&converter)) &&
+            SUCCEEDED(converter->Initialize(thumbnail, GUID_WICPixelFormat32bppPBGRA, WICBitmapDitherTypeNone, nullptr, 0.0, WICBitmapPaletteTypeCustom)))
+        {
+            const std::uint64_t bytes = static_cast<std::uint64_t>(tw) * th * 4ull;
+            auto* pixels = static_cast<std::uint8_t*>(CoTaskMemAlloc(static_cast<std::size_t>(bytes)));
+            if (pixels && SUCCEEDED(converter->CopyPixels(nullptr, tw * 4, static_cast<UINT>(bytes), pixels)))
+            {
+                image->width = tw; image->height = th; image->stride = tw * 4; image->bufferBytes = bytes; image->data = pixels;
+                ok = true;
+            }
+            else if (pixels) CoTaskMemFree(pixels);
+        }
+    }
+    if (converter) converter->Release();
+    thumbnail->Release();
+    return ok;
+}
+
+static int DecodeThumbnailWic(const wchar_t* path, std::uint32_t maxWidth, std::uint32_t maxHeight, GlideDecodedImage* image)
+{
+    const HRESULT init = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    const bool mustUninit = SUCCEEDED(init);
+    if (FAILED(init) && init != RPC_E_CHANGED_MODE) return 0;
+    IWICImagingFactory* factory = nullptr;
+    IWICBitmapDecoder* decoder = nullptr;
+    IWICBitmapFrameDecode* frame = nullptr;
+    HRESULT hr = CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&factory));
+    if (SUCCEEDED(hr)) hr = factory->CreateDecoderFromFilename(path, nullptr, GENERIC_READ, WICDecodeMetadataCacheOnDemand, &decoder);
+    if (SUCCEEDED(hr)) hr = decoder->GetFrame(0, &frame);
+    UINT width = 0, height = 0;
+    if (SUCCEEDED(hr)) hr = frame->GetSize(&width, &height);
+    if (SUCCEEDED(hr) && !WithinDecodeCap(width, height)) hr = E_INVALIDARG;
+    std::uint16_t orientation = 1;
+    bool staged = false; // image holds an unoriented frame that still has to be fitted and oriented
+    GUID container{};
+    if (SUCCEEDED(hr))
+    {
+        orientation = ReadOrientation(frame);
+        if (orientation < 1 || orientation > 8) orientation = 1;
+        const bool rotated = orientation >= 5;
+        const UINT boxW = rotated ? maxHeight : maxWidth, boxH = rotated ? maxWidth : maxHeight;
+        if (width <= boxW && height <= boxH) staged = false; // no reduction: the generic path below decodes it as is
+        else if (TryEmbeddedThumbnail(factory, frame, width, height, boxW, boxH, image)) staged = true;
+        else if (SUCCEEDED(decoder->GetContainerFormat(&container)) &&
+                 (IsEqualGUID(container, GUID_ContainerFormatTiff) || IsEqualGUID(container, GUID_ContainerFormatBmp)) &&
+                 static_cast<std::uint64_t>(width) * height >= 2'000'000ull)
+        {
+            const double ratio = std::min(static_cast<double>(boxW) / width, static_cast<double>(boxH) / height);
+            const auto k = static_cast<std::uint32_t>(std::floor(1.0 / ratio));
+            if (k >= 2 && DecodeBandedBoxReduced(path, width, height, k, image)) staged = true;
+        }
+        if (staged)
+        {
+            AreaAverageToBox(image, boxW, boxH);
+            if (orientation != 1)
+            {
+                const UINT sw = image->width, sh = image->height;
+                const UINT outW = rotated ? sh : sw, outH = rotated ? sw : sh;
+                const std::uint64_t bytes = static_cast<std::uint64_t>(outW) * outH * 4ull;
+                auto* oriented = static_cast<std::uint8_t*>(CoTaskMemAlloc(static_cast<std::size_t>(bytes)));
+                if (!oriented) { CoTaskMemFree(image->data); *image = {}; staged = false; hr = E_OUTOFMEMORY; }
+                else
+                {
+                    OrientBgra(static_cast<const std::uint8_t*>(image->data), sw, sh, orientation, oriented, outW);
+                    CoTaskMemFree(image->data);
+                    image->width = outW; image->height = outH; image->stride = outW * 4; image->bufferBytes = bytes; image->data = oriented;
+                }
+            }
+        }
+    }
+    if (frame) frame->Release();
+    if (decoder) decoder->Release();
+    if (factory) factory->Release();
+    if (mustUninit) CoUninitialize();
+    if (staged) return 1;
+    if (FAILED(hr)) { *image = {}; return 0; }
+    // Generic path: the bounded decode (orientation applied), then the exact fit.
+    *image = {};
+    if (!DecodeImageBoundedW(path, maxWidth, maxHeight, false, true, image)) { *image = {}; return 0; }
+    AreaAverageToBox(image, maxWidth, maxHeight);
+    return 1;
+}
+
+// Explorer tab thumbnails, every format: JPEG (libjpeg-turbo), WebP (libwebp scaled decode) and the WIC route above.
+// 0 = not handled here (the caller uses its general decoder).
+extern "C" __declspec(dllexport) int __cdecl GlideDecodeThumbnailW(const wchar_t* path, std::uint32_t maxWidth, std::uint32_t maxHeight,
+                                                                   GlideDecodedImage* image)
+{
+    if (!path || !image || maxWidth == 0 || maxHeight == 0) return 0;
+    *image = {};
+    try
+    {
+        if (GlideIsJpegPath(path)) return GlideDecodeJpegThumbnailW(path, maxWidth, maxHeight, image);
+        if (GlideIsTiffPath(path))
+        {
+            // 5.2.0: smallest pyramid level that covers the tile, parallel tile / strip decode with a box reduction, BigTIFF.
+            if (GlideTiffDecodeBounded(path, maxWidth, maxHeight, true, image)) { AreaAverageToBox(image, maxWidth, maxHeight); return 1; }
+            *image = {};
+        }
+        if (GlideIsWebpPath(path)) return GlideWebpDecodeBounded(path, maxWidth, maxHeight, true, image) ? 1 : 0;
+        return DecodeThumbnailWic(path, maxWidth, maxHeight, image);
+    }
+    catch (...) { *image = {}; return 0; } // std::bad_alloc from a vector must not cross the C boundary
+}
 
 // Last-resort rasterisation bridge for declared formats that have a registered Windows Shell
 // thumbnail provider but no direct WIC/Avalonia/bundled codec. THUMBNAILONLY is intentional: Glide
@@ -1368,6 +1719,34 @@ void GlideOrientIntoSurface(const std::uint8_t* source, std::uint32_t width, std
 bool GlideWithinDecodeCap(std::uint64_t width, std::uint64_t height) { return WithinDecodeCap(width, height); }
 
 // 5.0.7 diagnostics/tests: 1 when the libjpeg-turbo path accepts this JPEG (CMYK, 12-bit etc. return 0 = WIC).
+// Tests: 1 when the progressive JPEG's DC scan alone decodes to a 1/8 picture (no orientation applied).
+extern "C" __declspec(dllexport) int __cdecl GlideJpegProgressiveDcW(const wchar_t* path, GlideDecodedImage* image)
+{
+    if (!path || !image) return 0;
+    *image = {};
+    return GlideTurboProgressiveDc(path, image) ? 1 : 0;
+}
+
+// 5.2.0 tests: Glide's own DC-only reader on a JPEG in memory (no orientation); 1 = decoded.
+extern "C" __declspec(dllexport) int __cdecl GlideJpegDcOnlyMemory(const std::uint8_t* data, std::uint64_t size, GlideDecodedImage* image)
+{
+    if (!data || !image || size == 0 || size > 0x7FFFFFFF) return 0;
+    *image = {};
+    std::uint8_t* pixels = nullptr;
+    int w = 0, h = 0;
+    try { if (!GlideJpegDcOnly(data, static_cast<std::size_t>(size), &pixels, &w, &h)) return 0; }
+    catch (...) { return 0; }
+    image->width = static_cast<std::uint32_t>(w);
+    image->height = static_cast<std::uint32_t>(h);
+    image->stride = static_cast<std::uint32_t>(w) * 4;
+    image->bufferBytes = static_cast<std::uint64_t>(w) * h * 4ull;
+    image->data = pixels;
+    return 1;
+}
+
+// 5.2.0 tests: the route the last Explorer JPEG thumbnail decode took on the calling thread (see g_lastJpegThumbnailRoute).
+extern "C" __declspec(dllexport) int __cdecl GlideJpegLastThumbnailRoute() { return g_lastJpegThumbnailRoute; }
+
 extern "C" __declspec(dllexport) int __cdecl GlideJpegTurboAcceptsW(const wchar_t* path)
 {
     return GlideTurboAccepts(path) ? 1 : 0;
@@ -1379,4 +1758,36 @@ extern "C" __declspec(dllexport) int __cdecl GlideJpegPlanFirstView(int width, i
 {
     if (scaleDenom) *scaleDenom = GlideJpegChooseScaleDenom(width, height, needW, needH);
     return static_cast<int>(GlideJpegChooseFirstView(width, height, needW, needH, previewLongSide, scaledAllowed != 0));
+}
+
+// 5.2.0 tests/diagnostics: one natural-ink CMYK value through the lattice that stands in for Windows' CMYK converter
+// (GlideCmyk.cpp). 1 on success (BGRA in `bgra`), 0 when the converter is unavailable on this PC.
+extern "C" __declspec(dllexport) int __cdecl GlideCmykConvertW(std::uint8_t c, std::uint8_t m, std::uint8_t y, std::uint8_t k, std::uint8_t* bgra)
+{
+    if (!bgra || !GlideCmykReady()) return 0;
+    GlideCmykConvertOne(c, m, y, k, bgra);
+    return 1;
+}
+
+// 5.2.0 tests and the viewer's first-view gate: what the native TIFF reader would do for a display box. 1 when the file is a TIFF it
+// understands. reduction = power-of-two box reduction applied to the chosen level; flags: bit0 tiled, bit1 BigTIFF, bit2 chosen
+// level is a pyramid level (SubIFD or reduced page), bit3 this reader (not WIC) decodes the request.
+struct GlideTiffPlanInfo
+{
+    std::uint32_t levelWidth, levelHeight, reduction, levels, flags;
+};
+
+extern "C" __declspec(dllexport) int __cdecl GlideTiffPlanW(const wchar_t* path, std::uint32_t maxWidth, std::uint32_t maxHeight, GlideTiffPlanInfo* info)
+{
+    if (!path || !info) return 0;
+    *info = {};
+    return GlideTiffPlan(path, maxWidth, maxHeight, &info->levelWidth, &info->levelHeight, &info->reduction, &info->levels, &info->flags) ? 1 : 0;
+}
+
+// 5.2.0 tests/diagnostics: the native TIFF reader's bounded decode (0 x 0 = full size) even for files WIC would normally decode.
+extern "C" __declspec(dllexport) int __cdecl GlideTiffDecodeOwnW(const wchar_t* path, std::uint32_t maxWidth, std::uint32_t maxHeight, GlideDecodedImage* image)
+{
+    if (!path || !image) return 0;
+    *image = {};
+    return GlideTiffDecodeBounded(path, maxWidth, maxHeight, false, image, true) ? 1 : 0;
 }

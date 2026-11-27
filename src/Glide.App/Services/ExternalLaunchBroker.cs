@@ -35,8 +35,31 @@ internal static class ExternalLaunchBroker
     // the elected owner releases/exits and another live Glide process can take over.
     private static readonly string PresenceName = ProtocolNames.UserScoped(ProtocolNames.PresenceName, InstanceKey());
 
+    // 5.1.7 (issue #5): test hosts, portable copies and dev builds no longer share the installed Glide's family
+    // (see ProtocolNames.ScopedInstanceKey).
     private static string InstanceKey() =>
-        ProtocolNames.InstanceKey(CurrentUserKey(), Environment.GetEnvironmentVariable("GLIDE_SETTINGS_DIRECTORY"));
+        ProtocolNames.ScopedInstanceKey(CurrentUserKey(), Environment.GetEnvironmentVariable("GLIDE_SETTINGS_DIRECTORY"),
+            AppContext.BaseDirectory, IsInstalledCopy(), IsForeignHost(), Environment.ProcessId);
+
+    private static bool IsInstalledCopy()
+    {
+        try { return File.Exists(Path.Combine(AppContext.BaseDirectory, "installed.flag")); }
+        catch { return false; }
+    }
+
+    /// <summary>True when Glide.App is hosted by another program (a test host). An unknown entry assembly counts as Glide.</summary>
+    internal static bool IsForeignHost()
+    {
+        var entry = System.Reflection.Assembly.GetEntryAssembly()?.GetName().Name;
+        return entry is not null && !string.Equals(entry, typeof(ExternalLaunchBroker).Assembly.GetName().Name, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>True while this process is the elected single-instance owner (holds the presence object). Only the owner
+    /// may stay resident in Speed Boost standby or show the Speed Boost tray icon.</summary>
+    internal static bool IsPresenceOwner
+    {
+        get { lock (Gate) return _ownsPresence; }
+    }
     private static string EffectivePresenceName =>
         AppContext.BaseDirectory.Contains("Glide.Core.Tests", StringComparison.OrdinalIgnoreCase)
             ? $"{PresenceName}.{Environment.ProcessId}"
@@ -69,8 +92,15 @@ internal static class ExternalLaunchBroker
     // and the server's pipe grants access to the current user only (previously Everyone/Anonymous could
     // read). 5.0 also scopes the pipe and presence names to the user (see PipeName), so 4.x and 5.x
     // builds no longer forward to each other; each version elects and forwards within its own kind.
-    internal const PipeOptions ClientPipeOptions = PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly;
-    internal const PipeOptions ServerPipeOptions = PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly;
+    // 5.1.7: CurrentUserOnly compared token OWNERS (Administrators for an elevated token), so an elevated launch
+    // could not forward to the user's normal Glide. Both ends now check the logon user SID + session instead
+    // (PipePeerIdentity): the server pipe's DACL grants the user's SID only, the client verifies the server process.
+    internal const PipeOptions ClientPipeOptions = PipeOptions.Asynchronous;
+    internal const PipeOptions ServerPipeOptions = PipeOptions.Asynchronous;
+    // Set when the last forward found an owner this process must not use (other user/session, normal -> elevated,
+    // access denied): the launcher then opens its own window at once instead of retrying for the whole budget.
+    private static volatile bool _ownerIncompatible;
+    internal static bool LastOwnerIncompatible => _ownerIncompatible;
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern bool AllowSetForegroundWindow(int dwProcessId);
     private static readonly object Gate = new();
@@ -88,29 +118,6 @@ internal static class ExternalLaunchBroker
     private static BrokerState _state = BrokerState.Follower;
 
     private enum BrokerState { Owner, Follower, Ready, Stopping }
-
-    // IPC peer check (inbox only — no extra ACL packages): after a client connects the
-    // server compares the impersonated peer name to the current user. This is FAIL-OPEN
-    // by design: dropping on mismatch broke legitimate double-click opens (impersonation
-    // APIs disagree across split tokens/service sessions), which is worse than the residual
-    // cross-user open-request risk — requested paths are still validated, canonicalized and
-    // re-checked for existence/type before use, and only open/activate files, never commands.
-    // Mismatches are marked in the performance trace for diagnostics. (GetImpersonationUserName
-    // fails before the server has read from the pipe, which is why this check could never gate.)
-    // Access control is now enforced by PipeOptions.CurrentUserOnly on both ends (in-box, no package).
-    private static bool IsSameUserPeer(NamedPipeServerStream server, out string? peerName)
-    {
-        peerName = null;
-        if (!OperatingSystem.IsWindows()) return true;
-        try
-        {
-            peerName = server.GetImpersonationUserName();
-            var self = WindowsIdentity.GetCurrent()?.Name;
-            return !string.IsNullOrEmpty(peerName) &&
-                   string.Equals(peerName, self, StringComparison.OrdinalIgnoreCase);
-        }
-        catch { return false; }
-    }
 
     public static ExternalLaunchBatch? PrepareForwardBatch(IEnumerable<string> paths)
     {
@@ -210,6 +217,7 @@ internal static class ExternalLaunchBroker
 
     internal static bool TryForwardToExisting(ExternalLaunchBatch? batch, TimeSpan timeout)
     {
+        _ownerIncompatible = false;
         if (batch is null || batch.Requests.Count == 0 || timeout <= TimeSpan.Zero) return false;
         try { return TryForwardAsync(batch.Requests, timeout).GetAwaiter().GetResult(); }
         catch { return false; }
@@ -232,6 +240,12 @@ internal static class ExternalLaunchBroker
             {
                 await using var client = new NamedPipeClientStream(".", PipeName, PipeDirection.InOut, ClientPipeOptions);
                 await client.ConnectAsync(attemptCts.Token).ConfigureAwait(false);
+                if (OperatingSystem.IsWindows() &&
+                    !PipePeerIdentity.ClientAccepts(PipePeerIdentity.Self(), PipePeerIdentity.Server(client)))
+                {
+                    _ownerIncompatible = true; // nothing has been written; never send paths to this owner
+                    return false;
+                }
                 if (OperatingSystem.IsWindows())
                 {
                     try { AllowSetForegroundWindow(-1); } catch { /* foreground permission is best effort */ }
@@ -262,6 +276,12 @@ internal static class ExternalLaunchBroker
                 return seen.Count == requests.Count;
             }
             catch (OperationCanceledException) { continue; }
+            catch (UnauthorizedAccessException)
+            {
+                // The owner's pipe DACL excludes this token (e.g. an elevated owner's older ACL): not transient.
+                _ownerIncompatible = true;
+                return false;
+            }
             catch
             {
                 var pause = timeout - Stopwatch.GetElapsedTime(started);
@@ -414,8 +434,10 @@ internal static class ExternalLaunchBroker
                     if (Glide.App.Platform.GlideWindowRegistry.LaunchReceivers().Count == 0 || _ownsPresence) return;
                     if (!TryTakeOverPresenceLocked()) continue;
                     EnsureServerStartedLocked();
-                    return;
                 }
+                // This process is now the owner: it hosts the Speed Boost tray icon from here on.
+                Dispatcher.UIThread.Post(() => App.UpdateTrayIconState());
+                return;
             }
         }
         catch (OperationCanceledException) { /* cancellation is the expected way to stop this work */ }
@@ -471,6 +493,19 @@ internal static class ExternalLaunchBroker
         }
     }
 
+    private static NamedPipeServerStream CreateServerPipe()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            using var identity = WindowsIdentity.GetCurrent();
+            if (identity.User is { } user)
+                return NamedPipeServerStreamAcl.Create(PipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte,
+                    ServerPipeOptions, 0, 0, PipePeerIdentity.BuildServerSecurity(user));
+        }
+        return new NamedPipeServerStream(PipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte,
+            ServerPipeOptions | PipeOptions.CurrentUserOnly);
+    }
+
     private static async Task ServerLoopAsync(CancellationToken token)
     {
         var readinessPublished = false;
@@ -478,9 +513,8 @@ internal static class ExternalLaunchBroker
         {
             try
             {
-                // Current-user-only pipe (see ServerPipeOptions); IsSameUserPeer remains a diagnostic mark.
-                await using var server = new NamedPipeServerStream(
-                        PipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, ServerPipeOptions);
+                // User-SID-only pipe ACL (CreateServerPipe / PipePeerIdentity.BuildServerSecurity).
+                await using var server = CreateServerPipe();
                 if (!readinessPublished)
                 {
                     lock (Gate)
@@ -495,9 +529,14 @@ internal static class ExternalLaunchBroker
                 }
 
                 await server.WaitForConnectionAsync(token).ConfigureAwait(false);
-                // Fail-open peer gate (see IsSameUserPeer): accept, but mark mismatches.
-                if (!IsSameUserPeer(server, out var peerName) && !string.IsNullOrEmpty(peerName))
-                    GlidePerformanceTrace.Mark("ipc_cross_user_peer_accepted");
+                // Peer gate (PipePeerIdentity.ServerAccepts): same session; an elevated owner only serves the
+                // same user's elevated launches. The DACL already limits connections to the user's SID.
+                if (OperatingSystem.IsWindows() &&
+                    !PipePeerIdentity.ServerAccepts(PipePeerIdentity.Self(), PipePeerIdentity.Client(server)))
+                {
+                    GlidePerformanceTrace.Mark("ipc_peer_rejected");
+                    continue;
+                }
                 using var peerCts = CancellationTokenSource.CreateLinkedTokenSource(token);
                 peerCts.CancelAfter(ServerPeerDeadline);
                 using var reader = new StreamReader(server, Encoding.UTF8, leaveOpen: true);

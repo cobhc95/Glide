@@ -25,7 +25,9 @@ public partial class MainWindow
     internal static readonly IReadOnlySet<string> TextOverlayStyleIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
         "overlay.pictureTemplate", "overlay.pictureFontSize", "overlay.pictureBold", "overlay.pictureOpacity",
-        "overlay.picturePositionTopTabs", "overlay.picturePositionSideTabs", "overlay.pictureAlignmentTopTabs", "overlay.pictureAlignmentSideTabs", "overlay.pictureOffsetX", "overlay.pictureOffsetY", "overlay.pictureColor", "overlay.pictureShadow", "overlay.pictureBorder"
+        "overlay.picturePositionTopTabs", "overlay.picturePositionSideTabs", "overlay.pictureAlignmentTopTabs", "overlay.pictureAlignmentSideTabs", "overlay.pictureOffsetX", "overlay.pictureOffsetY", "overlay.pictureColor", "overlay.pictureShadow", "overlay.pictureBorder",
+        "overlay.titleBarTemplate", "overlay.titleBarFontSize", "overlay.titleBarColor", "overlay.titleBarBorder",
+        "overlay.tabBarTemplate", "overlay.tabBarFontSize", "overlay.tabBarColor", "overlay.tabBarBorder", "overlay.pictureSeparator", "overlay.separatorColor"
     };
 
     private sealed record SettingEffectHandler(IReadOnlySet<string> Ids, Action<MainWindow, IReadOnlyCollection<string>> Apply);
@@ -74,11 +76,16 @@ public partial class MainWindow
             static (w, _) => w.Viewport.ReverseSelectionZoomOutScale = w._settings.ReverseSelectionZoomOutScale),
         // New-tab placement, tab cycling, last-tab behaviour and the Explorer wheel are read when used.
         [SettingEffectOwner.TabsWorkspace] = new(Ids(
-            "tabs.cycleOrder", "tabs.lastTabBehavior", "tabs.newTabPosition", "tabs.switchToNewTabs", "tabs.newTabPositionKey", "tabs.newTabForegroundKey", "tabs.middleClickSide", "tabs.middleClickPosition", "tabs.afterCloseCustomTarget",
-            "tabs.afterCloseActivate", "explorer.scrollSpeed", "explorer.scrollMode", "explorer.scrollRows", "explorer.scrollPixels"), ReadAtUse),
+            "tabs.cycleOrder", "tabs.lastTabBehavior", "tabs.newTabPosition", "tabs.switchToNewTabs", "tabs.newTabPositionKey", "tabs.newTabForegroundKey", "tabs.duplicatePosition", "tabs.duplicateSide", "tabs.afterCloseCustomTarget",
+            "tabs.afterCloseActivate", "explorer.scrollSpeed", "explorer.scrollMode", "explorer.scrollRows", "explorer.scrollPixels",
+            // The thumbnail disk cache is started, resized or stopped by SettingsService.Publish (ThumbnailCacheSettings.Apply).
+            "explorer.thumbnailCache", "explorer.thumbnailCacheMaxMb"), ReadAtUse),
         // Settings-window-only preferences: the main window never reads them.
         [SettingEffectOwner.Fullscreen] = new(Ids("fullscreen.hideCursor", "fullscreen.hideCursorWindowed", "fullscreen.hideCursorDelay", "fullscreen.hideCursorMode"),
             static (w, _) => w.ResetFullscreenCursorTimer()),
+        // 5.2.0: thumbnail lanes and the whole-folder preparation (ApplyThumbnailLoadSettings).
+        [SettingEffectOwner.Performance] = new(Ids("performance.thumbnailLanes", "performance.thumbnailPrepareFolder"),
+            static (w, _) => w.ApplyThumbnailLoadSettings()),
         [SettingEffectOwner.General] = new(Ids("general.confirmDiscardSettings", "search.showRelatedResults"), ReadAtUse),
     };
 

@@ -197,8 +197,31 @@ public sealed record GlideSettingsState
     public bool ExplorerInfoDate { get; set; }
     public bool ExplorerInfoResolution { get; set; }
     public bool ExplorerInfoFileSize { get; set; }
+    // Round 4 C1: the info under thumbnails from a template (off by default).
+    public bool ExplorerInfoUseTemplate { get; set; }
+    public string ExplorerInfoTemplate { get; set; } = "{res}{sep}{filesize}<br>{modified}";
+    // 5.1.7 (issue #4): tags written into file names (off by default). TagGroups is "[+]Group: tag, tag" per line
+    // (Glide.Core.Tags.TagGroupCatalog); BatchRenameHistory was the batch rename dialog's remembered inputs
+    // (Glide.Core.Renaming.RenameInputHistory), newest first, capped at 30. Kept for old settings files; the rebuilt
+    // 5.2.0 dialog uses BatchRenamePresets instead and no longer reads or writes it.
+    public bool TagsEnabled { get; set; }
+    public string TagGroups { get; set; } = "";
+    public string TagPrefix { get; set; } = "";
+    public string TagOpen { get; set; } = "{";
+    public string TagClose { get; set; } = "}";
+    public string TagSeparator { get; set; } = ";";
+    public string TagFilenameFormat { get; set; } = "{name} {tags}";
+    public bool TagsApplyImmediately { get; set; } = true;
+    public string BatchRenameHistory { get; set; } = "";
+    // 5.2.0: the batch rename dialog's "Saved:" presets, one JSON string (Glide.Core.Renaming.RenamePresets). Internal state like
+    // BatchRenameHistory: no Settings page row, so nothing to bind to a key and no catalogue entry.
+    public string BatchRenamePresets { get; set; } = "";
     // Round 3 #12: drive bar (navigation pane) width in pixels; set by dragging the divider, remembered (120-600).
     public int ExplorerNavPaneWidth { get; set; } = 208;
+    /// <summary>5.1.7: keep the Explorer tab's thumbnails in a disk cache (Settings: explorer.thumbnailCache).</summary>
+    public bool ExplorerThumbnailCache { get; set; } = true;
+    /// <summary>5.1.7: size limit of that cache in megabytes (Settings: explorer.thumbnailCacheMaxMb).</summary>
+    public int ExplorerThumbnailCacheMaxMb { get; set; } = 512;
     // Explorer wheel speed multiplier (0.25 - 4). One notch scrolls 1 / 2 / 3 rows by view; this scales it.
     public double ExplorerScrollSpeed { get; set; } = 1.0;
     // Explorer wheel scroll amount mode (Explorer.ExplorerScrollModes) and its fixed rows / pixels values.
@@ -296,6 +319,10 @@ public sealed record GlideSettingsState
     public bool PredictivePrefetch { get; set; } = true;
     public bool BackgroundRefinement { get; set; } = true;
     public bool PurgeCacheOnMinimize { get; set; }
+    /// <summary>5.2.0: Explorer thumbnail decode lanes, "Automatic" or a number (Settings: performance.thumbnailLanes).</summary>
+    public string ThumbnailLanes { get; set; } = "Automatic";
+    /// <summary>5.2.0: prepare the whole folder's thumbnails in the background (Settings: performance.thumbnailPrepareFolder).</summary>
+    public bool ThumbnailPrepareFolder { get; set; } = true;
     public bool StartupDiagnostics { get; set; }
     public int PrefetchDepth { get; set; } = 15;
     public bool PrefetchSiblingFolders { get; set; } = true;
@@ -419,9 +446,9 @@ public sealed record GlideSettingsState
     // They replaced the "Shift and Alt change how a new tab opens" checkbox (NewTabModifiers), migrated in SettingsStore.
     public string NewTabPositionKey { get; set; } = Glide.Core.Workspace.NewTabKeys.Default;
     public string NewTabForegroundKey { get; set; } = Glide.Core.Workspace.NewTabKeys.Default;
-    // 5.1.0: Explorer middle-click has its own side and position (MiddleClickSides / MiddleClickPositions).
-    public string MiddleClickNewTabSide { get; set; } = Glide.Core.Workspace.MiddleClickSides.Default;
-    public string MiddleClickNewTabPosition { get; set; } = Glide.Core.Workspace.MiddleClickPositions.Default;
+    // Round 4 D1: "Duplicated tabs open [position] in the [side]" (replaced the 5.1.0 middle-click side / position).
+    public string DuplicateTabPosition { get; set; } = Glide.Core.Workspace.DuplicateTabPositions.Default;
+    public string DuplicateTabSide { get; set; } = Glide.Core.Workspace.DuplicateTabSides.Default;
     // 5.1.0: the new tab shown after closing a tab when "After closing a tab, activate" is Custom… (TabCloseCustomTargets).
     public string AfterTabCloseCustomTarget { get; set; } = Glide.Core.Workspace.TabCloseCustomTargets.Default;
     // 5.0.6: which tab becomes active after the active tab is closed (Glide.Core.Workspace.TabCloseActivation).
@@ -468,6 +495,18 @@ public sealed record GlideSettingsState
     public bool PictureCounterShadow { get; set; } = true;
     /// <summary>Encloses every line of the text overlay in one box styled like the Image information panel (5.0.6).</summary>
     public bool PictureCounterBorder { get; set; }
+    // Round 4 B5: the text overlay's look per position. Blank / 0 / "Same as over the picture" = as over the picture.
+    public string TextOverlayTitleBarTemplate { get; set; } = string.Empty;
+    public int TextOverlayTitleBarFontSize { get; set; }
+    public string TextOverlayTitleBarColor { get; set; } = "Same as over the picture";
+    public string TextOverlayTitleBarBorder { get; set; } = "Same as over the picture";
+    public string TextOverlayTabBarTemplate { get; set; } = string.Empty;
+    public int TextOverlayTabBarFontSize { get; set; }
+    public string TextOverlayTabBarColor { get; set; } = "Same as over the picture";
+    public string TextOverlayTabBarBorder { get; set; } = "Same as over the picture";
+    // Round 4 B6: what {sep} becomes, and its colour.
+    public string TextOverlaySeparator { get; set; } = "\u2022";
+    public string TextOverlaySeparatorColor { get; set; } = "Same as text";
 
     // Window in Window image overlays
     public int OverlayDefaultOpacity { get; set; } = 100;
@@ -530,6 +569,11 @@ public sealed record GlideSettingsState
     public double SettingsWindowWidth { get; set; }
     public double SettingsWindowHeight { get; set; }
     public bool SettingsWindowWasMaximized { get; set; }
+    /// <summary>
+    /// Where Settings was left (page, scroll, open sections), restored when it opens again; see <see cref="SettingsViewMemory"/>.
+    /// UI memory, not an option: kept by Restore defaults, cleared with the window placements. Empty = nothing remembered.
+    /// </summary>
+    public string SettingsViewMemory { get; set; } = string.Empty;
     /// <summary>Every Settings page opens with all its sections expanded (off by default).</summary>
     public bool SettingsAlwaysExpand { get; set; }
 

@@ -503,7 +503,7 @@ public sealed class ImageLoadCoordinatorLifetimeTests : IDisposable
     {
         var profile = ImagePerformanceGovernor.Current;
         Assert.InRange(ImagePerformanceGovernor.SpeculativeDecodeLanes, 1, 6);
-        Assert.InRange(ImagePerformanceGovernor.ThumbnailDecodeLanes, 2, 8);
+        Assert.InRange(ImagePerformanceGovernor.ThumbnailDecodeLanes, 2, 12);
         Assert.True(ImagePerformanceGovernor.ThumbnailDecodeLanes <= Math.Max(2, profile.LogicalProcessors));
         Assert.Equal(1, new ImageHardwareProfile(GlideHardwareTier.Constrained, 4, 4L << 30).SpeculativeDecodeLanes);
         Assert.Equal(2, new ImageHardwareProfile(GlideHardwareTier.Mainstream, 8, 16L << 30).SpeculativeDecodeLanes);

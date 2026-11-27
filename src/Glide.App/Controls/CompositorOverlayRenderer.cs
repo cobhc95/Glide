@@ -317,67 +317,12 @@ internal sealed class CompositorOverlayVisualHandler : CompositionCustomVisualHa
 
     private static void DrawChrome(ImmediateDrawingContext context, Item item, Color accentColor, bool showGlow)
     {
+        // One chrome look for picture-in-picture and Overlay mode (round 4 K1): see OverlayFrameChromePainter.
         var rect = new Rect(item.X, item.Y, item.Width, item.Height);
-        var accent = new ImmutableSolidColorBrush(accentColor);
-        var panel = new ImmutableSolidColorBrush(Color.FromArgb(225, 32, 36, 42));
-        var glass = new ImmutableSolidColorBrush(Color.FromArgb(205, 45, 50, 58));
-        var white = new ImmutableSolidColorBrush(Colors.White);
-        if (showGlow)
-            context.DrawRectangle(null, new ImmutablePen(accent, 1.35), rect, 7, 7);
-
-        var close = new Rect(rect.Right - 34, rect.Top + 7, 27, 27);
-        var closeCenter = close.Center;
-        context.DrawEllipse(panel, null, closeCenter, 13, 13);
-        context.DrawLine(new ImmutablePen(white, 1.8), new Point(closeCenter.X - 4, closeCenter.Y - 4), new Point(closeCenter.X + 4, closeCenter.Y + 4));
-        context.DrawLine(new ImmutablePen(white, 1.8), new Point(closeCenter.X + 4, closeCenter.Y - 4), new Point(closeCenter.X - 4, closeCenter.Y + 4));
-
-        var resize = new Rect(rect.Right - 28, rect.Bottom - 28, 24, 24);
-        context.DrawRectangle(glass, null, resize, 5, 5);
-        for (var k = 0; k < 3; k++)
-            context.DrawLine(new ImmutablePen(accent, 1.25), new Point(rect.Right - 7 - k * 5, rect.Bottom - 5), new Point(rect.Right - 5, rect.Bottom - 7 - k * 5));
-
-        // Right-middle horizontal resize control (↔) — fixed overlay coordinates.
-        var widthHandle = new Rect(rect.Right - 22, rect.Y + rect.Height / 2 - 22, 22, 44);
-        context.DrawRectangle(glass, new ImmutablePen(accent, 1.2), widthHandle, 6, 6);
-        var wc = widthHandle.Center;
-        context.DrawLine(new ImmutablePen(white, 2), new Point(wc.X - 7, wc.Y), new Point(wc.X + 7, wc.Y));
-        context.DrawLine(new ImmutablePen(white, 2), new Point(wc.X - 7, wc.Y), new Point(wc.X - 3, wc.Y - 4));
-        context.DrawLine(new ImmutablePen(white, 2), new Point(wc.X - 7, wc.Y), new Point(wc.X - 3, wc.Y + 4));
-        context.DrawLine(new ImmutablePen(white, 2), new Point(wc.X + 7, wc.Y), new Point(wc.X + 3, wc.Y - 4));
-        context.DrawLine(new ImmutablePen(white, 2), new Point(wc.X + 7, wc.Y), new Point(wc.X + 3, wc.Y + 4));
-
-        // Top-middle vertical resize control (↕) — fixed overlay coordinates.
-        var heightHandle = new Rect(rect.X + rect.Width / 2 - 22, rect.Y, 44, 22);
-        context.DrawRectangle(glass, new ImmutablePen(accent, 1.2), heightHandle, 6, 6);
-        var hc = heightHandle.Center;
-        context.DrawLine(new ImmutablePen(white, 2), new Point(hc.X, hc.Y - 6), new Point(hc.X, hc.Y + 6));
-        context.DrawLine(new ImmutablePen(white, 2), new Point(hc.X, hc.Y - 6), new Point(hc.X - 4, hc.Y - 2));
-        context.DrawLine(new ImmutablePen(white, 2), new Point(hc.X, hc.Y - 6), new Point(hc.X + 4, hc.Y - 2));
-        context.DrawLine(new ImmutablePen(white, 2), new Point(hc.X, hc.Y + 6), new Point(hc.X - 4, hc.Y + 2));
-        context.DrawLine(new ImmutablePen(white, 2), new Point(hc.X, hc.Y + 6), new Point(hc.X + 4, hc.Y + 2));
-
-        // Left-middle opacity slider — same geometry as manager/native renderer.
         var isVideo = item.Video is not null;
-        Rect Host(Glide.Core.ChromeRect r) => new(rect.X + r.X, rect.Y + r.Y, r.Width, r.Height);
-        var slider = Host(Glide.Core.OverlayVideoChromeLayout.OpacitySlider(rect.Width, rect.Height, isVideo));
-        context.DrawRectangle(glass, new ImmutablePen(accent, 1.0), slider, 6, 6);
-        var sliderX = slider.Center.X;
-        context.DrawLine(new ImmutablePen(white, 2), new Point(sliderX, slider.Top + 10), new Point(sliderX, slider.Bottom - 10));
-        var knobY = slider.Bottom - 10 - (slider.Height - 20) * Math.Clamp(item.Opacity, .1, 1.0);
-        context.DrawEllipse(accent, null, new Point(sliderX, knobY), 5, 5);
-
-        var zoomOut = Host(Glide.Core.OverlayVideoChromeLayout.ZoomOut(rect.Width, rect.Height, isVideo));
-        var zoomIn = Host(Glide.Core.OverlayVideoChromeLayout.ZoomIn(rect.Width, rect.Height, isVideo));
-        DrawZoomButton(context, zoomOut, false, glass, accent, white);
-        DrawZoomButton(context, zoomIn, true, glass, accent, white);
+        // Frame and glow only while the overlay is active (hover or interaction).
+        var spec = OverlayFrameGeometry.BuildSpec(rect, Math.Clamp(item.Opacity, .1, 1.0), glow: showGlow, video: isVideo, showFrame: showGlow);
+        OverlayFrameChromePainter.Draw(context, spec, accentColor);
         if (item.Video is { } video) OverlayVideoChromePainter.Draw(context, rect, video, accentColor);
-    }
-
-    private static void DrawZoomButton(ImmediateDrawingContext context, Rect rect, bool plus, IImmutableBrush fill, IImmutableBrush accent, IImmutableBrush text)
-    {
-        context.DrawRectangle(fill, new ImmutablePen(accent, 1.2), rect, 7, 7);
-        var center = rect.Center;
-        context.DrawLine(new ImmutablePen(text, 2), new Point(center.X - 5, center.Y), new Point(center.X + 5, center.Y));
-        if (plus) context.DrawLine(new ImmutablePen(text, 2), new Point(center.X, center.Y - 5), new Point(center.X, center.Y + 5));
     }
 }

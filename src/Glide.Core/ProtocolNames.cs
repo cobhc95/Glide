@@ -43,4 +43,26 @@ public static class ProtocolNames
         catch { normalized = settingsDirectoryOverride.Trim(); }
         return userKey + "|profile:" + normalized.ToUpperInvariant();
     }
+
+    /// <summary>
+    /// The single-instance family of one Glide process (5.1.7, issue #5). Only an installed copy (installed.flag beside
+    /// the exe, settings in %LOCALAPPDATA%\Glide) keeps the plain user key, so it still forwards to an already running
+    /// installed Glide of an older version. Every other process is isolated:
+    /// - GLIDE_SETTINGS_DIRECTORY: one family per profile directory (see <see cref="InstanceKey"/>);
+    /// - a test host or any other process whose entry assembly is not Glide: one family per process, so a test run can
+    ///   never create the user's real pipe and swallow the launches of the installed Glide;
+    /// - a portable copy or a dev / worktree build: one family per folder (it also has its own settings file there), so
+    ///   a double-click on the installed Glide never forwards into a dev build and vice versa.
+    /// </summary>
+    public static string ScopedInstanceKey(string userKey, string? settingsDirectoryOverride, string baseDirectory,
+        bool installedCopy, bool foreignHost, int processId)
+    {
+        if (!string.IsNullOrWhiteSpace(settingsDirectoryOverride)) return InstanceKey(userKey, settingsDirectoryOverride);
+        if (foreignHost) return userKey + "|host:" + processId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        if (installedCopy) return userKey;
+        string normalized;
+        try { normalized = Path.GetFullPath(baseDirectory ?? string.Empty).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar); }
+        catch { normalized = (baseDirectory ?? string.Empty).Trim(); }
+        return userKey + "|portable:" + normalized.ToUpperInvariant();
+    }
 }

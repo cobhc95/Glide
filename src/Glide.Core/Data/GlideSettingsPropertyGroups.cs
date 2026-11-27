@@ -30,13 +30,14 @@ public static class GlideSettingsPropertyGroups
     public static IReadOnlyList<string> ProfileProperties { get; } = ["LastProfileDirectory"];
 
     /// <summary>
-    /// Properties removed by "Window sizes and positions": the main window, the Settings window (older keys), the shared
+    /// Properties removed by "Window sizes and positions": the main window, the Settings window (older keys) and the page, scroll and open sections it was left on, the shared
     /// per-window store of every other window (Print, dialogs, Settings) and per-image overlay placements.
     /// </summary>
     public static IReadOnlyList<string> WindowPlacementProperties { get; } =
     [
         "WindowX", "WindowY", "WindowWidth", "WindowHeight", "WindowWasMaximized",
         "SettingsWindowX", "SettingsWindowY", "SettingsWindowWidth", "SettingsWindowHeight", "SettingsWindowWasMaximized",
+        "SettingsViewMemory",
         "WindowPlacements",
         "OverlayWindowPlacements",
     ];

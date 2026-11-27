@@ -153,19 +153,20 @@ public sealed class OverlayRound3Tests
     }
 
     [Fact]
-    public async Task Opacity_slider_responds_to_the_mouse_wheel()
+    public async Task Mouse_wheel_over_the_opacity_slider_zooms_the_picture_like_a_picture_in_picture_overlay()
     {
         await OnOverlayWithPicture(window =>
         {
             var (host, hit) = ChromeHost(window);
             SetOpacity(window, 0.6);
-            var center = Glide.App.Controls.OverlayChromePolicy.SliderRect(host.Bounds.Size).Center;
+            var viewport = window.FindControl<Glide.App.Controls.ImageViewport>("Viewport")!;
+            var center = Glide.App.Controls.OverlayFrameGeometry.Slider(new Rect(default, host.Bounds.Size)).Center;
+            Assert.Equal(Glide.App.Controls.OverlayFrameGeometry.Slider(new Rect(default, host.Bounds.Size)), hit.Bounds);   // grab area = drawn pill
+            var zoomBefore = viewport.ZoomPercent;
             var pointer = new Pointer(Pointer.GetNextFreeId(), PointerType.Mouse, true);
             Raise(window, hit, host, pointer, InputElement.PointerWheelChangedEvent, center, wheel: 1);
-            Assert.Equal(0.65, Opacity(window), 2);
-            Raise(window, hit, host, pointer, InputElement.PointerWheelChangedEvent, center, wheel: -1);
-            Raise(window, hit, host, pointer, InputElement.PointerWheelChangedEvent, center, wheel: -1);
-            Assert.Equal(0.55, Opacity(window), 2);
+            Assert.Equal(0.6, Opacity(window), 2);   // the wheel no longer steps the opacity
+            Assert.NotEqual(zoomBefore, viewport.ZoomPercent);
         });
     }
 
@@ -313,7 +314,7 @@ public sealed class OverlayRound3Tests
     public void Drag_pill_is_centred_inset_from_the_top_and_shrinks()
     {
         var pill = Glide.App.Controls.OverlayChromePolicy.DragStripRect(new Rect(10, 20, 600, 400))!.Value;
-        Assert.Equal(new Rect(10 + 220, 20 + 12, 160, 22), pill);
+        Assert.Equal(new Rect(10 + 220, 20 + 28, 160, 22), pill);
         var small = Glide.App.Controls.OverlayChromePolicy.DragStripRect(new Rect(0, 0, 180, 200))!.Value;
         Assert.Equal(88, small.Width);
         Assert.Equal(46, small.X);

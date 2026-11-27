@@ -1,0 +1,584 @@
+﻿[
+    {
+        "file":  "avif-4k.avif",
+        "width":  152,
+        "coldMs":  NaN,
+        "minMs":  null,
+        "maxMs":  null,
+        "size":  "error: NullReferenceException Object reference not set to an instance of an object.",
+        "samples":  [
+
+                    ]
+    },
+    {
+        "file":  "avif-4k.avif",
+        "width":  236,
+        "coldMs":  NaN,
+        "minMs":  null,
+        "maxMs":  null,
+        "size":  "error: NullReferenceException Object reference not set to an instance of an object.",
+        "samples":  [
+
+                    ]
+    },
+    {
+        "file":  "bmp-24mp.bmp",
+        "width":  152,
+        "coldMs":  67.061,
+        "minMs":  66.5473,
+        "maxMs":  70.5549,
+        "size":  "152x101",
+        "samples":  [
+                        70.5549,
+                        66.9654,
+                        69.9616,
+                        67.061,
+                        66.5473
+                    ]
+    },
+    {
+        "file":  "bmp-24mp.bmp",
+        "width":  236,
+        "coldMs":  68.8155,
+        "minMs":  66.7759,
+        "maxMs":  69.4757,
+        "size":  "236x157",
+        "samples":  [
+                        66.7759,
+                        67.0805,
+                        69.0341,
+                        69.4757,
+                        68.8155
+                    ]
+    },
+    {
+        "file":  "bmp-4k.bmp",
+        "width":  152,
+        "coldMs":  34.3715,
+        "minMs":  33.5309,
+        "maxMs":  34.4704,
+        "size":  "152x85",
+        "samples":  [
+                        34.4704,
+                        34.4688,
+                        33.8549,
+                        33.5309,
+                        34.3715
+                    ]
+    },
+    {
+        "file":  "bmp-4k.bmp",
+        "width":  236,
+        "coldMs":  33.176,
+        "minMs":  32.9586,
+        "maxMs":  37.0019,
+        "size":  "236x132",
+        "samples":  [
+                        37.0019,
+                        34.5603,
+                        32.9586,
+                        33.176,
+                        33.1648
+                    ]
+    },
+    {
+        "file":  "gif-4k.gif",
+        "width":  152,
+        "coldMs":  31.0452,
+        "minMs":  30.792,
+        "maxMs":  32.5153,
+        "size":  "152x85",
+        "samples":  [
+                        32.0498,
+                        32.5153,
+                        30.9536,
+                        31.0452,
+                        30.792
+                    ]
+    },
+    {
+        "file":  "gif-4k.gif",
+        "width":  236,
+        "coldMs":  31.746,
+        "minMs":  30.7779,
+        "maxMs":  32.5616,
+        "size":  "236x132",
+        "samples":  [
+                        32.5616,
+                        30.7779,
+                        31.5601,
+                        31.746,
+                        32.3208
+                    ]
+    },
+    {
+        "file":  "heic-4k.heic",
+        "width":  152,
+        "coldMs":  NaN,
+        "minMs":  null,
+        "maxMs":  null,
+        "size":  "error: NullReferenceException Object reference not set to an instance of an object.",
+        "samples":  [
+
+                    ]
+    },
+    {
+        "file":  "heic-4k.heic",
+        "width":  236,
+        "coldMs":  NaN,
+        "minMs":  null,
+        "maxMs":  null,
+        "size":  "error: NullReferenceException Object reference not set to an instance of an object.",
+        "samples":  [
+
+                    ]
+    },
+    {
+        "file":  "ico-256.ico",
+        "width":  152,
+        "coldMs":  16.2575,
+        "minMs":  15.4382,
+        "maxMs":  16.9483,
+        "size":  "152x152",
+        "samples":  [
+                        16.9483,
+                        16.1867,
+                        16.2575,
+                        15.4382,
+                        16.3752
+                    ]
+    },
+    {
+        "file":  "ico-256.ico",
+        "width":  236,
+        "coldMs":  15.6842,
+        "minMs":  15.5888,
+        "maxMs":  16.4056,
+        "size":  "236x236",
+        "samples":  [
+                        16.4056,
+                        15.5888,
+                        15.65,
+                        15.7191,
+                        15.6842
+                    ]
+    },
+    {
+        "file":  "jpeg-base-12mp.jpg",
+        "width":  152,
+        "coldMs":  22.8552,
+        "minMs":  22.5012,
+        "maxMs":  23.8524,
+        "size":  "152x114",
+        "samples":  [
+                        23.8524,
+                        22.9726,
+                        22.8552,
+                        22.607,
+                        22.5012
+                    ]
+    },
+    {
+        "file":  "jpeg-base-12mp.jpg",
+        "width":  236,
+        "coldMs":  23.1965,
+        "minMs":  22.6835,
+        "maxMs":  23.2382,
+        "size":  "236x177",
+        "samples":  [
+                        23.236,
+                        22.7748,
+                        22.6835,
+                        23.1965,
+                        23.2382
+                    ]
+    },
+    {
+        "file":  "jpeg-base-24mp.jpg",
+        "width":  152,
+        "coldMs":  35.7476,
+        "minMs":  35.0591,
+        "maxMs":  36.7654,
+        "size":  "152x101",
+        "samples":  [
+                        36.7654,
+                        35.7476,
+                        35.5258,
+                        35.988,
+                        35.0591
+                    ]
+    },
+    {
+        "file":  "jpeg-base-24mp.jpg",
+        "width":  236,
+        "coldMs":  35.6622,
+        "minMs":  35.2978,
+        "maxMs":  36.7817,
+        "size":  "236x157",
+        "samples":  [
+                        35.7956,
+                        35.2978,
+                        36.7817,
+                        35.6622,
+                        35.332
+                    ]
+    },
+    {
+        "file":  "jpeg-camera-mpf-24mp.jpg",
+        "width":  152,
+        "coldMs":  12.1201,
+        "minMs":  11.8347,
+        "maxMs":  12.5401,
+        "size":  "152x228",
+        "samples":  [
+                        12.5401,
+                        12.2562,
+                        12.0717,
+                        12.1201,
+                        11.8347
+                    ]
+    },
+    {
+        "file":  "jpeg-camera-mpf-24mp.jpg",
+        "width":  236,
+        "coldMs":  12.2356,
+        "minMs":  11.9261,
+        "maxMs":  12.7932,
+        "size":  "236x354",
+        "samples":  [
+                        12.2356,
+                        12.3596,
+                        12.1231,
+                        11.9261,
+                        12.7932
+                    ]
+    },
+    {
+        "file":  "jpeg-prog-12mp.jpg",
+        "width":  152,
+        "coldMs":  57.3081,
+        "minMs":  56.9607,
+        "maxMs":  59.2037,
+        "size":  "152x114",
+        "samples":  [
+                        59.2037,
+                        56.9607,
+                        57.3081,
+                        57.5502,
+                        57.0868
+                    ]
+    },
+    {
+        "file":  "jpeg-prog-12mp.jpg",
+        "width":  236,
+        "coldMs":  57.9676,
+        "minMs":  57.1302,
+        "maxMs":  58.3022,
+        "size":  "236x177",
+        "samples":  [
+                        58.0928,
+                        58.3022,
+                        57.9676,
+                        57.3913,
+                        57.1302
+                    ]
+    },
+    {
+        "file":  "jpeg-prog-24mp.jpg",
+        "width":  152,
+        "coldMs":  105.5598,
+        "minMs":  105.0871,
+        "maxMs":  110.8866,
+        "size":  "152x101",
+        "samples":  [
+                        110.8866,
+                        105.4426,
+                        105.0871,
+                        106.359,
+                        105.5598
+                    ]
+    },
+    {
+        "file":  "jpeg-prog-24mp.jpg",
+        "width":  236,
+        "coldMs":  105.7421,
+        "minMs":  105.203,
+        "maxMs":  108.024,
+        "size":  "236x157",
+        "samples":  [
+                        105.5933,
+                        105.203,
+                        108.024,
+                        105.7421,
+                        107.3249
+                    ]
+    },
+    {
+        "file":  "png-24mp.png",
+        "width":  152,
+        "coldMs":  147.9307,
+        "minMs":  147.6856,
+        "maxMs":  151.9204,
+        "size":  "152x101",
+        "samples":  [
+                        151.9204,
+                        147.9307,
+                        147.6856,
+                        147.7467,
+                        149.0623
+                    ]
+    },
+    {
+        "file":  "png-24mp.png",
+        "width":  236,
+        "coldMs":  147.9708,
+        "minMs":  147.7997,
+        "maxMs":  153.4651,
+        "size":  "236x157",
+        "samples":  [
+                        147.7997,
+                        147.9708,
+                        147.8418,
+                        153.4651,
+                        148.0016
+                    ]
+    },
+    {
+        "file":  "png-4k.png",
+        "width":  152,
+        "coldMs":  65.3994,
+        "minMs":  65.3134,
+        "maxMs":  68.2392,
+        "size":  "152x85",
+        "samples":  [
+                        68.2392,
+                        65.8953,
+                        65.3827,
+                        65.3134,
+                        65.3994
+                    ]
+    },
+    {
+        "file":  "png-4k.png",
+        "width":  236,
+        "coldMs":  66.5939,
+        "minMs":  65.6115,
+        "maxMs":  67.6945,
+        "size":  "236x132",
+        "samples":  [
+                        65.6115,
+                        65.9466,
+                        66.7411,
+                        67.6945,
+                        66.5939
+                    ]
+    },
+    {
+        "file":  "png-alpha-4k.png",
+        "width":  152,
+        "coldMs":  92.7536,
+        "minMs":  91.8358,
+        "maxMs":  96.0972,
+        "size":  "152x85",
+        "samples":  [
+                        96.0972,
+                        94.7738,
+                        92.1654,
+                        91.8358,
+                        92.7536
+                    ]
+    },
+    {
+        "file":  "png-alpha-4k.png",
+        "width":  236,
+        "coldMs":  93.0267,
+        "minMs":  92.5196,
+        "maxMs":  96.7093,
+        "size":  "236x132",
+        "samples":  [
+                        92.8027,
+                        95.1099,
+                        96.7093,
+                        93.0267,
+                        92.5196
+                    ]
+    },
+    {
+        "file":  "tiff-lzw-24mp.tif",
+        "width":  152,
+        "coldMs":  NaN,
+        "minMs":  null,
+        "maxMs":  null,
+        "size":  "error: NullReferenceException Object reference not set to an instance of an object.",
+        "samples":  [
+
+                    ]
+    },
+    {
+        "file":  "tiff-lzw-24mp.tif",
+        "width":  236,
+        "coldMs":  NaN,
+        "minMs":  null,
+        "maxMs":  null,
+        "size":  "error: NullReferenceException Object reference not set to an instance of an object.",
+        "samples":  [
+
+                    ]
+    },
+    {
+        "file":  "tiff-lzw-4k.tif",
+        "width":  152,
+        "coldMs":  NaN,
+        "minMs":  null,
+        "maxMs":  null,
+        "size":  "error: NullReferenceException Object reference not set to an instance of an object.",
+        "samples":  [
+
+                    ]
+    },
+    {
+        "file":  "tiff-lzw-4k.tif",
+        "width":  236,
+        "coldMs":  NaN,
+        "minMs":  null,
+        "maxMs":  null,
+        "size":  "error: NullReferenceException Object reference not set to an instance of an object.",
+        "samples":  [
+
+                    ]
+    },
+    {
+        "file":  "tiff-raw-24mp.tif",
+        "width":  152,
+        "coldMs":  NaN,
+        "minMs":  null,
+        "maxMs":  null,
+        "size":  "error: NullReferenceException Object reference not set to an instance of an object.",
+        "samples":  [
+
+                    ]
+    },
+    {
+        "file":  "tiff-raw-24mp.tif",
+        "width":  236,
+        "coldMs":  NaN,
+        "minMs":  null,
+        "maxMs":  null,
+        "size":  "error: NullReferenceException Object reference not set to an instance of an object.",
+        "samples":  [
+
+                    ]
+    },
+    {
+        "file":  "tiff-raw-4k.tif",
+        "width":  152,
+        "coldMs":  NaN,
+        "minMs":  null,
+        "maxMs":  null,
+        "size":  "error: NullReferenceException Object reference not set to an instance of an object.",
+        "samples":  [
+
+                    ]
+    },
+    {
+        "file":  "tiff-raw-4k.tif",
+        "width":  236,
+        "coldMs":  NaN,
+        "minMs":  null,
+        "maxMs":  null,
+        "size":  "error: NullReferenceException Object reference not set to an instance of an object.",
+        "samples":  [
+
+                    ]
+    },
+    {
+        "file":  "webp-24mp.webp",
+        "width":  152,
+        "coldMs":  84.2153,
+        "minMs":  83.5185,
+        "maxMs":  86.9091,
+        "size":  "152x101",
+        "samples":  [
+                        86.5123,
+                        83.5185,
+                        86.9091,
+                        83.8714,
+                        84.2153
+                    ]
+    },
+    {
+        "file":  "webp-24mp.webp",
+        "width":  236,
+        "coldMs":  85.0499,
+        "minMs":  84.7764,
+        "maxMs":  85.1765,
+        "size":  "236x157",
+        "samples":  [
+                        85.0761,
+                        85.1765,
+                        84.7764,
+                        85.0499,
+                        84.8533
+                    ]
+    },
+    {
+        "file":  "webp-4k.webp",
+        "width":  152,
+        "coldMs":  41.6456,
+        "minMs":  40.0972,
+        "maxMs":  41.8805,
+        "size":  "152x85",
+        "samples":  [
+                        41.8805,
+                        41.7339,
+                        40.0972,
+                        41.6456,
+                        40.5976
+                    ]
+    },
+    {
+        "file":  "webp-4k.webp",
+        "width":  236,
+        "coldMs":  40.9757,
+        "minMs":  40.8706,
+        "maxMs":  41.1506,
+        "size":  "236x132",
+        "samples":  [
+                        41.1144,
+                        40.9757,
+                        41.1506,
+                        40.9667,
+                        40.8706
+                    ]
+    },
+    {
+        "file":  "webp-alpha-4k.webp",
+        "width":  152,
+        "coldMs":  62.3865,
+        "minMs":  61.4864,
+        "maxMs":  64.5738,
+        "size":  "152x85",
+        "samples":  [
+                        64.2354,
+                        61.8639,
+                        61.4864,
+                        64.5738,
+                        62.3865
+                    ]
+    },
+    {
+        "file":  "webp-alpha-4k.webp",
+        "width":  236,
+        "coldMs":  62.4968,
+        "minMs":  62.0723,
+        "maxMs":  64.2496,
+        "size":  "236x132",
+        "samples":  [
+                        62.4968,
+                        64.2496,
+                        63.8822,
+                        62.125,
+                        62.0723
+                    ]
+    }
+]

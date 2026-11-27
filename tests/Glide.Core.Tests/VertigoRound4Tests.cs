@@ -18,7 +18,7 @@ public sealed class VertigoRound4Tests
         Assert.Equal((5, -4), Glide.Core.Settings.TextOverlayOffsets.Get(map, "Top right"));
         map = Glide.Core.Settings.TextOverlayOffsets.Set(map, "Top right", 0, 0);
         Assert.Equal("Bottom left=0,30", map);
-        Assert.Equal((4000, -4000), Glide.Core.Settings.TextOverlayOffsets.Get("Top left=99999,-99999", "Top left"));
+        Assert.Equal((99999, -99999), Glide.Core.Settings.TextOverlayOffsets.Get("Top left=99999,-99999", "Top left"));   // retest E: kept as typed; limited only when drawn
         Assert.Equal((0, 0), Glide.Core.Settings.TextOverlayOffsets.Get("garbage;=;x=1", "Top left"));
     }
 
@@ -97,11 +97,13 @@ public sealed class VertigoRound4Tests
     }
 
     [Fact]
-    public void Overlay_opacity_track_spans_the_bar_and_maps_35_to_100_percent()
+    public void Overlay_opacity_track_is_the_picture_in_picture_track_with_a_35_percent_floor()
     {
         var slider = new Rect(8, 50, 22, 130);
-        var inset = OverlayChromePolicy.WholeWindowOpacityTrackInsetDip;
-        Assert.Equal(slider.Bottom - inset, OverlayChromePolicy.WholeWindowOpacityTrackY(slider, 0.35), 6);
+        var inset = OverlayFrameGeometry.OpacityTrackInset;
+        // Same dot position as a picture-in-picture overlay of the same opacity: opacity x the track length.
+        Assert.Equal(slider.Bottom - inset - (slider.Height - 2 * inset) * 0.35, OverlayChromePolicy.WholeWindowOpacityTrackY(slider, 0.35), 6);
+        Assert.Equal(OverlayFrameGeometry.OpacityKnobY(slider, 0.6), OverlayChromePolicy.WholeWindowOpacityTrackY(slider, 0.6), 6);
         Assert.Equal(slider.Top + inset, OverlayChromePolicy.WholeWindowOpacityTrackY(slider, 1.0), 6);
         Assert.Equal(0.35, OverlayChromePolicy.WholeWindowOpacityFromTrackY(slider, slider.Bottom + 40), 6);
         Assert.Equal(1.0, OverlayChromePolicy.WholeWindowOpacityFromTrackY(slider, slider.Top), 6);

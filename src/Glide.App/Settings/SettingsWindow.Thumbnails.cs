@@ -12,14 +12,15 @@ public partial class SettingsWindow
     private Glide.App.Platform.ThumbnailSettings ReadThumbnailControls() => Glide.App.Platform.ThumbnailSettingsStore.Load() with
     {
         Enabled = ExplorerThumbnailsCheck.IsChecked == true,
-        Mode = SelectedText(ThumbnailModeCombo, "Recommended") switch
+        Mode = SelectedText(ThumbnailModeCombo, "Glide for all supported formats") switch
         {
             "Glide for unsupported formats only" => Glide.App.Platform.ThumbnailProviderMode.UnsupportedOnly,
             "Glide for all supported formats" => Glide.App.Platform.ThumbnailProviderMode.All,
             "Custom" => Glide.App.Platform.ThumbnailProviderMode.Custom,
-            _ => Glide.App.Platform.ThumbnailProviderMode.Recommended
+            "Recommended" => Glide.App.Platform.ThumbnailProviderMode.Recommended,
+            _ => Glide.App.Platform.ThumbnailProviderMode.All
         },
-        Quality = SelectedText(ThumbnailQualityCombo, "Balanced"),
+        Quality = SelectedText(ThumbnailQualityCombo, "Fast"),
         PreferEmbedded = ThumbnailPreferEmbeddedCheck.IsChecked == true,
         MaxSourceSize = SelectedText(ThumbnailMaxSourceCombo, "Automatic") switch
         {

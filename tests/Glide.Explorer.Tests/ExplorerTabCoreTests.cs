@@ -609,33 +609,32 @@ public sealed class ExplorerTabCoreTests
         });
     }
 
+    /// <summary>Round 4 D1: middle-click has no settings of its own; it follows New tabs open / Open new tabs in the.</summary>
     [Fact]
-    public async Task Middle_click_opens_an_image_in_a_new_background_tab_at_the_end_by_default()
+    public async Task Middle_click_follows_the_general_new_tab_settings()
     {
         await ExplorerHarness.Run(async h =>
         {
-            Assert.True(h.Settings.SwitchToNewTabs); // the general setting stays foreground; middle-click has its own (5.1.0)
+            h.Settings.SwitchToNewTabs = false;
+            h.Settings.NewTabPosition = NewTabPositions.AtEnd;
             var explorerId = h.Workspace.Active!.Id;
             h.Click("b.png", MouseButton.Middle);
             await h.WaitUntil(() => h.Workspace.Tabs.OfType<ImageTabState>().Any(), "new image tab");
-            Assert.Equal(explorerId, h.Workspace.Active!.Id); // the Explorer stays in front, like a web browser
+            Assert.Equal(explorerId, h.Workspace.Active!.Id);
             Assert.IsType<ImageTabState>(h.Workspace.Tabs[^1]);
-            Assert.Equal(Path.Combine(h.Root, "b.png"), h.Workspace.Tabs.OfType<ImageTabState>().Single().Path);
         });
     }
 
     [Fact]
-    public async Task Middle_click_opens_an_image_in_the_foreground_when_its_setting_says_so()
+    public async Task Middle_click_opens_in_the_foreground_by_default()
     {
         await ExplorerHarness.Run(async h =>
         {
-            h.Settings.SwitchToNewTabs = false; // the general setting does not apply to middle-click
-            h.Settings.MiddleClickNewTabSide = MiddleClickSides.Foreground;
+            Assert.True(h.Settings.SwitchToNewTabs);
             var explorerId = h.Workspace.Active!.Id;
             h.Click("b.png", MouseButton.Middle);
             await h.WaitUntil(() => h.Workspace.Active is ImageTabState, "switched to the new image tab");
             Assert.Contains(h.Workspace.Tabs, t => t.Id == explorerId && t is BrowserTabState);
-            Assert.Equal(Path.Combine(h.Root, "b.png"), h.Workspace.Tabs.OfType<ImageTabState>().Single().Path);
         });
     }
 

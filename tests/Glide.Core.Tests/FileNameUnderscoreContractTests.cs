@@ -12,7 +12,7 @@ public sealed class FileNameUnderscoreContractTests
         var tabs = ReadSource("src", "Glide.App", "MainWindow.Tabs.cs");
         Assert.Contains("Content = new TextBlock { Text = $\"{(string.Equals(entry.Kind, \"folder\"", tabs);
         Assert.Contains("RecentHistoryItemMiddleReleased", tabs);
-        Assert.Contains("ResolveMiddleClickOpening(e.KeyModifiers)", tabs);
+        Assert.Contains("ResolveNewTabOpening(e.KeyModifiers)", tabs);
     }
 
     [Fact]

@@ -23,6 +23,32 @@ internal static class WindowsFileAssociationRegistration
     private const string ApplicationName = "Glide";
     private const string ApplicationExe = "Glide.exe";
     private const string ProgId = "Glide.Image";
+    /// <summary>Folder next to Glide.exe holding the per-extension document icons (round 4 I1).</summary>
+    internal const string FileTypeIconFolder = "FileTypes";
+
+    /// <summary>
+    /// The ProgID an extension is registered under: <c>Glide.Image.png</c> when a document icon for it ships in
+    /// <see cref="FileTypeIconFolder"/> (so Explorer shows a "PNG" page with the Glide mark, like ImageGlass), else
+    /// the generic <c>Glide.Image</c> with the app icon.
+    /// </summary>
+    internal static string ProgIdFor(string extension, bool hasTypeIcon) =>
+        hasTypeIcon ? $"{ProgId}.{extension.TrimStart('.').ToLowerInvariant()}" : ProgId;
+
+    /// <summary>The generic ProgID or any per-extension one.</summary>
+    internal static bool IsGlideProgId(string? progId) =>
+        progId is not null && (progId.Equals(ProgId, StringComparison.OrdinalIgnoreCase) ||
+                               progId.StartsWith(ProgId + ".", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>The document icon for an extension, or null when none ships (compound suffixes never have one).</summary>
+    internal static string? FileTypeIconPath(string executableDirectory, string extension, Func<string, bool>? exists = null)
+    {
+        if (extension.LastIndexOf('.') != 0) return null;
+        var path = Path.Combine(executableDirectory, FileTypeIconFolder, extension.TrimStart('.').ToLowerInvariant() + ".ico");
+        return (exists ?? File.Exists)(path) ? path : null;
+    }
+
+    private static string ProgIdFor(string extension, string executable) =>
+        ProgIdFor(extension, FileTypeIconPath(Path.GetDirectoryName(executable) ?? AppContext.BaseDirectory, extension) is not null);
 
     private const string StateKeyPath = @"Software\Glide";
     private const string RegisteredVersionValue = "OpenWithRegistrationVersion";
@@ -38,8 +64,10 @@ internal static class WindowsFileAssociationRegistration
 
     /// <summary>
     /// Automatic per-user integration, intended to run once per version during startup, off the UI
-    /// thread. Idempotent and silent: it skips when a machine-wide (installer) registration already
-    /// covers this executable or when the user has explicitly removed the registration.
+    /// thread. Idempotent and silent. It never registers from a source tree / dev build (dist, bin, obj, a worktree)
+    /// and never when ANY machine-wide Glide registration exists (a per-user copy would override the installed one),
+    /// and it skips when the user has explicitly removed the registration. From the installed Glide it also removes
+    /// stale per-user registrations left behind by dev builds (<see cref="HealStaleUserRegistration"/>).
     /// </summary>
     public static void EnsureRegisteredQuietly()
     {
@@ -49,8 +77,15 @@ internal static class WindowsFileAssociationRegistration
             var executable = Environment.ProcessPath;
             if (string.IsNullOrWhiteSpace(executable) || !File.Exists(executable)) return;
 
-            // A machine-wide install already puts Glide in Open With for every user of this PC.
-            var machineWideRegistered = IsRegisteredInHive(Registry.LocalMachine, executable);
+            var inSourceTree = FileAssociationHygiene.IsInSourceTree(executable, PathExists);
+            var machineWideRegistered = FileAssociationHygiene.HasMachineWideRegistration(new RegistryClassesView(Registry.LocalMachine), File.Exists);
+
+            // Any non-dev Glide (the installed one above all) cleans up what dev builds / vanished copies left in HKCU.
+            if (FileAssociationHygiene.ShouldHealUserRegistration(inSourceTree))
+                HealStaleUserRegistration(executable);
+
+            // A dev build, or a PC with an installed Glide, never self-registers per user.
+            if (inSourceTree || machineWideRegistered) return;
 
             // A reset that deleted Glide's per-user ProgID but not the defaults it claimed would leave those
             // extensions pointing at nothing; release them first (no-op when nothing was claimed).
@@ -61,7 +96,7 @@ internal static class WindowsFileAssociationRegistration
             var optedOut = state.GetValue(OptOutValue) is int optOut && optOut != 0;
             var registeredVersion = state.GetValue(RegisteredVersionValue) as string;
 
-            if (!ShouldAutoRegister(machineWideRegistered, optedOut, registeredVersion, CurrentVersion())) return;
+            if (!ShouldAutoRegister(machineWideRegistered, optedOut, registeredVersion, CurrentVersion(), inSourceTree)) return;
 
             Register(out _);
         }
@@ -72,10 +107,70 @@ internal static class WindowsFileAssociationRegistration
     /// Pure decision for whether startup should add the per-user registration. Kept separate from the
     /// registry I/O so the policy is unit-testable.
     /// </summary>
-    internal static bool ShouldAutoRegister(bool machineWideRegistered, bool optedOut, string? registeredVersion, string currentVersion) =>
-        !machineWideRegistered &&
-        !optedOut &&
-        !string.Equals(registeredVersion, currentVersion, StringComparison.Ordinal);
+    internal static bool ShouldAutoRegister(bool machineWideRegistered, bool optedOut, string? registeredVersion, string currentVersion,
+        bool inSourceTree = false) =>
+        FileAssociationHygiene.ShouldAutoRegister(inSourceTree, machineWideRegistered, optedOut, registeredVersion, currentVersion);
+
+    /// <summary>
+    /// Removes per-user (HKCU) Glide ProgIDs and Applications\Glide.exe whose command points at another Glide.exe that
+    /// is missing or lives in a source tree / dist folder: such a registration overrides the installed one. When no
+    /// live per-user Glide class remains, the whole per-user registration goes (claimed defaults, capabilities, Open
+    /// With entries) without setting the opt-out. Best effort.
+    /// </summary>
+    internal static void HealStaleUserRegistration(string thisExecutable)
+    {
+        try
+        {
+            var user = Registry.CurrentUser;
+            var plan = FileAssociationHygiene.PlanStaleCleanup(new RegistryClassesView(user), thisExecutable, File.Exists, PathExists);
+            if (plan.IsEmpty) return;
+
+            if (plan.RemoveAll)
+            {
+                DeleteRegistration(user);
+                using var state = user.OpenSubKey(StateKeyPath, writable: true);
+                state?.DeleteValue(RegisteredVersionValue, throwOnMissingValue: false);
+            }
+            else
+            {
+                foreach (var name in plan.StaleClassNames)
+                    user.DeleteSubKeyTree($@"Software\Classes\{name}", throwOnMissingSubKey: false);
+            }
+            NotifyAssociationChanged();
+        }
+        catch { /* best effort: a stale entry only affects the per-user override */ }
+    }
+
+    private static bool PathExists(string path) => File.Exists(path) || Directory.Exists(path);
+
+    /// <summary>Registry-backed <see cref="IGlideClassesView"/> over one hive's Software\Classes.</summary>
+    private sealed class RegistryClassesView(RegistryKey hive) : IGlideClassesView
+    {
+        public IReadOnlyList<string> GlideClassNames()
+        {
+            var names = new List<string>();
+            try
+            {
+                using var classes = hive.OpenSubKey(@"Software\Classes");
+                if (classes is not null)
+                    names.AddRange(classes.GetSubKeyNames().Where(IsGlideProgId));
+                using var application = hive.OpenSubKey($@"Software\Classes\Applications\{ApplicationExe}");
+                if (application is not null) names.Add($@"Applications\{ApplicationExe}");
+            }
+            catch { /* unreadable hive: report what was found */ }
+            return names;
+        }
+
+        public string? OpenCommand(string className)
+        {
+            try
+            {
+                using var key = hive.OpenSubKey($@"Software\Classes\{className}\shell\open\command");
+                return key?.GetValue(string.Empty) as string;
+            }
+            catch { return null; }
+        }
+    }
 
     /// <summary>Adds Glide to Windows Open With for every recognised extension (current user).</summary>
     public static bool Register(out string message) => RegisterInHive(Registry.CurrentUser, perUser: true, out message);
@@ -151,12 +246,31 @@ internal static class WindowsFileAssociationRegistration
                 open?.SetValue(string.Empty, command, RegistryValueKind.String);
             }
 
+            // Per-extension ProgIDs carry a document icon showing the extension (round 4 I1).
+            var executableDirectory = Path.GetDirectoryName(executable) ?? AppContext.BaseDirectory;
+            foreach (var extension in ImageFormatRegistry.Extensions)
+            {
+                if (FileTypeIconPath(executableDirectory, extension) is not { } iconPath) continue;
+                var label = extension.TrimStart('.').ToUpperInvariant();
+                using var typed = hive.CreateSubKey($@"Software\Classes\{ProgIdFor(extension, hasTypeIcon: true)}", writable: true);
+                typed?.SetValue(string.Empty, $"{label} image", RegistryValueKind.String);
+                typed?.SetValue("FriendlyTypeName", $"{label} image", RegistryValueKind.String);
+                using var typedIcon = typed?.CreateSubKey("DefaultIcon", writable: true);
+                typedIcon?.SetValue(string.Empty, $"\"{iconPath}\",0", RegistryValueKind.String);
+                using var typedOpen = typed?.CreateSubKey(@"shell\open\command", writable: true);
+                typedOpen?.SetValue(string.Empty, command, RegistryValueKind.String);
+            }
+
             // OpenWithProgids makes Glide discoverable from a file's native Open With menu without
             // attempting to change Windows' protected default-app UserChoice value.
             foreach (var extension in ImageFormatRegistry.Extensions)
             {
                 using var openWith = hive.CreateSubKey($@"Software\Classes\{extension}\OpenWithProgids", writable: true);
-                openWith?.SetValue(ProgId, Array.Empty<byte>(), RegistryValueKind.None);
+                var extensionProgId = ProgIdFor(extension, executable);
+                openWith?.SetValue(extensionProgId, Array.Empty<byte>(), RegistryValueKind.None);
+                // One Glide entry per Open With list: drop the generic one an earlier version wrote.
+                if (!extensionProgId.Equals(ProgId, StringComparison.OrdinalIgnoreCase))
+                    openWith?.DeleteValue(ProgId, throwOnMissingValue: false);
             }
 
             using (var capabilities = hive.CreateSubKey(@"Software\Glide\Capabilities", writable: true))
@@ -166,7 +280,7 @@ internal static class WindowsFileAssociationRegistration
                 using var associations = capabilities?.CreateSubKey("FileAssociations", writable: true);
                 if (associations is not null)
                     foreach (var extension in ImageFormatRegistry.Extensions)
-                        associations.SetValue(extension, ProgId, RegistryValueKind.String);
+                        associations.SetValue(extension, ProgIdFor(extension, executable), RegistryValueKind.String);
             }
 
             using (var registered = hive.CreateSubKey(@"Software\RegisteredApplications", writable: true))
@@ -196,6 +310,28 @@ internal static class WindowsFileAssociationRegistration
         }
     }
 
+    /// <summary>Removes every Glide class, Open With, capability and claimed-default entry from one hive (no opt-out).</summary>
+    private static void DeleteRegistration(RegistryKey hive)
+    {
+        // First, while the record of exactly which defaults are Glide's still exists.
+        ReleaseClaimedDefaults(hive);
+        hive.DeleteSubKeyTree($@"Software\Classes\Applications\{ApplicationExe}", throwOnMissingSubKey: false);
+        hive.DeleteSubKeyTree($@"Software\Classes\{ProgId}", throwOnMissingSubKey: false);
+        foreach (var extension in ImageFormatRegistry.Extensions.Where(extension => extension.LastIndexOf('.') == 0))
+            hive.DeleteSubKeyTree($@"Software\Classes\{ProgIdFor(extension, hasTypeIcon: true)}", throwOnMissingSubKey: false);
+        hive.DeleteSubKeyTree(@"Software\Glide\Capabilities", throwOnMissingSubKey: false);
+
+        using (var registered = hive.OpenSubKey(@"Software\RegisteredApplications", writable: true))
+            registered?.DeleteValue(ApplicationName, throwOnMissingValue: false);
+
+        foreach (var extension in ImageFormatRegistry.Extensions)
+        {
+            using var openWith = hive.OpenSubKey($@"Software\Classes\{extension}\OpenWithProgids", writable: true);
+            openWith?.DeleteValue(ProgId, throwOnMissingValue: false);
+            if (extension.LastIndexOf('.') == 0) openWith?.DeleteValue(ProgIdFor(extension, hasTypeIcon: true), throwOnMissingValue: false);
+        }
+    }
+
     private static bool UnregisterInHive(RegistryKey hive, bool perUser, out string message)
     {
         if (!OperatingSystem.IsWindows())
@@ -206,20 +342,7 @@ internal static class WindowsFileAssociationRegistration
 
         try
         {
-            // First, while the record of exactly which defaults are Glide's still exists.
-            ReleaseClaimedDefaults(hive);
-            hive.DeleteSubKeyTree($@"Software\Classes\Applications\{ApplicationExe}", throwOnMissingSubKey: false);
-            hive.DeleteSubKeyTree($@"Software\Classes\{ProgId}", throwOnMissingSubKey: false);
-            hive.DeleteSubKeyTree(@"Software\Glide\Capabilities", throwOnMissingSubKey: false);
-
-            using (var registered = hive.OpenSubKey(@"Software\RegisteredApplications", writable: true))
-                registered?.DeleteValue(ApplicationName, throwOnMissingValue: false);
-
-            foreach (var extension in ImageFormatRegistry.Extensions)
-            {
-                using var openWith = hive.OpenSubKey($@"Software\Classes\{extension}\OpenWithProgids", writable: true);
-                openWith?.DeleteValue(ProgId, throwOnMissingValue: false);
-            }
+            DeleteRegistration(hive);
 
             if (perUser)
             {
@@ -266,7 +389,7 @@ internal static class WindowsFileAssociationRegistration
     /// </summary>
     internal static bool ShouldClaimDefault(DefaultClaimFacts facts)
     {
-        static bool IsNoneOrGlide(string? progId) => string.IsNullOrWhiteSpace(progId) || progId.Equals(ProgId, StringComparison.OrdinalIgnoreCase);
+        static bool IsNoneOrGlide(string? progId) => string.IsNullOrWhiteSpace(progId) || IsGlideProgId(progId);
         if (!IsNoneOrGlide(facts.UserChoiceProgId)) return false;
         if (facts.OpenWithProgIds.Any(progId => !IsNoneOrGlide(progId))) return false;
         if (!IsNoneOrGlide(facts.TargetHiveDefault)) return false;
@@ -276,7 +399,7 @@ internal static class WindowsFileAssociationRegistration
 
     /// <summary>A recorded claim is released only while the extension's default is still Glide's ProgID.</summary>
     internal static bool ShouldReleaseClaim(string? currentDefault) =>
-        currentDefault is not null && currentDefault.Equals(ProgId, StringComparison.OrdinalIgnoreCase);
+        IsGlideProgId(currentDefault);
 
     /// <summary>
     /// Formats Glide may become the default viewer for: those it can actually open on a clean PC (core and
@@ -346,8 +469,9 @@ internal static class WindowsFileAssociationRegistration
                 if (!ShouldClaimDefault(ReadClaimFacts(hive, otherHive, extension))) continue;
                 using var key = hive.CreateSubKey($@"Software\Classes\{extension}", writable: true);
                 if (key is null) continue;
-                key.SetValue(string.Empty, ProgId, RegistryValueKind.String);
-                record?.SetValue(extension, ProgId, RegistryValueKind.String);
+                var extensionProgId = ProgIdFor(extension, executable);
+                key.SetValue(string.Empty, extensionProgId, RegistryValueKind.String);
+                record?.SetValue(extension, extensionProgId, RegistryValueKind.String);
                 claimed++;
             }
             catch { /* one unreadable/locked extension must not stop the rest */ }
@@ -385,8 +509,8 @@ internal static class WindowsFileAssociationRegistration
         {
             using var record = hive.OpenSubKey(ClaimedDefaultsKeyPath);
             if (record is null) return;
-            using var progId = hive.OpenSubKey($@"Software\Classes\{ProgId}");
-            if (progId is not null) return;
+            // Any surviving Glide ProgID (generic or per-extension) means the registration is intact.
+            if (new RegistryClassesView(hive).GlideClassNames().Any(name => !name.StartsWith("Applications\\", StringComparison.OrdinalIgnoreCase))) return;
         }
         catch { return; }
         ReleaseClaimedDefaults(hive);

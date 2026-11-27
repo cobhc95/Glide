@@ -1,4 +1,5 @@
 using Avalonia.Input;
+using Glide.App.Services;
 using Glide.App.Settings;
 using Glide.Core;
 using Glide.Core.Workspace;
@@ -17,11 +18,17 @@ public partial class MainWindow
         NewTabPolicy.Resolve(_settings.NewTabPosition, _settings.SwitchToNewTabs, _settings.NewTabPositionKey, _settings.NewTabForegroundKey,
             shift: modifiers.HasFlag(KeyModifiers.Shift), ctrl: modifiers.HasFlag(KeyModifiers.Control), alt: modifiers.HasFlag(KeyModifiers.Alt));
 
-    /// <summary>5.1.0: an Explorer middle-click has its own side and position settings; the held-key flips still apply.</summary>
-    private NewTabOpening ResolveMiddleClickOpening(KeyModifiers modifiers) =>
-        NewTabPolicy.ResolveMiddleClick(_settings.MiddleClickNewTabSide, _settings.MiddleClickNewTabPosition, _settings.NewTabPosition,
-            _settings.NewTabPositionKey, _settings.NewTabForegroundKey,
-            shift: modifiers.HasFlag(KeyModifiers.Shift), ctrl: modifiers.HasFlag(KeyModifiers.Control), alt: modifiers.HasFlag(KeyModifiers.Alt));
+    /// <summary>Round 4 D1: where Duplicate tab puts the copy and whether it becomes active.</summary>
+    private NewTabOpening DuplicateTabOpening => NewTabPolicy.ForDuplicate(_settings.DuplicateTabPosition, _settings.DuplicateTabSide);
+
+    /// <summary>Round 4 D5: "Open in new tab" plus the held-key hint, e.g. "Open in new tab (Shift: background)".</summary>
+    private string OpenInNewTabMenuLabel() => OpenInNewTabMenuLabel("Open in new tab");
+
+    private string OpenInNewTabMenuLabel(string text)
+    {
+        var hint = NewTabPolicy.MenuHint(_settings.NewTabPosition, _settings.SwitchToNewTabs, _settings.NewTabPositionKey, _settings.NewTabForegroundKey);
+        return hint.Length == 0 ? text : $"{text} ({hint})";
+    }
 
     /// <summary>Adds <paramref name="tab"/> as a tab opened from the current one: placed and activated as the settings and held keys say.</summary>
     private Task OpenInNewTabAsync(TabState tab, KeyModifiers modifiers, string source) =>
@@ -33,7 +40,14 @@ public partial class MainWindow
         if (opening.Activate) CaptureActiveTabRuntimeState();
         _workspace.OpenTab(tab, opening);
         _diagnostics.Write("tabs", "opened_in_new_tab", new { tab.Id, tab.Kind, source, atEnd = opening.AtEnd, activate = opening.Activate });
-        if (opening.Activate) await ActivateWorkspaceAsync();
+        if (UiTrace.Input) UiTrace.WriteInput("tab_added", $"id={tab.Id} kind={tab.Kind} source={source} activate={opening.Activate} tabs={_workspace.Tabs.Count}");
+        if (opening.Activate)
+        {
+            // The new tab is in the strip at once. An image tab used to appear only when its picture had loaded (the strip is
+            // rebuilt at the end of the activation), so a slow or stuck load looked like "the middle-click opened nothing".
+            RebuildTabStrip();
+            await ActivateWorkspaceAsync();
+        }
         else RebuildTabStrip();
     }
 

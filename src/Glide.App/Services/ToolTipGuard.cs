@@ -46,6 +46,9 @@ internal static class ToolTipGuard
 
     internal static bool IsInWheelQuietPeriod(long nowTicks) => nowTicks - s_lastWheelTicks < (long)WheelQuietPeriod.TotalMilliseconds;
 
+    /// <summary>Tests: forgets the last wheel tick, so a test never starts inside the quiet period a previous test's wheel tick began.</summary>
+    internal static void ResetWheelQuietPeriodForTests() => s_lastWheelTicks = long.MinValue / 2;
+
     /// <summary>
     /// Marks a control that sets its own tooltip placement (tab headers: beside a side tab, under a top tab with hover
     /// previews). The guard then leaves its placement and offsets alone; the wheel and stuck-tooltip handling still apply.
@@ -157,8 +160,15 @@ internal static class ToolTipGuard
 
     private static readonly List<WeakReference<Control>> s_openOwners = new();
 
+    private static readonly ConditionalWeakTable<Control, object> s_detachHooked = new();
+
     private static void Track(Control control)
     {
+        // The service closes a tip only when it sees the pointer leave. An owner removed from the tree while its tip is open
+        // (Settings search results rebuilt by the next keystroke, an Explorer tile recycled) never sees that, so close the tip
+        // with it (5.1.7 UI test bug 6).
+        if (s_detachHooked.TryAdd(control, s_detachHooked))
+            control.DetachedFromVisualTree += (_, _) => { if (ToolTip.GetIsOpen(control)) ToolTip.SetIsOpen(control, false); };
         s_openOwners.RemoveAll(r => !r.TryGetTarget(out var c) || ReferenceEquals(c, control) || !c.CheckAccess());
         s_openOwners.Add(new WeakReference<Control>(control));
     }

@@ -65,6 +65,27 @@ public static class HotkeyDefaultMigrations
         return true;
     }
 
+    /// <summary>
+    /// The one rule behind every "this action gained a default key" migration: for a file older than <paramref name="schema"/>,
+    /// the row gets <paramref name="key"/> when it is empty (a saved empty list cannot tell "never had a default" from "the user
+    /// removed it", so the schema number is the marker: the user could not have removed a key that did not exist yet) and no
+    /// other action uses the key. A binding the user set is kept, and from <paramref name="schema"/> on an empty row is a
+    /// deliberate choice and stays empty.
+    /// </summary>
+    /// <returns>True when the map was changed.</returns>
+    public static bool GrantDefaultWhenUnassigned(IDictionary<string, List<string>> hotkeys, int sourceSchema, int schema, string rowId, string key)
+    {
+        if (sourceSchema >= schema) return false;
+        if (hotkeys.TryGetValue(rowId, out var current) && current is not null && current.Count > 0) return false;
+        foreach (var (id, shortcuts) in hotkeys)
+        {
+            if (string.Equals(id, rowId, StringComparison.OrdinalIgnoreCase)) continue;
+            if (shortcuts is not null && shortcuts.Any(s => ShortcutText.AreEqual(s, key))) return false;
+        }
+        hotkeys[rowId] = [key];
+        return true;
+    }
+
     /// <summary>Settings schema that gave "Enter / exit Overlay mode" the default Alt+O.</summary>
     public const int OverlayToggleDefaultSchema = 19;
 
@@ -75,18 +96,23 @@ public static class HotkeyDefaultMigrations
     /// Schema 19: "Enter / exit Overlay mode" gains Alt+O, only where the row is still unassigned and no other action uses Alt+O.
     /// </summary>
     /// <returns>True when the map was changed.</returns>
-    public static bool MigrateOverlayToggle(IDictionary<string, List<string>> hotkeys, int sourceSchema)
-    {
-        if (sourceSchema >= OverlayToggleDefaultSchema) return false;
-        if (hotkeys.TryGetValue(OverlayToggleId, out var current) && current is not null && current.Count > 0) return false;
-        foreach (var (id, shortcuts) in hotkeys)
-        {
-            if (string.Equals(id, OverlayToggleId, StringComparison.OrdinalIgnoreCase)) continue;
-            if (shortcuts is not null && shortcuts.Any(s => ShortcutText.AreEqual(s, OverlayToggleNewDefault))) return false;
-        }
-        hotkeys[OverlayToggleId] = [OverlayToggleNewDefault];
-        return true;
-    }
+    public static bool MigrateOverlayToggle(IDictionary<string, List<string>> hotkeys, int sourceSchema) =>
+        GrantDefaultWhenUnassigned(hotkeys, sourceSchema, OverlayToggleDefaultSchema, OverlayToggleId, OverlayToggleNewDefault);
+
+    /// <summary>
+    /// Settings schema that gave "Show / hide the tag sidebar" its default Ctrl+Shift+G. The action was added (5.1.7 builds) without a
+    /// key, so every settings file written since then stores <c>tags.toggleSidebar: []</c>; a default added later never reaches such a file
+    /// by itself, because the row exists.
+    /// </summary>
+    public const int TagSidebarDefaultSchema = 25;
+
+    public const string TagSidebarId = "tags.toggleSidebar";
+    public const string TagSidebarNewDefault = "Ctrl+Shift+G";
+
+    /// <summary>Schema 25: "Show / hide the tag sidebar" gains Ctrl+Shift+G where it is still unassigned and the key is free.</summary>
+    /// <returns>True when the map was changed.</returns>
+    public static bool MigrateTagSidebar(IDictionary<string, List<string>> hotkeys, int sourceSchema) =>
+        GrantDefaultWhenUnassigned(hotkeys, sourceSchema, TagSidebarDefaultSchema, TagSidebarId, TagSidebarNewDefault);
 
     /// <summary>Settings schema that moved the Backspace default from "Previous image" (nav.previousBack) to "Back, or Previous image" (nav.backOrPrevious).</summary>
     public const int BackspaceToBackOrPreviousSchema = 11;

@@ -115,6 +115,8 @@ internal static class SettingAccessors
         ["explorer.infoResolution"] = Bool(s => s.ExplorerInfoResolution, (s, v) => s.ExplorerInfoResolution = v),
         ["explorer.infoFileSize"] = Bool(s => s.ExplorerInfoFileSize, (s, v) => s.ExplorerInfoFileSize = v),
         ["explorer.keepSelectionInView"] = Bool(s => s.ExplorerKeepSelectionInView, (s, v) => s.ExplorerKeepSelectionInView = v),
+        ["tags.enabled"] = Bool(s => s.TagsEnabled, (s, v) => s.TagsEnabled = v),
+        ["tags.applyImmediately"] = Bool(s => s.TagsApplyImmediately, (s, v) => s.TagsApplyImmediately = v),
         ["explorer.clickToRename"] = Bool(s => s.ExplorerClickToRename, (s, v) => s.ExplorerClickToRename = v),
         ["explorer.onlyImages"] = Bool(s => s.ExplorerShowOnlyImages, (s, v) => s.ExplorerShowOnlyImages = v),
         ["tabs.confirmCloseMultiple"] = Bool(s => s.ConfirmCloseMultipleTabs, (s, v) => s.ConfirmCloseMultipleTabs = v),
@@ -198,14 +200,21 @@ internal static class SettingAccessors
         ["tabs.switchToNewTabs"] = Text(s => Glide.Core.Workspace.NewTabSides.FromSwitch(s.SwitchToNewTabs), (s, v) => s.SwitchToNewTabs = Glide.Core.Workspace.NewTabSides.ToSwitch(v)),
         ["tabs.newTabPositionKey"] = Text(s => s.NewTabPositionKey, (s, v) => s.NewTabPositionKey = v),
         ["tabs.newTabForegroundKey"] = Text(s => s.NewTabForegroundKey, (s, v) => s.NewTabForegroundKey = v),
-        ["tabs.middleClickSide"] = Text(s => s.MiddleClickNewTabSide, (s, v) => s.MiddleClickNewTabSide = v),
-        ["tabs.middleClickPosition"] = Text(s => s.MiddleClickNewTabPosition, (s, v) => s.MiddleClickNewTabPosition = v),
+        ["tabs.duplicatePosition"] = Text(s => s.DuplicateTabPosition, (s, v) => s.DuplicateTabPosition = v),
+        ["tabs.duplicateSide"] = Text(s => s.DuplicateTabSide, (s, v) => s.DuplicateTabSide = v),
         ["tabs.afterCloseActivate"] = Text(s => s.AfterTabCloseActivate, (s, v) => s.AfterTabCloseActivate = v),
         ["tabs.afterCloseCustomTarget"] = Text(s => s.AfterTabCloseCustomTarget, (s, v) => s.AfterTabCloseCustomTarget = v),
         ["tabs.hoverPreview"] = Bool(s => s.TabHoverPreviews, (s, v) => s.TabHoverPreviews = v),
         ["tabs.animateGifPreviews"] = Bool(s => s.AnimateGifPreviews, (s, v) => s.AnimateGifPreviews = v),
         ["tabs.previewResizeModifier"] = Text(s => s.TabPreviewResizeModifier, (s, v) => s.TabPreviewResizeModifier = v),
         ["overlay.pictureBorder"] = Bool(s => s.PictureCounterBorder, (s, v) => s.PictureCounterBorder = v),
+        ["overlay.titleBarColor"] = Text(s => s.TextOverlayTitleBarColor, (s, v) => s.TextOverlayTitleBarColor = v),
+        ["overlay.titleBarBorder"] = Text(s => s.TextOverlayTitleBarBorder, (s, v) => s.TextOverlayTitleBarBorder = v),
+        ["overlay.tabBarColor"] = Text(s => s.TextOverlayTabBarColor, (s, v) => s.TextOverlayTabBarColor = v),
+        ["overlay.tabBarBorder"] = Text(s => s.TextOverlayTabBarBorder, (s, v) => s.TextOverlayTabBarBorder = v),
+        ["overlay.pictureSeparator"] = Text(s => s.TextOverlaySeparator, (s, v) => s.TextOverlaySeparator = v),
+        ["overlay.separatorColor"] = Text(s => s.TextOverlaySeparatorColor, (s, v) => s.TextOverlaySeparatorColor = v),
+        ["explorer.infoUseTemplate"] = Bool(s => s.ExplorerInfoUseTemplate, (s, v) => s.ExplorerInfoUseTemplate = v),
     };
 
     /// <summary>
@@ -249,6 +258,10 @@ internal static class SettingAccessors
         ["general.newExplorerTabDefaultDirectory"] = Str(s => s.NewExplorerTabDefaultDirectory, (s, v) => s.NewExplorerTabDefaultDirectory = v),
         ["appearance.explorerTheme"] = Str(s => s.ExplorerThemeChoice, (s, v) => s.ExplorerThemeChoice = v),
         ["explorer.navPaneWidth"] = Int(s => s.ExplorerNavPaneWidth, (s, v) => s.ExplorerNavPaneWidth = v),
+        ["performance.thumbnailLanes"] = Str(s => s.ThumbnailLanes, (s, v) => s.ThumbnailLanes = v),
+        ["performance.thumbnailPrepareFolder"] = Flag(s => s.ThumbnailPrepareFolder, (s, v) => s.ThumbnailPrepareFolder = v),
+        ["explorer.thumbnailCache"] = Flag(s => s.ExplorerThumbnailCache, (s, v) => s.ExplorerThumbnailCache = v),
+        ["explorer.thumbnailCacheMaxMb"] = Int(s => s.ExplorerThumbnailCacheMaxMb, (s, v) => s.ExplorerThumbnailCacheMaxMb = v),
         ["appearance.tooltipDelaySettings"] = Int(s => s.TooltipDelaySettingsMs, (s, v) => s.TooltipDelaySettingsMs = v),
         ["appearance.tooltipDelayMain"] = Int(s => s.TooltipDelayMainMs, (s, v) => s.TooltipDelayMainMs = v),
         ["appearance.tooltipDelayOverlay"] = Int(s => s.TooltipDelayOverlayMs, (s, v) => s.TooltipDelayOverlayMs = v),
@@ -261,6 +274,12 @@ internal static class SettingAccessors
         ["explorer.scrollSpeed"] = Double(s => s.ExplorerScrollSpeed, (s, v) => s.ExplorerScrollSpeed = v),
         ["explorer.scrollRows"] = Int(s => s.ExplorerScrollRows, (s, v) => s.ExplorerScrollRows = v),
         ["explorer.scrollPixels"] = Int(s => s.ExplorerScrollPixels, (s, v) => s.ExplorerScrollPixels = v),
+        ["tags.groups"] = Str(s => s.TagGroups, (s, v) => s.TagGroups = v),
+        ["tags.prefix"] = Str(s => s.TagPrefix, (s, v) => s.TagPrefix = v),
+        ["tags.open"] = Str(s => s.TagOpen, (s, v) => s.TagOpen = v),
+        ["tags.close"] = Str(s => s.TagClose, (s, v) => s.TagClose = v),
+        ["tags.separator"] = Str(s => s.TagSeparator, (s, v) => s.TagSeparator = v),
+        ["tags.format"] = Str(s => s.TagFilenameFormat, (s, v) => s.TagFilenameFormat = v),
         ["explorer.altFileManagerPath"] = Str(s => s.AlternativeFileManagerPath, (s, v) => s.AlternativeFileManagerPath = v),
         ["explorer.altFileManagerArguments"] = Str(s => s.AlternativeFileManagerArguments, (s, v) => s.AlternativeFileManagerArguments = v),
         ["tabs.showBackButton"] = Flag(s => s.TabBarShowBackButton, (s, v) => s.TabBarShowBackButton = v),
@@ -283,6 +302,11 @@ internal static class SettingAccessors
         ["tabs.closedHistory"] = Int(s => s.ClosedTabHistoryLimit, (s, v) => s.ClosedTabHistoryLimit = v),
         ["folderNav.explore"] = Flag(s => s.FolderNavShowExplore, (s, v) => s.FolderNavShowExplore = v),
         ["overlay.pictureTemplate"] = Str(s => s.PictureCounterTemplate, (s, v) => s.PictureCounterTemplate = v),
+        ["overlay.titleBarTemplate"] = Str(s => s.TextOverlayTitleBarTemplate, (s, v) => s.TextOverlayTitleBarTemplate = v),
+        ["overlay.titleBarFontSize"] = Int(s => s.TextOverlayTitleBarFontSize, (s, v) => s.TextOverlayTitleBarFontSize = v),
+        ["overlay.tabBarTemplate"] = Str(s => s.TextOverlayTabBarTemplate, (s, v) => s.TextOverlayTabBarTemplate = v),
+        ["overlay.tabBarFontSize"] = Int(s => s.TextOverlayTabBarFontSize, (s, v) => s.TextOverlayTabBarFontSize = v),
+        ["explorer.infoTemplate"] = Str(s => s.ExplorerInfoTemplate, (s, v) => s.ExplorerInfoTemplate = v),
         ["overlay.pictureFontSize"] = Int(s => s.PictureCounterFontSize, (s, v) => s.PictureCounterFontSize = v),
         ["overlay.pictureOpacity"] = Int(s => s.PictureCounterOpacity, (s, v) => s.PictureCounterOpacity = v),
         ["overlay.pictureOffsetX"] = Int(s => TextOverlayPlacements.Offset(s, TextOverlayPlacements.SideTabsLayout(s)).X, (s, v) => TextOverlayPlacements.SetOffset(s, TextOverlayPlacements.SideTabsLayout(s), v, null)),
@@ -348,11 +372,11 @@ internal static class SettingAccessors
             case "tabs.newTabPosition":
                 state.NewTabPosition = Glide.Core.Workspace.NewTabPositions.Normalize(state.NewTabPosition);
                 break;
-            case "tabs.middleClickSide":
-                state.MiddleClickNewTabSide = Glide.Core.Workspace.MiddleClickSides.Normalize(state.MiddleClickNewTabSide);
+            case "tabs.duplicatePosition":
+                state.DuplicateTabPosition = Glide.Core.Workspace.DuplicateTabPositions.Normalize(state.DuplicateTabPosition);
                 break;
-            case "tabs.middleClickPosition":
-                state.MiddleClickNewTabPosition = Glide.Core.Workspace.MiddleClickPositions.Normalize(state.MiddleClickNewTabPosition);
+            case "tabs.duplicateSide":
+                state.DuplicateTabSide = Glide.Core.Workspace.DuplicateTabSides.Normalize(state.DuplicateTabSide);
                 break;
             case "tabs.afterCloseCustomTarget":
                 state.AfterTabCloseCustomTarget = Glide.Core.Workspace.TabCloseCustomTargets.Normalize(state.AfterTabCloseCustomTarget);

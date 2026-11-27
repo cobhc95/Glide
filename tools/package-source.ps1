@@ -10,6 +10,10 @@ $stagedProject = Join-Path $temp 'Glide Image Viewer'
 New-Item -ItemType Directory -Path $temp | Out-Null
 Copy-Item $project $stagedProject -Recurse
 
+# Agent worktrees (full repo copies) never ship.
+$stagedWorktrees = Join-Path $stagedProject '.claude\worktrees'
+if (Test-Path $stagedWorktrees) { Remove-Item $stagedWorktrees -Recurse -Force }
+
 # Generated field-audit/diagnostic evidence is deliberately excluded from source handoff ZIPs.
 # Quantitative baselines and research conclusions belong in the single authoritative handoff;
 # the next Windows audit must generate fresh evidence rather than inherit stale PASS/FAIL artefacts.

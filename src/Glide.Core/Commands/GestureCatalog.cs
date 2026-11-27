@@ -252,7 +252,14 @@ public static class GestureCatalog
     /// </summary>
     /// Since 5.0.8 the side buttons are pass-through by default ("Default (not used by Glide)"): Glide leaves them entirely
     /// to Windows / the mouse software, so this returns null for every slot. Kept as the hook for future registry defaults.
-    public static string? DefaultActionFor(string? slotId) => null;
+    /// Round 4 (A1): in the Explorer area they go Back / Forward in the tab history again by default (every other area
+    /// stays pass-through; the image view handles "Back to the folder it was opened from" itself, see MainWindow).
+    public static string? DefaultActionFor(string? slotId) => slotId switch
+    {
+        "explorer.backButton" => NavigateBack,
+        "explorer.forwardButton" => NavigateForward,
+        _ => null
+    };
 
     public static IReadOnlyList<GestureAreaDefinition> Areas { get; } = new GestureAreaDefinition[]
     {
@@ -378,6 +385,10 @@ public static class GestureCatalog
 
         S("explorer.middleClick", GestureAreas.Explorer, GestureInputs.MiddleClick),
         S("explorer.doubleClick", GestureAreas.Explorer, GestureInputs.DoubleLeft),
+        // Round 4 C3: modifier + double-click on an item.
+        S("explorer.altDoubleClick", GestureAreas.Explorer, GestureInputs.DoubleLeft, GestureModifiers.Alt),
+        S("explorer.ctrlDoubleClick", GestureAreas.Explorer, GestureInputs.DoubleLeft, GestureModifiers.Ctrl),
+        S("explorer.shiftDoubleClick", GestureAreas.Explorer, GestureInputs.DoubleLeft, GestureModifiers.Shift),
         S("explorer.backButton", GestureAreas.Explorer, GestureInputs.BackButton),
         S("explorer.forwardButton", GestureAreas.Explorer, GestureInputs.ForwardButton),
         S("explorer.wheel", GestureAreas.Explorer, GestureInputs.Wheel)
@@ -442,8 +453,11 @@ public static class GestureCatalog
         ["titleBar.wheel"] = "nothing",
         ["explorer.middleClick"] = "open in new tab",
         ["explorer.doubleClick"] = "open in current tab",
-        ["explorer.backButton"] = "not used by Glide",
-        ["explorer.forwardButton"] = "not used by Glide",
+        ["explorer.altDoubleClick"] = "properties",
+        ["explorer.ctrlDoubleClick"] = "select only",
+        ["explorer.shiftDoubleClick"] = "select only",
+        ["explorer.backButton"] = "back",
+        ["explorer.forwardButton"] = "forward",
         ["explorer.wheel"] = "scroll the list"
     };
 
@@ -482,8 +496,22 @@ public static class GestureCatalog
         ["titleBar.middleClick"] = [NewTab, ReopenClosedTab, MinimizeWindow],
         ["titleBar.doubleClick"] = [MaximizeRestore, Fullscreen, NewTab],
         ["explorer.middleClick"] = [OpenInNewTab, OpenInCurrentTab],
-        ["explorer.doubleClick"] = [OpenInCurrentTab, OpenInNewTab]
+        ["explorer.doubleClick"] = [OpenInCurrentTab, OpenInNewTab],
+        ["explorer.altDoubleClick"] = ["explorer.itemProperties", OpenInNewTab, OpenInCurrentTab],
+        ["explorer.ctrlDoubleClick"] = [OpenInNewTab, OpenInCurrentTab, "explorer.itemProperties"],
+        ["explorer.shiftDoubleClick"] = [OpenInNewTab, OpenInCurrentTab, "explorer.itemProperties"]
     };
+
+    /// <summary>
+    /// What a slot does when it is left at Default, for the slots whose Default runs a registry action (round 4 C3:
+    /// Alt+double-click on an Explorer item shows its properties). Other slots: null (their owner's built-in behaviour).
+    /// </summary>
+    public static string? DefaultRunAction(string? slotId) =>
+        string.Equals(slotId, "explorer.altDoubleClick", StringComparison.OrdinalIgnoreCase) ? "explorer.itemProperties" : null;
+
+    /// <summary>The Explorer item double-click slot for the held keys: the plain row, or its Alt / Ctrl / Shift row.</summary>
+    public static string ExplorerDoubleClickSlot(string? modifier) =>
+        SlotFor(GestureAreas.Explorer, GestureInputs.DoubleLeft, modifier ?? GestureModifiers.None)?.Id ?? "explorer.doubleClick";
 
     private static readonly string[] SuggestedDrag = [Pan, CreateSelection, MoveWindow];
     private static readonly string[] SuggestedWheel = [ZoomWheel, BrowseWheel, PanWheelHorizontal, PanWheel];

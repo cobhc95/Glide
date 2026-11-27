@@ -123,6 +123,14 @@
           <TextBlock x:Name="NavigationBoundaryNoticeText" Text="End of folder" FontSize="18" FontWeight="SemiBold" Foreground="White"/>
         </Border>
 
+        <!-- Round 4 J1: the shown picture's file was deleted, renamed or moved; the picture stays on screen from memory. -->
+        <Border x:Name="MissingFileIndicator" IsVisible="False"
+                HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,12,0,0" ZIndex="1440"
+                Background="#E0401818" BorderBrush="#FFE05050" BorderThickness="1"
+                CornerRadius="6" Padding="12,6">
+          <TextBlock Text="File no longer on disk" FontSize="14" FontWeight="SemiBold" Foreground="White"/>
+        </Border>
+
         <!-- "When the last image is reached: Ask me each time" (5.0.7): the picker card is added here; clicking outside it = Stay. -->
         <Panel x:Name="EndOfFolderPickerHost" IsVisible="False" ZIndex="1455" Background="Transparent"/>
 
@@ -261,6 +269,9 @@
       <!-- EXPLORER: toolbar/grid/virtualizer are instantiated only when a Browser tab is activated. -->
       <ContentControl x:Name="BrowserView" IsVisible="False" Background="{DynamicResource BrushViewport}"/>
 
+      <!-- 5.1.7 (issue #4): the tag sidebar docks to the right edge; MainWindow.Tags.cs gives the viewer / Explorer room beside it. -->
+      <Border x:Name="TagSidebarHost" IsVisible="False" HorizontalAlignment="Right" VerticalAlignment="Stretch" ZIndex="600"/>
+
       <!-- Session-only collapsed status affordance. Close persists hidden; collapse does not. -->
       <Button x:Name="StatusRestoreButton" Classes="statusRestore" IsVisible="False"
               HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,16,14"
@@ -289,5 +300,13 @@
     <!-- Drag to resize the vertical tab pane; double-click restores the default width. -->
     <Border x:Name="SideTabResizeHandle" Grid.Row="1" Width="6" HorizontalAlignment="Left" IsVisible="False" ZIndex="901"
             Background="Transparent" Cursor="SizeWestEast" ToolTip.Tip="Drag to resize the tab pane. Double-click: default width."/>
+    <!-- The "Alt+drag to move" hint of the text overlay. A plain label of the window itself (no tooltip service, no overlay layer, no theme
+         resource): the last child of the root grid over both rows, topmost, never hit-testable, with its own opaque dark background and light
+         text. MainWindow.TextOverlayDrag.cs places it with its Margin next to CornerCounterHost. -->
+    <Border x:Name="TextOverlayHint" Grid.RowSpan="2" IsVisible="False" IsHitTestVisible="False" Focusable="False" ZIndex="100000"
+            HorizontalAlignment="Left" VerticalAlignment="Top"
+            Background="#FF1F2227" BorderBrush="#FF5B616B" BorderThickness="1" CornerRadius="4" Padding="8,5">
+      <TextBlock x:Name="TextOverlayHintText" Foreground="#FFF3F5F8" FontSize="12" TextWrapping="Wrap" MaxWidth="320"/>
+    </Border>
   </Grid>
 </Window>

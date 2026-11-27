@@ -71,12 +71,14 @@ public sealed class ExplorerTileInfoTests
             h.Call("ApplyExplorerTileInfo");
             await h.SettleAsync();
             var tile = h.Tile("a.png")!;
-            await h.WaitUntil(() => InfoTexts(h.Tile("a.png")!).Contains("48 × 32"), "resolution line filled in");
-            tile = h.Tile("a.png")!;
             var info = new FileInfo(Path.Combine(h.Root, "a.png"));
+            // Round 4 C1: resolution and file size share one line.
+            var combined = $"48 × 32  \u2022  {ExplorerModel.FormatSize(info.Length)}";
+            await h.WaitUntil(() => InfoTexts(h.Tile("a.png")!).Contains(combined), "resolution filled in");
+            tile = h.Tile("a.png")!;
             var texts = InfoTexts(tile);
-            Assert.Equal(new[] { ExplorerModel.FormatDate(info.LastWriteTime), "48 × 32", ExplorerModel.FormatSize(info.Length) }, texts);
-            Assert.Equal(ExplorerViewModes.TileSize(ExplorerViewModes.Large, 3).Height, tile.Bounds.Height);
+            Assert.Equal(new[] { ExplorerModel.FormatDate(info.LastWriteTime), combined }, texts);
+            Assert.Equal(ExplorerViewModes.TileSize(ExplorerViewModes.Large, 2).Height, tile.Bounds.Height);
 
             // Every info line lies inside the selection fill (which spans the tile), below the caption.
             h.Click("a.png");
@@ -96,9 +98,8 @@ public sealed class ExplorerTileInfoTests
             // A folder keeps the same height; its resolution and size lines stay empty.
             var folder = h.Tile("Alpha")!;
             Assert.Equal(tile.Bounds.Height, folder.Bounds.Height);
-            Assert.Equal(3, InfoTexts(folder).Count);
+            Assert.Equal(2, InfoTexts(folder).Count);
             Assert.Equal("", InfoTexts(folder)[1]);
-            Assert.Equal("", InfoTexts(folder)[2]);
 
             // Layout math (keyboard / rubber band) stays in step with the taller tiles.
             foreach (var name in new[] { "Alpha", "b.png", "c.png" })

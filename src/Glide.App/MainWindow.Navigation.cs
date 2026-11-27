@@ -134,6 +134,7 @@ public partial class MainWindow
             if (!IsFolderSessionCurrent(session)) return;
 
             _navigator.ReplaceFolderIndex(provisional, requestedPath);
+            _ = Task.Run(() => CodecPreloader.NotifyListing(provisional)); // 5.2.0: a HEIC / AVIF / JXL / JP2 neighbour warms its codec plug-in now, not on its first open
             if (!IsFolderSessionCurrent(session)) return;
             _folderIndexReady = true;
             _folderIndexCanonicalReady = false;
@@ -165,6 +166,7 @@ public partial class MainWindow
             if (!IsFolderSessionCurrent(session)) return;
             var current = _navigator.Current ?? requestedPath;
             _navigator.ReplaceFolderIndex(paths, current);
+            _ = Task.Run(() => CodecPreloader.NotifyListing(paths));
             if (!IsFolderSessionCurrent(session)) return;
             _folderIndexCanonicalReady = true;
             if (GlidePerformanceTrace.Enabled) GlidePerformanceTrace.Mark("folder_index_complete", $"count={_navigator.Count}");
@@ -246,9 +248,12 @@ public partial class MainWindow
             });
             var now = _navigator.Current;
             if (now is not null && !string.Equals(now, _currentPath, StringComparison.OrdinalIgnoreCase)
-                && _currentPath is not null && !File.Exists(_currentPath))
+                && _currentPath is not null && !File.Exists(_currentPath)
+                && _workspace.Active is ImageTabState)
             {
-                // The viewed file was deleted/renamed externally; show the neighbour now in its slot.
+                // The viewed file was deleted/renamed externally; show the neighbour now in its slot. Only while a picture tab is in
+                // front: the picture a tab turned away from (Ctrl+E made it an Explorer tab, a Home tab ...) is not on screen, and
+                // presenting its neighbour would bring the viewer back over the Explorer list (5.1.7 desktop retest, C).
                 await PresentCurrentAsync();
             }
             NotifyViewerStatusChanged();
@@ -370,11 +375,12 @@ public partial class MainWindow
             if (!isRefinementOnly)
             {
                 if (_settings.AnimateGifs && GifAnimationPlayer.IsGif(path))
-                    EnsureGifPlayer().Start(path);
+                    StartGifForActiveTab(path);
                 else _gifPlayer?.Stop();
                 // Re-evaluate on every image change: Stop() only reports when it had a state, and a GIF player
                 // whose presentation was superseded no longer has an animation without raising StateChanged.
                 UpdateGifStatusUi();
+                UpdateMissingFileIndicator(null);
             }
 
             // A newer click may have arrived while this frame was being attached. Do not let an
@@ -1201,6 +1207,8 @@ public partial class MainWindow
     /// </summary>
     private void EnsurePresentedFrameSufficient(string reason)
     {
+        // A job posted before the window closed can run after its frame was disposed.
+        if (_windowLifetimeCts.IsCancellationRequested) return;
         if (_presentedPath is null || Viewport.Bitmap is null) return;
         var (frame, needed) = PresentedFrameWidths();
         // Undersized, or a staged/reduced preview (fit-sized but not final): both get the full frame now.
@@ -1451,6 +1459,34 @@ public partial class MainWindow
         _explorerFolderWatch?.Stop();
     }
 
+    /// <summary>Round 4 J2: an image tab whose file disappeared and has no kept frame (see ActivateWorkspaceAsync).</summary>
+    private void ShowMissingImageTab(ImageTabState image)
+    {
+        _gifPlayer?.Stop();
+        BeginImageRequest(image.Path);
+        var previous = Viewport.PresentedFrame.Bitmap;
+        var retiredInteraction = _interactionPreviewBitmap;
+        Viewport.CancelInteraction();
+        Viewport.SetInteractionBitmap(null);
+        _interactionPreviewBitmap = null;
+        Viewport.SwapPresentedFrame(null, 0, 0, 0, image.Path);
+        // The detached frames give back their presentation lease once the compositor can no longer be drawing them.
+        DispatcherTimer.RunOnce(() =>
+        {
+            RetirePresentedBitmap(previous);
+            if (!ReferenceEquals(retiredInteraction, previous)) RetirePresentedBitmap(retiredInteraction);
+        }, TimeSpan.FromSeconds(2));
+        _currentPath = image.Path;
+        _presentedPath = image.Path;
+        _navigator.OpenSingleOnly(image.Path);
+        ShowImageSurface();
+        UpdateMissingFileIndicator(image.Path);
+        UpdateGifStatusUi();
+        NotifyViewerStatusChanged();
+        UpdateWindowTitle();
+        _diagnostics.Write("navigation", "tab_image_missing", new { path = image.Path });
+    }
+
     private void ShowImageSurface()
     {
         HideExplorerSurface();
@@ -1459,6 +1495,8 @@ public partial class MainWindow
         BrowserView.IsVisible = false;
         ImageView.IsVisible = true;
         SyncFullscreenTitleBarForActiveView();
+        UpdateTagSidebar();
+        UpdateTextOverlayVisibility();
         NotifyStatusChromeChanged();
     }
 
@@ -1470,6 +1508,8 @@ public partial class MainWindow
         BrowserView.IsVisible = false;
         WarmOpenTransitionHost.IsVisible = true;
         SyncFullscreenTitleBarForActiveView();
+        UpdateTagSidebar();
+        UpdateTextOverlayVisibility();
         NotifyStatusChromeChanged();
     }
 
@@ -1573,6 +1613,8 @@ public partial class MainWindow
         ImageView.IsVisible = false;
         BrowserView.IsVisible = false;
         SyncFullscreenTitleBarForActiveView();
+        UpdateTagSidebar();
+        UpdateTextOverlayVisibility();
         var recentLanding = string.Equals(_settings.HomePageMode, "Recent pictures page", StringComparison.OrdinalIgnoreCase);
         home.HeadingText.Text = recentLanding ? "Recent pictures" : "Glide";
         UpdateHomeHintTexts(home);
@@ -1686,6 +1728,8 @@ public partial class MainWindow
         BrowserView.IsVisible = true;
         // Fullscreen: the Explorer navigation row must not sit under the overlaid title bar.
         SyncFullscreenTitleBarForActiveView();
+        UpdateTagSidebar();
+        UpdateTextOverlayVisibility();
         // Glide owns its production Explorer surface here. The legacy IExplorerBrowser host remains
         // dormant diagnostic code only; there is no production entry point to it. The managed surface
         // is authoritative because it can follow Glide theme/resizing consistently across Windows/DPI.
@@ -1722,6 +1766,13 @@ public partial class MainWindow
             case ImageTabState image:
                 AdvanceWorkspaceEpoch();
                 if (TryShowWarmImageTab(image)) break;
+                if (!File.Exists(image.Path))
+                {
+                    // Round 4 J2: the tab's file is gone and no frame of it is kept. Never leave the previous tab's
+                    // picture on screen under this tab: show an empty viewer with the "no longer on disk" badge.
+                    ShowMissingImageTab(image);
+                    break;
+                }
                 await LoadPathAsync(image.Path, updateActiveTab: false);
                 if (image.ViewState is { } view)
                     Viewport.RestoreViewState(new ViewerViewSnapshot(view.Mode, view.Zoom, new Vector(view.PanX, view.PanY)));

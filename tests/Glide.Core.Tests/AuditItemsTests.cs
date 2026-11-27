@@ -227,9 +227,18 @@ public sealed class AuditItemsTests
             Assert.Equal(GestureCatalog.Default, slot.DefaultActionId);          // saved "default" bindings keep meaning Default
             Assert.Equal(GestureInputKind.Click, slot.Kind);
             Assert.True(GestureCatalog.DefaultBehavior.ContainsKey(id));
-            // 5.0.8: Default is pass-through (Glide leaves the side buttons to Windows / the mouse software).
-            Assert.Equal("not used by Glide", GestureCatalog.DefaultBehavior[id]);
-            Assert.Null(GestureCatalog.DefaultActionFor(id));
+            // 5.0.8: Default is pass-through (Glide leaves the side buttons to Windows / the mouse software), except in the
+            // Explorer, where round 4 (A1) made them go Back / Forward again.
+            if (id.StartsWith("explorer.", StringComparison.Ordinal))
+            {
+                Assert.Equal(id.Contains("back") ? GestureCatalog.NavigateBack : GestureCatalog.NavigateForward, GestureCatalog.DefaultActionFor(id));
+                Assert.Equal(id.Contains("back") ? "back" : "forward", GestureCatalog.DefaultBehavior[id]);
+            }
+            else
+            {
+                Assert.Equal("not used by Glide", GestureCatalog.DefaultBehavior[id]);
+                Assert.Null(GestureCatalog.DefaultActionFor(id));
+            }
             Assert.Same(slot, GestureCatalog.SlotFor(slot.Area, slot.Input));
             Assert.Equal(GestureCatalog.Default, GestureCatalog.CreateDefaultMap()[id]);
         }

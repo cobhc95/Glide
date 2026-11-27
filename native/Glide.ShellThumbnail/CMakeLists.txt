@@ -93,6 +93,8 @@ add_library(Glide.ShellThumbnail SHARED
     GlideThumbnailProvider.cpp
     ThumbnailCore.cpp
     CodecProviders.cpp
+    # 5.2.0: the DC-only progressive JPEG reader shared with Glide.Native (Explorer thumbnails of progressive JPEGs).
+    ../Glide.Native/GlideJpegDc.cpp
     Glide.ShellThumbnail.def
     "${CMAKE_CURRENT_BINARY_DIR}/Glide.ShellThumbnail.rc"
 )
@@ -102,9 +104,13 @@ target_compile_definitions(Glide.ShellThumbnail PRIVATE UNICODE _UNICODE WIN32_L
 # libwebp headers are consumed as <webp/decode.h> from the vendored src/ tree; GlideCodecPins.h is generated.
 target_include_directories(Glide.ShellThumbnail PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/libwebp/src"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/libjpeg-turbo/include"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../Glide.Native"
     "${CMAKE_CURRENT_BINARY_DIR}")
 target_link_libraries(Glide.ShellThumbnail PRIVATE
     webpdecoder
+    # 5.1.7: libjpeg-turbo (the same vendored static build as Glide.Native) for DCT-scaled JPEG thumbnails.
+    "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/libjpeg-turbo/lib/x64/turbojpeg-static.lib"
     windowscodecs
     d2d1
     d3d11

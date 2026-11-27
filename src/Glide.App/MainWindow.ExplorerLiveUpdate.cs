@@ -78,7 +78,8 @@ public partial class MainWindow
         _explorerPendingSelection = null;
         var showHidden = ExplorerOptionsView.ShowHiddenFiles;
         var onlyImages = ExplorerOptionsView.ShowOnlyImages;
-        var probeDimensions = ExplorerSortFields.IsDimension(_explorerSortKey);
+        var probeDimensions = ExplorerSortFields.NeedsProbe(_explorerSortKey);
+        var probeKey = _explorerSortKey;
         var known = _explorerAllEntries.ToList();
         var token = _windowLifetimeCts.Token;
         try
@@ -91,7 +92,7 @@ public partial class MainWindow
                 foreach (var entry in known) byPath.TryAdd(entry.Path, entry);
                 for (var i = 0; i < listed.Count; i++)
                     if (byPath.TryGetValue(listed[i].Path, out var old) && ExplorerEntryList.SameListing(old, listed[i])) listed[i] = old;
-                if (probeDimensions) ExplorerModel.ProbeDimensions(listed, token);
+                if (probeDimensions) ExplorerModel.ProbeForSort(listed, probeKey, token);
                 return listed;
             }, token);
             if (version != Volatile.Read(ref _explorerInPlaceVersion) || generation != Volatile.Read(ref _browserGeneration) ||
@@ -152,6 +153,7 @@ public partial class MainWindow
         _browserSelectionAnchor = _browserCurrentIndex;
         foreach (var tile in RealizedExplorerTiles()) UpdateExplorerTileVisual(tile);
         UpdateExplorerStatus();
+        RefreshTagSidebarAfterListing();
 
         if (_explorerPendingRename is { } renamePath)
         {

@@ -1,7 +1,9 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
+using Avalonia.Media;
 using Glide.Core.Settings;
+using Glide.Core.Workspace;
 
 namespace Glide.App;
 
@@ -20,6 +22,25 @@ public partial class MainWindow
 
     /// <summary>The alignment of the settings card matching the current tab layout.</summary>
     internal string EffectiveTextOverlayAlignment => OverlayOptionsView.PictureCounterAlignment(SideTabsActive);
+
+    /// <summary>
+    /// Whether the text overlay shows now: "Show text overlay" is on, Overlay mode is off, and it describes a picture that is on
+    /// screen. Over the picture it lives in the picture view, which is hidden in an Explorer or Welcome tab; in the title bar or
+    /// the tab pane it would stay on screen with the last picture's text (5.1.7 UI test, point 13), so it hides there too.
+    /// </summary>
+    internal bool TextOverlayWanted => OverlayOptionsView.PictureCounterEnabled && !_wholeAppOverlayMode
+        && (TextOverlayPlacements.IsOverPicture(EffectiveTextOverlayPlacement) || _workspace.Active is ImageTabState);
+
+    /// <summary>Re-evaluates <see cref="TextOverlayWanted"/>; called when the active tab or surface changes.</summary>
+    private void UpdateTextOverlayVisibility()
+    {
+        if (CornerCounterHost is null) return;
+        var wanted = TextOverlayWanted;
+        if (CornerCounterHost.IsVisible == wanted) return;
+        CornerCounterHost.IsVisible = wanted;
+        ReserveSideTabSpaceForTextOverlay();
+        LayoutTitleBarTextOverlay();
+    }
 
     /// <summary>Moves the text overlay to its place; returns true when it is over the picture (normal layout applies).</summary>
     private bool PlaceTextOverlay()
@@ -45,6 +66,7 @@ public partial class MainWindow
                     UpdateTextOverlayPictureMargin();
             };
             ImageView.SizeChanged += (_, _) => UpdateTextOverlayPictureMargin();
+            CornerCounterHost.SizeChanged += (_, _) => ApplyTextOverlayPictureOffset();
         }
         if (!overPicture)
         {
@@ -90,6 +112,9 @@ public partial class MainWindow
         return new Thickness(TextOverlayPictureSideGap, 0, TextOverlayPictureSideGap, TextOverlayBottomInset());
     }
 
+    /// <summary>The overlay never rests closer than this to the picture area's edge when clamped or dragged: flush against the window edge its last glyph was cut off.</summary>
+    internal const double TextOverlayClampInset = 4;
+
     private const double TextOverlayPictureSideGap = 15;
     private const double TextOverlayPictureTopGap = 28;
 
@@ -98,9 +123,22 @@ public partial class MainWindow
 
     private void UpdateTextOverlayPictureMargin()
     {
-        if (CornerCounterHost is null || !ReferenceEquals(CornerCounterHost.Parent, ImageView)) return;
+        if (CornerCounterHost is null || !ReferenceEquals(CornerCounterHost.Parent, ImageView) || _textOverlayDragPointer is not null) return;
         var wanted = TextOverlayPictureMargin();
         if (CornerCounterHost.Margin != wanted) CornerCounterHost.Margin = wanted;
+        ApplyTextOverlayPictureOffset();
+    }
+
+    /// <summary>Round 4 B3: the saved offset, limited so the overlay stays inside the picture area.</summary>
+    private void ApplyTextOverlayPictureOffset()
+    {
+        if (CornerCounterHost is null || !ReferenceEquals(CornerCounterHost.Parent, ImageView) || _textOverlayDragPointer is not null) return;
+        var (x, y) = OverlayOptionsView.PictureCounterOffset(SideTabsActive);
+        (x, y) = TextOverlayLayout.ClampOffset(OverlayOptionsView.PictureCounterAnchor(SideTabsActive), ImageView.Bounds.Width, ImageView.Bounds.Height,
+            CornerCounterHost.Bounds.Width, CornerCounterHost.Bounds.Height, x, y, TextOverlayPictureSideGap, TextOverlayPictureTopGap, TextOverlayBottomInset(), TextOverlayClampInset);
+        var current = CornerCounterHost.RenderTransform as TranslateTransform;
+        if (x == 0 && y == 0) { if (current is not null) CornerCounterHost.RenderTransform = null; return; }
+        if (current is null || current.X != x || current.Y != y) CornerCounterHost.RenderTransform = new TranslateTransform(x, y);
     }
 
     /// <summary>The side tab pane leaves room for the text overlay at its top or bottom; also follows pane visibility (auto-hide).</summary>

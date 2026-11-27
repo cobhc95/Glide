@@ -676,8 +676,13 @@ public sealed class VideoCodecDetectionTests
 [Trait("Area", "Video")]
 public sealed class NoBundledVideoDecoderTests
 {
-    // The only source allowed to name it: the cleanup that deletes what older versions downloaded.
-    private static readonly string[] Allowed = [Path.Combine("src", "Glide.Core", "Reset", "LegacyVideoDecoderCleanup.cs")];
+    // The sources allowed to name it: the cleanup that deletes what older versions downloaded, and the developer-only
+    // format-audit fixture generator, which calls an ffmpeg the developer has on PATH (never bundled, never shipped).
+    private static readonly string[] Allowed =
+    [
+        Path.Combine("src", "Glide.Core", "Reset", "LegacyVideoDecoderCleanup.cs"),
+        Path.Combine("tools", "perf", "generate_format_fixtures.py"),
+    ];
 
     [Fact]
     public void No_source_or_build_script_mentions_ffmpeg()

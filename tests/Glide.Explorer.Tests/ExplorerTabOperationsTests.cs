@@ -83,7 +83,7 @@ public sealed class ExplorerTabOperationsTests
             var menu = h.ActiveMenu!;
             Assert.Equal(new[]
             {
-                "Open all 2 in new tabs", "-", "Cut", "Copy", "Copy 2 paths", "-", "Delete 2 items", "-", "Properties of b.png"
+                "Open all 2 in new tabs", "-", "Cut", "Copy", "Copy 2 paths", "-", "Rename 2 items…", "Delete 2 items", "-", "Properties of b.png"
             }, Headers(menu));
             return Task.CompletedTask;
         });

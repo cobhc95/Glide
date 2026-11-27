@@ -59,6 +59,7 @@ internal static class SettingsService
             previous = _current;
             _current = snapshot;
         }
+        ThumbnailCacheSettings.Apply(snapshot);
         Changed?.Invoke(null, new SettingsChangedEventArgs(previous, snapshot, delta));
     }
 

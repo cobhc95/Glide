@@ -10,6 +10,7 @@ using Avalonia.VisualTree;
 using System.Diagnostics;
 using Glide.Core;
 using Glide.Imaging;
+using ResizeMode = Glide.App.Controls.OverlayResizeMode;
 
 namespace Glide.App.Controls;
 
@@ -40,8 +41,6 @@ public sealed class WindowInWindowOverlayManager : IDisposable
         public bool AvoidOverlap = true;
         public long MotionRevision;
     }
-
-    private enum ResizeMode { Proportional, WidthOnly, HeightOnly }
 
     private readonly LegacyOverlaySurface _surface;
     private readonly Control _inputHost;
@@ -108,6 +107,8 @@ public sealed class WindowInWindowOverlayManager : IDisposable
     public int AnimationRefreshRateHz { get; set; } = 144;
     public Action<string>? OpenFileLocationRequested { get; set; }
     public Action<string>? OpenInNewTabRequested { get; set; }
+    /// <summary>Round 4 D5: the "Open in new tab" header with its held-key hint.</summary>
+    public Func<string>? OpenInNewTabLabel { get; set; }
     public Action<string>? OpenWithRequested { get; set; }
     public event Action<bool>? ContextMenuVisibilityChanged;
     public Func<Size, Rect?>? ImageRectForSize { get; set; }
@@ -712,9 +713,11 @@ public sealed class WindowInWindowOverlayManager : IDisposable
         {
             var size = item.Bitmap.PixelSize; var pw = Math.Max(1.0, size.Width); var ph = Math.Max(1.0, size.Height);
             var z = Math.Clamp(s.Zoom, 1.0, 16.0);
-            var baseScale = s.ContentScale > 0.000001 ? s.ContentScale : Math.Max(0.0001, Math.Min(s.Width / pw, s.Height / ph));
+            // Preserve aspect ratio off: the whole picture is stretched (non-uniformly) over the frame.
+            var baseScale = !s.PreserveAspectRatio ? 1.0 : s.ContentScale > 0.000001 ? s.ContentScale : Math.Max(0.0001, Math.Min(s.Width / pw, s.Height / ph));
             var scale = baseScale * z;
-            var sw = Math.Min(pw, Math.Max(1.0, s.Width / scale)); var sh = Math.Min(ph, Math.Max(1.0, s.Height / scale));
+            var sw = !s.PreserveAspectRatio ? Math.Max(1.0, pw / z) : Math.Min(pw, Math.Max(1.0, s.Width / scale));
+            var sh = !s.PreserveAspectRatio ? Math.Max(1.0, ph / z) : Math.Min(ph, Math.Max(1.0, s.Height / scale));
             var centerX = 0.5 - s.PanX / Math.Max(1.0, s.Width * z); var centerY = 0.5 - s.PanY / Math.Max(1.0, s.Height * z);
             var halfX = sw / (2 * pw); var halfY = sh / (2 * ph); centerX = Math.Clamp(centerX, halfX, 1-halfX); centerY = Math.Clamp(centerY, halfY, 1-halfY);
             return new Rect(Math.Clamp(centerX*pw-sw/2,0,Math.Max(0,pw-sw)), Math.Clamp(centerY*ph-sh/2,0,Math.Max(0,ph-sh)), sw, sh);
@@ -723,86 +726,28 @@ public sealed class WindowInWindowOverlayManager : IDisposable
 
     private void DrawChrome(DrawingContext context, OverlayState s, bool isInteracting = false, VideoOverlaySession? video = null)
     {
-        var accent = AccentBrush;
-        if (isInteracting)
-        {
-            var glow = new SolidColorBrush(Color.FromArgb(64, 56, 184, 244));
-            context.DrawRectangle(glow, null, new Rect(s.X - 2, s.Y - 2, s.Width + 4, s.Height + 4), 9, 9);
-        }
-        var panel = new SolidColorBrush(Color.FromArgb(225, 32, 36, 42));
-        var glass = new SolidColorBrush(Color.FromArgb(205, 45, 50, 58));
-        var text = Brushes.White;
-        var rect = new Rect(s.X, s.Y, s.Width, s.Height);
-        context.DrawRectangle(null, new Pen(accent, 1.35), rect, 7, 7);
-
-        var close = CloseRect(s);
-        var cc = close.Center;
-        context.DrawEllipse(panel, null, cc, 13, 13);
-        context.DrawLine(new Pen(text, 1.8), new Point(cc.X - 4, cc.Y - 4), new Point(cc.X + 4, cc.Y + 4));
-        context.DrawLine(new Pen(text, 1.8), new Point(cc.X + 4, cc.Y - 4), new Point(cc.X - 4, cc.Y + 4));
-
-        var resize = ResizeRectVisual(s);
-        context.DrawRectangle(glass, null, resize, 5, 5);
-        for (var k = 0; k < 3; k++)
-            context.DrawLine(new Pen(accent, 1.25),
-                new Point(rect.Right - 7 - k * 5, rect.Bottom - 5),
-                new Point(rect.Right - 5, rect.Bottom - 7 - k * 5));
-
-        // The lower-right corner remains the true resize control. The centred right and top
-        // handles are crop controls: they change only the overlay viewport on one axis while the
-        // image scale/zoom stays fixed.
-        var widthHandle = ResizeWidthRect(s);
-        var heightHandle = ResizeHeightRect(s);
-        context.DrawRectangle(glass, new Pen(accent, 1.2), widthHandle, 6, 6);
-        context.DrawRectangle(glass, new Pen(accent, 1.2), heightHandle, 6, 6);
-
-        // Right-middle: horizontal resize button ↔
-        var wc = widthHandle.Center;
-        context.DrawLine(new Pen(text, 2), new Point(wc.X - 7, wc.Y), new Point(wc.X + 7, wc.Y));
-        context.DrawLine(new Pen(text, 2), new Point(wc.X - 7, wc.Y), new Point(wc.X - 3, wc.Y - 4));
-        context.DrawLine(new Pen(text, 2), new Point(wc.X - 7, wc.Y), new Point(wc.X - 3, wc.Y + 4));
-        context.DrawLine(new Pen(text, 2), new Point(wc.X + 7, wc.Y), new Point(wc.X + 3, wc.Y - 4));
-        context.DrawLine(new Pen(text, 2), new Point(wc.X + 7, wc.Y), new Point(wc.X + 3, wc.Y + 4));
-
-        // Top-middle: vertical resize button ↕
-        var hc = heightHandle.Center;
-        context.DrawLine(new Pen(text, 2), new Point(hc.X, hc.Y - 6), new Point(hc.X, hc.Y + 6));
-        context.DrawLine(new Pen(text, 2), new Point(hc.X, hc.Y - 6), new Point(hc.X - 4, hc.Y - 2));
-        context.DrawLine(new Pen(text, 2), new Point(hc.X, hc.Y - 6), new Point(hc.X + 4, hc.Y - 2));
-        context.DrawLine(new Pen(text, 2), new Point(hc.X, hc.Y + 6), new Point(hc.X - 4, hc.Y + 2));
-        context.DrawLine(new Pen(text, 2), new Point(hc.X, hc.Y + 6), new Point(hc.X + 4, hc.Y + 2));
-
-        var slider = SliderRect(s);
-        context.DrawRectangle(glass, null, slider, 10, 10);
-        var sliderX = slider.Center.X;
-        context.DrawLine(new Pen(text, 2), new Point(sliderX, slider.Top + 10), new Point(sliderX, slider.Bottom - 10));
-        var ty = slider.Bottom - 10 - (slider.Height - 20) * s.Opacity;
-        context.DrawEllipse(accent, null, new Point(sliderX, ty), 5, 5);
-
-        DrawZoomButton(context, ZoomOutRect(s), false, glass, accent, text);
-        DrawZoomButton(context, ZoomInRect(s), true, glass, accent, text);
+        // Shared with Overlay mode (LegacyOverlayChrome) and the compositor renderer: one chrome look (round 4 K1).
+        var accentColor = (AccentBrush as ISolidColorBrush)?.Color ?? Color.FromRgb(0x36, 0xB8, 0xF4);
+        OverlayFrameChromePainter.Draw(context, BuildChromeSpec(s, isInteracting), accentColor);
         if (video is not null)
             OverlayVideoChromePainter.Draw(context, new Rect(s.X, s.Y, s.Width, s.Height),
                 new OverlayVideoChrome(video.Progress, video.Info.Playing && !video.Info.Ended, video.Info.Muted, video.Info.Volume),
-                (accent as ISolidColorBrush)?.Color ?? Color.FromRgb(0x36, 0xB8, 0xF4));
+                accentColor);
     }
 
-    private static void DrawZoomButton(DrawingContext context, Rect rect, bool plus, IBrush fill, IBrush accent, IBrush text)
-    {
-        context.DrawRectangle(fill, new Pen(accent, 1.2), rect, 7, 7);
-        var c = rect.Center;
-        context.DrawLine(new Pen(text, 2), new Point(c.X - 5, c.Y), new Point(c.X + 5, c.Y));
-        if (plus) context.DrawLine(new Pen(text, 2), new Point(c.X, c.Y - 5), new Point(c.X, c.Y + 5));
-    }
+    internal static OverlayFrameChromeSpec BuildChromeSpec(OverlayState s, bool glow) =>
+        // The same builder Overlay mode uses; the lower-right corner is the true resize control and the centred right and top
+        // handles change only one axis (the overlay viewport; image scale/zoom stays fixed).
+        OverlayFrameGeometry.BuildSpec(Frame(s), s.Opacity, glow, s.IsVideo);
 
-    private static Rect CloseRect(OverlayState s) => new(s.X + s.Width - 34, s.Y + 7, 27, 27);
-    private static Rect ResizeRect(OverlayState s) => new(s.X + s.Width - 36, s.Y + s.Height - 36, 40, 40);
-    private static Rect ResizeRectVisual(OverlayState s) => new(s.X + s.Width - 28, s.Y + s.Height - 28, 24, 24);
-    private static Rect ResizeWidthRect(OverlayState s) => new(s.X + s.Width - 22, s.Y + s.Height / 2 - 22, 22, 44);
-    private static Rect ResizeHeightRect(OverlayState s) => new(s.X + s.Width / 2 - 22, s.Y, 44, 22);
-    private static Rect SliderRect(OverlayState s) => ToHost(s, OverlayVideoChromeLayout.OpacitySlider(s.Width, s.Height, s.IsVideo));
-    private static Rect ZoomOutRect(OverlayState s) => ToHost(s, OverlayVideoChromeLayout.ZoomOut(s.Width, s.Height, s.IsVideo));
-    private static Rect ZoomInRect(OverlayState s) => ToHost(s, OverlayVideoChromeLayout.ZoomIn(s.Width, s.Height, s.IsVideo));
+    private static Rect Frame(OverlayState s) => new(s.X, s.Y, s.Width, s.Height);
+    private static Rect CloseRect(OverlayState s) => OverlayFrameGeometry.Close(Frame(s));
+    private static Rect ResizeRect(OverlayState s) => OverlayFrameGeometry.GripHit(Frame(s));
+    private static Rect ResizeWidthRect(OverlayState s) => OverlayFrameGeometry.WidthHandle(Frame(s));
+    private static Rect ResizeHeightRect(OverlayState s) => OverlayFrameGeometry.HeightHandle(Frame(s));
+    private static Rect SliderRect(OverlayState s) => OverlayFrameGeometry.Slider(Frame(s), s.IsVideo);
+    private static Rect ZoomOutRect(OverlayState s) => OverlayFrameGeometry.ZoomOut(Frame(s), s.IsVideo);
+    private static Rect ZoomInRect(OverlayState s) => OverlayFrameGeometry.ZoomIn(Frame(s), s.IsVideo);
     private static Rect NavigationBarRect(OverlayState s) => s.IsVideo ? ToHost(s, OverlayVideoChromeLayout.NavigationBar(s.Width, s.Height)) : default;
     private static Rect PlayPauseRect(OverlayState s) => s.IsVideo ? ToHost(s, OverlayVideoChromeLayout.PlayPauseButton(s.Width, s.Height)) : default;
     private static Rect MuteRect(OverlayState s) => s.IsVideo ? ToHost(s, OverlayVideoChromeLayout.MuteButton(s.Width, s.Height)) : default;
@@ -999,10 +944,6 @@ public sealed class WindowInWindowOverlayManager : IDisposable
                 var current = EnsureContentScale(_items[i].State, bitmap);
                 var dx = p.X - resize.Origin.X;
                 var dy = p.Y - resize.Origin.Y;
-                var requestedWidth = Math.Max(80, resize.Width + dx);
-                var requestedHeight = resize.Mode == ResizeMode.HeightOnly
-                    ? Math.Max(60, resize.Height - dy)
-                    : Math.Max(60, resize.Height + dy);
 
                 if (resize.Mode is ResizeMode.WidthOnly or ResizeMode.HeightOnly)
                 {
@@ -1013,30 +954,29 @@ public sealed class WindowInWindowOverlayManager : IDisposable
                     // image edge simply stops rather than stretching or zooming the picture.
                     var pixelSize = bitmap.PixelSize;
                     var renderedScale = Math.Max(0.0001, resize.ContentScale) * Math.Clamp(current.Zoom, 1.0, 16.0);
-                    var naturalMaxWidth = Math.Max(80.0, Math.Max(1.0, pixelSize.Width) * renderedScale);
-                    var naturalMaxHeight = Math.Max(60.0, Math.Max(1.0, pixelSize.Height) * renderedScale);
+                    // Ratio off: the edges stretch the picture, so there is nothing to run out of.
+                    var naturalMaxWidth = current.PreserveAspectRatio ? Math.Max(80.0, Math.Max(1.0, pixelSize.Width) * renderedScale) : double.PositiveInfinity;
+                    var naturalMaxHeight = current.PreserveAspectRatio ? Math.Max(60.0, Math.Max(1.0, pixelSize.Height) * renderedScale) : double.PositiveInfinity;
+                    // The size rules are shared with Overlay mode's window resize (OverlayResizeMath).
+                    var size = OverlayResizeMath.Compute(resize.Mode, resize.Width, resize.Height, dx, dy, current.PreserveAspectRatio, naturalMaxWidth, naturalMaxHeight);
 
                     if (resize.Mode == ResizeMode.WidthOnly)
                     {
-                        var maxWidth = Math.Max(resize.Width, naturalMaxWidth);
-                        var width = Math.Clamp(requestedWidth, 80.0, maxWidth);
                         SetState(i, ClampTransform(current with
                         {
-                            Width = width,
+                            Width = size.Width,
                             Height = resize.Height,
                             ContentScale = resize.ContentScale
                         }, bitmap));
                     }
                     else
                     {
-                        var maxHeight = Math.Max(resize.Height, naturalMaxHeight);
-                        var height = Math.Clamp(requestedHeight, 60.0, maxHeight);
                         var bottom = current.Y + current.Height;
                         SetState(i, ClampTransform(current with
                         {
-                            Y = bottom - height,
+                            Y = bottom - size.Height,
                             Width = resize.Width,
-                            Height = height,
+                            Height = size.Height,
                             ContentScale = resize.ContentScale
                         }, bitmap));
                     }
@@ -1044,24 +984,11 @@ public sealed class WindowInWindowOverlayManager : IDisposable
                 }
                 else
                 {
-                    double width;
-                    double height;
-                    if (current.PreserveAspectRatio)
-                    {
-                        // The lower-right corner is the proportional resize control. Choose the
-                        // stronger drag axis so it remains responsive while preserving aspect ratio.
-                        var sx = requestedWidth / Math.Max(1.0, resize.Width);
-                        var sy = requestedHeight / Math.Max(1.0, resize.Height);
-                        var scale = Math.Abs(sx - 1.0) >= Math.Abs(sy - 1.0) ? sx : sy;
-                        scale = Math.Clamp(double.IsFinite(scale) ? scale : 1.0, 0.05, 20.0);
-                        width = Math.Max(80, resize.Width * scale);
-                        height = Math.Max(60, resize.Height * scale);
-                    }
-                    else
-                    {
-                        width = requestedWidth;
-                        height = requestedHeight;
-                    }
+                    // The lower-right corner is the proportional resize control. It chooses the
+                    // stronger drag axis so it remains responsive while preserving aspect ratio.
+                    var size = OverlayResizeMath.Compute(resize.Mode, resize.Width, resize.Height, dx, dy, current.PreserveAspectRatio);
+                    var width = size.Width;
+                    var height = size.Height;
 
                     // Corner resizing changes the rendered image scale with the overlay. Zoom itself
                     // is deliberately left alone, preventing resize feedback from multiplying Zoom
@@ -1213,8 +1140,7 @@ public sealed class WindowInWindowOverlayManager : IDisposable
     {
         var i = FindIndex(id); if (i < 0) return;
         var slider = SliderRect(_items[i].State);
-        var t = (slider.Bottom - 10 - y) / Math.Max(1.0, slider.Height - 20);
-        SetState(i, _items[i].State with { Opacity = Math.Clamp(t, .1, 1.0) });
+        SetState(i, _items[i].State with { Opacity = OverlayFrameGeometry.OpacityFromY(slider, y, OverlayChromePolicy.MinimumOpacity) });
         Invalidate();
     }
 
@@ -1323,7 +1249,7 @@ public sealed class WindowInWindowOverlayManager : IDisposable
             Item("Open file location in Explorer", () => { var i = FindIndex(id); if (i >= 0) OpenFileLocationRequested?.Invoke(_items[i].State.Path); }, "FolderLocate")
         };
         if (video is null)
-            openItems.Add(Item("Open in new tab", () => { var i = FindIndex(id); if (i >= 0) OpenInNewTabRequested?.Invoke(_items[i].State.Path); }, "Tabs"));
+            openItems.Add(Item(OpenInNewTabLabel?.Invoke() ?? "Open in new tab", () => { var i = FindIndex(id); if (i >= 0) OpenInNewTabRequested?.Invoke(_items[i].State.Path); }, "Tabs"));
         openItems.Add(Item("Open with external program...", () => { var i = FindIndex(id); if (i >= 0) OpenWithRequested?.Invoke(_items[i].State.Path); }, "OpenWith"));
         items.Add(Group("Open", "Open", openItems.ToArray()));
 
@@ -1383,7 +1309,12 @@ public sealed class WindowInWindowOverlayManager : IDisposable
     {
         var i = FindIndex(id);
         if (i < 0) return;
-        SetState(i, _items[i].State with { PreserveAspectRatio = !_items[i].State.PreserveAspectRatio });
+        var state = _items[i].State;
+        var preserve = !state.PreserveAspectRatio;
+        // Back to ratio on: restart from a scale that covers the frame (no distortion), then the edges crop again.
+        if (preserve && _items[i].Bitmap is { } bitmap)
+            state = state with { ContentScale = Math.Max(0.0001, Math.Max(state.Width / Math.Max(1.0, bitmap.PixelSize.Width), state.Height / Math.Max(1.0, bitmap.PixelSize.Height))) };
+        SetState(i, state with { PreserveAspectRatio = preserve });
         Invalidate();
     }
 

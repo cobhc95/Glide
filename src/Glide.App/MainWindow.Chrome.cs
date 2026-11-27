@@ -25,16 +25,96 @@ public partial class MainWindow
         UpdatePictureCounter();
         UpdateStatusStats();
         UpdatePictureAddressRow();
+        RefreshTagSidebarTargets();
+        // The window title carries the same "[n/total]" as the overlay and the status bar. The folder list completes after the
+        // first frame (a tab dragged into another window shows "[1/1]" until the folder is indexed again), so it follows them.
+        UpdateWindowTitle();
     }
 
     private void UpdatePictureCounter()
     {
         if (CornerCounterText is null || CornerCounterShadowText is null) return;
         var model = CurrentViewerStatus();
-        var text = ApplyTextOverlayLineBreaks(ViewerStatusFormatter.CounterText(model, OverlayOptionsView.PictureCounterTemplate));
-        CornerCounterText.Text = text;
+        // Round 4 B5: the template of the position in use; B6: {sep} and its colour; C1: {modified} / {taken} dates.
+        var style = OverlayOptionsView.Style(EffectiveTextOverlayPlacement);
+        var template = style.Template;
+        if (TextTemplate.Uses(template, "modified") || TextTemplate.Uses(template, "taken"))
+            model = model with { Modified = TextOverlayModifiedDate(model.Path), Taken = TextOverlayTakenDate(model.Path) };
+        var separator = OverlayOptionsView.Separator;
+        var segments = TextTemplate.Segments(string.IsNullOrWhiteSpace(template) ? ViewerStatusFormatter.DefaultCounterTemplate : template,
+            ViewerStatusFormatter.Values(model), separator);
+        var parts = segments.Select(s => s.IsSeparator ? s : s with { Text = ApplyTextOverlayLineBreaks(s.Text) }).ToList();
+        if (style.SingleLine)   // the title bar keeps to one line: each line break becomes a separator
+            parts = parts.SelectMany(s => s.IsSeparator || !s.Text.Contains('\n') ? new[] { s } : SplitLines(s.Text, separator)).ToList();
+        var text = string.Concat(parts.Select(s => s.Text));
         CornerCounterShadowText.Text = text;
+        var sepBrush = SeparatorBrush();
+        if (sepBrush is null || !parts.Any(p => p.IsSeparator))
+        {
+            CornerCounterText.Inlines?.Clear();
+            CornerCounterText.Text = text;
+        }
+        else
+        {
+            CornerCounterText.Text = null;
+            var inlines = new Avalonia.Controls.Documents.InlineCollection();
+            foreach (var part in parts)
+                inlines.Add(part.IsSeparator ? new Avalonia.Controls.Documents.Run(part.Text) { Foreground = sepBrush } : new Avalonia.Controls.Documents.Run(part.Text));
+            CornerCounterText.Inlines = inlines;
+        }
         UpdateFolderCounter(ViewerStatusFormatter.FolderPathOf(model.Path));
+    }
+
+    private static IEnumerable<TemplateSegment> SplitLines(string text, string? separator)
+    {
+        var lines = text.Split('\n');
+        for (var i = 0; i < lines.Length; i++)
+        {
+            if (i > 0) yield return new TemplateSegment(TextTemplate.SeparatorText(separator), true);
+            if (lines[i].Length > 0) yield return new TemplateSegment(lines[i], false);
+        }
+    }
+
+    /// <summary>"Text overlay separator colour": null = the same as the text.</summary>
+    private IBrush? SeparatorBrush() => OverlayOptionsView.SeparatorColor switch
+    {
+        TextOverlayStyle.SameAsText or null or "" => null,
+        var c => new SolidColorBrush(Color.Parse(TextOverlayColourHex(c)))
+    };
+
+    private string TextOverlayColourHex(string? choice) => choice switch
+    {
+        "Soft gray" => IsDarkTheme() ? "#D2D8DE" : "#56616B",
+        "Accent" => CurrentAccentHex(),
+        "Amber" => "#F1B84B",
+        _ => IsDarkTheme() ? "#FFFFFF" : "#20262C"
+    };
+
+    // Round 4 C1: {modified} reads the file time; {taken} the EXIF date, read once per picture off the UI thread.
+    private (string Path, DateTime? Taken)? _textOverlayTaken;
+    private string? _textOverlayTakenPending;
+
+    private static DateTime? TextOverlayModifiedDate(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return null;
+        try { return File.Exists(path) ? File.GetLastWriteTime(path) : null; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return null; }
+    }
+
+    private DateTime? TextOverlayTakenDate(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return null;
+        if (_textOverlayTaken is { } cached && string.Equals(cached.Path, path, StringComparison.OrdinalIgnoreCase)) return cached.Taken;
+        if (string.Equals(_textOverlayTakenPending, path, StringComparison.OrdinalIgnoreCase)) return null;
+        _textOverlayTakenPending = path;
+        _ = Task.Run(() => Glide.Imaging.ImageMetadataReader.Read(path).Captured?.DateTime).ContinueWith(t =>
+            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+            {
+                _textOverlayTaken = (path, t.IsCompletedSuccessfully ? t.Result : null);
+                if (string.Equals(_textOverlayTakenPending, path, StringComparison.OrdinalIgnoreCase)) _textOverlayTakenPending = null;
+                if (string.Equals(_currentPath, path, StringComparison.OrdinalIgnoreCase)) UpdatePictureCounter();
+            }), TaskScheduler.Default);
+        return null;
     }
 
     /// <summary><c>&lt;br&gt;</c> (also <c>&lt;br/&gt;</c>, <c>&lt;br /&gt;</c>, any case) and the typed two-character
@@ -81,7 +161,7 @@ public partial class MainWindow
                 {
                     var parents = SiblingFolderNavigationService.EnumerateChildDirectories(grand, options, parent);
                     var parentIndex = Array.FindIndex(parents, p => string.Equals(p.TrimEnd(Path.DirectorySeparatorChar), parent.TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase));
-                    if (parentIndex >= 0) value += $"/{parentIndex + 1}";
+                    if (parentIndex >= 0) value += $" - ({parentIndex + 1}/{parents.Length})";
                 }
                 return value;
             }
@@ -96,7 +176,8 @@ public partial class MainWindow
     private void ApplyPictureCounterVisuals()
     {
         if (CornerCounterHost is null) return;
-        var size = Math.Clamp(OverlayOptionsView.PictureCounterFontSize, 8, 48);
+        var style = OverlayOptionsView.Style(EffectiveTextOverlayPlacement);   // round 4 B5: the look of the position in use
+        var size = Math.Clamp(style.FontSize, 8, 48);
         CornerCounterText.FontSize = size;
         CornerCounterShadowText.FontSize = size;
         var weight = OverlayOptionsView.PictureCounterBold ? FontWeight.SemiBold : FontWeight.Normal;
@@ -104,19 +185,13 @@ public partial class MainWindow
         CornerCounterShadowText.FontWeight = weight;
         CornerCounterText.Opacity = Math.Clamp(OverlayOptionsView.PictureCounterOpacity, 10, 100) / 100.0;
         CornerCounterShadowText.Opacity = OverlayOptionsView.PictureCounterShadow ? CornerCounterText.Opacity * 0.85 : 0;
-        var colour = OverlayOptionsView.PictureCounterColor switch
-        {
-            "Soft gray" => IsDarkTheme() ? "#D2D8DE" : "#56616B",
-            "Accent" => CurrentAccentHex(),
-            "Amber" => "#F1B84B",
-            _ => IsDarkTheme() ? "#FFFFFF" : "#20262C"
-        };
+        var colour = TextOverlayColourHex(style.Color);
         CornerCounterText.Foreground = new SolidColorBrush(Color.Parse(colour));
         FolderCounterText.Foreground = CornerCounterText.Foreground;
         FolderCounterText.FontSize = size;
         FolderCounterText.FontWeight = weight;
         FolderCounterText.Opacity = CornerCounterText.Opacity * 0.7;
-        ApplyTextOverlayBorder();
+        ApplyTextOverlayBorder(style.Border);
         if (!PlaceTextOverlay())
         {
             // In the side tab pane or the title bar: no picture position, margins or offsets. The lines form one block:
@@ -137,9 +212,8 @@ public partial class MainWindow
             ? Avalonia.Layout.VerticalAlignment.Bottom
             : Avalonia.Layout.VerticalAlignment.Top;
         ApplyTextOverlayAlignment(EffectiveTextOverlayAlignment);   // the alignment of the card for the current tab layout
-        var (offsetX, offsetY) = OverlayOptionsView.PictureCounterOffset(SideTabsActive);
-        CornerCounterHost.RenderTransform = offsetX == 0 && offsetY == 0 ? null : new TranslateTransform(offsetX, offsetY);
         CornerCounterHost.Margin = TextOverlayPictureMargin();
+        ApplyTextOverlayPictureOffset();
         UpdatePictureCounter();
     }
 
@@ -176,9 +250,9 @@ public partial class MainWindow
     /// "Text overlay border": one box around every line of the overlay (the counter and the folder position line), styled
     /// like the Image information panel; a light box in the light theme so the overlay colours stay readable.
     /// </summary>
-    private void ApplyTextOverlayBorder()
+    private void ApplyTextOverlayBorder(bool border)
     {
-        if (!OverlayOptionsView.PictureCounterBorder)
+        if (!border)
         {
             CornerCounterHost.Background = null;
             CornerCounterHost.BorderBrush = null;

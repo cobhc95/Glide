@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 #include <new>
 #include <thread>
 #include <vector>
@@ -188,6 +189,30 @@ namespace
         px[0] = Premul(b, a); px[1] = Premul(g, a); px[2] = Premul(r, a); px[3] = static_cast<std::uint8_t>(a);
     }
 
+    // Runs f(yBegin, yEnd) over [0, rows) on up to DecodeThreads() threads when the surface is large (5.2.0: the RGB -> BGRA
+    // conversion of a decoded HEIC / JPEG XL picture was a single-threaded 15 - 25 ms pass over 12 MP). Nothing a worker touches can throw.
+    template <class F>
+    void ForRowBands(std::uint32_t rows, std::uint64_t pixels, F&& f)
+    {
+        const std::uint32_t bands = pixels >= (1u << 20) ? std::min(DecodeThreads(), rows) : 1u;
+        if (bands <= 1) { f(0u, rows); return; }
+        auto run = [&](std::uint32_t band)
+        {
+            f(static_cast<std::uint32_t>(static_cast<std::uint64_t>(rows) * band / bands), static_cast<std::uint32_t>(static_cast<std::uint64_t>(rows) * (band + 1) / bands));
+        };
+        std::vector<std::thread> workers;
+        std::uint32_t started = 1;
+        try
+        {
+            workers.reserve(bands - 1);
+            for (; started < bands; ++started) workers.emplace_back(run, started);
+        }
+        catch (...) { /* the bands that could not start run below */ }
+        run(0);
+        for (std::uint32_t band = started; band < bands; ++band) run(band);
+        for (auto& worker : workers) worker.join();
+    }
+
     struct DownscaleSpan { std::uint32_t first, last; float wFirst, wLast; };
 
     // Output rows [yStart, yEnd) of an area-average downscale; `accRow` is this band's own float row.
@@ -345,18 +370,58 @@ namespace
         if (heif_image_get_bits_per_pixel_range(img, heif_channel_interleaved) != 8) return false;
         if (!req.image.Allocate(static_cast<std::uint32_t>(w), static_cast<std::uint32_t>(h))) return false;
         const bool premultiplied = heif_image_is_premultiplied_alpha(img) != 0;
-        for (int y = 0; y < h; ++y)
+        ForRowBands(static_cast<std::uint32_t>(h), static_cast<std::uint64_t>(w) * h, [&](std::uint32_t yBegin, std::uint32_t yEnd)
         {
-            const std::uint8_t* s = plane + stride * static_cast<size_t>(y);
-            std::uint8_t* d = req.image.Row(static_cast<std::uint32_t>(y));
-            for (int x = 0; x < w; ++x, s += bpp, d += 4)
+            for (std::uint32_t y = yBegin; y < yEnd; ++y)
             {
-                if (!hasAlpha) { d[0] = s[2]; d[1] = s[1]; d[2] = s[0]; d[3] = 255; }
-                else if (premultiplied) { d[3] = s[3]; d[0] = std::min(s[2], s[3]); d[1] = std::min(s[1], s[3]); d[2] = std::min(s[0], s[3]); }
-                else Store(d, s[0], s[1], s[2], s[3]);
+                const std::uint8_t* s = plane + stride * static_cast<size_t>(y);
+                std::uint8_t* d = req.image.Row(y);
+                for (int x = 0; x < w; ++x, s += bpp, d += 4)
+                {
+                    if (!hasAlpha) { d[0] = s[2]; d[1] = s[1]; d[2] = s[0]; d[3] = 255; }
+                    else if (premultiplied) { d[3] = s[3]; d[0] = std::min(s[2], s[3]); d[1] = std::min(s[1], s[3]); d[2] = std::min(s[0], s[3]); }
+                    else Store(d, s[0], s[1], s[2], s[3]);
+                }
             }
-        }
+        });
         return true;
+    }
+
+    // 5.2.0: a HEIF file often carries a small thumbnail item (iPhone: 320 px, referenced with 'thmb'). When one is at least as large as
+    // the requested preview and has the picture's aspect ratio, decoding it (a few milliseconds) replaces decoding the whole HEVC / AV1
+    // picture (about 100 ms for 12 MP) and then averaging it down. Opaque pictures only: alpha, auxiliary and HDR handling stay on the
+    // primary item. The caller still fits the result to the requested size.
+    bool TryHeifThumbnail(heif_image_handle* primary, int primaryWidth, int primaryHeight, const heif_decoding_options* options, Request& req)
+    {
+        if (req.longestSide == 0 || heif_image_handle_has_alpha_channel(primary)) return false;
+        const int count = heif_image_handle_get_number_of_thumbnails(primary);
+        if (count <= 0 || count > 8) return false;
+        heif_item_id ids[8];
+        const int got = std::min(count, heif_image_handle_get_list_of_thumbnail_IDs(primary, ids, count));
+        heif_image_handle* best = nullptr;
+        int bestLongest = 0;
+        const double aspect = static_cast<double>(primaryWidth) / primaryHeight;
+        for (int i = 0; i < got; ++i)
+        {
+            heif_image_handle* t = nullptr;
+            if (heif_image_handle_get_thumbnail(primary, ids[i], &t).code != heif_error_Ok || !t) continue;
+            const int tw = heif_image_handle_get_width(t), th = heif_image_handle_get_height(t);
+            const int longest = std::max(tw, th);
+            const bool usable = tw > 0 && th > 0 && DimensionsOk(static_cast<std::uint64_t>(tw), static_cast<std::uint64_t>(th)) &&
+                                std::fabs(static_cast<double>(tw) / th - aspect) <= 0.03 * aspect &&
+                                static_cast<std::uint32_t>(longest) >= req.longestSide && !heif_image_handle_has_alpha_channel(t) &&
+                                (best == nullptr || longest < bestLongest);
+            if (!usable) { heif_image_handle_release(t); continue; }
+            if (best) heif_image_handle_release(best);
+            best = t;
+            bestLongest = longest;
+        }
+        if (!best) return false;
+        struct HandleGuard { heif_image_handle* h; ~HandleGuard() { heif_image_handle_release(h); } } guard{ best };
+        heif_image* img = nullptr;
+        if (heif_decode_image(best, &img, heif_colorspace_RGB, heif_chroma_interleaved_RGB, options).code != heif_error_Ok || !img) return false;
+        struct ImgGuard { heif_image* i; ~ImgGuard() { heif_image_release(i); } } imgGuard{ img };
+        return CopyHeifImage(img, false, req);
     }
 
     bool DecodeHeif(const File& file, Request& req)
@@ -403,6 +468,8 @@ namespace
             if (itemType == heif_item_type_grid) options->num_codec_threads = 1;
             else if (itemType == heif_item_type_hvc1) options->num_codec_threads = static_cast<int>(threads);
 
+            if (TryHeifThumbnail(handle, w, h, options, req)) return true;
+            req.image.Reset();
             const bool alpha = heif_image_handle_has_alpha_channel(handle) != 0;
             heif_image* img = nullptr;
             if (heif_decode_image(handle, &img, heif_colorspace_RGB,
@@ -435,8 +502,60 @@ namespace
     // ---------------------------------------------------------------------------------------------
     // JPEG XL via libjxl (decoder only). Input is streamed in chunks; output is 8-bit sRGB when the
     // image is XYB-encoded; libjxl's default colour management (skcms) converts ICC-tagged images to sRGB.
+    // The DC image reaches the caller through libjxl's pixel callback: only the pixel at the centre of every 8 x 8 block is kept, so the
+    // full-size smooth upscale libjxl renders for a flush is never stored (nor converted) as a whole.
+    // Outside a flush (a file without a DC step decodes to its end through the same callback) the pixels are copied into `full`, whose
+    // pages are only committed when they are written, so the DC route never pays for the full-size buffer.
+    struct DcSampler
+    {
+        std::uint32_t width, height, cols, rows, channels;
+        Bgra* out;
+        std::uint8_t* full;
+        bool flushing;
+    };
+
+    void JxlDcCallback(void* opaque, size_t x, size_t y, size_t count, const void* pixels)
+    {
+        auto* s = static_cast<DcSampler*>(opaque);
+        if (y >= s->height || x >= s->width) return;
+        if (!s->flushing)
+        {
+            count = std::min<size_t>(count, s->width - x);
+            std::memcpy(s->full + (y * s->width + x) * s->channels, pixels, count * s->channels);
+            return;
+        }
+        const std::uint32_t j = static_cast<std::uint32_t>(y / 8);
+        if (j >= s->rows || y != std::min<size_t>(static_cast<size_t>(j) * 8 + 4, s->height - 1)) return;
+        const auto* p = static_cast<const std::uint8_t*>(pixels);
+        std::uint8_t* row = s->out->Row(j);
+        const std::uint32_t first = static_cast<std::uint32_t>(x / 8);
+        for (std::uint32_t i = first; i < s->cols; ++i)
+        {
+            const size_t cx = std::min<size_t>(static_cast<size_t>(i) * 8 + 4, s->width - 1);
+            if (cx < x) continue;
+            if (cx >= x + count) break;
+            const std::uint8_t* q = p + (cx - x) * s->channels;
+            std::uint8_t* d = row + static_cast<size_t>(i) * 4;
+            if (s->channels == 1) { d[0] = d[1] = d[2] = q[0]; }
+            else { d[0] = q[2]; d[1] = q[1]; d[2] = q[0]; }
+            d[3] = 255;
+        }
+    }
+
     bool DecodeJxl(const File& file, Request& req)
     {
+        // 5.2.0: a preview of one eighth of the picture or less is served from the DC image (VarDCT keeps one pixel per 8 x 8 block of
+        // the picture in the first groups of the file): libjxl is asked to stop at its DC progression step and flush that image, which
+        // costs a fraction of the full decode. Whether this applies needs the size, so a header-only pass runs first; the progression
+        // event is only subscribed when it does (a non-progressive file or one with alpha just decodes in full, as before).
+        bool wantDc = false;
+        if (!req.probeOnly && req.longestSide > 0)
+        {
+            Request probe;
+            probe.probeOnly = true;
+            if (DecodeJxl(file, probe) && probe.width > 0 && probe.height > 0)
+                wantDc = static_cast<std::uint64_t>(req.longestSide) * 8 * 100 <= static_cast<std::uint64_t>(std::max(probe.width, probe.height)) * 105;
+        }
         JxlDecoder* dec = JxlDecoderCreate(nullptr);
         if (!dec) return false;
         struct DecGuard { JxlDecoder* d; ~DecGuard() { JxlDecoderDestroy(d); } } decGuard{ dec };
@@ -454,8 +573,10 @@ namespace
                 if (JxlDecoderSetParallelRunner(dec, JxlThreadParallelRunner, runner) != JXL_DEC_SUCCESS) return false;
             }
         }
-        const int events = req.probeOnly ? JXL_DEC_BASIC_INFO : (JXL_DEC_BASIC_INFO | JXL_DEC_COLOR_ENCODING | JXL_DEC_FULL_IMAGE);
+        const int events = req.probeOnly ? JXL_DEC_BASIC_INFO
+            : (JXL_DEC_BASIC_INFO | JXL_DEC_COLOR_ENCODING | JXL_DEC_FULL_IMAGE | (wantDc ? JXL_DEC_FRAME_PROGRESSION : 0));
         if (JxlDecoderSubscribeEvents(dec, events) != JXL_DEC_SUCCESS) return false;
+        if (wantDc) JxlDecoderSetProgressiveDetail(dec, kDC);
         JxlDecoderSetKeepOrientation(dec, JXL_FALSE);
         JxlDecoderSetUnpremultiplyAlpha(dec, JXL_TRUE);
 
@@ -468,6 +589,9 @@ namespace
         JxlPixelFormat format{ 4, JXL_TYPE_UINT8, JXL_NATIVE_ENDIAN, 0 };
         std::vector<std::uint8_t> pixels;
         bool gray = false, alpha = false;
+        Bgra dc;
+        DcSampler sampler{};
+        std::unique_ptr<std::uint8_t[]> fullBuffer;
 
         for (;;)
         {
@@ -519,6 +643,16 @@ namespace
             }
             case JXL_DEC_NEED_IMAGE_OUT_BUFFER:
             {
+                if (wantDc && !alpha)
+                {
+                    const size_t bytes = static_cast<size_t>(req.width) * req.height * format.num_channels;
+                    fullBuffer.reset(new (std::nothrow) std::uint8_t[bytes]);
+                    sampler = DcSampler{ req.width, req.height, (req.width + 7) / 8, (req.height + 7) / 8, format.num_channels, &dc, fullBuffer.get(), false };
+                    if (!fullBuffer || !dc.Allocate(sampler.cols, sampler.rows)) return false;
+                    std::memset(dc.data, 0, dc.Bytes());
+                    if (JxlDecoderSetImageOutCallback(dec, &format, JxlDcCallback, &sampler) != JXL_DEC_SUCCESS) return false;
+                    break;
+                }
                 size_t bytes = 0;
                 if (JxlDecoderImageOutBufferSize(dec, &format, &bytes) != JXL_DEC_SUCCESS) return false;
                 if (bytes != static_cast<size_t>(req.width) * req.height * format.num_channels) return false;
@@ -526,23 +660,40 @@ namespace
                 if (JxlDecoderSetImageOutBuffer(dec, &format, pixels.data(), pixels.size()) != JXL_DEC_SUCCESS) return false;
                 break;
             }
+            case JXL_DEC_FRAME_PROGRESSION:
+            {
+                // The DC image (one eighth of the size, rendered at full size as a smooth upscale) is ready: the callback keeps one pixel per
+                // 8 x 8 block, which is the DC picture itself. Take it and stop; a file without a DC step just decodes in full.
+                if (!dc.data || alpha || JxlDecoderGetIntendedDownsamplingRatio(dec) < 8) break;
+                sampler.flushing = true;
+                const bool flushed = JxlDecoderFlushImage(dec) == JXL_DEC_SUCCESS;
+                sampler.flushing = false;
+                if (!flushed) break;
+                req.image = static_cast<Bgra&&>(dc);
+                return true;
+            }
             case JXL_DEC_FULL_IMAGE:
             {
                 // First displayed frame (coalesced) is complete; animation frames beyond it are ignored.
-                if (pixels.empty() || !req.image.Allocate(req.width, req.height)) return false;
+                const std::uint8_t* s = !pixels.empty() ? pixels.data() : fullBuffer.get();
+                if (!s || !req.image.Allocate(req.width, req.height)) return false;
                 const std::uint32_t n = format.num_channels;
-                const std::uint8_t* s = pixels.data();
-                for (std::uint32_t y = 0; y < req.height; ++y)
+                const std::uint8_t* const source = s;
+                ForRowBands(req.height, static_cast<std::uint64_t>(req.width) * req.height, [&](std::uint32_t yBegin, std::uint32_t yEnd)
                 {
-                    std::uint8_t* d = req.image.Row(y);
-                    for (std::uint32_t x = 0; x < req.width; ++x, s += n, d += 4)
+                    for (std::uint32_t y = yBegin; y < yEnd; ++y)
                     {
-                        if (n == 1) Store(d, s[0], s[0], s[0], 255);
-                        else if (n == 2) Store(d, s[0], s[0], s[0], s[1]);
-                        else if (n == 3) Store(d, s[0], s[1], s[2], 255);
-                        else Store(d, s[0], s[1], s[2], s[3]);
+                        const std::uint8_t* p = source + static_cast<size_t>(y) * req.width * n;
+                        std::uint8_t* d = req.image.Row(y);
+                        for (std::uint32_t x = 0; x < req.width; ++x, p += n, d += 4)
+                        {
+                            if (n == 1) Store(d, p[0], p[0], p[0], 255);
+                            else if (n == 2) Store(d, p[0], p[0], p[0], p[1]);
+                            else if (n == 3) Store(d, p[0], p[1], p[2], 255);
+                            else Store(d, p[0], p[1], p[2], p[3]);
+                        }
                     }
-                }
+                });
                 return true;
             }
             case JXL_DEC_SUCCESS:

@@ -67,6 +67,11 @@ public readonly struct ExplorerOptions(GlideSettingsState settings)
     public bool ItemInfoTooltip => settings.ExplorerItemInfoTooltip;
     public bool InfoResolution => settings.ExplorerInfoResolution;
     public bool InfoFileSize => settings.ExplorerInfoFileSize;
+    public bool ThumbnailCache => settings.ExplorerThumbnailCache;
+    public int ThumbnailCacheMaxMb => settings.ExplorerThumbnailCacheMaxMb;
+    public bool InfoUseTemplate => settings.ExplorerInfoUseTemplate;
+    public string InfoTemplate => settings.ExplorerInfoTemplate;
+    public string Separator => settings.TextOverlaySeparator;
     public double ScrollSpeed => settings.ExplorerScrollSpeed;
     public string ScrollMode => settings.ExplorerScrollMode;
     public int ScrollRows => settings.ExplorerScrollRows;
@@ -130,6 +135,10 @@ public readonly struct OverlayOptions(GlideSettingsState settings)
     public string PictureCounterAnchor(bool sideTabs) => TextOverlayPlacements.PictureAnchor(settings, sideTabs);
     public bool PictureCounterShadow => settings.PictureCounterShadow;
     public bool PictureCounterBorder => settings.PictureCounterBorder;
+    public string Separator => settings.TextOverlaySeparator;
+    public string SeparatorColor => settings.TextOverlaySeparatorColor;
+    /// <summary>Round 4 B5: the overlay's look at <paramref name="placement"/> (picture, title bar or vertical tab bar).</summary>
+    public TextOverlayStyle Style(string placement) => TextOverlayStyle.For(settings, placement);
     public int DefaultOpacity => settings.OverlayDefaultOpacity;
     public bool RememberFolder => settings.OverlayRememberFolder;
     public bool PersistLayoutBetweenSessions => settings.OverlayPersistLayoutBetweenSessions;

@@ -1,0 +1,1 @@
+.apng .arw .avif .bmp .cr2 .cr3 .cur .dds .dib .dng .exr .gif .hdr .heic .heif .hif .ico .j2k .jfif .jp2 .jpe .jpeg .jpg .jxl .jxr .nef .orf .png .psd .qoi .raf .rw2 .svg .svgz .tga .tif .tiff .wdp .webp

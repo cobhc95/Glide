@@ -9,7 +9,8 @@ namespace Glide.Core.Settings;
 /// </summary>
 public static class TextOverlayOffsets
 {
-    public const int Limit = 4000;
+    // No limit is stored: any int is kept as typed (5.1.7 desktop retest, E: 5000 became 500). The overlay is limited to the
+    // picture area when it is drawn (TextOverlayLayout.ClampOffset), so a huge value is harmless and stays what the user typed.
 
     public static (int X, int Y) Get(string? map, string? anchor)
     {
@@ -22,7 +23,7 @@ public static class TextOverlayOffsets
             if (parts.Length == 2 &&
                 int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var x) &&
                 int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var y))
-                return (Math.Clamp(x, -Limit, Limit), Math.Clamp(y, -Limit, Limit));
+                return (x, y);
         }
         return (0, 0);
     }
@@ -33,7 +34,6 @@ public static class TextOverlayOffsets
         var kept = (map ?? string.Empty).Split(';', StringSplitOptions.RemoveEmptyEntries)
             .Where(e => { var eq = e.IndexOf('='); return eq > 0 && !string.Equals(e[..eq].Trim(), key, StringComparison.OrdinalIgnoreCase); })
             .ToList();
-        x = Math.Clamp(x, -Limit, Limit); y = Math.Clamp(y, -Limit, Limit);
         if (x != 0 || y != 0) kept.Add(string.Create(CultureInfo.InvariantCulture, $"{key}={x},{y}"));
         return string.Join(";", kept);
     }
@@ -65,7 +65,6 @@ public static class TextOverlayOffsets
         var kept = (map ?? string.Empty).Split(';', StringSplitOptions.RemoveEmptyEntries)
             .Where(e => { var eq = e.IndexOf('='); return eq > 0 && !e[..eq].Trim().StartsWith(prefix, StringComparison.OrdinalIgnoreCase); })
             .ToList();
-        x = Math.Clamp(x, -Limit, Limit); y = Math.Clamp(y, -Limit, Limit);
         kept.Add(string.Create(CultureInfo.InvariantCulture, $"{prefix}{PictureAnchor(anchor)}={x},{y}"));
         return string.Join(";", kept);
     }

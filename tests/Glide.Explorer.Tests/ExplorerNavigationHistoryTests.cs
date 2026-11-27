@@ -91,13 +91,9 @@ public sealed class ExplorerNavigationHistoryTests
             await h.WaitUntil(() => string.Equals(Path.GetFileName(h.Get<string?>("_currentPath")), ExplorerHarness.ImageB, StringComparison.OrdinalIgnoreCase), "next image");
             Assert.Equal(2, History(h).Count);
 
-            // 5.0.8: side buttons are pass-through by default ("not used by Glide"): unhandled, nothing moves.
-            Assert.False(RaiseSideButton(h, ImageViewport(h), back: true));
-            Assert.Equal(2, History(h).Count);
-            Assert.True(h.Workspace.Active is ImageTabState);
-            h.Settings.Gestures["windowed.backButtonImage"] = Glide.Core.Commands.GestureCatalog.NavigateBack;
-            h.Settings.Gestures["explorer.forwardButton"] = Glide.Core.Commands.GestureCatalog.NavigateForward;
-            Assert.True(RaiseSideButton(h, ImageViewport(h), back: true));   // bound mouse back button: Back
+            // Round 4 (A1/A2): on Default the mouse back button on a picture opened from the Explorer goes Back to it,
+            // and the Explorer's forward button goes Forward.
+            Assert.True(RaiseSideButton(h, ImageViewport(h), back: true));   // default mouse back button: Back
             await WaitForExplorerAsync(h, h.Root);
             Assert.Equal(new[] { ExplorerHarness.ImageB }, h.SelectedNames);  // the image on screen when Back was pressed
 

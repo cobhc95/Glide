@@ -15,3 +15,4 @@ and full-resolution JPEG decode. WIC remains the fallback for everything this pa
 
 Update: replace the four files from a newer official vc-x64 release, refresh `SHA256SUMS`, rebuild, and rerun
 the JPEG parity tests (`JpegTurboParityTests`).
+- `native/Glide.Native/GlideJpegLib.h` (5.1.7): hand-written declarations of the libjpeg API (`jpeg_CreateDecompress`, buffered-image mode) that this static library also exports, because the package ships only `turbojpeg.h` and TurboJPEG cannot stop a progressive decode after its first scan. `jpeg_CreateDecompress` checks the structure size (600 bytes) and the library version (62) against the values passed, so a different library is refused at run time; `ProgressiveJpegThumbnailTests` checks the field offsets by decoding a real file. Re-verify both when the library is replaced.

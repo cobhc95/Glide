@@ -62,11 +62,15 @@ public static class ResetPlanner
                 break;
 
             case ResetItemId.Caches:
-                // Glide keeps no on-disk image cache (decoded frames live in memory): what is on disk is the thumbnail
+                // Decoded frames live in memory; what is on disk is the Explorer thumbnail cache (below), the thumbnail
                 // settings file, the launch-policy sidecar (rebuilt on the next save), the startup timing log and temp files.
                 targets.Add(new FileTarget(Path.Combine(env.SettingsDirectory, ResetCatalog.ThumbnailSettingsFileName)));
                 targets.Add(new FileTarget(Path.Combine(env.SettingsDirectory, ResetCatalog.LaunchPolicyFileName)));
                 targets.Add(new DirectoryTarget(Path.Combine(env.LocalGlideDirectory, ResetCatalog.StartupDiagnosticsFolderName)));
+                // 5.1.7: the Explorer tab's thumbnail disk cache (under %LOCALAPPDATA%\Glide, or the settings folder when redirected).
+                targets.Add(new DirectoryTarget(Path.Combine(env.LocalGlideDirectory, ResetCatalog.ThumbnailCacheFolderName)));
+                if (!string.Equals(Path.GetFullPath(env.SettingsDirectory), Path.GetFullPath(env.LocalGlideDirectory), StringComparison.OrdinalIgnoreCase))
+                    targets.Add(new DirectoryTarget(Path.Combine(env.SettingsDirectory, ResetCatalog.ThumbnailCacheFolderName)));
                 targets.Add(new FileTarget(Path.Combine(env.TempDirectory, "glide-diagnostic-transfer.jpg")));
                 targets.Add(new DirectoryTarget(Path.Combine(env.TempDirectory, "glide_diagnostic_fixtures")));
                 targets.Add(new FilesMatchingTarget(env.TempDirectory, "glide_bench_*.tsv"));

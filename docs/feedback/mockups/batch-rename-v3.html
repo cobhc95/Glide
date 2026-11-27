@@ -1,0 +1,60 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+:root{--bg:#1b1d21;--card:#24272c;--line:#3a3f46;--text:#e8eaed;--dim:#9aa0a6;--acc:#4ea1ff;--ok:#5ccf8a;--bad:#f06a6a}
+*{box-sizing:border-box}body{margin:0;background:#111;font:13px "Segoe UI",sans-serif;color:var(--text)}
+.win{width:980px;height:760px;background:var(--bg);border:1px solid #333;display:flex;flex-direction:column}
+.title{height:36px;display:flex;align-items:center;padding:0 16px;background:#16181b;color:var(--dim);font-size:12px;justify-content:space-between}
+.main{flex:1;padding:18px 22px;display:flex;flex-direction:column;gap:14px;min-height:0}
+.lab{color:var(--dim);font-size:12px;margin-bottom:6px}
+.big{display:flex;align-items:center;gap:6px;background:#15171a;border:1px solid var(--acc);border-radius:8px;padding:9px 10px;font-size:15px}
+.tok{background:#1f3b5c;color:#cfe5ff;border-radius:5px;padding:2px 8px;font-size:13px}
+.txt{color:var(--text)}
+.chips{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;align-items:center}
+.chip{border:1px solid var(--line);border-radius:14px;padding:4px 11px;color:#cfe5ff;background:#22303f}
+.chips .h{color:var(--dim);font-size:12px;margin-right:4px}
+.row{display:flex;gap:14px}
+.f{flex:1;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px 12px}
+.f .lab{margin-bottom:7px}
+.in{background:#15171a;border:1px solid var(--line);border-radius:5px;padding:5px 9px;color:var(--text);display:inline-block;min-width:60px}
+.sel:after{content:"  ▾";color:var(--dim)}
+.line{display:flex;align-items:center;gap:8px;color:var(--dim)}
+.more{color:var(--acc);font-size:12px}
+table{width:100%;border-collapse:collapse}
+th{text-align:left;color:var(--dim);font-weight:600;padding:7px 8px;border-bottom:1px solid var(--line);font-size:12px}
+td{padding:7px 8px;border-bottom:1px solid #2c3036}
+.mark{background:#1f3b5c;border-radius:3px;padding:0 3px;color:#fff}
+tr.bad td{background:#2a1a1a}.bad .st{color:var(--bad)}
+.st{font-size:12px;color:var(--ok)}.st.dim{color:var(--dim)}
+.foot{height:60px;display:flex;align-items:center;gap:10px;padding:0 22px;border-top:1px solid var(--line);background:#1e2024}
+.btn{border:1px solid var(--line);border-radius:6px;padding:7px 14px;background:#2a2e34}.btn.p{background:var(--acc);border-color:var(--acc);color:#06121f;font-weight:600}
+.grow{flex:1}.note{color:var(--dim);font-size:12px}
+</style></head><body>
+<div class="win">
+ <div class="title"><span>Rename 6 pictures</span><span>✕</span></div>
+ <div class="main">
+  <div>
+   <div class="lab">New name — type text and click the blue pieces to add them</div>
+   <div class="big"><span class="tok">Date taken</span><span class="txt">&nbsp;Paris trip&nbsp;</span><span class="tok">Number</span></div>
+   <div class="chips"><span class="h">Add:</span><span class="chip">＋ Old name</span><span class="chip">＋ Number</span><span class="chip">＋ Date taken</span><span class="chip">＋ Date modified</span><span class="chip">＋ Folder name</span><span class="chip">＋ Size (W×H)</span></div>
+  </div>
+  <div class="row">
+   <div class="f"><div class="lab">Replace text</div><div class="line"><span class="in" style="flex:1">IMG</span>→<span class="in" style="flex:1">photo</span></div></div>
+   <div class="f" style="flex:.8"><div class="lab">Numbers</div><div class="line">Start <span class="in" style="min-width:44px">1</span> Look <span class="in sel">001</span></div></div>
+   <div class="f" style="flex:.7"><div class="lab">Capitals</div><div class="line"><span class="in sel" style="flex:1">Title Case</span></div></div>
+  </div>
+  <div class="line"><span class="more">▸ More options</span><span class="note">— date format, remove characters, extension, sort order, match case, regular expressions</span><span class="grow"></span><span class="in sel">Saved: Holiday photos</span></div>
+  <div style="flex:1;min-height:0">
+   <table>
+    <tr><th style="width:38%">Now</th><th>After</th><th style="width:110px"></th></tr>
+    <tr><td>IMG_4471.jpg</td><td><span class="mark">2026-05-14</span> Paris trip <span class="mark">001</span>.jpg</td><td class="st">✓</td></tr>
+    <tr><td>IMG_4472.jpg</td><td><span class="mark">2026-05-14</span> Paris trip <span class="mark">002</span>.jpg</td><td class="st">✓</td></tr>
+    <tr><td>IMG_4480.JPG</td><td><span class="mark">2026-05-15</span> Paris trip <span class="mark">003</span>.jpg</td><td class="st">✓</td></tr>
+    <tr><td>DSC00012.ARW</td><td><span class="mark">2026-05-15</span> Paris trip <span class="mark">004</span>.arw</td><td class="st">✓</td></tr>
+    <tr class="bad"><td>Paris trip 005.jpg</td><td>2026-05-16 Paris trip 005.jpg</td><td class="st">⚠ name taken</td></tr>
+    <tr><td>notes.png</td><td style="color:var(--dim)">no date taken — left as is</td><td class="st dim">skipped</td></tr>
+   </table>
+  </div>
+ </div>
+ <div class="foot"><span class="btn">↶ Undo last rename</span><span class="note">4 will be renamed · 1 problem</span><span class="grow"></span><span class="btn">Cancel</span><span class="btn p">Rename 4</span></div>
+</div>
+</body></html>

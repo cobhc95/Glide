@@ -50,8 +50,11 @@ internal sealed class GifAnimationPlayer : IDisposable
     public static bool IsGif(string? path) =>
         !string.IsNullOrWhiteSpace(path) && string.Equals(Path.GetExtension(path), ".gif", StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>Starts playback for the frame the viewport is presenting now (UI thread).</summary>
-    public void Start(string path)
+    /// <summary>
+    /// Starts playback for the frame the viewport is presenting now (UI thread). <paramref name="pausedFrame"/> (round 4
+    /// H2) starts paused on that frame instead: a tab that was left with its GIF paused comes back exactly as it was.
+    /// </summary>
+    public void Start(string path, int? pausedFrame = null)
     {
         Stop();
         var generation = _viewport.PresentationGeneration;
@@ -74,12 +77,13 @@ internal sealed class GifAnimationPlayer : IDisposable
                 }
                 _frames = frames;
                 _generation = generation;
-                _index = 0;
-                _paused = false;
-                _timer = new DispatcherTimer(DispatcherPriority.Render) { Interval = TimeSpan.FromMilliseconds(frames[0].DelayMs) };
+                _index = pausedFrame is { } frame ? Math.Clamp(frame, 0, frames.Count - 1) : 0;
+                _paused = pausedFrame is not null;
+                _timer = new DispatcherTimer(DispatcherPriority.Render) { Interval = TimeSpan.FromMilliseconds(frames[_index].DelayMs) };
                 _timer.Tick += Tick;
-                _timer.Start();
-                _diagnostics("gif_playback_started", new { path, frameCount = frames.Count });
+                if (_paused) _viewport.SetAnimationFrame(frames[_index].Bitmap);
+                else _timer.Start();
+                _diagnostics("gif_playback_started", new { path, frameCount = frames.Count, paused = _paused, frame = _index });
                 StateChanged?.Invoke();
             });
         }, TaskScheduler.Default);

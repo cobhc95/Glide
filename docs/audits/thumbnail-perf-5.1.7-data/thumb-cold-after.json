@@ -1,0 +1,616 @@
+﻿[
+    {
+        "file":  "avif-4k.avif",
+        "width":  152,
+        "coldMs":  NaN,
+        "minMs":  null,
+        "maxMs":  null,
+        "size":  "error: NullReferenceException Object reference not set to an instance of an object.",
+        "samples":  [
+
+                    ]
+    },
+    {
+        "file":  "avif-4k.avif",
+        "width":  236,
+        "coldMs":  NaN,
+        "minMs":  null,
+        "maxMs":  null,
+        "size":  "error: NullReferenceException Object reference not set to an instance of an object.",
+        "samples":  [
+
+                    ]
+    },
+    {
+        "file":  "bmp-24mp.bmp",
+        "width":  152,
+        "coldMs":  22.9168,
+        "minMs":  22.075,
+        "maxMs":  23.0678,
+        "size":  "152x102",
+        "samples":  [
+                        22.9168,
+                        23.0678,
+                        22.0757,
+                        22.075,
+                        22.945
+                    ]
+    },
+    {
+        "file":  "bmp-24mp.bmp",
+        "width":  236,
+        "coldMs":  23.1149,
+        "minMs":  21.8656,
+        "maxMs":  23.7641,
+        "size":  "236x157",
+        "samples":  [
+                        23.7641,
+                        23.4952,
+                        23.1149,
+                        22.9112,
+                        21.8656
+                    ]
+    },
+    {
+        "file":  "bmp-4k.bmp",
+        "width":  152,
+        "coldMs":  18.8415,
+        "minMs":  18.5931,
+        "maxMs":  19.4846,
+        "size":  "152x86",
+        "samples":  [
+                        19.4846,
+                        18.8415,
+                        18.7883,
+                        18.5931,
+                        18.8496
+                    ]
+    },
+    {
+        "file":  "bmp-4k.bmp",
+        "width":  236,
+        "coldMs":  19.8784,
+        "minMs":  19.0888,
+        "maxMs":  20.1685,
+        "size":  "236x133",
+        "samples":  [
+                        20.1685,
+                        19.0888,
+                        19.8784,
+                        20.1187,
+                        19.7339
+                    ]
+    },
+    {
+        "file":  "gif-4k.gif",
+        "width":  152,
+        "coldMs":  31.6291,
+        "minMs":  31.0002,
+        "maxMs":  34.578,
+        "size":  "152x85",
+        "samples":  [
+                        34.578,
+                        31.6291,
+                        31.0002,
+                        33.1417,
+                        31.439
+                    ]
+    },
+    {
+        "file":  "gif-4k.gif",
+        "width":  236,
+        "coldMs":  31.6535,
+        "minMs":  30.9159,
+        "maxMs":  36.0253,
+        "size":  "236x132",
+        "samples":  [
+                        32.9495,
+                        31.5535,
+                        36.0253,
+                        31.6535,
+                        30.9159
+                    ]
+    },
+    {
+        "file":  "heic-4k.heic",
+        "width":  152,
+        "coldMs":  NaN,
+        "minMs":  null,
+        "maxMs":  null,
+        "size":  "error: NullReferenceException Object reference not set to an instance of an object.",
+        "samples":  [
+
+                    ]
+    },
+    {
+        "file":  "heic-4k.heic",
+        "width":  236,
+        "coldMs":  NaN,
+        "minMs":  null,
+        "maxMs":  null,
+        "size":  "error: NullReferenceException Object reference not set to an instance of an object.",
+        "samples":  [
+
+                    ]
+    },
+    {
+        "file":  "ico-256.ico",
+        "width":  152,
+        "coldMs":  16.0432,
+        "minMs":  15.5909,
+        "maxMs":  17.2505,
+        "size":  "152x152",
+        "samples":  [
+                        17.2505,
+                        15.5909,
+                        16.3303,
+                        16.0432,
+                        15.6834
+                    ]
+    },
+    {
+        "file":  "ico-256.ico",
+        "width":  236,
+        "coldMs":  16.5653,
+        "minMs":  15.6915,
+        "maxMs":  18.8909,
+        "size":  "236x236",
+        "samples":  [
+                        16.1358,
+                        17.7292,
+                        15.6915,
+                        18.8909,
+                        16.5653
+                    ]
+    },
+    {
+        "file":  "jpeg-base-12mp.jpg",
+        "width":  152,
+        "coldMs":  23.5236,
+        "minMs":  22.9509,
+        "maxMs":  24.4286,
+        "size":  "152x114",
+        "samples":  [
+                        24.4286,
+                        23.1767,
+                        23.5236,
+                        23.6516,
+                        22.9509
+                    ]
+    },
+    {
+        "file":  "jpeg-base-12mp.jpg",
+        "width":  236,
+        "coldMs":  23.0086,
+        "minMs":  22.8139,
+        "maxMs":  24.1412,
+        "size":  "236x177",
+        "samples":  [
+                        22.8994,
+                        24.1412,
+                        22.8139,
+                        23.0489,
+                        23.0086
+                    ]
+    },
+    {
+        "file":  "jpeg-base-24mp.jpg",
+        "width":  152,
+        "coldMs":  36.1493,
+        "minMs":  35.3665,
+        "maxMs":  37.187,
+        "size":  "152x101",
+        "samples":  [
+                        36.6041,
+                        36.0669,
+                        35.3665,
+                        37.187,
+                        36.1493
+                    ]
+    },
+    {
+        "file":  "jpeg-base-24mp.jpg",
+        "width":  236,
+        "coldMs":  35.6685,
+        "minMs":  35.4875,
+        "maxMs":  36.2831,
+        "size":  "236x157",
+        "samples":  [
+                        36.2405,
+                        35.4875,
+                        36.2831,
+                        35.6322,
+                        35.6685
+                    ]
+    },
+    {
+        "file":  "jpeg-camera-mpf-24mp.jpg",
+        "width":  152,
+        "coldMs":  11.9962,
+        "minMs":  11.8213,
+        "maxMs":  12.3463,
+        "size":  "152x228",
+        "samples":  [
+                        12.3463,
+                        11.9599,
+                        11.9962,
+                        11.8213,
+                        12.0784
+                    ]
+    },
+    {
+        "file":  "jpeg-camera-mpf-24mp.jpg",
+        "width":  236,
+        "coldMs":  12.363,
+        "minMs":  12.1771,
+        "maxMs":  12.6201,
+        "size":  "236x354",
+        "samples":  [
+                        12.5621,
+                        12.1771,
+                        12.2022,
+                        12.6201,
+                        12.363
+                    ]
+    },
+    {
+        "file":  "jpeg-prog-12mp.jpg",
+        "width":  152,
+        "coldMs":  18.7729,
+        "minMs":  18.1712,
+        "maxMs":  20.0885,
+        "size":  "152x114",
+        "samples":  [
+                        18.7729,
+                        20.0885,
+                        18.9477,
+                        18.1712,
+                        18.7133
+                    ]
+    },
+    {
+        "file":  "jpeg-prog-12mp.jpg",
+        "width":  236,
+        "coldMs":  19.222,
+        "minMs":  18.3992,
+        "maxMs":  20.68,
+        "size":  "236x177",
+        "samples":  [
+                        18.9521,
+                        19.222,
+                        19.75,
+                        20.68,
+                        18.3992
+                    ]
+    },
+    {
+        "file":  "jpeg-prog-24mp.jpg",
+        "width":  152,
+        "coldMs":  27.8501,
+        "minMs":  26.3111,
+        "maxMs":  28.6866,
+        "size":  "152x101",
+        "samples":  [
+                        28.0699,
+                        27.8501,
+                        27.0645,
+                        28.6866,
+                        26.3111
+                    ]
+    },
+    {
+        "file":  "jpeg-prog-24mp.jpg",
+        "width":  236,
+        "coldMs":  26.957,
+        "minMs":  26.715699999999998,
+        "maxMs":  27.4379,
+        "size":  "236x157",
+        "samples":  [
+                        26.7521,
+                        27.1594,
+                        26.715699999999998,
+                        26.957,
+                        27.4379
+                    ]
+    },
+    {
+        "file":  "png-24mp.png",
+        "width":  152,
+        "coldMs":  149.0757,
+        "minMs":  147.6192,
+        "maxMs":  150.3749,
+        "size":  "152x101",
+        "samples":  [
+                        149.9247,
+                        149.0757,
+                        147.6192,
+                        149.0645,
+                        150.3749
+                    ]
+    },
+    {
+        "file":  "png-24mp.png",
+        "width":  236,
+        "coldMs":  149.6665,
+        "minMs":  147.9467,
+        "maxMs":  150.9065,
+        "size":  "236x157",
+        "samples":  [
+                        149.6665,
+                        148.2669,
+                        150.9065,
+                        147.9467,
+                        150.7635
+                    ]
+    },
+    {
+        "file":  "png-4k.png",
+        "width":  152,
+        "coldMs":  65.7152,
+        "minMs":  65.5452,
+        "maxMs":  67.0459,
+        "size":  "152x85",
+        "samples":  [
+                        66.0122,
+                        65.5452,
+                        67.0459,
+                        65.7152,
+                        65.5498
+                    ]
+    },
+    {
+        "file":  "png-4k.png",
+        "width":  236,
+        "coldMs":  65.7568,
+        "minMs":  65.3359,
+        "maxMs":  68.2362,
+        "size":  "236x132",
+        "samples":  [
+                        65.7568,
+                        66.5732,
+                        68.2362,
+                        65.7285,
+                        65.3359
+                    ]
+    },
+    {
+        "file":  "png-alpha-4k.png",
+        "width":  152,
+        "coldMs":  93.4841,
+        "minMs":  92.7312,
+        "maxMs":  94.1347,
+        "size":  "152x85",
+        "samples":  [
+                        93.9347,
+                        94.1347,
+                        93.4841,
+                        93.0354,
+                        92.7312
+                    ]
+    },
+    {
+        "file":  "png-alpha-4k.png",
+        "width":  236,
+        "coldMs":  93.6901,
+        "minMs":  92.3724,
+        "maxMs":  96.2673,
+        "size":  "236x132",
+        "samples":  [
+                        92.3724,
+                        95.8985,
+                        96.2673,
+                        93.6901,
+                        92.6121
+                    ]
+    },
+    {
+        "file":  "tiff-lzw-24mp.tif",
+        "width":  152,
+        "coldMs":  46.1132,
+        "minMs":  45.1631,
+        "maxMs":  55.2393,
+        "size":  "152x102",
+        "samples":  [
+                        45.4405,
+                        46.1132,
+                        45.1631,
+                        55.2393,
+                        48.0671
+                    ]
+    },
+    {
+        "file":  "tiff-lzw-24mp.tif",
+        "width":  236,
+        "coldMs":  49.0154,
+        "minMs":  45.2704,
+        "maxMs":  52.1533,
+        "size":  "236x157",
+        "samples":  [
+                        52.1533,
+                        46.0526,
+                        45.2704,
+                        49.4816,
+                        49.0154
+                    ]
+    },
+    {
+        "file":  "tiff-lzw-4k.tif",
+        "width":  152,
+        "coldMs":  28.258,
+        "minMs":  27.2536,
+        "maxMs":  30.7315,
+        "size":  "152x86",
+        "samples":  [
+                        28.3523,
+                        27.9084,
+                        27.2536,
+                        30.7315,
+                        28.258
+                    ]
+    },
+    {
+        "file":  "tiff-lzw-4k.tif",
+        "width":  236,
+        "coldMs":  29.7801,
+        "minMs":  28.4588,
+        "maxMs":  30.1415,
+        "size":  "236x133",
+        "samples":  [
+                        28.4588,
+                        30.1415,
+                        29.7524,
+                        29.7801,
+                        29.915
+                    ]
+    },
+    {
+        "file":  "tiff-raw-24mp.tif",
+        "width":  152,
+        "coldMs":  25.1001,
+        "minMs":  24.694,
+        "maxMs":  26.766,
+        "size":  "152x102",
+        "samples":  [
+                        25.1001,
+                        24.694,
+                        24.9782,
+                        26.6283,
+                        26.766
+                    ]
+    },
+    {
+        "file":  "tiff-raw-24mp.tif",
+        "width":  236,
+        "coldMs":  25.9486,
+        "minMs":  24.8612,
+        "maxMs":  26.5071,
+        "size":  "236x157",
+        "samples":  [
+                        26.5071,
+                        24.8612,
+                        25.9486,
+                        25.7598,
+                        26.0537
+                    ]
+    },
+    {
+        "file":  "tiff-raw-4k.tif",
+        "width":  152,
+        "coldMs":  21.6526,
+        "minMs":  21.2608,
+        "maxMs":  22.4478,
+        "size":  "152x86",
+        "samples":  [
+                        21.6526,
+                        21.7289,
+                        21.2608,
+                        21.3662,
+                        22.4478
+                    ]
+    },
+    {
+        "file":  "tiff-raw-4k.tif",
+        "width":  236,
+        "coldMs":  22.4436,
+        "minMs":  21.3776,
+        "maxMs":  23.2144,
+        "size":  "236x133",
+        "samples":  [
+                        23.2144,
+                        22.4788,
+                        21.9509,
+                        21.3776,
+                        22.4436
+                    ]
+    },
+    {
+        "file":  "webp-24mp.webp",
+        "width":  152,
+        "coldMs":  66.1967,
+        "minMs":  64.5401,
+        "maxMs":  66.9955,
+        "size":  "152x101",
+        "samples":  [
+                        66.8468,
+                        66.1967,
+                        64.5401,
+                        66.0035,
+                        66.9955
+                    ]
+    },
+    {
+        "file":  "webp-24mp.webp",
+        "width":  236,
+        "coldMs":  65.5972,
+        "minMs":  64.39,
+        "maxMs":  67.1272,
+        "size":  "236x157",
+        "samples":  [
+                        67.1272,
+                        65.4543,
+                        64.39,
+                        65.6402,
+                        65.5972
+                    ]
+    },
+    {
+        "file":  "webp-4k.webp",
+        "width":  152,
+        "coldMs":  30.6856,
+        "minMs":  29.3052,
+        "maxMs":  31.0849,
+        "size":  "152x86",
+        "samples":  [
+                        30.8053,
+                        30.1629,
+                        30.6856,
+                        29.3052,
+                        31.0849
+                    ]
+    },
+    {
+        "file":  "webp-4k.webp",
+        "width":  236,
+        "coldMs":  30.5845,
+        "minMs":  30.2225,
+        "maxMs":  31.6727,
+        "size":  "236x133",
+        "samples":  [
+                        31.6523,
+                        30.5502,
+                        30.2225,
+                        30.5845,
+                        31.6727
+                    ]
+    },
+    {
+        "file":  "webp-alpha-4k.webp",
+        "width":  152,
+        "coldMs":  52.7407,
+        "minMs":  51.1368,
+        "maxMs":  53.9547,
+        "size":  "152x86",
+        "samples":  [
+                        52.778,
+                        53.9547,
+                        51.1368,
+                        52.7407,
+                        52.4544
+                    ]
+    },
+    {
+        "file":  "webp-alpha-4k.webp",
+        "width":  236,
+        "coldMs":  52.5185,
+        "minMs":  51.4791,
+        "maxMs":  54.4643,
+        "size":  "236x133",
+        "samples":  [
+                        54.4643,
+                        51.4791,
+                        53.1131,
+                        52.237,
+                        52.5185
+                    ]
+    }
+]

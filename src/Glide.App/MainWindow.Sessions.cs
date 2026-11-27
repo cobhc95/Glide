@@ -110,7 +110,13 @@ public partial class MainWindow
     private bool ShouldEnterSpeedBoostStandby()
         => ShouldEnterSpeedBoostStandbyPolicy(_forceProcessExit, _closeForSpeedBoostStandby, _speedBoostStandbyActive, App.IsShuttingDown) &&
            _settings.SpeedBoostEnabled && App.IsTrayIconAvailable &&
-           GlideWindowRegistry.Snapshot().Count <= 1;
+           SpeedBoostStandbyOwnerPolicy(ExternalLaunchBroker.IsPresenceOwner, GlideWindowRegistry.Snapshot().Count);
+
+    /// <summary>Issue #5: only the elected single-instance owner may stay resident. A follower process (one that could not
+    /// forward its launch, or started with single-instance reuse off) used to enter standby too, so every such launch left
+    /// one more resident Speed Boost process, unreachable by later launches. A follower now exits with its last window.</summary>
+    internal static bool SpeedBoostStandbyOwnerPolicy(bool ownsLaunchBroker, int openWindows)
+        => ownsLaunchBroker && openWindows <= 1;
 
     /// <summary>The state half of the standby decision. A window closing because the application is exiting
     /// (App.IsShuttingDown) never enters standby: standby keeps the launch broker alive, and a process that is
@@ -178,6 +184,7 @@ public partial class MainWindow
         }
         catch { /* working-set trim is an optional memory optimisation */ }
         App.PublishCurrentSettings(_settings);
+        App.NoteSpeedBoostStandbyEntered();
         App.UpdateTrayIconState(_settings);
         // Closing the warm window is what releases Avalonia's composition target. The process and
         // broker remain resident; App creates a fresh render window on the next activation.
@@ -200,7 +207,9 @@ public partial class MainWindow
             Dispatcher.UIThread.Post(EnsureNativeMaximizedState, DispatcherPriority.Loaded);
         }
         _speedBoostStandbyActive = false;
-        App.UpdateTrayIconState(_settings);
+        // The live settings, not this window's copy: a resident window may predate a settings change
+        // made by another Glide process (adopted through App's settings-file watcher).
+        App.UpdateTrayIconState();
 
         // X from an image clears the viewport, so a no-file warm activation lands on normal Home
         // instead of exposing an empty viewer. An incoming Explorer image owns the transition path.
@@ -617,6 +626,73 @@ public partial class MainWindow
             return;
         }
 
+        await ShowNeighbourAfterDeleteAsync(folder, oldIndex);
+    }
+
+    private readonly PermanentDeleteConfirmations _permanentDeleteConfirmations = new();
+
+    /// <summary>Test seam for the Shift+Delete confirmation: returns (delete, don't ask again for this folder in this tab).</summary>
+    internal Func<string, Task<(bool Delete, bool DontAskAgain)>>? PermanentDeleteConfirmOverride { get; set; }
+
+    /// <summary>
+    /// Round 4 G1: Shift+Delete in the image view deletes the current file permanently (not to the Recycle Bin). It asks
+    /// first, Delete focused, unless "Don't ask again for this folder in this tab" was ticked for this folder in this tab
+    /// (remembered for the session only), then shows the next picture like Delete does.
+    /// </summary>
+    private async Task DeleteCurrentFilePermanentlyAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_currentPath) || _workspace.Active is not ImageTabState tab) return;
+        var oldPath = _currentPath;
+        var oldIndex = Math.Max(0, _navigator.Index);
+        var folder = Path.GetDirectoryName(oldPath);
+        if (_permanentDeleteConfirmations.ShouldAsk(tab.Id, folder))
+        {
+            var (delete, dontAskAgain) = PermanentDeleteConfirmOverride is { } seam
+                ? await seam(oldPath)
+                : await ConfirmPermanentDeleteAsync(Path.GetFileName(oldPath));
+            if (!delete) return;
+            if (dontAskAgain) _permanentDeleteConfirmations.DontAskAgain(tab.Id, folder);
+        }
+        var result = await Glide.App.Explorer.ExplorerFileOperations.DeleteAsync([oldPath], permanent: true);
+        if (result.Errors.Count > 0 || result.Deleted.Count == 0)
+        {
+            var error = result.Errors.Count > 0 ? result.Errors[0].Message : "The file was not deleted.";
+            _diagnostics.Write("file", "permanent_delete_failed", new { path = oldPath, error });
+            await ConfirmAsync("Delete permanently", error, "OK", showCancel: false);
+            return;
+        }
+        _diagnostics.Write("file", "permanent_delete", new { path = oldPath });
+        await ShowNeighbourAfterDeleteAsync(folder, oldIndex);
+    }
+
+    private async Task<(bool Delete, bool DontAskAgain)> ConfirmPermanentDeleteAsync(string fileName)
+    {
+        var dialog = CreatePermanentDeleteDialog(fileName, out var dontAsk);
+        dialog.Icon = Icon;
+        dialog.Topmost = Topmost;
+        PopupPlacementStore.Track(dialog, "confirm");
+        _overlays?.SetModalSuppressed(true);
+        try
+        {
+            var delete = await ShowOwnedDialogAsync<bool>(dialog);
+            return (delete, delete && dontAsk.IsChecked == true);
+        }
+        finally { _overlays?.SetModalSuppressed(false); }
+    }
+
+    /// <summary>The Shift+Delete confirmation: the standard confirm dialog (Delete is the default and focused) plus the "Don't ask again" box.</summary>
+    internal static Window CreatePermanentDeleteDialog(string fileName, out CheckBox dontAskAgain)
+    {
+        var dialog = CreateConfirmDialog("Delete permanently",
+            $"Permanently delete '{fileName}'?\n\nThis can't be undone and it will NOT go to the Recycle Bin.", "Delete");
+        dontAskAgain = new CheckBox { Content = "Don't ask again for this folder in this tab" };
+        ((StackPanel)dialog.Content!).Children.Insert(1, dontAskAgain);
+        return dialog;
+    }
+
+    /// <summary>After the current file was deleted: show the picture now at its place in the folder, or close the tab when none is left.</summary>
+    private async Task ShowNeighbourAfterDeleteAsync(string? folder, int oldIndex)
+    {
         // Listing the folder again can be slow on a network share: do it off the UI thread too.
         var replacement = string.IsNullOrWhiteSpace(folder) ? null : await Task.Run<string?>(() =>
         {
@@ -713,9 +789,12 @@ public partial class MainWindow
             Item("Save as…", GlideCommand.SaveImageAs, hasImage && hasFile, "SaveAs"),
             Item("Rename…", GlideCommand.RenameFile, hasFile, "Rename"),
             Item("Delete to Recycle Bin", GlideCommand.DeleteFile, hasFile, "Delete"),
+            Item("Delete permanently…", GlideCommand.DeleteFilePermanently, hasFile, "Delete"),
             Separator(),
             Item("Print…", GlideCommand.Print, hasImage, "Print")
         };
+        // With tags on, the tag sidebar is reachable from the picture's menu too (after Rename).
+        if (BuildTagSidebarMenuItem() is { } tagSidebarItem) fileItems.Insert(3, tagSidebarItem);
         if (!string.IsNullOrWhiteSpace(_settings.ExternalProgram1) || !string.IsNullOrWhiteSpace(_settings.ExternalProgram2) || !string.IsNullOrWhiteSpace(_settings.ExternalProgram3))
         {
             var externalItems = new List<MenuItem>();

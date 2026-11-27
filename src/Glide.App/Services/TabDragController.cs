@@ -19,6 +19,7 @@ public sealed class TabDragController
     private PixelPoint _lastScreen;
     private bool _active;
     private bool _singlePending;
+    private bool _releasing;
     private int _targetIndex = -1;
 
     public bool IsActive => _id is not null;
@@ -105,7 +106,9 @@ public sealed class TabDragController
         var targetIndex = _targetIndex;
         // Snapshot first: releasing capture raises PointerCaptureLost synchronously, which clears the state
         // (and the visuals) before the reorder below runs.
-        _host.ReleaseCapture(e.Pointer);
+        _releasing = true;
+        try { _host.ReleaseCapture(e.Pointer); }
+        finally { _releasing = false; }
         try
         {
             if (wasDrag && target is { IsVisible: true } && target.CanAcceptTabAttach && _host.TabAttachEnabled())
@@ -139,7 +142,26 @@ public sealed class TabDragController
     {
         if (_id != id) return;
         _host.Diagnostic("drag_capture_lost", new { id, active = _active, target = _ordinaryAttach.Target?.Title ?? "" });
+        // The press selected this tab at once; its content is shown when the release arrives (PointerReleasedAsync). A press whose
+        // capture was lost before any release and before a drag started (the strip was rebuilt under the pointer, for example by the
+        // end of another tab's activation, so the release went to a control that no longer exists) never gets that release: the tab
+        // would stay selected with the previous tab's content on screen. Show the selected tab's content now.
+        var pressWithoutRelease = !_active && !_singlePending && !_releasing;
         ClearState();
+        if (pressWithoutRelease && _host.ActivateSelectionIfNotShownAsync is { } activate) _ = ActivateSelectionAsync(id, activate);
+    }
+
+    private async Task ActivateSelectionAsync(Guid id, Func<Task> activate)
+    {
+        try
+        {
+            _host.Diagnostic("capture_lost_activated", new { id });
+            await activate().ConfigureAwait(true);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _host.Diagnostic("capture_lost_activation_failed", new { id, error = ex.Message });
+        }
     }
 
     public void Clear()
@@ -193,6 +215,8 @@ public sealed class TabDragHost
     public required Func<Guid, PixelPoint, Task> DetachAsync { get; init; }
     public required Func<Guid, int, Task> ReorderAsync { get; init; }
     public required Func<Task> ActivateAsync { get; init; }
+    /// <summary>Activates the selected tab when the window is not showing it yet (a press that lost its pointer capture before the release).</summary>
+    public Func<Task>? ActivateSelectionIfNotShownAsync { get; init; }
     public required Action RebuildTabs { get; init; }
     public required Action<string, object?> Diagnostic { get; init; }
 }

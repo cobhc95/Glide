@@ -58,8 +58,43 @@ public partial class MainWindow
         {
             case ImageTabState image:
                 CaptureWarmImageTab(image);
+                RememberPausedGif(image);
                 break;
         }
+    }
+
+    /// <summary>Round 4 H2: the frame each tab's GIF was paused on when the tab was left (tab id -> path, frame).</summary>
+    private readonly Dictionary<Guid, (string Path, int Frame)> _pausedGifTabs = new();
+
+    private void RememberPausedGif(ImageTabState image)
+    {
+        if (_gifPlayer is { IsPaused: true } player && string.Equals(_presentedPath, image.Path, StringComparison.OrdinalIgnoreCase))
+            _pausedGifTabs[image.Id] = (image.Path, player.FrameIndex);
+        else _pausedGifTabs.Remove(image.Id);
+    }
+
+    /// <summary>Starts the GIF of the active tab: paused on its remembered frame when the tab was left paused.</summary>
+    private void StartGifForActiveTab(string path)
+    {
+        int? frame = null;
+        if (_workspace.Active is { } active && _pausedGifTabs.Remove(active.Id, out var paused) &&
+            string.Equals(paused.Path, path, StringComparison.OrdinalIgnoreCase))
+            frame = paused.Frame;
+        EnsureGifPlayer().Start(path, frame);
+    }
+
+    /// <summary>Test hook: forgets every kept tab frame, as eviction would.</summary>
+    internal void ClearWarmTabsForTests() => _warmImageTabs?.Clear();
+
+    /// <summary>
+    /// Round 4 J1: a picture whose file was deleted, renamed or moved since it was opened keeps showing (from memory)
+    /// with a "File no longer on disk" badge. Null / an existing file hides the badge.
+    /// </summary>
+    private void UpdateMissingFileIndicator(string? path)
+    {
+        var missing = path is not null && !File.Exists(path);
+        MissingFileIndicator.IsVisible = missing;
+        if (missing) Avalonia.Controls.ToolTip.SetTip(MissingFileIndicator, path);
     }
 
     /// <summary>The Explorer surface switches to another tab: keep the listing it showed for a quick return.</summary>
@@ -140,7 +175,7 @@ public partial class MainWindow
     {
         if (_warmImageTabs is null || !_warmImageTabs.TryGet(image.Id, out var warm)) return false;
         if (!string.Equals(warm.Path, image.Path, StringComparison.OrdinalIgnoreCase) || _speedBoostStandbyActive ||
-            _warmPresentationGateActive || _wholeAppOverlayMode || !File.Exists(warm.Path))
+            _warmPresentationGateActive || _wholeAppOverlayMode)
         {
             _warmImageTabs.Remove(image.Id);
             return false;
@@ -184,9 +219,11 @@ public partial class MainWindow
         _loader.SetActivePath(path);
         ShowImageSurface();
         Viewport.RestoreViewState(warm.View);
-        if (_settings.AnimateGifs && GifAnimationPlayer.IsGif(path)) EnsureGifPlayer().Start(path);
+        var fileExists = File.Exists(path);
+        if (_settings.AnimateGifs && fileExists && GifAnimationPlayer.IsGif(path)) StartGifForActiveTab(path);
         else _gifPlayer?.Stop();
         UpdateGifStatusUi();
+        UpdateMissingFileIndicator(path);
 
         if (previous is not null && !sameFrame)
         {

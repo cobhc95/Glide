@@ -30,5 +30,9 @@ public partial class SettingsWindow
         : ReferenceEquals(sender, OverlayTooltipLinkButton) ? "appearance.tooltipDelayOverlay"
         : "appearance.tooltipDelayMain");
 
+    /// <summary>Round 4 E1: Mouse &amp; keyboard > Mouse pointer's link to the fullscreen hide-cursor option (delay and mode live with it).</summary>
+    private void HideCursorFullscreenLinkClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e) => RevealSetting("fullscreen.hideCursor");
+
     private void NewTabsLinkClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e) => RevealSetting("tabs.switchToNewTabs");
 }
+

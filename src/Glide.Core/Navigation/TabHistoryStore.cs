@@ -32,6 +32,14 @@ public sealed class TabHistoryStore
         return history;
     }
 
+    /// <summary>Renamed files (<see cref="NavigationHistory.RetargetImages"/>) in every tab's history.</summary>
+    public bool RetargetImages(IReadOnlyDictionary<string, string> renamed)
+    {
+        var changed = false;
+        foreach (var history in _histories.Values) changed |= history.RetargetImages(renamed);
+        return changed;
+    }
+
     /// <summary>Starts a tab's history over (empty).</summary>
     public void Reset(Guid tabId) => _histories[tabId] = new NavigationHistory();
 

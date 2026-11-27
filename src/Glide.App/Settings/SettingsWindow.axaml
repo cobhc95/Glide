@@ -196,6 +196,8 @@
                 <Grid ColumnDefinitions="270,150,*" Margin="6,0,0,0"><TextBlock Text="Compressed cache budget (MB)" VerticalAlignment="Center"/><NumericUpDown x:Name="CompressedCacheMbBox" Grid.Column="1" Minimum="32" Maximum="2048"/></Grid>
                 <Grid ColumnDefinitions="270,150,*" Margin="6,0,0,0"><TextBlock Text="Decoded-frame budget (MB)" VerticalAlignment="Center"/><NumericUpDown x:Name="DecodedCacheMbBox" Grid.Column="1" Minimum="32" Maximum="2048"/></Grid>
                 <CheckBox x:Name="PurgeCacheCheck" Content="Purge compressed and decoded caches when Glide is minimized"/>
+                <Grid ColumnDefinitions="270,150,*" Margin="6,0,0,0"><TextBlock Text="Thumbnails loaded at once" VerticalAlignment="Center"/><ComboBox x:Name="ThumbnailLanesCombo" Grid.Column="1" Width="150" ToolTip.Tip="Explorer thumbnails decoded at the same time. Automatic: 12 on a 16-thread PC. A fixed number is lowered to what free memory allows."><ComboBoxItem Content="Automatic"/><ComboBoxItem Content="4"/><ComboBoxItem Content="8"/><ComboBoxItem Content="12"/><ComboBoxItem Content="16"/><ComboBoxItem Content="24"/><ComboBoxItem Content="32"/></ComboBox></Grid>
+                <CheckBox x:Name="ThumbnailPrepareFolderCheck" Content="Prepare thumbnails for the whole folder in the background"/>
             </StackPanel>
           </controls:SettingsCard>
           </StackPanel>
@@ -243,7 +245,11 @@
                 <CheckBox x:Name="PictureCounterCheck" Content="Show text overlay"/>
                 <Grid ColumnDefinitions="205,330,*" Margin="6,0,0,0"><TextBlock Text="Text overlay template" VerticalAlignment="Center"/><TextBox x:Name="PictureTemplateBox" Grid.Column="1" Width="320" Text="[{index}/{total}]"/></Grid>
                 <!-- Text and the template box tooltip come from code (TextOverlayTemplateHelp / Tip), where backslash-n cannot turn into a raw line break. -->
-                <TextBlock x:Name="PictureTemplateHelpText" Classes="phaseNote" Margin="6,-2,8,2" TextWrapping="Wrap"/>
+                <TextBlock x:Name="PictureTemplateHelpText" Classes="phaseNote" Margin="6,-2,8,0" TextWrapping="Wrap"/>
+                <!-- Round 4 B7: the tokens in columns (filled from TextTemplate.Tokens in ApplyTextOverlayHelp). -->
+                <Grid x:Name="PictureTemplateTokenGrid" Margin="14,0,8,2" ColumnDefinitions="Auto,*,Auto,*,Auto,*"/>
+                <Grid ColumnDefinitions="230,220,*" Margin="6,0,0,0"><StackPanel VerticalAlignment="Center" Margin="0,0,10,0"><TextBlock Text="Separator between parts ({sep})" TextWrapping="Wrap"/><TextBlock Classes="phaseNote" Text="The symbol {sep} becomes in the template." TextWrapping="Wrap"/></StackPanel><ComboBox x:Name="PictureSeparatorCombo" Grid.Column="1" Width="140" HorizontalAlignment="Left" VerticalAlignment="Center"><ComboBoxItem Content="•"/><ComboBoxItem Content="▪"/><ComboBoxItem Content="|"/><ComboBoxItem Content="–"/><ComboBoxItem Content="/"/><ComboBoxItem Content="None"/></ComboBox></Grid>
+                <Grid ColumnDefinitions="230,220,*" Margin="6,0,0,0"><StackPanel VerticalAlignment="Center" Margin="0,0,10,0"><TextBlock Text="Separator colour" TextWrapping="Wrap"/><TextBlock Classes="phaseNote" Text="Colour of the separator symbol only." TextWrapping="Wrap"/></StackPanel><ComboBox x:Name="SeparatorColorCombo" Grid.Column="1" Width="210" VerticalAlignment="Center"><ComboBoxItem Content="Same as text"/><ComboBoxItem Content="White"/><ComboBoxItem Content="Soft gray"/><ComboBoxItem Content="Accent"/><ComboBoxItem Content="Amber"/></ComboBox></Grid>
                 <!-- Text overlay placement (5.1.3): one card per tab layout; the card matching the Tabs position gets the accent outline and the "In use now" badge (UpdateTextOverlayPlacementCards). The WrapPanel stacks the cards when the window is narrow. -->
                 <WrapPanel Orientation="Horizontal" Margin="6,4,0,0"><TextBlock Text="Text overlay placement" FontWeight="SemiBold" Foreground="{DynamicResource BrushAccent}" Margin="0,0,14,0" VerticalAlignment="Center"/><TextBlock Classes="phaseNote" Text="Each tab layout has its own settings; Glide uses the one matching your tabs." TextWrapping="Wrap" VerticalAlignment="Center"/></WrapPanel>
                 <WrapPanel Orientation="Horizontal" Margin="6,0,0,0">
@@ -256,6 +262,13 @@
                       </Grid>
                       <Grid ColumnDefinitions="90,*"><TextBlock Text="Position" VerticalAlignment="Center"/><ComboBox x:Name="TopTabsPositionCombo" Grid.Column="1" HorizontalAlignment="Stretch"><ComboBoxItem Content="Top left"/><ComboBoxItem Content="Top center"/><ComboBoxItem Content="Top right"/><ComboBoxItem Content="Bottom left"/><ComboBoxItem Content="Bottom center"/><ComboBoxItem Content="Bottom right"/><ComboBoxItem Content="Title bar – left"/><ComboBoxItem Content="Title bar – center"/><ComboBoxItem Content="Title bar – right"/><ComboBoxItem Content="Custom"/></ComboBox></Grid>
                       <Grid ColumnDefinitions="90,*"><TextBlock Text="Alignment" VerticalAlignment="Center"/><ComboBox x:Name="TopTabsAlignmentCombo" Grid.Column="1" HorizontalAlignment="Stretch"><ComboBoxItem Content="Automatic"/><ComboBoxItem Content="Left"/><ComboBoxItem Content="Center"/><ComboBoxItem Content="Right"/></ComboBox></Grid>
+                      <!-- Round 4 B4: the offsets edit the card in use; SettingsWindow moves this panel into that card. -->
+                      <StackPanel x:Name="TextOverlayOffsetPanel" Spacing="8">
+                        <!-- One box per row: the card's content column is only ~210 px wide, and two NumericUpDowns side by side (even with MinWidth 0) were ~15 px each, no digit visible (5.1.7 desktop retest, E). Any int is accepted: the overlay is limited to the picture when drawn, not when typed. -->
+                        <Grid ColumnDefinitions="90,*"><TextBlock Text="X offset (px)" VerticalAlignment="Center"/><NumericUpDown x:Name="PictureOffsetXBox" Grid.Column="1" HorizontalAlignment="Stretch" FormatString="0" Minimum="-2147483648" Maximum="2147483647" ToolTip.Tip="Text overlay horizontal offset (px)"/></Grid>
+                        <Grid ColumnDefinitions="90,*"><TextBlock Text="Y offset (px)" VerticalAlignment="Center"/><NumericUpDown x:Name="PictureOffsetYBox" Grid.Column="1" HorizontalAlignment="Stretch" FormatString="0" Minimum="-2147483648" Maximum="2147483647" ToolTip.Tip="Text overlay vertical offset (px)"/></Grid>
+                        <TextBlock Classes="phaseNote" TextWrapping="Wrap" Text="For the Custom position. Alt+drag the text overlay to move it (the card switches to Custom); pick a preset to reset."/>
+                      </StackPanel>
                       <StackPanel Spacing="2">
                         <TextBlock Classes="phaseNote" Text="Positions available:"/>
                         <TextBlock Classes="phaseNote" Text="  • Over the picture: top / bottom × left, center, right" TextWrapping="Wrap"/>
@@ -283,18 +296,35 @@
                     </StackPanel>
                   </Border>
                 </WrapPanel>
-                <TextBlock Classes="phaseNote" Margin="6,-6,8,2" Text="Font, colour, opacity, shadow and border below stay shared by both." TextWrapping="Wrap"/>
+                <!-- Round 4 B5: the look per position. Over the picture uses the rows below; the bars can have their own. -->
+                <TextBlock Text="Look in the title bar and the vertical tab bar" Classes="settingsSectionLabel" FontWeight="SemiBold" Margin="4,2,0,0"/>
+                <TextBlock Classes="phaseNote" Margin="6,-4,8,0" TextWrapping="Wrap" Text="Blank, 0 or Same: as over the picture. The title bar always shows one line (line breaks become separators)."/>
+                <Grid x:Name="TextOverlayBarStyleGrid" Margin="6,0,0,0" ColumnDefinitions="Auto,*,*" MaxWidth="640" HorizontalAlignment="Left" RowDefinitions="Auto,Auto,Auto,Auto,Auto" ColumnSpacing="10" RowSpacing="6">
+                  <TextBlock Grid.Column="1" Text="Title bar" FontWeight="SemiBold"/>
+                  <TextBlock Grid.Column="2" Text="Vertical tab bar" FontWeight="SemiBold"/>
+                  <TextBlock Grid.Row="1" Text="Template" VerticalAlignment="Center"/>
+                  <TextBox x:Name="TitleBarTemplateBox" Grid.Row="1" Grid.Column="1" Watermark="Same as over the picture"/>
+                  <TextBox x:Name="TabBarTemplateBox" Grid.Row="1" Grid.Column="2" Watermark="Same as over the picture"/>
+                  <TextBlock Grid.Row="2" Text="Font size" VerticalAlignment="Center"/>
+                  <NumericUpDown x:Name="TitleBarFontSizeBox" Grid.Row="2" Grid.Column="1" Width="120" HorizontalAlignment="Left" Minimum="0" Maximum="48" ToolTip.Tip="0: the same size as over the picture."/>
+                  <NumericUpDown x:Name="TabBarFontSizeBox" Grid.Row="2" Grid.Column="2" Width="120" HorizontalAlignment="Left" Minimum="0" Maximum="48" ToolTip.Tip="0: the same size as over the picture."/>
+                  <TextBlock Grid.Row="3" Text="Colour" VerticalAlignment="Center"/>
+                  <ComboBox Grid.Row="3" Grid.Column="1" x:Name="TitleBarColorCombo" HorizontalAlignment="Stretch"><ComboBoxItem Content="Same as over the picture"/><ComboBoxItem Content="White"/><ComboBoxItem Content="Soft gray"/><ComboBoxItem Content="Accent"/><ComboBoxItem Content="Amber"/></ComboBox>
+                  <ComboBox Grid.Row="3" Grid.Column="2" x:Name="TabBarColorCombo" HorizontalAlignment="Stretch"><ComboBoxItem Content="Same as over the picture"/><ComboBoxItem Content="White"/><ComboBoxItem Content="Soft gray"/><ComboBoxItem Content="Accent"/><ComboBoxItem Content="Amber"/></ComboBox>
+                  <TextBlock Grid.Row="4" Text="Border" VerticalAlignment="Center"/>
+                  <ComboBox Grid.Row="4" Grid.Column="1" x:Name="TitleBarBorderCombo" HorizontalAlignment="Stretch"><ComboBoxItem Content="Same as over the picture"/><ComboBoxItem Content="On"/><ComboBoxItem Content="Off"/></ComboBox>
+                  <ComboBox Grid.Row="4" Grid.Column="2" x:Name="TabBarBorderCombo" HorizontalAlignment="Stretch"><ComboBoxItem Content="Same as over the picture"/><ComboBoxItem Content="On"/><ComboBoxItem Content="Off"/></ComboBox>
+                </Grid>
+                <TextBlock Text="Over the picture" Classes="settingsSectionLabel" FontWeight="SemiBold" Margin="4,6,0,0"/>
                 <Grid ColumnDefinitions="245,150,*" Margin="6,0,0,0"><TextBlock Text="Text overlay font size" VerticalAlignment="Center"/><NumericUpDown x:Name="PictureFontSizeBox" Grid.Column="1" Minimum="8" Maximum="48"/></Grid>
                 <CheckBox x:Name="PictureBoldCheck" Content="Text overlay bold"/>
                 <Grid ColumnDefinitions="245,220,*" Margin="6,0,0,0"><TextBlock Text="Text overlay colour" VerticalAlignment="Center"/><ComboBox x:Name="PictureColorCombo" Grid.Column="1" Width="210"><ComboBoxItem Content="White"/><ComboBoxItem Content="Soft gray"/><ComboBoxItem Content="Accent"/><ComboBoxItem Content="Amber"/></ComboBox></Grid>
                 <Grid ColumnDefinitions="245,150,*" Margin="6,0,0,0"><TextBlock Text="Text overlay opacity (%)" VerticalAlignment="Center"/><NumericUpDown x:Name="PictureOpacityBox" Grid.Column="1" Minimum="10" Maximum="100"/></Grid>
-                <Grid ColumnDefinitions="245,150,*" Margin="6,0,0,0"><TextBlock Text="Text overlay horizontal offset (px)" VerticalAlignment="Center"/><NumericUpDown x:Name="PictureOffsetXBox" Grid.Column="1" Minimum="-4000" Maximum="4000"/><TextBlock Grid.Column="2" Classes="phaseNote" Margin="8,0,0,0" VerticalAlignment="Center" TextWrapping="Wrap" Text="For the Custom position. Alt+drag the text overlay to move it (the card switches to Custom); pick a preset to reset."/></Grid>
-                <Grid ColumnDefinitions="245,150,*" Margin="6,0,0,0"><TextBlock Text="Text overlay vertical offset (px)" VerticalAlignment="Center"/><NumericUpDown x:Name="PictureOffsetYBox" Grid.Column="1" Minimum="-4000" Maximum="4000"/></Grid>
                 <CheckBox x:Name="PictureShadowCheck" Content="Text overlay shadow"/>
                 <CheckBox x:Name="PictureBorderCheck" Content="Text overlay border" ToolTip.Tip="Encloses every line of the text overlay (the counter and the folder position line) in one box, styled like the Image information panel."/>
                 <TextBlock Text="Folder position line" Classes="settingsSectionLabel" FontWeight="SemiBold" Margin="4,10,0,0"/>
                 <CheckBox x:Name="ShowFolderCounterCheck" Content="Show folder position under image counter" ToolTip.Tip="Shows the current folder position and number of sibling folders."/>
-                <CheckBox x:Name="FolderCounterGrandparentCheck" Content="Include parent folder position in folder counter" ToolTip.Tip="Adds the parent folder position within the grandparent, for example 5/50/4."/>
+                <CheckBox x:Name="FolderCounterGrandparentCheck" Content="Include parent folder position in folder counter" ToolTip.Tip="Adds the parent folder position among its sibling folders (the folders in the grandparent), in brackets, for example 6/94 - (10/30)."/>
             </StackPanel>
           </controls:SettingsCard>
           </StackPanel>
@@ -327,7 +357,6 @@
                 <CheckBox x:Name="FullscreenKeepTabBarOpenCheck" Content="Keep title/tab bar open in fullscreen (resizes image below it)"/>
                 <CheckBox x:Name="FullscreenKeepTitleBarForExplorerCheck" Content="Keep title bar visible in full screen while Explorer is active" ToolTip.Tip="With an Explorer tab selected, the title/tab bar stays shown in fullscreen and the Explorer navigation row (Back, Forward, Up, address bar, filter) sits on its own line beneath it. Image and Welcome tabs keep the normal auto-hide."/>
                 <CheckBox x:Name="HideCursorFullscreenCheck" Content="Hide cursor when idle in fullscreen"/>
-                <CheckBox x:Name="HideCursorNormalWindowCheck" Content="Hide cursor in normal window (over the picture)"/>
                 <Grid ColumnDefinitions="260,150,*" Margin="6,0,0,0"><TextBlock Text="Hide cursor after (seconds)" VerticalAlignment="Center"/><NumericUpDown x:Name="FullscreenHideCursorDelayBox" Grid.Column="1" Minimum="0.5" Maximum="30" Increment="0.5" FormatString="0.0"/></Grid>
                 <Grid ColumnDefinitions="260,250,*" Margin="6,0,0,0"><TextBlock Text="Hide cursor" VerticalAlignment="Center"/><ComboBox x:Name="HideCursorModeCombo" Grid.Column="1" Width="240"><ComboBoxItem Content="After a delay"/><ComboBoxItem Content="Always while over the picture"/></ComboBox></Grid>
                 <Grid ColumnDefinitions="260,250,*" Margin="6,0,0,0"><TextBlock Text="Behavior after exiting fullscreen" VerticalAlignment="Center"/><ComboBox x:Name="FullscreenExitBehaviorCombo" Grid.Column="1" Width="240"><ComboBoxItem Content="Restore size and location"/><ComboBoxItem Content="Maximized"/><ComboBoxItem Content="Minimized"/></ComboBox></Grid>
@@ -472,10 +501,25 @@
                   <CheckBox x:Name="ExplorerInfoResolutionCheck" Content="Resolution"/>
                   <CheckBox x:Name="ExplorerInfoFileSizeCheck" Content="File size"/>
                 </StackPanel>
+                <CheckBox x:Name="ExplorerInfoUseTemplateCheck" Content="Use a template for the info under thumbnails instead" Margin="6,0,0,0" ToolTip.Tip="Off by default. The text overlay's tokens, plus {modified} and {taken} (EXIF date taken) with an optional format: {modified:yyyy/MM/dd HH:mm}, {taken:ddd d MMM}, {modified:h:mm tt}. Up to 3 lines (&lt;br&gt;)."/>
+                <Grid ColumnDefinitions="Auto,*" Margin="6,0,0,0"><TextBlock Text="Thumbnail info template" VerticalAlignment="Center" Margin="0,0,12,0"/><TextBox x:Name="ExplorerInfoTemplateBox" Grid.Column="1" MaxWidth="420" HorizontalAlignment="Stretch"/></Grid>
+                <TextBlock Classes="phaseNote" Margin="6,-4,8,0" TextWrapping="Wrap" Text="Dates: {modified} or {taken}, with a format after a colon: yyyy year, MM month, MMM Jan, dd day, ddd Mon, dddd Monday, HH:mm 24-hour, h:mm tt 12-hour. Excel-style YYYY/DD also work."/>
                 <Grid ColumnDefinitions="260,230,*" Margin="6,0,0,0">
                   <TextBlock Text="Drive bar width (px)" VerticalAlignment="Center"/>
                   <NumericUpDown x:Name="ExplorerNavPaneWidthBox" Grid.Column="1" Width="220" Minimum="120" Maximum="600" Increment="10" FormatString="0" ToolTip.Tip="Width of the Explorer tab's drive bar (120 to 600, default 208). You can also drag the line between the drive bar and the thumbnails."/>
                 </Grid>
+                <!-- 5.1.7 thumbnail disk cache: one group so "thumbnail cache" in search reveals the toggle, the limit and the Clear button together. -->
+                <StackPanel x:Name="ExplorerThumbnailCacheGroup" Spacing="10">
+                <CheckBox x:Name="ExplorerThumbnailCacheCheck" Content="Remember Explorer thumbnails on disk" ToolTip.Tip="On (default): thumbnails are kept in a cache folder, so a folder you have opened before shows its pictures at once. A thumbnail is made again when its picture changes."/>
+                <Grid ColumnDefinitions="260,230,*" Margin="6,0,0,0">
+                  <TextBlock Text="Thumbnail cache size limit (MB)" VerticalAlignment="Center"/>
+                  <NumericUpDown x:Name="ExplorerThumbnailCacheMaxBox" Grid.Column="1" Width="220" Minimum="32" Maximum="8192" Increment="64" FormatString="0" ToolTip.Tip="The most disk space the thumbnail cache may use (32 to 8192 MB, default 512). When it is full the thumbnails opened longest ago are removed first."/>
+                </Grid>
+                <StackPanel Orientation="Horizontal" Spacing="12" Margin="6,0,0,0">
+                  <Button x:Name="ClearThumbnailCacheButton" Classes="secondaryAction" Content="Clear thumbnail cache" Click="ClearThumbnailCacheClicked" MinWidth="170" ToolTip.Tip="Delete every thumbnail Glide saved. They are made again as you browse."/>
+                  <TextBlock x:Name="ThumbnailCacheUsageText" Classes="phaseNote" VerticalAlignment="Center"/>
+                </StackPanel>
+                </StackPanel>
                 <!-- Mouse-wheel scrolling: one group so "Explorer scroll speed and amount" on Mouse & keyboard reveals and highlights all of it. -->
                 <StackPanel x:Name="ExplorerScrollSettingsGroup" Spacing="10">
                 <Grid ColumnDefinitions="260,230,*" Margin="6,0,0,0">
@@ -534,6 +578,30 @@
                 </Button>
               </StackPanel>
             </controls:SettingsCard>
+            <controls:SettingsCard CardId="window-tags" Title="Tags" Subtitle="Tag pictures by writing tags into their file names" Icon="Rename" IsExpanded="False">
+              <StackPanel Classes="settingsCardBody" Spacing="10">
+                <CheckBox x:Name="TagsEnabledCheck" Content="Enable tags" ToolTip.Tip="Off by default. Adds the tag sidebar (Explorer tab and picture view; Ctrl+Shift+G or the context menu shows or hides it) that adds and removes tags in the names of the selected files, e.g. Holiday {sea;sun}.jpg. The Explorer filter box finds tags like any other part of a name."/>
+                <CheckBox x:Name="TagsApplyImmediatelyCheck" Content="Apply a tag click immediately" Margin="6,0,0,0" ToolTip.Tip="On (default): ticking or clearing a tag renames the files at once. Off: tick several tags, then press Add or Remove in the sidebar."/>
+                <TextBlock Classes="phaseNote" Margin="6,0,8,0" TextWrapping="Wrap" Text="Tag groups. Tags are always written in the order of the groups and of the tags in each group. 'Include group tag' also writes the group's name whenever one of its tags is added. Separate tags with commas."/>
+                <StackPanel x:Name="TagGroupsHost" Spacing="6" Margin="6,0,0,0"/>
+                <Button x:Name="TagAddGroupButton" Content="Add a group" HorizontalAlignment="Left" Margin="6,0,0,0" Click="TagAddGroupClicked"/>
+                <Grid ColumnDefinitions="260,230,*" Margin="6,0,0,0">
+                  <TextBlock Text="Prefix character (before each tag)" VerticalAlignment="Center"/>
+                  <TextBox x:Name="TagPrefixBox" Grid.Column="1" Width="220" HorizontalAlignment="Left" MaxLength="4" Watermark="none, or e.g. #" ToolTip.Tip="Written in front of every tag: # gives {#mom;#dad}. Empty: none."/>
+                </Grid>
+                <Grid ColumnDefinitions="260,Auto,Auto,Auto,Auto,Auto" Margin="6,0,0,0">
+                  <TextBlock Text="Tag block: opens, closes, separator" VerticalAlignment="Center"/>
+                  <TextBox x:Name="TagOpenBox" Grid.Column="1" Width="60" MaxLength="4" Margin="0,0,6,0" ToolTip.Tip="Opens the list of tags (default {)."/>
+                  <TextBox x:Name="TagCloseBox" Grid.Column="2" Width="60" MaxLength="4" Margin="0,0,6,0" ToolTip.Tip="Closes the list of tags (default })."/>
+                  <TextBox x:Name="TagSeparatorBox" Grid.Column="3" Width="60" MaxLength="4" ToolTip.Tip="Between tags (default ;). A tag can't contain it."/>
+                </Grid>
+                <Grid ColumnDefinitions="260,230,*" Margin="6,0,0,0">
+                  <TextBlock Text="File name format" VerticalAlignment="Center"/>
+                  <TextBox x:Name="TagFormatBox" Grid.Column="1" Width="220" HorizontalAlignment="Left" ToolTip.Tip="{}{name} is the name without tags, {tags} the tag block. Default: {name} {tags}"/>
+                </Grid>
+                <TextBlock x:Name="TagExampleText" Classes="phaseNote" Margin="6,0,8,0" TextWrapping="Wrap"/>
+              </StackPanel>
+            </controls:SettingsCard>
           </StackPanel>
 
           <!-- TABS &amp; STATUS BAR -->
@@ -588,7 +656,7 @@
                   </ComboBox>
                 </Grid>
                 <Grid ColumnDefinitions="242,230,*" Margin="24,0,0,0">
-                  <TextBlock x:Name="NewTabPositionKeyLabel" Text="Key to open at the end instead" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                  <TextBlock x:Name="NewTabPositionKeyLabel" Margin="0,0,12,0" Text="Key to open at the end instead" VerticalAlignment="Center" TextWrapping="Wrap"/>
                   <ComboBox x:Name="NewTabPositionKeyCombo" Grid.Column="1" Width="140" ToolTip.Tip="Hold this key while opening a picture or folder in a new tab to put that one tab at the other position. None turns it off. Ctrl+T and + are not affected."><ComboBoxItem Content="None"/><ComboBoxItem Content="Shift"/><ComboBoxItem Content="Ctrl"/><ComboBoxItem Content="Alt"/></ComboBox>
                 </Grid>
                 <Grid ColumnDefinitions="260,230,*" Margin="6,0,0,0">
@@ -599,25 +667,25 @@
                   </ComboBox>
                 </Grid>
                 <Grid ColumnDefinitions="242,230,*" Margin="24,0,0,0">
-                  <TextBlock x:Name="NewTabForegroundKeyLabel" Text="Key to open in the background instead" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                  <TextBlock x:Name="NewTabForegroundKeyLabel" Margin="0,0,12,0" Text="Key to open in the background instead" VerticalAlignment="Center" TextWrapping="Wrap"/>
                   <ComboBox x:Name="NewTabForegroundKeyCombo" Grid.Column="1" Width="140" ToolTip.Tip="Hold this key while opening a picture or folder in a new tab to do the other of foreground and background for that one tab. None turns it off. Ctrl+T and + are not affected."><ComboBoxItem Content="None"/><ComboBoxItem Content="Shift"/><ComboBoxItem Content="Ctrl"/><ComboBoxItem Content="Alt"/></ComboBox>
                 </Grid>
-                <Grid ColumnDefinitions="260,230,*" Margin="6,0,0,0">
-                  <TextBlock Text="Middle-click opens in a new tab in the" VerticalAlignment="Center" TextWrapping="Wrap"/>
-                  <ComboBox x:Name="MiddleClickSideCombo" Grid.Column="1" Width="220" ToolTip.Tip="Explorer middle-click on a picture or folder: open it in a background tab (default, like a web browser) or in the foreground. The keys above still flip it for one tab.">
-                    <ComboBoxItem Content="background"/>
-                    <ComboBoxItem Content="foreground"/>
-                  </ComboBox>
-                </Grid>
-                <Grid ColumnDefinitions="260,230,*" Margin="6,0,0,0">
-                  <TextBlock Text="Middle-click new tab position" VerticalAlignment="Center" TextWrapping="Wrap"/>
-                  <ComboBox x:Name="MiddleClickPositionCombo" Grid.Column="1" Width="220" ToolTip.Tip="Where an Explorer middle-click puts the new tab: at the end (default), next to the current tab, or the same as New tabs open.">
-                    <ComboBoxItem Content="at the end"/>
-                    <ComboBoxItem Content="next to the current tab"/>
-                    <ComboBoxItem Content="same as new tabs"/>
-                  </ComboBox>
-                </Grid>
+                <TextBlock x:Name="NewTabSharedKeyWarning" Margin="24,0,0,0" IsVisible="False" TextWrapping="Wrap" Opacity="0.85" Foreground="{DynamicResource SystemFillColorCautionBrush}" Text="Both keys are the same: holding it inverts both the position and foreground / background."/>
                 </StackPanel>
+                <Grid ColumnDefinitions="260,230,*" Margin="6,0,0,0">
+                  <TextBlock Text="Duplicated tabs open" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                  <ComboBox x:Name="DuplicateTabPositionCombo" Grid.Column="1" Width="220" ToolTip.Tip="Where Duplicate tab puts the copy: next to the current tab (default) or at the end.">
+                    <ComboBoxItem Content="next to the current tab"/>
+                    <ComboBoxItem Content="at the end"/>
+                  </ComboBox>
+                </Grid>
+                <Grid ColumnDefinitions="260,230,*" Margin="6,0,0,0">
+                  <TextBlock Text="Duplicated tabs open in the" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                  <ComboBox x:Name="DuplicateTabSideCombo" Grid.Column="1" Width="220" ToolTip.Tip="Foreground (default): Glide switches to the duplicate. Background: it stays behind the current tab.">
+                    <ComboBoxItem Content="foreground"/>
+                    <ComboBoxItem Content="background"/>
+                  </ComboBox>
+                </Grid>
                 <CheckBox x:Name="TabHoverPreviewsCheck" Content="Show tab previews on hover" ToolTip.Tip="Hovering a background tab shows a small preview of its picture or folder in the tab tooltip."/>
                 <CheckBox x:Name="AnimateGifPreviewsCheck" Content="Animate GIF previews on hover" Margin="24,0,0,0" IsEnabled="{Binding #TabHoverPreviewsCheck.IsChecked}" ToolTip.Tip="An animated GIF tab's hover preview plays while the tooltip is open. Very large GIFs keep the still first frame. Needs Show tab previews on hover."/>
                 <Grid ColumnDefinitions="231,140,*" Margin="24,0,0,0" IsEnabled="{Binding #TabHoverPreviewsCheck.IsChecked}"><TextBlock Text="Tab preview size (%)" VerticalAlignment="Center"/><NumericUpDown x:Name="TabPreviewSizeBox" Grid.Column="1" Minimum="50" Maximum="250" Increment="10" FormatString="0" ToolTip.Tip="50 to 250 percent of the normal preview size (100). Also: hold the Resize preview key and turn the wheel over a tab while its preview shows."/></Grid>
@@ -779,6 +847,15 @@
                 <CheckBox x:Name="TabFocusNavigationCheck" Content="Allow Tab key to navigate focus through buttons and controls" ToolTip.Tip="When disabled, pressing Tab will not cycle keyboard focus through toolbar buttons and UI controls."/>
             </StackPanel>
           </controls:SettingsCard>
+            <!-- Round 4 E1: the normal-window hide-cursor option lives here; the fullscreen one, the delay and the mode stay on
+                 Window & navigation > Fullscreen, reached through the link. -->
+            <controls:SettingsCard CardId="mouse-pointer" Title="Mouse pointer" Subtitle="Hide the pointer over the picture in a normal window" Icon="Mouse" IsExpanded="False">
+              <StackPanel Classes="settingsCardBody" Spacing="10">
+                <CheckBox x:Name="HideCursorNormalWindowCheck" Content="Hide cursor in normal window (over the picture)" ToolTip.Tip="Uses the hide delay and Hide cursor mode set with Hide cursor in fullscreen."/>
+                <Button x:Name="HideCursorFullscreenLinkButton" Click="HideCursorFullscreenLinkClicked" Background="Transparent" BorderThickness="0" Padding="6,2" Cursor="Hand"
+                        Content="Hide cursor in fullscreen, delay and mode →" ToolTip.Tip="Opens Window &amp; navigation > Fullscreen."/>
+            </StackPanel>
+          </controls:SettingsCard>
             <!-- A link, not a copy: the Explorer tab's mouse-wheel settings live on Window & navigation > Explorer tab. -->
             <Border Classes="settingsCard">
               <Button x:Name="ExplorerScrollLinkButton" Click="ExplorerScrollLinkClicked" Background="Transparent" BorderThickness="0" CornerRadius="0" Padding="14,10" MinHeight="52"
@@ -888,8 +965,8 @@
             <controls:SettingsCard CardId="windows-thumbnails" Title="Explorer thumbnails" Subtitle="Glide's thumbnails in Windows Explorer" Icon="Image" IsExpanded="False">
               <StackPanel Classes="settingsCardBody" Spacing="10">
                 <CheckBox x:Name="ExplorerThumbnailsCheck" Content="Show Glide thumbnails in Windows Explorer" ToolTip.Tip="Registers Glide's native thumbnail provider for supported formats. Thumbnail registration is separate from Open With."/>
-                <Grid ColumnDefinitions="260,250,*" Margin="6,0,0,0"><TextBlock Text="Provider mode" VerticalAlignment="Center"/><ComboBox x:Name="ThumbnailModeCombo" Grid.Column="1" Width="240" ToolTip.Tip="Which formats Explorer asks Glide for. Recommended: formats Glide decodes itself plus formats with no other handler. Unsupported only: just the gaps. All: every format Glide opens, replacing other handlers. Custom: keeps the current selection of formats routed to Glide."><ComboBoxItem Content="Recommended"/><ComboBoxItem Content="Glide for unsupported formats only"/><ComboBoxItem Content="Glide for all supported formats"/><ComboBoxItem Content="Custom"/></ComboBox></Grid>
-                <Grid ColumnDefinitions="260,250,*" Margin="6,0,0,0"><TextBlock Text="Thumbnail quality" VerticalAlignment="Center"/><ComboBox x:Name="ThumbnailQualityCombo" Grid.Column="1" Width="240" ToolTip.Tip="Fast: bilinear scaling, reuses small camera previews (softer), animated GIFs use frame 1 only. Balanced (default): area-averaging scaling, previews only when they are at least thumbnail size, skips blank first GIF frames. High: decodes at twice the thumbnail size and uses high-quality cubic scaling (sharpest, slowest). Use Refresh thumbnails to rebuild existing ones."><ComboBoxItem Content="Fast"/><ComboBoxItem Content="Balanced"/><ComboBoxItem Content="High"/></ComboBox></Grid>
+                <Grid ColumnDefinitions="260,250,*" Margin="6,0,0,0"><TextBlock Text="Provider mode" VerticalAlignment="Center"/><ComboBox x:Name="ThumbnailModeCombo" Grid.Column="1" Width="240" ToolTip.Tip="Which formats Explorer asks Glide for. Recommended: formats Glide decodes itself plus formats with no other handler. Unsupported only: just the gaps. All (default): every format Glide opens, replacing other handlers. Custom: keeps the current selection of formats routed to Glide."><ComboBoxItem Content="Recommended"/><ComboBoxItem Content="Glide for unsupported formats only"/><ComboBoxItem Content="Glide for all supported formats"/><ComboBoxItem Content="Custom"/></ComboBox></Grid>
+                <Grid ColumnDefinitions="260,250,*" Margin="6,0,0,0"><TextBlock Text="Thumbnail quality" VerticalAlignment="Center"/><ComboBox x:Name="ThumbnailQualityCombo" Grid.Column="1" Width="240" ToolTip.Tip="Fast (default): bilinear scaling, reuses small camera previews (softer), animated GIFs use frame 1 only. Balanced: area-averaging scaling, previews only when they are at least thumbnail size, skips blank first GIF frames. High: decodes at twice the thumbnail size and uses high-quality cubic scaling (sharpest, slowest). Use Refresh thumbnails to rebuild existing ones."><ComboBoxItem Content="Fast"/><ComboBoxItem Content="Balanced"/><ComboBoxItem Content="High"/></ComboBox></Grid>
                 <Grid ColumnDefinitions="260,250,*" Margin="6,0,0,0"><TextBlock Text="Maximum source decode size" VerticalAlignment="Center"/><ComboBox x:Name="ThumbnailMaxSourceCombo" Grid.Column="1" Width="240" ToolTip.Tip="Largest intermediate image Glide decodes for one thumbnail. Automatic follows the size Explorer asks for (up to 2048 px). A smaller cap is faster and uses less memory; thumbnails larger than the cap are enlarged and look softer."><ComboBoxItem Content="Automatic"/><ComboBoxItem Content="512 px"/><ComboBoxItem Content="1024 px"/><ComboBoxItem Content="2048 px"/></ComboBox></Grid>
                 <CheckBox x:Name="ThumbnailPreferEmbeddedCheck" Content="Prefer embedded previews (faster for RAW and large files)" ToolTip.Tip="Use the preview stored inside JPEG, TIFF and RAW files instead of decoding the whole image, when it is large enough for the chosen quality. Previews are rotated like the photo and letterbox bars are cropped."/>
                 <WrapPanel ItemSpacing="12" LineSpacing="8"><Button Classes="secondaryAction" Content="Apply thumbnail settings" Click="ApplyThumbnailSettingsClicked" MinWidth="200"/><Button Classes="secondaryAction" Content="Restore recommended" Click="RestoreThumbnailDefaultsClicked" MinWidth="180"/><Button Classes="secondaryAction" Content="Refresh thumbnails" Click="RefreshThumbnailsClicked" MinWidth="160"/></WrapPanel>

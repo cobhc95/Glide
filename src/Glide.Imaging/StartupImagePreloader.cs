@@ -92,6 +92,9 @@ public static class StartupImagePreloader
             var headerWithinCap = ImageHeaderProbe.TryProbe(path, out var header);
             var headerOverCap = header.IsValid && (ImageLoadCoordinator.IsDecompressionBomb(header) || !DecodeMemoryGuard.FitsAvailableMemory(header));
 
+            // A missing/incompatible Glide.Native.dll must not lose the managed bytes fallback below.
+            try
+            {
             if (OperatingSystem.IsWindows() && NativeImageDecoder.SupportsDirectNativeDecode(path))
             {
                 var status = 0;
@@ -105,7 +108,11 @@ public static class StartupImagePreloader
                 }
                 else if ((headerWithinCap && !headerOverCap) || (!header.IsValid && NativeProbeWithinCap(path)))
                 {
-                    status = NativeImageDecoder.RawGlideDecodeImage(path, 0, out native);
+                    // 5.2.0: a TIFF goes through the bounded entry with a box that never reduces it, so the native TIFF reader (parallel tiles,
+                    // BigTIFF, CMYK) decodes it in full when it is the better choice; otherwise this is WIC's full decode as before.
+                    status = NativeImageDecoder.IsTiffPath(path)
+                        ? NativeImageDecoder.RawGlideDecodeImageBounded(path, 65535, 65535, out native)
+                        : NativeImageDecoder.RawGlideDecodeImage(path, 0, out native);
                 }
                 else if (GlidePerformanceTrace.Enabled)
                 {
@@ -131,6 +138,12 @@ public static class StartupImagePreloader
                     }
                     return result;
                 }
+            }
+            }
+            catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException)
+            {
+                if (GlidePerformanceTrace.Enabled)
+                    GlidePerformanceTrace.Mark("startup_preload_native_unavailable", ex.GetType().Name);
             }
 
             // Preload bytes stay as byte[] (not NativeCompressedBuffer): the handoff to the

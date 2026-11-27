@@ -35,7 +35,7 @@ namespace
         { 0x6E3C1B2A, 0x9F41, 0x4E7C, { 0x9B, 0x1E, 0x2C, 0x7A, 0x5D, 0x8F, 0x0A, 0x31 } };
 
     constexpr wchar_t kProviderFriendlyName[] = L"Glide Explorer Thumbnail Provider";
-    constexpr wchar_t kProviderThreadingModel[] = L"Apartment";
+    constexpr wchar_t kProviderThreadingModel[] = L"Both";
 
     HMODULE g_module = nullptr;
     std::atomic<long> g_objectCount{ 0 };

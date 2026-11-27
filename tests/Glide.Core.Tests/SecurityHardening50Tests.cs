@@ -473,21 +473,110 @@ public sealed class SecurityHardening50Tests : IDisposable
     public void Single_instance_pipe_and_presence_names_are_scoped_to_the_user()
     {
         var user = Glide.App.Services.ExternalLaunchBroker.CurrentUserKey();
-        var pipe = Glide.App.Services.ExternalLaunchBroker.PipeName;
+        // An installed Glide's name (this test host itself is isolated per process since 5.1.7, issue #5).
+        var pipe = ProtocolNames.UserScoped(ProtocolNames.PipeName,
+            ProtocolNames.ScopedInstanceKey(user, null, AppContext.BaseDirectory, installedCopy: true, foreignHost: false, processId: 1));
         Assert.Equal(ProtocolNames.UserScoped(ProtocolNames.PipeName, user), pipe);
+        Assert.StartsWith(ProtocolNames.PipeName + ".", Glide.App.Services.ExternalLaunchBroker.PipeName, StringComparison.Ordinal);
         Assert.StartsWith(ProtocolNames.PipeName + ".", pipe, StringComparison.Ordinal);
         Assert.DoesNotContain(user, pipe, StringComparison.OrdinalIgnoreCase); // a hash, not the raw SID
         Assert.NotEqual(pipe, ProtocolNames.UserScoped(ProtocolNames.PipeName, "S-1-5-21-1-2-3-1001"));
         Assert.Equal(ProtocolNames.UserScoped("x", "S-1-5-21-1"), ProtocolNames.UserScoped("x", "s-1-5-21-1"));
         if (OperatingSystem.IsWindows()) Assert.StartsWith("S-1-", user, StringComparison.Ordinal);
 
-        // Both ends use the same scoped name, and CurrentUserOnly stays on.
+        // Both ends use the same scoped name; the server pipe gets the user-SID ACL and both ends verify the peer.
         var broker = File.ReadAllText(RepositoryFile("src", "Glide.App", "Services", "ExternalLaunchBroker.cs"));
         Assert.Contains("new NamedPipeClientStream(\".\", PipeName, PipeDirection.InOut, ClientPipeOptions)", broker, StringComparison.Ordinal);
-        Assert.Contains("PipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, ServerPipeOptions)", broker, StringComparison.Ordinal);
+        Assert.Contains("NamedPipeServerStreamAcl.Create(PipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte,", broker, StringComparison.Ordinal);
+        Assert.Contains("PipePeerIdentity.BuildServerSecurity(user)", broker, StringComparison.Ordinal);
+        Assert.Contains("PipePeerIdentity.ClientAccepts(PipePeerIdentity.Self(), PipePeerIdentity.Server(client))", broker, StringComparison.Ordinal);
+        Assert.Contains("PipePeerIdentity.ServerAccepts(PipePeerIdentity.Self(), PipePeerIdentity.Client(server))", broker, StringComparison.Ordinal);
+        Assert.Contains("ServerPipeOptions | PipeOptions.CurrentUserOnly", broker, StringComparison.Ordinal); // non-Windows fallback
         Assert.DoesNotContain("const string PipeName", broker, StringComparison.Ordinal);
-        Assert.True(Glide.App.Services.ExternalLaunchBroker.ClientPipeOptions.HasFlag(System.IO.Pipes.PipeOptions.CurrentUserOnly));
-        Assert.True(Glide.App.Services.ExternalLaunchBroker.ServerPipeOptions.HasFlag(System.IO.Pipes.PipeOptions.CurrentUserOnly));
+    }
+
+    // ============================================================== G2. elevated launch forwarding (5.1.7) ====
+
+    private static Glide.App.Services.PipePeer Peer(string? sid, int? session, bool? elevated) => new(sid, session, elevated);
+    private const string UserA = "S-1-5-21-1-2-3-1001";
+    private const string UserB = "S-1-5-21-1-2-3-1002";
+
+    [Fact]
+    public void Elevated_client_forwards_to_same_users_normal_owner()
+    {
+        Assert.True(Glide.App.Services.PipePeerIdentity.ClientAccepts(Peer(UserA, 1, true), Peer(UserA, 1, false)));
+        Assert.True(Glide.App.Services.PipePeerIdentity.ClientAccepts(Peer(UserA, 1, false), Peer(UserA, 1, false)));
+        Assert.True(Glide.App.Services.PipePeerIdentity.ClientAccepts(Peer(UserA, 1, true), Peer(UserA, 1, true)));
+        // A normal owner cannot read an elevated client's token: the ACL does the user check, the session must match.
+        Assert.True(Glide.App.Services.PipePeerIdentity.ServerAccepts(Peer(UserA, 1, false), Peer(null, 1, null)));
+        Assert.True(Glide.App.Services.PipePeerIdentity.ServerAccepts(Peer(UserA, 1, true), Peer(UserA, 1, true)));
+    }
+
+    [Fact]
+    public void Pipe_peer_policy_rejects_other_users_sessions_and_normal_to_elevated()
+    {
+        Func<Glide.App.Services.PipePeer, Glide.App.Services.PipePeer, bool> c = Glide.App.Services.PipePeerIdentity.ClientAccepts;
+        Func<Glide.App.Services.PipePeer, Glide.App.Services.PipePeer, bool> s = Glide.App.Services.PipePeerIdentity.ServerAccepts;
+        Assert.False(c(Peer(UserA, 1, true), Peer(UserB, 1, false)));   // other user
+        Assert.False(c(Peer(UserA, 1, false), Peer(UserA, 2, false)));  // other session
+        Assert.False(c(Peer(UserA, 1, false), Peer(UserA, 1, true)));   // normal launch -> elevated owner
+        Assert.False(c(Peer(UserA, 1, false), Peer(null, 1, null)));    // unverifiable owner
+        Assert.False(c(Peer(UserA, null, false), Peer(UserA, null, false)));
+        Assert.False(s(Peer(UserA, 1, false), Peer(UserB, 1, false)));
+        Assert.False(s(Peer(UserA, 1, false), Peer(UserA, 2, true)));
+        Assert.False(s(Peer(UserA, 1, true), Peer(UserA, 1, false)));   // elevated owner serves elevated launches only
+        Assert.False(s(Peer(UserA, 1, true), Peer(null, 1, null)));
+        Assert.False(s(Peer(UserA, 1, false), Peer(UserA, null, false)));
+    }
+
+    [Fact]
+    public void Pipe_acl_grants_only_the_user_sid()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var user = new System.Security.Principal.SecurityIdentifier(UserA);
+        var security = Glide.App.Services.PipePeerIdentity.BuildServerSecurity(user);
+        Assert.True(security.AreAccessRulesProtected);
+        Assert.Equal(user, security.GetOwner(typeof(System.Security.Principal.SecurityIdentifier)));
+        var rules = security.GetAccessRules(true, true, typeof(System.Security.Principal.SecurityIdentifier))
+            .Cast<System.IO.Pipes.PipeAccessRule>().ToList();
+        var rule = Assert.Single(rules);
+        Assert.Equal(user, rule.IdentityReference);
+        Assert.Equal(System.Security.AccessControl.AccessControlType.Allow, rule.AccessControlType);
+    }
+
+    [Fact]
+    public void Incompatible_owner_starts_own_window_without_waiting_out_the_budget()
+    {
+        var forwards = 0;
+        var outcome = Glide.App.Services.LaunchElection.Resolve(
+            hasRequest: true, startHidden: false,
+            tryForward: _ => { forwards++; return false; },
+            claimPresence: () => false,
+            budget: TimeSpan.FromSeconds(8),
+            sleep: _ => throw new InvalidOperationException("must not wait"),
+            ownerIncompatible: () => true);
+        Assert.Equal(Glide.App.Services.LaunchElectionOutcome.StartFollowerUi, outcome);
+        Assert.Equal(1, forwards);
+    }
+
+    [Fact]
+    public void Real_pipe_with_user_sid_acl_round_trips_and_passes_identity_checks()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        // Isolated, per-process test pipe name (never the user's Glide pipe).
+        var name = "Glide.Test.PeerIdentity." + Environment.ProcessId + "." + Guid.NewGuid().ToString("N");
+        using var identity = System.Security.Principal.WindowsIdentity.GetCurrent();
+        using var server = System.IO.Pipes.NamedPipeServerStreamAcl.Create(name, System.IO.Pipes.PipeDirection.InOut, 1,
+            System.IO.Pipes.PipeTransmissionMode.Byte, System.IO.Pipes.PipeOptions.Asynchronous, 0, 0,
+            Glide.App.Services.PipePeerIdentity.BuildServerSecurity(identity.User!));
+        var accept = server.WaitForConnectionAsync();
+        using var client = new System.IO.Pipes.NamedPipeClientStream(".", name, System.IO.Pipes.PipeDirection.InOut, System.IO.Pipes.PipeOptions.Asynchronous);
+        client.Connect(5000);
+        Assert.True(accept.Wait(5000));
+        var self = Glide.App.Services.PipePeerIdentity.Self();
+        Assert.Equal(identity.User!.Value, self.UserSid);
+        Assert.True(Glide.App.Services.PipePeerIdentity.ClientAccepts(self, Glide.App.Services.PipePeerIdentity.Server(client)));
+        Assert.True(Glide.App.Services.PipePeerIdentity.ServerAccepts(self, Glide.App.Services.PipePeerIdentity.Client(server)));
     }
 
     // ============================================================== H. local signing script ========
@@ -531,7 +620,7 @@ public sealed class SecurityHardening50Tests : IDisposable
         {
             StartupCustomPath = @"C:\Pictures",
             OpenFileDefaultDirectory = @"\\old\share", // this PC's own value is a network path: cleared, not kept
-            LastOpenDirectory = @"D:\Photos",
+            LastOpenDirectory = @"D:\Pictures",
         };
         var imported = new Glide.Core.Settings.GlideSettingsState
         {
@@ -549,7 +638,7 @@ public sealed class SecurityHardening50Tests : IDisposable
         Assert.Equal(@"C:\Pictures", imported.StartupCustomPath);
         Assert.Equal("", imported.NewTabCustomPath);
         Assert.Equal(@"E:\Shared", imported.NewExplorerTabDefaultDirectory);
-        Assert.Equal(@"D:\Photos", imported.LastOpenDirectory);
+        Assert.Equal(@"D:\Pictures", imported.LastOpenDirectory);
         Assert.Equal("", imported.OpenFileDefaultDirectory);
         Assert.Equal(@"C:\Overlay", imported.OverlayDefaultDirectory);
         Assert.Equal("", imported.ProfileDefaultDirectory);

@@ -3,6 +3,7 @@
 // Every function returns false when the file is not a JPEG this path handles (CMYK/YCCK, 12/16-bit,
 // lossless, unknown subsampling, any libjpeg-turbo warning or error); the caller then decodes it with WIC
 // exactly as before, so behaviour for those files is unchanged.
+#include <cstddef>
 #include <cstdint>
 #include <windows.h>
 
@@ -21,7 +22,12 @@ bool GlideWithinDecodeCap(std::uint64_t width, std::uint64_t height);
 // covers the request) of the main image. Progressive files only when progressiveScaled (the caller is not asking
 // for WIC's staged first-scans preview, which is faster for a first view). Declined files return false and keep
 // WIC's scaled first view. Output is 32bpp BGRA (opaque) in CoTaskMem, EXIF orientation applied.
-bool GlideTurboDecodeBounded(const wchar_t* path, std::uint32_t maxWidth, std::uint32_t maxHeight, bool progressiveScaled, GlideDecodedImage* image);
+// thumbnail: always DCT-scale (progressive too) with the fast IDCT/upsampling; the Explorer tab grid's decode.
+bool GlideTurboDecodeBounded(const wchar_t* path, std::uint32_t maxWidth, std::uint32_t maxHeight, bool progressiveScaled, GlideDecodedImage* image,
+                             bool thumbnail = false);
+
+// Explorer thumbnail of a JPEG already in memory (5.2.0): GlideTurboDecodeBounded(thumbnail = true) without the file open.
+bool GlideTurboDecodeBoundedMemory(const std::uint8_t* data, std::size_t size, std::uint32_t maxWidth, std::uint32_t maxHeight, GlideDecodedImage* image);
 
 // Full-resolution decode into the caller's surface. Baseline: parallel horizontal bands; progressive: one
 // thread (banding a progressive file repeats the whole multi-scan decode per band and multiplies memory).
@@ -42,3 +48,15 @@ GlideJpegFirstView GlideJpegChooseFirstView(int width, int height, std::uint32_t
                                             std::uint32_t previewLongSide, bool scaledAllowed);
 // Smallest power-of-two DCT scale denominator (1, 2, 4 or 8) whose output still covers needW x needH.
 int GlideJpegChooseScaleDenom(int width, int height, std::uint32_t needW, std::uint32_t needH);
+
+// Tests/diagnostics: the DC-only 1/8 decode of a progressive JPEG (libjpeg buffered-image mode, stops after the first scan(s)),
+// without orientation. False for anything but a progressive YCbCr / grayscale JPEG whose DC scan decodes cleanly.
+bool GlideTurboProgressiveDc(const wchar_t* path, GlideDecodedImage* image);
+
+// 5.2.0: the DC-only 1/8 decode of a progressive JPEG by Glide's own marker / Huffman reader (GlideJpegDc.cpp): no coefficient
+// buffer (about 1.5 MB instead of 132 MB for 45 MP), BGRA in CoTaskMem, no orientation. False for anything it does not handle.
+bool GlideJpegDcOnly(const std::uint8_t* data, std::size_t size, std::uint8_t** pixels, int* width, int* height);
+
+// Tests: the route the last Explorer JPEG thumbnail took on this thread (1 = own DC reader, 2 = libjpeg DC, 3 = DCT-scaled
+// TurboJPEG decode, 4 = embedded preview, 0 = declined).
+extern thread_local int g_lastJpegThumbnailRoute;

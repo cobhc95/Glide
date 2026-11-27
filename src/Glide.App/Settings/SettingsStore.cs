@@ -22,7 +22,15 @@ public static class SettingsStore
     /// </summary>
     private const int LaunchPolicySchema = 4;
     // 9 (5.0.0 Back / Forward): the one-time title-bar default migration below is gated on it.
-    internal const int CurrentSettingsSchema = 23;
+    internal const int CurrentSettingsSchema = 25;
+    /// <summary>
+    /// Settings schema (round 4 D1) that retired the 5.1.0 "Middle-click opens in a new tab in the" / "Middle-click new tab
+    /// position" settings (Explorer middle-click now follows the general new-tab settings and keys) and added "Duplicated
+    /// tabs open [position] in the [side]". Older files: the legacy MiddleClickNewTab* keys are dropped (not read; they are
+    /// not written again) and the duplicate settings start at their defaults (next to the current tab, foreground), the
+    /// placement Duplicate tab already had before.
+    /// </summary>
+    internal const int DuplicateTabSettingsSchema = 24;
     /// <summary>
     /// Settings schema (5.1.4) that added the "Custom" text overlay position: per-preset offsets are retired; a card whose
     /// preset had an offset becomes Custom at the same spot (TextOverlayPlacements.MigratePerPresetOffsets).
@@ -348,9 +356,29 @@ public static class SettingsStore
 
     public static string GetSettingsDirectory() => Path.GetDirectoryName(GetSettingsPath())!;
 
+    /// <summary>
+    /// Folder of the Explorer thumbnail disk cache: the settings folder's "thumbnails" when the settings folder is redirected
+    /// (an isolated profile or a test), otherwise %LOCALAPPDATA%\Glide\thumbnails (never next to a portable copy's exe).
+    /// </summary>
+    public static string GetThumbnailCacheDirectory()
+    {
+        var redirected = !string.IsNullOrWhiteSpace(SettingsDirectoryOverrideForTests.Value) ||
+                         !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("GLIDE_SETTINGS_DIRECTORY"));
+        var root = redirected
+            ? GetSettingsDirectory()
+            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Glide");
+        return Path.Combine(root, Glide.Imaging.ThumbnailDiskCache.FolderName);
+    }
+
     internal static bool MigrateWheelDirection(int sourceSchema, bool invert) => sourceSchema >= 6 && invert;
 
     /// <summary>Schema at which the 4.7 mouse toggles were folded into gesture bindings.</summary>
+    /// <summary>Round 4 D1: files older than <see cref="DuplicateTabSettingsSchema"/> get the duplicate-tab defaults; newer ones are normalised.</summary>
+    internal static (string Position, string Side) MigrateDuplicateTabSettings(int sourceSchema, string? position, string? side) =>
+        sourceSchema < DuplicateTabSettingsSchema
+            ? (Glide.Core.Workspace.DuplicateTabPositions.Default, Glide.Core.Workspace.DuplicateTabSides.Default)
+            : (Glide.Core.Workspace.DuplicateTabPositions.Normalize(position), Glide.Core.Workspace.DuplicateTabSides.Normalize(side));
+
     internal const int GestureFoldSchema = 7;
 
     /// <summary>
@@ -380,6 +408,8 @@ public static class SettingsStore
         HotkeyDefaultMigrations.MigrateBackspaceToBackOrPrevious(state.Hotkeys, sourceSchema);
         // Schema 19: "Enter / exit Overlay mode" gains Alt+O (only where unassigned and the key is free).
         HotkeyDefaultMigrations.MigrateOverlayToggle(state.Hotkeys, sourceSchema);
+        // Schema 25: "Show / hide the tag sidebar" gains Ctrl+Shift+G (only where unassigned and the key is free).
+        HotkeyDefaultMigrations.MigrateTagSidebar(state.Hotkeys, sourceSchema);
         if (sourceSchema >= HotkeyDefaultMigrations.StatusToggleMovedSchema) return;
         if (state.ViewportZoomStepPercent == 10) state.ViewportZoomStepPercent = Glide.Core.ZoomStepPolicy.DefaultStepPercent;
         HotkeyDefaultMigrations.MigrateStatusToggle(state.Hotkeys, sourceSchema);
@@ -528,14 +558,15 @@ public static class SettingsStore
                 ? LegacyMouseToggles.ExplorerNewTab : LegacyMouseToggles.ExplorerCurrentTab;
             loaded.TabPreviewSizePercent = Glide.Core.Workspace.TabPreviewSize.Clamp(loaded.TabPreviewSizePercent);
             loaded.ExplorerNavPaneWidth = Glide.App.Explorer.ExplorerLayout.ClampNavPaneWidth(loaded.ExplorerNavPaneWidth);
+            loaded.ExplorerThumbnailCacheMaxMb = Glide.App.Services.ThumbnailCacheSettings.ClampMegabytes(loaded.ExplorerThumbnailCacheMaxMb);
         loaded.TabPreviewResizeModifier = Glide.Core.Workspace.TabPreviewSize.NormalizeModifier(loaded.TabPreviewResizeModifier);
         loaded.TabToolTipTextSize = loaded.TabToolTipTextSize is "Small" or "Large" ? loaded.TabToolTipTextSize : "Medium";
             loaded.NewTabPosition = Glide.Core.Workspace.NewTabPositions.Normalize(loaded.NewTabPosition);
             loaded.AfterTabCloseCustomTarget = Glide.Core.Workspace.TabCloseCustomTargets.Normalize(loaded.AfterTabCloseCustomTarget);
             foreach (var area in Glide.Core.Settings.TooltipAreas.All)
                 Glide.Core.Settings.TooltipAreas.SetDelayMs(loaded, area.Id, Glide.Core.Settings.TooltipAreas.DelayMs(loaded, area.Id));
-            loaded.MiddleClickNewTabSide = Glide.Core.Workspace.MiddleClickSides.Normalize(loaded.MiddleClickNewTabSide);
-            loaded.MiddleClickNewTabPosition = Glide.Core.Workspace.MiddleClickPositions.Normalize(loaded.MiddleClickNewTabPosition);
+            (loaded.DuplicateTabPosition, loaded.DuplicateTabSide) =
+                MigrateDuplicateTabSettings(sourceSchema, loaded.DuplicateTabPosition, loaded.DuplicateTabSide);
             loaded.AfterTabCloseActivate = MigrateAfterTabCloseActivate(sourceSchema,
                 Glide.Core.Workspace.TabCloseActivation.Normalize(loaded.AfterTabCloseActivate));
             loaded.SwitchToNewTabs = MigrateSwitchToNewTabs(sourceSchema, loaded.SwitchToNewTabs);
@@ -567,6 +598,13 @@ public static class SettingsStore
             loaded.PictureCounterPositionSideTabs = Glide.Core.Settings.TextOverlayPlacements.Normalize(loaded.PictureCounterPositionSideTabs);
             loaded.PictureCounterAlignmentTopTabs = Glide.Core.Settings.TextOverlayPlacements.NormalizeAlignment(loaded.PictureCounterAlignmentTopTabs);
             loaded.PictureCounterAlignmentSideTabs = Glide.Core.Settings.TextOverlayPlacements.NormalizeAlignment(loaded.PictureCounterAlignmentSideTabs);
+            // Round 4 B5/B6: unknown choice values fall back to their defaults.
+            loaded.TextOverlayTitleBarColor = Glide.Core.Settings.TextOverlayStyle.NormalizeChoice(loaded.TextOverlayTitleBarColor, Glide.Core.Settings.TextOverlayStyle.ColorChoices);
+            loaded.TextOverlayTabBarColor = Glide.Core.Settings.TextOverlayStyle.NormalizeChoice(loaded.TextOverlayTabBarColor, Glide.Core.Settings.TextOverlayStyle.ColorChoices);
+            loaded.TextOverlayTitleBarBorder = Glide.Core.Settings.TextOverlayStyle.NormalizeChoice(loaded.TextOverlayTitleBarBorder, Glide.Core.Settings.TextOverlayStyle.BorderChoices);
+            loaded.TextOverlayTabBarBorder = Glide.Core.Settings.TextOverlayStyle.NormalizeChoice(loaded.TextOverlayTabBarBorder, Glide.Core.Settings.TextOverlayStyle.BorderChoices);
+            loaded.TextOverlaySeparator = Glide.Core.Settings.TextOverlayStyle.NormalizeChoice(loaded.TextOverlaySeparator, Glide.Core.Status.TextTemplate.Separators);
+            loaded.TextOverlaySeparatorColor = Glide.Core.Settings.TextOverlayStyle.NormalizeChoice(loaded.TextOverlaySeparatorColor, Glide.Core.Settings.TextOverlayStyle.SeparatorColorChoices);
             if (sourceSchema < TextOverlayCustomPositionSchema)
                 Glide.Core.Settings.TextOverlayPlacements.MigratePerPresetOffsets(loaded);
             // 4.8.0: the title-bar Show in Explorer button opens Glide's own Explorer tab by default. Files saved

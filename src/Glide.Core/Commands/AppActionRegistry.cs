@@ -263,6 +263,8 @@ public static class AppActionRegistry
         Cmd("overlay.clear", "Clear all overlays", "Overlays", GlideCommand.ClearOverlays, [], ["remove overlays", "close overlays", "window in window"]),
         Cmd("overlay.toggleMode", "Enter / exit Overlay (Window-in-Window) mode", "Overlays", GlideCommand.ToggleOverlayMode, ["Alt+O"],
             ["overlay mode", "window in window", "frameless", "transparent window", "exit overlay"]) with { Icon = "Overlays" },
+        Cmd("overlay.preserveAspect", "Overlay mode: toggle Preserve aspect ratio", "Overlays", GlideCommand.ToggleOverlayPreserveAspect, [],
+            ["aspect ratio", "stretch", "crop", "overlay mode", "resize"]) with { Inputs = NoGesture },
         Cmd("status.close", "Close (hide) the status bar", "Application", GlideCommand.CloseStatusBar, [], ["status", "status bar", "hide", "close"]),
         Cmd("tab.newExplorer", "New Explorer tab (browse folders)", "Tabs", GlideCommand.NewExplorerTab, [], ["explorer", "browse", "folder", "files"]) with { Icon = "Browser" },
         Cmd("tab.newHome", "New Welcome tab", "Tabs", GlideCommand.NewHomeTab, [], ["welcome", "home", "start page"]),
@@ -272,6 +274,11 @@ public static class AppActionRegistry
         Cmd("explorer.back", "Explorer: back", "Explorer", GlideCommand.BrowserBack, [], ["explorer", "back", "history"]) with { Contexts = AppActionContexts.Explorer, Description = "Same as Back, from an Explorer tab.", Gesture = G("explorer.back", "Explorer: back", GestureActionCategories.Explorer, 1100, ExplorerAndChrome) },
         Cmd("explorer.forward", "Explorer: forward", "Explorer", GlideCommand.BrowserForward, [], ["explorer", "forward", "history"]) with { Contexts = AppActionContexts.Explorer, Description = "Same as Forward, from an Explorer tab.", Gesture = G("explorer.forward", "Explorer: forward", GestureActionCategories.Explorer, 1101, ExplorerAndChrome) },
         Cmd("explorer.up", "Explorer: up one folder", "Explorer", GlideCommand.BrowserUp, [], ["explorer", "up", "parent folder"]) with { Contexts = AppActionContexts.Explorer, Gesture = G("explorer.up", "Explorer: up one folder", GestureActionCategories.Explorer, 1102, ExplorerAndChrome) },
+        // Round 4 C3: bindable to the Explorer gesture rows; the default of Alt+double-click on an item.
+        Cmd("explorer.itemProperties", "Explorer: properties", "Explorer", GlideCommand.ExplorerItemProperties, [], ["explorer", "properties", "details", "file properties", "alt double-click"]) with { Contexts = AppActionContexts.Explorer, Description = "Shows Windows properties for the selected item (or the folder when nothing is selected). Default of Alt+double-click on an item.", Gesture = G("explorer.itemProperties", "Explorer: properties", GestureActionCategories.Explorer, 1103, [GestureAreas.Explorer]) },
+        // 5.1.7 (issue #4): the tag sidebar. Works in image and Explorer tabs; with tags switched off it says where to turn them on. Ctrl+Shift+G (free) so it is reachable; the Explorer and viewer context menus list it while tags are on.
+        Cmd("tags.toggleSidebar", "Show / hide the tag sidebar", "File", GlideCommand.ToggleTagSidebar, ["Ctrl+Shift+G"],
+            ["tag", "tags", "tagging", "sidebar", "label", "labels", "keywords"]) with { Icon = "Rename" },
         Cmd("explorer.showInWindows", "Show in Windows File Explorer", "Explorer", GlideCommand.ShowFolderInWindowsExplorer, [],
             ["windows explorer", "file explorer", "reveal", "open folder", "show this folder", "select file"]) with { Contexts = AppActionContexts.Explorer, Description = "Opens the folder in Windows File Explorer with the selected item selected." },
         Cmd("explorer.showInAlternative", "Show in alternative file manager", "Explorer", GlideCommand.ShowInAlternativeFileManager, [],
@@ -342,6 +349,9 @@ public static class AppActionRegistry
         {
             Description = "Opens Settings at the Text overlay placement card for the current tab layout (Tabs along the top or Tabs at the side). Right-clicking the text overlay does the same."
         },
+        // Round 4 G1: Shift+Delete, like Windows; asks first (Delete focused) unless "Don't ask again for this folder in this tab".
+        Cmd("file.deletePermanently", "Delete current file permanently", "File", GlideCommand.DeleteFilePermanently, ["Shift+Delete"],
+            ["delete", "permanent", "permanently", "shift+delete", "no recycle bin", "erase"]) with { Destructive = true, Inputs = NoGesture },
         Cmd("app.importBackup", "Import Glide backup…", "Application", GlideCommand.ImportGlideBackup, [],
             ["backup", "back up", "restore", "import", "load settings", "transfer", "migrate", "move to new pc", "new computer", "settings file", "profile", "glidebackup"]) with
         {
@@ -396,7 +406,7 @@ public static class AppActionRegistry
             "With an overlay selected and 'Keyboard zoom for selected overlay' on, these keys zoom the overlay instead of the image.", "overlay", "zoom", "plus", "minus"),
         Fixed("overlay.areaCancel", "Esc", "Cancel drawing an overlay animation area", AppActionContexts.Overlay,
             "While drawing an overlay animation area, Esc cancels it.", "overlay", "area", "escape", "cancel"),
-        Fixed("explorer.filter", "Ctrl+F", "Explorer: focus the filter box", AppActionContexts.Explorer, "Moves the keyboard to the Explorer filter box.", "filter", "search", "find"),
+        Fixed("explorer.filter", "Ctrl+F / F3", "Explorer: focus the filter box", AppActionContexts.Explorer, "Moves the keyboard to the Explorer filter box.", "filter", "search", "find"),
         Fixed("explorer.address", "Ctrl+L / Alt+D / F4", "Explorer: edit the address bar", AppActionContexts.Explorer, "Edits the folder path in the Explorer address bar.", "address", "path", "location"),
         // 5.0.0: Alt+Left / Alt+Right are no longer fixed Explorer keys; they are the editable defaults of Back / Forward
         // (nav.back / nav.forward), which also step across an image opened from the Explorer tab. Backspace in the Explorer list
@@ -404,18 +414,20 @@ public static class AppActionRegistry
         Fixed("explorer.up", "Alt+Up", "Explorer: up one folder", AppActionContexts.Explorer, "Opens the parent folder.", "up", "parent", "alt+up"),
         Fixed("explorer.properties", "Alt+Enter", "Explorer: properties", AppActionContexts.Explorer, "Shows Windows properties for the selection or the folder.", "properties", "details"),
         Fixed("explorer.selectAll", "Ctrl+A", "Explorer: select all", AppActionContexts.Explorer, "Selects every item in the folder.", "select all"),
-        Fixed("explorer.copy", "Ctrl+C", "Explorer: copy files", AppActionContexts.Explorer, "Copies the selected files to the clipboard.", "copy", "clipboard"),
+        Fixed("explorer.copy", "Ctrl+C / Ctrl+Insert", "Explorer: copy files", AppActionContexts.Explorer, "Copies the selected files to the clipboard.", "copy", "clipboard"),
         Fixed("explorer.cut", "Ctrl+X", "Explorer: cut files", AppActionContexts.Explorer, "Cuts the selected files to the clipboard.", "cut", "move", "clipboard"),
-        Fixed("explorer.paste", "Ctrl+V", "Explorer: paste files", AppActionContexts.Explorer, "Pastes files from the clipboard into this folder.", "paste", "clipboard"),
+        Fixed("explorer.paste", "Ctrl+V / Shift+Insert", "Explorer: paste files", AppActionContexts.Explorer, "Pastes files from the clipboard into this folder.", "paste", "clipboard"),
         Fixed("explorer.newFolder", "Ctrl+Shift+N", "Explorer: new folder", AppActionContexts.Explorer, "Creates a new folder.", "new folder", "create"),
         Fixed("explorer.refresh", "F5 / Ctrl+R", "Explorer: refresh", AppActionContexts.Explorer, "Reloads the folder.", "refresh", "reload"),
         Fixed("explorer.toggleItem", "Ctrl+Space", "Explorer: toggle the focused item", AppActionContexts.Explorer, "Adds or removes the focused item from the selection.", "select", "toggle"),
-        Fixed("explorer.rename", "F2", "Explorer: rename", AppActionContexts.Explorer, "Renames the selected item in place.", "rename"),
+        Fixed("explorer.rename", "F2", "Explorer: rename", AppActionContexts.Explorer, "Renames the selected item in place. With several items selected it opens the batch rename dialog (a pattern for all names, with a live preview).", "rename", "batch rename", "bulk rename", "multiple"),
         Fixed("explorer.delete", "Delete / Shift+Delete", "Explorer: delete (Shift: permanently)", AppActionContexts.Explorer, "Deletes the selection to the Recycle Bin, or permanently with Shift.", "delete", "recycle bin", "permanent"),
         Fixed("explorer.menu", "Menu key / Shift+F10", "Explorer: context menu", AppActionContexts.Explorer, "Opens the context menu for the selection.", "context menu", "right click"),
         Fixed("explorer.open", "Enter", "Explorer: open the selected item", AppActionContexts.Explorer, "Opens the selected image or folder.", "open", "enter"),
         Fixed("explorer.move", "Arrows / Home / End / Page Up / Page Down (Shift extends, Ctrl moves focus only)", "Explorer: move the selection", AppActionContexts.Explorer, "Keyboard navigation in the file list.", "arrows", "navigate", "select"),
-        Fixed("explorer.typeAhead", "Letters", "Explorer: jump to an item by typing its name", AppActionContexts.Explorer, "Type the first letters of a name to select it.", "type ahead", "jump", "letters"),
+        Fixed("explorer.typeAhead", "Letters", "Explorer: jump to an item by typing its name", AppActionContexts.Explorer, "Type the first letters of a name to select it; the same letter again moves to the next match. Like Windows File Explorer, plain letters and digits type-to-select while the list has the keyboard, so single-letter hotkeys (F, O, U ...) do not fire there; they still work elsewhere and with Ctrl / Alt.", "type ahead", "jump", "letters", "type to select"),
+        Fixed("explorer.copyPath", "Ctrl+Shift+C", "Explorer: copy the path", AppActionContexts.Explorer, "Copies the full path of the selected items as text.", "copy path", "clipboard", "address"),
+        Fixed("explorer.viewMode", "Ctrl+Shift+1 / Ctrl+Shift+2 / Ctrl+Shift+3 / Ctrl+Shift+4 / Ctrl+Shift+5 / Ctrl+Shift+6", "Explorer: choose the view", AppActionContexts.Explorer, "Ctrl+Shift+1 to 6 select Thumbnails (XL), (L), (M), (S), List and Details.", "view", "thumbnails", "details", "list", "icons"),
     ];
 
     /// <summary>One generated action per bindable Toggle / Choice setting (see <see cref="SettingActionCatalog"/>).</summary>
@@ -458,7 +470,7 @@ public static class AppActionRegistry
         "view.flipHorizontal", "view.flipVertical", "nav.next", "nav.previous", "nav.first", "nav.last", "view.fit",
         "view.fitWidth", "view.fitHeight", "view.fitWindow", "view.actual", "view.toggleFitActual", "view.zoomIn",
         "view.zoomOut", "gif.playPause", "gif.previousFrame", "gif.nextFrame", "file.copyImage", "file.copyFile",
-        "file.copyName", "file.copyFolder", "file.copyPath", "file.rename", "file.delete", "file.print", "file.save",
+        "file.copyName", "file.copyFolder", "file.copyPath", "file.rename", "file.delete", "file.deletePermanently", "file.print", "file.save",
         // external.1-3 are not listed: they work in image AND Explorer tabs (in an Explorer tab on the selected image, see MainWindow.LaunchExternal).
         "file.saveAs", "nav.jumpForward10", "nav.jumpBack10", "view.zoom200",
         "selection.export", "overlay.resetZoom", "overlay.bringFront", "overlay.saveLayout", "overlay.clear",

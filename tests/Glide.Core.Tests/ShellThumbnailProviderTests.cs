@@ -154,6 +154,56 @@ public sealed class ShellThumbnailProviderTests : IDisposable
     }
 
     [Fact]
+    public void Camera_mpf_preview_and_turbo_decode_serve_large_jpegs()
+    {
+        // 5.1.7: the main picture is blue, the MPF preview (1200x800) red, so the chosen source is visible.
+        var provider = Provider.Require();
+        var fixtures = Path.Combine(FindRepositoryRoot(), "tests", "Glide.Core.Tests", "Fixtures", "Jpeg");
+        var present = provider.Render(Path.Combine(fixtures, "mpf-present-2400x1600.jpg"), 256, Balanced);
+        Assert.Equal("mpf", present.Diagnostics.Decoder);
+        Assert.True(present.Diagnostics.Embedded);
+        Assert.True(present.Pixel(present.Width / 2, present.Height / 2).R > 200);
+
+        // Too small, wrong aspect, gain map, or the toggle off: the main image, DCT-scaled by libjpeg-turbo.
+        foreach (var name in new[] { "mpf-toosmall-2400x1600.jpg", "mpf-aspect-2400x1600.jpg", "mpf-gainmap-2400x1600.jpg" })
+        {
+            var main = provider.Render(Path.Combine(fixtures, name), 256, Balanced);
+            Assert.Equal("turbo", main.Diagnostics.Decoder);
+            Assert.True(main.Pixel(main.Width / 2, main.Height / 2).B > 150, name);
+        }
+        Assert.Equal("turbo", provider.Render(Path.Combine(fixtures, "mpf-present-2400x1600.jpg"), 256, Balanced, preferEmbedded: false).Diagnostics.Decoder);
+    }
+
+    [Fact]
+    public void Progressive_jpeg_uses_the_dc_only_reader_not_a_full_scaled_decode()
+    {
+        // 5.2.0: Explorer's thumbnail of a progressive camera JPEG took libjpeg-turbo's scaled decode (every scan, ~150 ms for
+        // 45 MP, one at a time). It now reads only a prefix of the file and Huffman-decodes the DC scans, like Glide's own Explorer tab.
+        var provider = Provider.Require();
+        var fixtures = Path.Combine(FindRepositoryRoot(), "tests", "Glide.Core.Tests", "Fixtures", "Jpeg");
+        foreach (var quality in new[] { Fast, Balanced })
+        {
+            var result = provider.Render(Path.Combine(fixtures, "big-progressive420-4480x6720.jpg"), 256, quality);
+            Assert.Equal("dc", result.Diagnostics.Decoder);
+            Assert.Equal((170, 256), (result.Width, result.Height));      // 4480 x 6720 portrait (2:3), fitted into 256
+            Assert.True(result.Diagnostics.BytesRead <= (ulong)new FileInfo(Path.Combine(fixtures, "big-progressive420-4480x6720.jpg")).Length);
+        }
+        // A baseline file of the same size still goes through libjpeg-turbo, and a tile bigger than 1/8 of the source declines the DC route.
+        Assert.Equal("turbo", provider.Render(Path.Combine(fixtures, "big-base420-4480x6720.jpg"), 256, Balanced).Diagnostics.Decoder);
+        Assert.NotEqual("dc", provider.Render(Path.Combine(fixtures, "big-progressive420-4480x6720.jpg"), 1024, Balanced).Diagnostics.Decoder);
+    }
+
+    [Fact]
+    public void Provider_is_free_threaded_so_explorer_can_request_thumbnails_in_parallel()
+    {
+        // ThreadingModel "Apartment" funnels every call from an MTA caller through one host STA: thumbnails arrived strictly one by one.
+        var native = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "native", "Glide.ShellThumbnail", "GlideThumbnailProvider.cpp"));
+        Assert.Contains("kProviderThreadingModel[] = L\"Both\"", native);
+        var managed = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "Glide.App", "Platform", "WindowsThumbnailRegistration.cs"));
+        Assert.Contains("\"ThreadingModel\", \"Both\"", managed);
+    }
+
+    [Fact]
     public void Embedded_preview_follows_exif_orientation()
     {
         var provider = Provider.Require();

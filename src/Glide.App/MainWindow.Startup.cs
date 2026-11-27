@@ -52,6 +52,7 @@ public partial class MainWindow
             }
         }
         BeginDeferredRecentHistoryInitialization();
+        ScheduleSvgWarmUp();
         ScheduleLegacyVideoDecoderCleanup();
         if (_pendingExternalReceiver)
             Dispatcher.UIThread.Post(() => _ = EnsurePendingExternalReceiverFallbackAsync(), DispatcherPriority.Background);
@@ -101,6 +102,7 @@ public partial class MainWindow
         };
         overlays.OpenFileLocationRequested = path => ExplorerShell.Reveal(path, directory: false);
         // Read the held keys now, while the menu item is being clicked (Shift / Alt flip the new-tab settings).
+        overlays.OpenInNewTabLabel = OpenInNewTabMenuLabel;
         overlays.OpenInNewTabRequested = path => { var held = ModifierKeyState.Current(); Dispatcher.UIThread.Post(async () => await OpenImageInNewTabAsync(path, held, "overlay_menu")); };
         overlays.OpenWithRequested = path => WindowsOpenWith.Show(path);
         overlays.VideoUnavailable += (path, reason) => Dispatcher.UIThread.Post(async () => await ShowVideoUnavailableAsync(path, reason));
@@ -194,6 +196,10 @@ public partial class MainWindow
         // A torn-off/detached window holds exactly the transferred tab: it must never run the
         // startup action ("Open last session" used to copy every tab into it).
         _isTransferredTabWindow = true;
+        // The base constructor remembered the live saved placement for RestoreValidatedStartupNormalPosition, which re-applies it
+        // once the HWND is up. That is for the first window of a launch only: a detached / duplicated window is placed by its
+        // creator (drop point, cascade) and must not jump to the saved main-window box a moment after it is shown.
+        _validatedStartupNormalPosition = null;
         _workspace.ResetForDetached(transferredTab, _settings.DetachedWindowHomeTab);
     }
 
@@ -299,6 +305,29 @@ public partial class MainWindow
             if (_windowLifetimeCts.IsCancellationRequested) return;
             AdoptStartupSettingsIfReady(applyVisuals: true);
         }, DispatcherPriority.Background), TaskScheduler.Default);
+    }
+
+    private static int _svgWarmUpScheduled;
+
+    /// <summary>
+    /// 5.2.0: once per process, when the UI has gone idle (application-idle priority) and a couple of seconds after the first
+    /// picture, Svg.Skia and the Direct2D SVG route are initialised on a below-normal-priority thread, so the first SVG tile
+    /// or the first SVG opened does not pay the ~100 ms start-up.
+    /// </summary>
+    private void ScheduleSvgWarmUp()
+    {
+        if (Interlocked.Exchange(ref _svgWarmUpScheduled, 1) != 0) return;
+        var token = _windowLifetimeCts.Token;
+        Dispatcher.UIThread.Post(() => _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(2), token).ConfigureAwait(false);
+                var thread = new Thread(SvgTileRenderer.WarmUp) { IsBackground = true, Priority = ThreadPriority.BelowNormal, Name = "Glide SVG warm-up" };
+                thread.Start();
+            }
+            catch (OperationCanceledException) { /* the window closed first */ }
+        }), DispatcherPriority.ApplicationIdle);
     }
 
     private static int _legacyVideoDecoderCleanupScheduled;
@@ -420,6 +449,39 @@ public partial class MainWindow
         Position = new PixelPoint(area.X + (area.Width - widthPx) / 2, area.Y + (area.Height - heightPx) / 2);
     }
 
+    /// <summary>How long after the last size change the transient pointer state is cleared once more.</summary>
+    internal const int ResizeInputResetDelayMs = 90;
+
+    /// <summary>
+    /// Clears transient pointer ownership once the size has stopped changing for <see cref="ResizeInputResetDelayMs"/>.
+    /// SizeChanged fires for every WM_SIZE of a drag (hundreds per second), and this used to allocate a CancellationTokenSource,
+    /// a thread-pool task and a delay timer for each one. Now one dispatcher timer is armed per burst: every size change only
+    /// moves the deadline, and the timer re-arms itself for the remainder until the burst is over.
+    /// </summary>
+    private void ScheduleResizeInputReset()
+    {
+        _resizeInputResetDeadlineTicks = Environment.TickCount64 + ResizeInputResetDelayMs;
+        if (_resizeInputResetArmed) return;
+        _resizeInputResetArmed = true;
+        ArmResizeInputResetTimer(ResizeInputResetDelayMs);
+    }
+
+    private void ArmResizeInputResetTimer(long delayMs)
+    {
+        DispatcherTimer.RunOnce(() =>
+        {
+            if (_windowLifetimeCts.IsCancellationRequested) { _resizeInputResetArmed = false; return; }
+            var remaining = _resizeInputResetDeadlineTicks - Environment.TickCount64;
+            if (remaining > 0) { ArmResizeInputResetTimer(remaining); return; }
+            _resizeInputResetArmed = false;
+            EndManualWindowDrag();
+            Viewport.CancelInteraction();
+        }, TimeSpan.FromMilliseconds(Math.Max(1, delayMs)), DispatcherPriority.Input);
+    }
+
+    /// <summary>The geometry last handed to <see cref="SettingsService.Publish"/> by placement tracking: skips republishing the same box.</summary>
+    private (int X, int Y, double W, double H, bool Maximized)? _publishedPlacement;
+
     private void TrackNormalWindowPlacement()
     {
         // Overlay mode is intentionally transient presentation geometry. Never let moving/resizing
@@ -442,6 +504,14 @@ public partial class MainWindow
         _settings.WindowWidth = _lastNormalWindowSize.Width;
         _settings.WindowHeight = _lastNormalWindowSize.Height;
         _settings.WindowWasMaximized = false;
+        // Publishing clones the whole settings state and runs every Changed subscriber, which is far too heavy to repeat for each
+        // WM_SIZE / WM_WINDOWPOSCHANGED of a drag. While Windows' modal size/move loop runs the box is only remembered here;
+        // ResetPointerStateAfterNativeResize (WM_EXITSIZEMOVE) publishes the final one. Outside the loop (snap, programmatic
+        // resize, restore) an unchanged box is not published again.
+        if (_nativeSizeMoveActive) return;
+        var box = (_lastNormalWindowPosition.X, _lastNormalWindowPosition.Y, _lastNormalWindowSize.Width, _lastNormalWindowSize.Height, false);
+        if (_publishedPlacement == box) return;
+        _publishedPlacement = box;
         App.PublishCurrentSettings(_settings);
     }
 

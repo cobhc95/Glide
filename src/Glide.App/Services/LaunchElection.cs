@@ -37,7 +37,8 @@ internal static class LaunchElection
         TimeSpan budget,
         Action<TimeSpan>? sleep = null,
         Func<TimeSpan>? elapsed = null,
-        Action<string>? trace = null)
+        Action<string>? trace = null,
+        Func<bool>? ownerIncompatible = null)
     {
         sleep ??= Thread.Sleep;
         var started = Stopwatch.GetTimestamp();
@@ -55,6 +56,13 @@ internal static class LaunchElection
                     trace?.Invoke($"follower_forwarded attempt={attempt} elapsedMs={(int)elapsed().TotalMilliseconds}");
                     return LaunchElectionOutcome.Forwarded;
                 }
+            }
+            // 5.1.7: the owner cannot take this launch (other user/session, normal launch vs elevated owner):
+            // waiting out the budget cannot help, so open this process's own window now.
+            if (hasRequest && ownerIncompatible?.Invoke() == true)
+            {
+                trace?.Invoke($"owner_incompatible attempt={attempt} elapsedMs={(int)elapsed().TotalMilliseconds}");
+                return LaunchElectionOutcome.StartFollowerUi;
             }
             if (claimPresence())
             {

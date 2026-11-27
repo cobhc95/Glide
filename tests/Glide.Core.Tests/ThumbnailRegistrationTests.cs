@@ -54,8 +54,29 @@ public sealed class ThumbnailRegistrationTests
     {
         var defaults = ThumbnailSettings.Default;
         Assert.True(defaults.Enabled);
-        Assert.Equal(ThumbnailProviderMode.Recommended, defaults.Mode);
-        Assert.Equal("Balanced", defaults.Quality);
+        Assert.Equal(ThumbnailProviderMode.All, defaults.Mode);
+        Assert.Equal("Fast", defaults.Quality);
         Assert.True(defaults.PreferEmbedded);
+    }
+
+    [Fact]
+    public void Old_defaults_move_to_the_new_defaults_once_and_other_choices_are_kept()
+    {
+        var old = new ThumbnailSettings(true, ThumbnailProviderMode.Recommended, "Balanced", true, 0);
+        var moved = ThumbnailSettingsStore.MigrateDefaults(old);
+        Assert.Equal(ThumbnailProviderMode.All, moved.Mode);
+        Assert.Equal("Fast", moved.Quality);
+        Assert.Equal(ThumbnailSettings.CurrentDefaultsRevision, moved.DefaultsRevision);
+        Assert.Equal(moved, ThumbnailSettingsStore.MigrateDefaults(moved));
+
+        var deliberate = old with { Quality = "High" };
+        var kept = ThumbnailSettingsStore.MigrateDefaults(deliberate);
+        Assert.Equal(ThumbnailProviderMode.Recommended, kept.Mode);
+        Assert.Equal("High", kept.Quality);
+        Assert.Equal(ThumbnailSettings.CurrentDefaultsRevision, kept.DefaultsRevision);
+
+        // Already current: a user who picked Recommended + Balanced after the migration is not moved again.
+        var chosen = old with { DefaultsRevision = ThumbnailSettings.CurrentDefaultsRevision };
+        Assert.Equal(chosen, ThumbnailSettingsStore.MigrateDefaults(chosen));
     }
 }

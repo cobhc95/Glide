@@ -244,4 +244,20 @@ public sealed class SettingsDialogCentringTests : IDisposable
         // No monitor known: plain centring.
         Assert.Equal((100 + 435, 100 + 300), WindowPlacementResolver.CenterOnOwner(100, 100, 1500, 1050, 630, 450, null));
     }
+
+    [Theory]
+    [InlineData(980, 792, 0)]    // batch rename: 980x760 client plus title bar, owner maximized
+    [InlineData(980, 792, 32)]   // same, with a title-bar inset
+    [InlineData(980, 1100, 32)]  // taller than the work area: shrinks
+    public void Fixed_size_dialog_fits_a_1389x828_work_area(int w, int h, int inset)
+    {
+        var area = new ScreenWorkArea(0, 0, 1389, 828, 1.0);
+        var (x, y, fw, fh) = WindowPlacementResolver.FitDialog(0, 0, 1389, 828, w, h, 760, 592, inset, area);
+        Assert.True(y >= area.Y + inset && x >= area.X);
+        Assert.True(x + fw <= area.Right && y + fh <= area.Bottom);
+        Assert.True(fh >= 592 && fw >= 760);
+        // An owner hanging above the top of the screen still gives a dialog whose title bar is reachable.
+        var (_, ty, _, _) = WindowPlacementResolver.FitDialog(0, -600, 1389, 828, w, h, 760, 592, inset, area);
+        Assert.True(ty >= area.Y + inset);
+    }
 }

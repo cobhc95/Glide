@@ -165,6 +165,38 @@ public static class ImageHeaderProbe
                 }
             }
         }
+        // BigTIFF (version 43, 64-bit offsets and 20-byte entries): WIC cannot read it, the native reader can.
+        if (data.Length >= 16 && ((data[0] == (byte)'I' && data[1] == (byte)'I') || (data[0] == (byte)'M' && data[1] == (byte)'M')))
+        {
+            var le = data[0] == (byte)'I';
+            if (ReadU16(data, 2, le) == 43 && ReadU16(data, 4, le) == 8)
+            {
+                var first = le ? BinaryPrimitives.ReadUInt64LittleEndian(data.Slice(8, 8)) : BinaryPrimitives.ReadUInt64BigEndian(data.Slice(8, 8));
+                if (first >= 16 && first + 8 <= (ulong)data.Length)
+                {
+                    var off = (int)first;
+                    var count = le ? BinaryPrimitives.ReadUInt64LittleEndian(data.Slice(off, 8)) : BinaryPrimitives.ReadUInt64BigEndian(data.Slice(off, 8));
+                    off += 8;
+                    long w = 0, h = 0;
+                    for (ulong n = 0; n < count && n < 4096 && off + 20 <= data.Length; n++, off += 20)
+                    {
+                        var tag = ReadU16(data, off, le); var type = ReadU16(data, off + 2, le);
+                        var cnt = le ? BinaryPrimitives.ReadUInt64LittleEndian(data.Slice(off + 4, 8)) : BinaryPrimitives.ReadUInt64BigEndian(data.Slice(off + 4, 8));
+                        if (cnt != 1 || (tag != 256 && tag != 257)) continue;
+                        long val = type switch
+                        {
+                            3 => ReadU16(data, off + 12, le),
+                            4 => ReadU32(data, off + 12, le),
+                            16 => (long)(le ? BinaryPrimitives.ReadUInt64LittleEndian(data.Slice(off + 12, 8)) : BinaryPrimitives.ReadUInt64BigEndian(data.Slice(off + 12, 8))),
+                            _ => 0
+                        };
+                        if (val <= 0 || val > int.MaxValue) continue;
+                        if (tag == 256) w = val; else h = val;
+                        if (w > 0 && h > 0) return Set((int)w, (int)h, out d);
+                    }
+                }
+            }
+        }
         // WebP VP8X / VP8L / lossy VP8.
         if (data.Length >= 30 && data[..4].SequenceEqual("RIFF"u8) && data.Slice(8,4).SequenceEqual("WEBP"u8))
         {

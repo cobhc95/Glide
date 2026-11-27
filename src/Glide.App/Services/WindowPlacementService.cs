@@ -167,6 +167,9 @@ public static class WindowPlacementService
         }
         tracker.Restore();
         tracker.Hook();
+        // Nothing remembered (first open, or the saved spot was off-screen): centre on the owner and keep it wholly on
+        // the owner's monitor, shrinking a too-large resizable window to the working area.
+        if (window.WindowStartupLocation == WindowStartupLocation.CenterOwner) DialogPlacement.CenterOnOwner(window);
     }
 
     private static void CleanLegacyPopupPlacementFile()

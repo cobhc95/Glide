@@ -29,40 +29,35 @@ public static class NewTabSides
     public static bool ToSwitch(string? value) => !string.Equals(value?.Trim(), Background, StringComparison.OrdinalIgnoreCase);
 }
 
-/// <summary>Values of "Middle-click opens in a new tab in the" (5.1.0): background by default, like a web browser.</summary>
-public static class MiddleClickSides
+/// <summary>
+/// Values of "Duplicated tabs open [next to the current tab / at the end]" (round 4 D1; replaced the 5.1.0 middle-click
+/// position setting, Explorer middle-click now follows "New tabs open").
+/// </summary>
+public static class DuplicateTabPositions
 {
-    public const string Background = NewTabSides.Background;
-    public const string Foreground = NewTabSides.Foreground;
-    public const string Default = Background;
+    public const string NextToCurrent = NewTabPositions.NextToCurrent;
+    public const string AtEnd = NewTabPositions.AtEnd;
+    public const string Default = NextToCurrent;
 
     /// <summary>In the Settings combo order.</summary>
-    public static IReadOnlyList<string> All { get; } = [Background, Foreground];
+    public static IReadOnlyList<string> All { get; } = [NextToCurrent, AtEnd];
 
     public static string Normalize(string? value) =>
-        string.Equals(value?.Trim(), Foreground, StringComparison.OrdinalIgnoreCase) ? Foreground : Background;
+        string.Equals(value?.Trim(), AtEnd, StringComparison.OrdinalIgnoreCase) ? AtEnd : NextToCurrent;
 }
 
-/// <summary>Values of "Middle-click new tab position" (5.1.0): at the end by default, or follow "New tabs open".</summary>
-public static class MiddleClickPositions
+/// <summary>Values of "... in the [foreground / background]" for duplicated tabs (round 4 D1): foreground by default.</summary>
+public static class DuplicateTabSides
 {
-    public const string AtEnd = NewTabPositions.AtEnd;
-    public const string NextToCurrent = NewTabPositions.NextToCurrent;
-    public const string SameAsNewTabs = "same as new tabs";
-    public const string Default = AtEnd;
+    public const string Foreground = NewTabSides.Foreground;
+    public const string Background = NewTabSides.Background;
+    public const string Default = Foreground;
 
     /// <summary>In the Settings combo order.</summary>
-    public static IReadOnlyList<string> All { get; } = [AtEnd, NextToCurrent, SameAsNewTabs];
+    public static IReadOnlyList<string> All { get; } = [Foreground, Background];
 
     public static string Normalize(string? value) =>
-        All.FirstOrDefault(v => string.Equals(v, value?.Trim(), StringComparison.OrdinalIgnoreCase)) ?? Default;
-
-    /// <summary>The "New tabs open" value this middle-click position stands for.</summary>
-    public static string Effective(string? middlePosition, string? newTabPosition) => Normalize(middlePosition) switch
-    {
-        SameAsNewTabs => NewTabPositions.Normalize(newTabPosition),
-        var own => own
-    };
+        string.Equals(value?.Trim(), Background, StringComparison.OrdinalIgnoreCase) ? Background : Foreground;
 }
 
 /// <summary>The keys that can be held to open one new tab the other way ("Key to open … instead").</summary>
@@ -94,7 +89,7 @@ public static class NewTabKeys
 public readonly record struct NewTabOpening(bool AtEnd, bool Activate);
 
 /// <summary>
-/// Opening something "in a new tab" from inside Glide (Explorer middle-click, a double-click set to open new tabs,
+/// Opening something "in a new tab" from inside Glide (Explorer middle-click (round 4 D1: no separate settings), a double-click set to open new tabs,
 /// the Explorer and overlay "Open in new tab" menu items). "New tabs open [at the end / next to the current tab]" and
 /// "Open new tabs in the [foreground / background]" give the default. Each has its own "Key to open … instead"
 /// (None / Shift / Ctrl / Alt, None by default): holding that key while opening does the other thing for that one tab.
@@ -121,14 +116,33 @@ public static class NewTabPolicy
             Activate: switchToNewTabs ^ NewTabKeys.IsHeld(foregroundKey, shift, ctrl, alt));
 
     /// <summary>
-    /// 5.1.0: an Explorer middle-click on a picture or folder. It has its own side ("Middle-click opens in a new tab in
-    /// the", background by default) and position ("Middle-click new tab position", at the end by default, or the same as
-    /// "New tabs open"); the held-key flips of the general new-tab settings still apply on top.
+    /// Round 4 D1: "Duplicate tab" places and activates the copy as "Duplicated tabs open [position] in the [side]" says
+    /// (next to the current tab, foreground by default). Held keys do not apply.
     /// </summary>
-    public static NewTabOpening ResolveMiddleClick(string? middleSide, string? middlePosition, string? newTabPosition,
-        string? positionKey, string? foregroundKey, bool shift, bool ctrl, bool alt) =>
-        Resolve(MiddleClickPositions.Effective(middlePosition, newTabPosition), MiddleClickSides.Normalize(middleSide) == MiddleClickSides.Foreground,
-            positionKey, foregroundKey, shift, ctrl, alt);
+    public static NewTabOpening ForDuplicate(string? position, string? side) =>
+        new(AtEnd: DuplicateTabPositions.Normalize(position) == DuplicateTabPositions.AtEnd,
+            Activate: DuplicateTabSides.Normalize(side) == DuplicateTabSides.Foreground);
+
+    /// <summary>Round 4 D2: both keys set to the same key (not None) is allowed; holding it then inverts both.</summary>
+    public static bool KeysShared(string? positionKey, string? foregroundKey) =>
+        NewTabKeys.Normalize(positionKey) is var k && k != NewTabKeys.None && k == NewTabKeys.Normalize(foregroundKey);
+
+    /// <summary>Round 4 D5: the hint shown after "Open in new tab" in context menus, e.g. "Shift: background"; empty with no keys.</summary>
+    public static string MenuHint(string? position, bool switchToNewTabs, string? positionKey, string? foregroundKey)
+    {
+        var pk = NewTabKeys.Normalize(positionKey);
+        var fk = NewTabKeys.Normalize(foregroundKey);
+        var otherPosition = NewTabPositions.Normalize(position) == NewTabPositions.AtEnd ? "next to current" : "at end";
+        var otherSide = switchToNewTabs ? "background" : "foreground";
+        var parts = new List<string>();
+        if (pk != NewTabKeys.None && pk == fk) parts.Add($"{pk}: {otherSide}, {otherPosition}");
+        else
+        {
+            if (fk != NewTabKeys.None) parts.Add($"{fk}: {otherSide}");
+            if (pk != NewTabKeys.None) parts.Add($"{pk}: {otherPosition}");
+        }
+        return string.Join("; ", parts);
+    }
 
     /// <summary>
     /// A plain new tab (Ctrl+T, the "+" button and its menu, a title-bar middle-click): like a web browser, always at the

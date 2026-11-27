@@ -47,11 +47,22 @@
 #include <string>
 #include <vector>
 
+#include <turbojpeg.h>
+
 #pragma comment(lib, "windowscodecs.lib")
 #pragma comment(lib, "d2d1.lib")
 #pragma comment(lib, "d3d11.lib")
 #pragma comment(lib, "dxgi.lib")
 #pragma comment(lib, "shlwapi.lib")
+
+// 5.2.0: Glide.Native's DC-only progressive JPEG reader (native/Glide.Native/GlideJpegDc.cpp), compiled into this DLL
+// too so Explorer's thumbnails of progressive camera JPEGs take the same path as Glide's own Explorer tab.
+// GlideJpegDc.cpp needs the decode-cap check below (same limits as Glide.Native).
+bool GlideJpegDcOnly(const std::uint8_t* data, std::size_t size, std::uint8_t** pixels, int* width, int* height);
+bool GlideWithinDecodeCap(std::uint64_t width, std::uint64_t height)
+{
+    return width > 0 && height > 0 && width <= 65536 && height <= 65536 && width * height <= 512'000'000ull;
+}
 
 namespace glide::thumb
 {
@@ -983,8 +994,141 @@ namespace glide::thumb
             return true; // a genuinely blank animation still yields a (white) thumbnail
         }
 
+        /// The largest CIPA DC-007 (MPF) large-thumbnail entry (VGA / full-HD class) stored after the main image.
+        /// Gain maps, depth maps and other entries are never used as a picture. Same rules as Glide.Native's first view.
+        bool FindMpfPreview(const std::uint8_t* d, std::size_t n, std::size_t& offset, std::size_t& length)
+        {
+            offset = length = 0;
+            std::size_t i = 2;
+            while (i + 4 <= n && d[i] == 0xFF)
+            {
+                const std::uint8_t marker = d[i + 1];
+                if (marker == 0xDA || marker == 0xD9) break;
+                const std::size_t len = (static_cast<std::size_t>(d[i + 2]) << 8) | d[i + 3];
+                if (len < 2 || i + 2 + len > n) break;
+                if (marker == 0xE2 && len >= 16 && std::memcmp(d + i + 4, "MPF\0", 4) == 0)
+                {
+                    const std::size_t base = i + 8;
+                    const std::uint8_t* t = d + base;
+                    const std::size_t tn = n - base;
+                    const bool le = t[0] == 'I';
+                    auto u16 = [&](std::size_t o) -> std::uint32_t { return o + 2 > tn ? 0u : le ? (t[o] | (t[o + 1] << 8)) : ((t[o] << 8) | t[o + 1]); };
+                    auto u32 = [&](std::size_t o) -> std::uint32_t {
+                        return o + 4 > tn ? 0u : le ? (t[o] | (t[o + 1] << 8) | (t[o + 2] << 16) | (static_cast<std::uint32_t>(t[o + 3]) << 24))
+                                                    : ((static_cast<std::uint32_t>(t[o]) << 24) | (t[o + 1] << 16) | (t[o + 2] << 8) | t[o + 3]);
+                    };
+                    const std::size_t ifd = u32(4);
+                    if (ifd + 2 <= tn)
+                    {
+                        for (std::uint32_t e = 0, c = u16(ifd); e < c && e < 64; ++e)
+                        {
+                            const std::size_t en = ifd + 2 + static_cast<std::size_t>(e) * 12;
+                            if (u16(en) != 0xB002) continue;
+                            const std::size_t entries = std::min<std::size_t>(u32(en + 4) / 16, 64), at = u32(en + 8);
+                            for (std::size_t k = 1; k < entries; ++k)
+                            {
+                                const std::uint32_t type = u32(at + k * 16) & 0x00FFFFFFu;
+                                if (type != 0x010001u && type != 0x010002u) continue;
+                                const std::size_t sz = u32(at + k * 16 + 4), off = u32(at + k * 16 + 8);
+                                if (sz > length && off != 0 && base + off + sz <= n) { offset = base + off; length = sz; }
+                            }
+                        }
+                    }
+                }
+                i += 2 + len;
+            }
+            return length > 0;
+        }
+
+        /// 5.1.7: 8-bit JPEG through libjpeg-turbo at the smallest DCT scale (1/2, 1/4, 1/8) that still covers the
+        /// target, then the preset's WIC scaler down to the target. Measured on 24 MP camera JPEGs: several times faster
+        /// than WIC's IWICBitmapSourceTransform reduction (SIMD Huffman/IDCT; the fast integer IDCT and plain chroma
+        /// upsampling are invisible once the result is shrunk again, and High keeps the accurate ones). Anything unusual
+        /// (CMYK, 12-bit, lossless, any decoder warning) returns false and WIC decodes it exactly as before.
+        /// `preview`: the bytes are a camera's MPF preview; it must cover the target and have the main image's aspect
+        /// ratio (sourceWidth/sourceHeight, within 1%), and it may decode at full size.
+        bool DecodeJpegTurbo(IWICImagingFactory* factory, const std::uint8_t* data, std::size_t size,
+                             std::uint32_t targetWidth, std::uint32_t targetHeight, const QualityProfile& profile, Image& out,
+                             bool preview = false, std::uint32_t sourceWidth = 0, std::uint32_t sourceHeight = 0)
+        {
+            if (!factory || !data || size < 4 || size > MaxSourceBytes) return false;
+            tjhandle h = tj3Init(TJINIT_DECOMPRESS);
+            if (!h) return false;
+            struct Guard { tjhandle h; ~Guard() { tj3Destroy(h); } } guard{ h };
+            if (tj3DecompressHeader(h, data, size) != 0) return false;
+            const int width = tj3Get(h, TJPARAM_JPEGWIDTH), height = tj3Get(h, TJPARAM_JPEGHEIGHT);
+            const int colorspace = tj3Get(h, TJPARAM_COLORSPACE);
+            if (width <= 0 || height <= 0 || width > static_cast<int>(MaxDimension) || height > static_cast<int>(MaxDimension)) return false;
+            if (static_cast<std::uint64_t>(width) * height > MaxPixels) return false;
+            if (tj3Get(h, TJPARAM_PRECISION) != 8 || tj3Get(h, TJPARAM_LOSSLESS) == 1) return false;
+            if (colorspace != TJCS_YCbCr && colorspace != TJCS_GRAY && colorspace != TJCS_RGB) return false;
+            if (tj3Get(h, TJPARAM_SUBSAMP) == TJSAMP_UNKNOWN) return false;
+            if (preview)
+            {
+                if (static_cast<std::uint32_t>(width) < targetWidth || static_cast<std::uint32_t>(height) < targetHeight) return false;
+                if (sourceWidth == 0 || sourceHeight == 0) return false;
+                const double a = static_cast<double>(width) / height, b = static_cast<double>(sourceWidth) / sourceHeight;
+                if (std::abs(a - b) > 0.01 * b) return false;
+            }
+            tjscalingfactor scale{ 1, 1 };
+            for (int denom = 8; denom > 1; denom /= 2)
+            {
+                const tjscalingfactor f{ 1, denom };
+                if (static_cast<std::uint32_t>(TJSCALED(width, f)) >= targetWidth && static_cast<std::uint32_t>(TJSCALED(height, f)) >= targetHeight)
+                {
+                    scale = f;
+                    break;
+                }
+            }
+            if (scale.denom == 1 && !preview) return false; // no reduction possible: WIC's own path is as good
+            tj3Set(h, TJPARAM_STOPONWARNING, 1);
+            tj3Set(h, TJPARAM_FASTDCT, profile.quality == Quality::High ? 0 : 1);
+            tj3Set(h, TJPARAM_FASTUPSAMPLE, profile.quality == Quality::High ? 0 : 1);
+            if (tj3SetScalingFactor(h, scale) != 0) return false;
+            const int w = TJSCALED(width, scale), hgt = TJSCALED(height, scale);
+            std::vector<std::uint8_t> pixels;
+            try { pixels.resize(static_cast<std::size_t>(w) * hgt * 4); }
+            catch (...) { return false; }
+            if (tj3Decompress8(h, data, size, pixels.data(), w * 4, TJPF_BGRA) != 0) return false;
+            Com<IWICBitmap> bitmap;
+            if (FAILED(factory->CreateBitmapFromMemory(static_cast<UINT>(w), static_cast<UINT>(hgt), GUID_WICPixelFormat32bppPBGRA,
+                                                       static_cast<UINT>(w) * 4, static_cast<UINT>(pixels.size()), pixels.data(),
+                                                       bitmap.put())) || !bitmap)
+                return false;
+            return CopySourceToImage(factory, bitmap.p, targetWidth, targetHeight, profile.interpolation, out);
+        }
+
+        /// Progressive JPEG DC-only thumbnail (see GlideJpegDc.cpp). Needs ceil(w/8) x ceil(h/8) to cover the target.
+        bool DecodeJpegDcPrefix(IWICImagingFactory* factory, Source& source, std::uint32_t sourceWidth, std::uint32_t sourceHeight,
+                                std::uint32_t targetWidth, std::uint32_t targetHeight, const QualityProfile& profile, Image& out)
+        {
+            if (!factory || (sourceWidth + 7) / 8 < targetWidth || (sourceHeight + 7) / 8 < targetHeight) return false;
+            const std::size_t total = source.Size();
+            std::uint8_t* pixels = nullptr;
+            int w = 0, h = 0;
+            bool ok = false;
+            for (std::size_t want = 1024 * 1024;; want *= 4)
+            {
+                const std::size_t ask = std::min(want, total);
+                std::size_t have = 0;
+                const std::uint8_t* head = source.Head(ask, have);
+                if (!head || have < 4) return false;
+                // A prefix that ends inside the DC scans makes the reader fail; retry with more bytes, up to the whole file.
+                if (GlideJpegDcOnly(head, have, &pixels, &w, &h)) { ok = true; break; }
+                if (have >= total) return false;
+                if (head[0] != 0xFF || head[1] != 0xD8) return false;
+            }
+            struct Free { std::uint8_t* p; ~Free() { if (p) CoTaskMemFree(p); } } guard{ pixels };
+            if (!ok || w <= 0 || h <= 0) return false;
+            Com<IWICBitmap> bitmap;
+            if (FAILED(factory->CreateBitmapFromMemory(static_cast<UINT>(w), static_cast<UINT>(h), GUID_WICPixelFormat32bppPBGRA,
+                                                       static_cast<UINT>(w) * 4, static_cast<UINT>(w) * h * 4, pixels, bitmap.put())) || !bitmap)
+                return false;
+            return CopySourceToImage(factory, bitmap.p, targetWidth, targetHeight, profile.interpolation, out) && out.Valid();
+        }
+
         bool DecodeWithWic(IWICImagingFactory* factory, IStream* stream, const Edges& edges,
-                           const QualityProfile& profile, bool preferEmbedded, DecodeResult& result)
+                           const QualityProfile& profile, bool preferEmbedded, DecodeResult& result, Source* source = nullptr)
         {
             if (!factory || !stream) return false;
             Com<IWICBitmapDecoder> decoder;
@@ -1039,6 +1183,43 @@ namespace glide::thumb
 
             std::uint32_t targetWidth = 0, targetHeight = 0;
             FitWithin(sourceWidth, sourceHeight, edges.decode, targetWidth, targetHeight);
+            if (source && container == GUID_ContainerFormatJpeg)
+            {
+                // 5.2.0: progressive JPEG whose 1/8 picture still covers the thumbnail: Huffman-decode only the first
+                // (DC) scans, a few ms per 45 MP file against the several hundred ms of libjpeg-turbo's scaled decode,
+                // which has to entropy-decode every scan. Reads only a growing prefix of the file (the DC scans come
+                // first). Anything the reader declines (baseline, arithmetic, 12-bit...) falls through unchanged.
+                if (DecodeJpegDcPrefix(factory, *source, sourceWidth, sourceHeight, targetWidth, targetHeight, profile, result.image))
+                {
+                    ApplyOrientation(result.image, orientation);
+                    result.decoder = "dc";
+                    return result.image.Valid();
+                }
+                std::size_t size = 0;
+                const std::uint8_t* data = source->All(size);
+                // Camera JPEGs (Canon, Nikon, Sony, Fujifilm, ...) carry a 1620x1080-class MPF preview after the main
+                // image: when it covers the thumbnail it costs ~1/30 of the main image's entropy decode.
+                std::size_t previewOffset = 0, previewLength = 0;
+                Image previewImage;
+                if (data && preferEmbedded && FindMpfPreview(data, size, previewOffset, previewLength) &&
+                    DecodeJpegTurbo(factory, data + previewOffset, previewLength, targetWidth, targetHeight, profile, previewImage,
+                                    true, sourceWidth, sourceHeight) && previewImage.Valid())
+                {
+                    result.image = std::move(previewImage);
+                    ApplyOrientation(result.image, orientation);
+                    result.decoder = "mpf";
+                    result.embedded = true;
+                    return result.image.Valid();
+                }
+                Image fast;
+                if (data && DecodeJpegTurbo(factory, data, size, targetWidth, targetHeight, profile, fast) && fast.Valid())
+                {
+                    result.image = std::move(fast);
+                    ApplyOrientation(result.image, orientation);
+                    result.decoder = "turbo";
+                    return result.image.Valid();
+                }
+            }
             bool reduced = false;
             if (!DecodeFrameReduced(factory, frame.p, sourceWidth, sourceHeight, targetWidth, targetHeight,
                                     profile.interpolation, result.image, reduced))
@@ -2484,7 +2665,7 @@ namespace glide::thumb
             {
                 IStream* stream = source.WicStream(factory);
                 DecodeResult attempt;
-                const bool ok = stream && DecodeWithWic(factory, stream, edges, profile, options.preferEmbedded, attempt);
+                const bool ok = stream && DecodeWithWic(factory, stream, edges, profile, options.preferEmbedded, attempt, &source);
                 if (stream) stream->Release();
                 if (ok)
                 {

@@ -1,6 +1,6 @@
 # Glide Image Viewer
 
-> **Glide 5.1.6:** [download](https://github.com/cobhc95/Glide/releases/latest) · reopening a closed tab restores it in place with its full history; plus 5.1.5's transparent Explorer thumbnails and installer thumbnail choice, on top of 5.1's instant tab switching, faster large-photo browsing with less memory, live Explorer tabs and browser-style tabs. [Release notes](docs/releases/release-notes-5.1.6.md) · [changelog](CHANGELOG.md)
+> **Glide 5.2.0:** [download](https://github.com/cobhc95/Glide/releases/latest) · Explorer thumbnails for every format Glide opens, a 45 MP progressive-JPEG folder that shows all its thumbnails in about half a second, batch rename and tags, a rebuilt Overlay mode, and a fourth round of community fixes. [Release notes](docs/releases/release-notes-5.2.0.md) · [changelog](CHANGELOG.md)
 
 ## Fast. Multi-tabbed. Multi-window. Highly customizable.
 
@@ -8,17 +8,36 @@
 
 **Glide is a Windows image viewer built to feel instant**: tabs and multiple windows, a built-in Explorer tab, 196 recognised file extensions (about 112 open on a clean Windows install), Save As to about 30 formats, printing, overlays, a hotkey or gesture for almost everything, and Explorer thumbnails. No telemetry, no .NET runtime to install.
 
-[Download](#download-and-install) · [Performance](#performance) · [Feature tour](#feature-tour) · [Shortcuts](#default-shortcuts) · [Formats](#formats) · [Build](#building-from-source) · [Docs](#documentation)
+[Download](#download-and-install) · [What changed in 5.2.0](#what-changed-in-520) · [Performance](#performance) · [Feature tour](#feature-tour) · [Shortcuts](#default-shortcuts) · [Formats](#formats) · [Build](#building-from-source) · [Docs](#documentation)
 
 ## Download and install
 
 Windows 10 1607 or later, x64. From the [latest release](https://github.com/cobhc95/Glide/releases/latest):
 
 * **`Glide.Setup.exe`**: installer (administrator rights; adds Open With and Explorer thumbnails).
-* **`Glide-5.1.6-Portable.zip`**: extract anywhere and run `Glide.exe`.
 * **`Glide.Setup.sha256`**: checksum (`certutil -hashfile Glide.Setup.exe SHA256`).
 
-Upgrades keep your settings, key bindings and title bar.
+Upgrades keep your settings, key bindings and title bar. **5.2.0 changes two defaults** for Windows File Explorer thumbnails ("Glide for all supported formats" and Fast quality; users still on the old defaults are moved once, other choices are kept). Windows Explorer may need a restart or a thumbnail-cache clear after installing.
+
+## What changed in 5.2.0
+
+Synthetic test images, headless, Release build on a 16-thread PC; before = 5.1.x, after = 5.2.0 ([release notes](docs/releases/release-notes-5.2.0.md), [audits](docs/audits/)).
+
+| | Before | After |
+|---|---:|---:|
+| 133 progressive 45 MP JPEGs, every thumbnail (decode pipeline) | 1537 ms | 255 ms |
+| Same folder in the Explorer tab, all tiles ready without scrolling | never (only the visible ones) | 538 ms |
+| One 45 MP progressive JPEG, Windows Explorer thumbnail provider | 153 ms | 11.5 ms |
+| 12 progressive 45 MP decodes at once, memory | +1576 MB | +56 MB |
+| Tiled TIFF 24 MP: Explorer thumbnail / first view | 185 / 200 ms | 30.8 / 28.9 ms |
+| Pyramid TIFF 24 MP: Explorer thumbnail / first view | 189 / 205 ms | 3.74 / 11.7 ms |
+| CMYK JPEG 4K, first view | 428 ms | 54.0 ms |
+| BigTIFF 24 MP, first view | did not open | 29.3 ms |
+| Path-heavy SVG tile | 213 ms | 29.4 ms |
+| Explorer-tab thumbnails | 11 formats | every format Glide opens |
+| Setup size | 19.6 MB (5.1.6) | 20.3 MB (21,293,497 bytes, +8.5 %) |
+
+New in 5.2.0: a rebuilt **batch rename** (F2 with several items selected), optional **tags** in file names with a sidebar, **Overlay mode** that matches picture-in-picture (crop or stretch with *Preserve aspect ratio*), **Shift+Delete** permanent delete, a separate look for the text overlay in the title bar and tab bar, Explorer sort by date taken, and per-extension file-type icons.
 
 ## Performance
 
@@ -68,7 +87,7 @@ Next / Previous use Explorer's natural order with six sorts, and live folder ref
 
 ### Explorer tab
 
-A folder browser inside a tab: breadcrumb address bar, a resizable drive bar, Thumbnails XL / L / M / S, List and Details, sorting by name, date, type, file size or image width / height / pixels, filter (`Ctrl+F`), click-to-rename, copy / cut / paste through the Windows clipboard, Recycle Bin delete and drag and drop. Changes made in Windows File Explorer or other programs appear within a fraction of a second, updated in place without a reload. Optionally show date, resolution and file size under thumbnails, and keep the address bar above pictures in picture tabs. *Open last session* restores each tab's folder, selection and scroll, even after a crash.
+A folder browser inside a tab: breadcrumb address bar, a resizable drive bar, Thumbnails XL / L / M / S, List and Details, sorting by name, date, date taken, type, file size or image width / height / pixels, batch rename (`F2` with several items selected), optional tags, filter (`Ctrl+F`), click-to-rename, copy / cut / paste through the Windows clipboard, Recycle Bin delete and drag and drop. Changes made in Windows File Explorer or other programs appear within a fraction of a second, updated in place without a reload. Thumbnails are shown for every format Glide opens and remembered on disk. Optionally show date, resolution and file size under thumbnails (or your own template), and keep the address bar above pictures in picture tabs. *Open last session* restores each tab's folder, selection and scroll, even after a crash.
 
 ![Explorer tab in a wide window](docs/screenshots/5.0.7/explorer-full.png)
 
@@ -109,10 +128,10 @@ Eight pages of collapsible cards with *N changed* badges and a search that opens
 
 * **Save / Save As**: `Ctrl+S` saves in place after confirmation, `Ctrl+Alt+S` converts to about 30 formats via a temporary file, keeping EXIF / XMP / colour profile where the format allows.
 * **Print** (`Ctrl+P`): full-resolution output with an instant live preview, fit / fill / actual size / custom scale, alignment and margins.
-* **Overlay mode** (`Alt+O`): all of Glide as a frameless, transparent picture window. Drag the picture to move it (zoomed in: bottom bar or `Alt+drag`), opacity slider with mouse wheel, sizes 25-200 % above the taskbar, optional drag strip and **Lock position**.
+* **Overlay mode** (`Alt+O`): all of Glide as a frameless, transparent picture window that behaves like a picture-in-picture overlay (crop or stretch with *Preserve aspect ratio*). Drag the picture to move it (zoomed in: bottom bar or `Alt+drag`), opacity slider with mouse wheel, sizes 25-200 % above the taskbar, optional drag strip and **Lock position**.
 * **Window-in-Window overlays**: transparent reference images or videos with their own zoom, opacity and rotation; saveable layouts.
 * **Slideshow**: interval, order, shuffle, loop, across folders.
-* **Windows integration**: Open With for every format, Explorer thumbnails for every format Glide decodes, three external-program slots (`Shift+1/2/3`).
+* **Windows integration**: Open With for every format, file-type icons, Windows File Explorer thumbnails for every format Glide decodes (default mode: Glide for all supported formats, Fast quality), three external-program slots (`Shift+1/2/3`).
 * **Privacy and security**: no telemetry; one daily update check to GitHub (off with one switch; Glide never downloads updates itself); SVGs can't fetch remote content; decoders are bounded against malformed files.
 
 ![Glide Print window with the live preview](docs/screenshots/print-research/glide-print-dialog.png)
@@ -159,9 +178,9 @@ Run `build.cmd` (or `build.cmd fast --no-pause`) with the .NET 10 SDK (x64) and 
 
 ## Documentation
 
-[CHANGELOG](CHANGELOG.md) · [Release notes](docs/releases/) · [Actions and hotkeys](docs/ACTIONS-AND-HOTKEYS.md) · [Navigation history](docs/NAVIGATION-HISTORY.md) · [Format coverage](docs/format-coverage.md) · [Explorer thumbnails](docs/explorer-thumbnails.md) · [Print research](docs/print-research.md) · [Architecture handoff](docs/GLIDE_MANIFESTO_AND_HANDOFF.md) · [All docs](docs/README.md)
+[CHANGELOG](CHANGELOG.md) · [Release notes](docs/releases/) · [Actions and hotkeys](docs/ACTIONS-AND-HOTKEYS.md) · [Navigation history](docs/NAVIGATION-HISTORY.md) · [Format coverage](docs/format-coverage.md) · [Explorer thumbnails](docs/explorer-thumbnails.md) · [Print research](docs/print-research.md) · [Architecture handoff](docs/history/GLIDE_MANIFESTO_AND_HANDOFF.md) · [All docs](docs/README.md)
 
-Thanks to vertigo220, whose reports and ideas shaped 5.0 ([feedback map](docs/releases/5.0.0-community-feedback.md)), and to everyone who tested 5.0.x and 5.1.
+Thanks to vertigo220, whose reports and ideas shaped 5.0 ([feedback map](docs/releases/5.0.0-community-feedback.md)) and the 5.2.0 round 4 ([issue #1](https://github.com/cobhc95/Glide/issues/1)), and to everyone who tested 5.0.x, 5.1 and 5.2.
 
 ## License
 

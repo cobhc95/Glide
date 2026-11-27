@@ -35,7 +35,15 @@ internal static class SettingsChangeSet
             var before = property.GetValue(committed);
             var after = property.GetValue(current);
             if (SettingValuesEqual(before, after)) continue;
-            changes.Add(new SettingChange(HumanizeSettingName(property.Name), FormatSettingValue(before), FormatSettingValue(after)) { Label = DisplayLabel(property.Name) });
+            // Compound values stored as one string / list (offsets "Custom top tabs@Top right=500,0", the status bar's group ids) are described the
+            // way their Settings controls show them, never as the stored text (5.1.7 desktop retest, F).
+            if (CompoundChanges(property.Name, committed, current) is { } compound) { changes.AddRange(compound); continue; }
+            // Round 4 D4: a Choice setting shows its own option labels ("foreground → background"), even when it is
+            // stored as a bool or number, never "Off → On".
+            var (beforeText, afterText) = ChoiceTextAccessor(property.Name) is { } choiceText
+                ? (choiceText(committed), choiceText(current))
+                : (FormatSettingValue(before), FormatSettingValue(after));
+            changes.Add(new SettingChange(HumanizeSettingName(property.Name), beforeText, afterText) { Label = DisplayLabel(property.Name, current) });
         }
 
         if (!DictionaryOfListsEqual(committed.Hotkeys, current.Hotkeys))
@@ -51,6 +59,52 @@ internal static class SettingsChangeSet
             changes.Add(new SettingChange("Custom gestures", CountText(beforeCustom.Count, "custom gesture"), CountText(afterCustom.Count, "custom gesture")));
         // Window placements are remembered geometry, not settings: never a pending change (see IsListedSetting).
         return changes;
+    }
+
+    /// <summary>The Settings label of the text overlay offset boxes (catalogue "overlay.pictureOffsetX/Y" without the axis).</summary>
+    internal const string TextOverlayOffsetLabel = "Text overlay offset (px)";
+
+    /// <summary>
+    /// The readable changes of a setting that stores several values in one string or list, or null when <paramref name="propertyName"/>
+    /// is not one of them. Text overlay offsets: one row per tab layout that changed ("Tabs along the top: X 500, Y 0"); status bar
+    /// groups and title-bar buttons: the labels the customisers show instead of their ids.
+    /// </summary>
+    internal static List<SettingChange>? CompoundChanges(string propertyName, GlideSettingsState committed, GlideSettingsState current)
+    {
+        switch (propertyName)
+        {
+            case nameof(GlideSettingsState.PictureCounterOffsets):
+                var rows = new List<SettingChange>();
+                foreach (var (side, layout) in new[] { (false, "Tabs along the top"), (true, "Tabs at the side") })
+                {
+                    var was = Glide.Core.Settings.TextOverlayPlacements.Offset(committed, side);
+                    var now = Glide.Core.Settings.TextOverlayPlacements.Offset(current, side);
+                    if (was == now) continue;
+                    rows.Add(new SettingChange(TextOverlayOffsetLabel, $"{layout}: X {was.X}, Y {was.Y}", $"{layout}: X {now.X}, Y {now.Y}") { Label = TextOverlayOffsetLabel });
+                }
+                // A change that only moved the anchor (or a retired entry) leaves the visible offsets equal: nothing readable to show.
+                return rows;
+            case nameof(GlideSettingsState.StatusBarGroups):
+                return [new SettingChange("Status bar buttons", StatusBarGroupsText(committed.StatusBarGroups), StatusBarGroupsText(current.StatusBarGroups)) { Label = "Status bar buttons" }];
+            case nameof(GlideSettingsState.TitleBarButtons):
+                return [new SettingChange("Title bar buttons", TitleBarButtonsText(committed.TitleBarButtons), TitleBarButtonsText(current.TitleBarButtons)) { Label = "Title bar buttons" }];
+            default:
+                return null;
+        }
+    }
+
+    private static string StatusBarGroupsText(string? stored)
+    {
+        if (string.IsNullOrWhiteSpace(stored)) return "Default layout";
+        if (string.Equals(stored.Trim(), "none", StringComparison.OrdinalIgnoreCase)) return "None";
+        return string.Join(", ", Glide.Core.StatusBarGroupCatalog.Parse(stored).Select(Glide.Core.StatusBarGroupCatalog.LabelOf));
+    }
+
+    private static string TitleBarButtonsText(IEnumerable<string>? ids)
+    {
+        var labels = (ids ?? []).Where(id => !string.IsNullOrWhiteSpace(id))
+            .Select(id => Glide.Core.Settings.TitleBarButtonCatalog.Find(id)?.Label ?? id).ToArray();
+        return labels.Length == 0 ? "None" : string.Join(", ", labels);
     }
 
     /// <summary>
@@ -87,15 +141,43 @@ internal static class SettingsChangeSet
         return true;
     }
 
-    private static readonly Lazy<Dictionary<string, string>> CatalogLabelsByProperty = new(BuildCatalogLabels);
+    private static readonly Lazy<Dictionary<string, string>> CatalogIdsByProperty = new(BuildCatalogIds);
+    private static readonly Lazy<Dictionary<string, string>> CatalogLabelsByProperty = new(() =>
+    {
+        var labels = Glide.Core.Settings.SettingsCatalog.All.GroupBy(s => s.Id, StringComparer.OrdinalIgnoreCase).ToDictionary(g => g.Key, g => g.First().Label, StringComparer.OrdinalIgnoreCase);
+        return CatalogIdsByProperty.Value.ToDictionary(p => p.Key, p => labels[p.Value], StringComparer.Ordinal);
+    });
+
+    /// <summary>The accessor that reads <paramref name="propertyName"/> as its Choice option text, when it backs a catalogued Choice.</summary>
+    internal static Func<GlideSettingsState, string>? ChoiceTextAccessor(string propertyName)
+    {
+        if (!CatalogIdsByProperty.Value.TryGetValue(propertyName, out var id)) return null;
+        var entry = Glide.Core.Settings.SettingsCatalog.All.FirstOrDefault(e => string.Equals(e.Id, id, StringComparison.OrdinalIgnoreCase));
+        if (entry is null || entry.Kind != Glide.Core.Settings.SettingKind.Choice) return null;
+        return SettingAccessors.All.TryGetValue(id, out var accessor) ? accessor.GetText : null;
+    }
 
     /// <summary>
     /// The label the unsaved-changes dialog shows for <paramref name="propertyName"/>: the SettingsCatalog label when the
     /// property belongs to a catalogued setting (found through its <see cref="SettingAccessors"/> entry, or a catalogue label
     /// that reads the same as the property name), else the property name split into words, in sentence case either way.
     /// </summary>
-    internal static string DisplayLabel(string propertyName)
+    internal static string DisplayLabel(string propertyName) => DisplayLabel(propertyName, null);
+
+    /// <summary>
+    /// As <see cref="DisplayLabel(string)"/>, but the two "Key to open ... instead" settings name the other position / side
+    /// from the staged state, exactly as the Settings page labels them (<see cref="Glide.Core.Workspace.NewTabPolicy"/>);
+    /// the static catalogue label cannot know which one applies.
+    /// </summary>
+    internal static string DisplayLabel(string propertyName, GlideSettingsState? staged)
     {
+        if (staged is not null)
+        {
+            if (propertyName == nameof(GlideSettingsState.NewTabPositionKey))
+                return SentenceCase(Glide.Core.Workspace.NewTabPolicy.PositionKeyLabel(staged.NewTabPosition));
+            if (propertyName == nameof(GlideSettingsState.NewTabForegroundKey))
+                return SentenceCase(Glide.Core.Workspace.NewTabPolicy.ForegroundKeyLabel(staged.SwitchToNewTabs));
+        }
         if (CatalogLabelsByProperty.Value.TryGetValue(propertyName, out var label)) return SentenceCase(label);
         var humanized = HumanizeSettingName(propertyName);
         var match = Glide.Core.Settings.SettingsCatalog.All.FirstOrDefault(s => string.Equals(s.Label, humanized, StringComparison.OrdinalIgnoreCase));
@@ -125,7 +207,7 @@ internal static class SettingsChangeSet
     /// Maps state property names to catalogue labels by probing each accessor once: flip its value on a fresh state and
     /// see which property changed. No hand-kept table to drift.
     /// </summary>
-    private static Dictionary<string, string> BuildCatalogLabels()
+    private static Dictionary<string, string> BuildCatalogIds()
     {
         var map = new Dictionary<string, string>(StringComparer.Ordinal);
         var labels = Glide.Core.Settings.SettingsCatalog.All.GroupBy(s => s.Id, StringComparer.OrdinalIgnoreCase).ToDictionary(g => g.Key, g => g.First().Label, StringComparer.OrdinalIgnoreCase);
@@ -133,7 +215,7 @@ internal static class SettingsChangeSet
             .Where(p => p.CanRead && p.GetIndexParameters().Length == 0).ToArray();
         foreach (var (id, accessor) in SettingAccessors.All)
         {
-            if (!labels.TryGetValue(id, out var label)) continue;
+            if (!labels.ContainsKey(id)) continue;
             try
             {
                 var baseline = new GlideSettingsState();
@@ -152,7 +234,7 @@ internal static class SettingsChangeSet
                 foreach (var property in properties)
                 {
                     if (map.ContainsKey(property.Name)) continue;
-                    if (!SettingValuesEqual(property.GetValue(baseline), property.GetValue(probe))) { map[property.Name] = label; break; }
+                    if (!SettingValuesEqual(property.GetValue(baseline), property.GetValue(probe))) { map[property.Name] = id; break; }
                 }
             }
             catch

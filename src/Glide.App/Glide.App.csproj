@@ -46,6 +46,17 @@
     <AvaloniaResource Include="Assets\**" />
     <Content Include="Assets\Glide.ico" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- Per-extension document icons (round 4 I1), used as each Glide.Image.<ext> ProgID's DefaultIcon. -->
+    <Content Include="FileTypeIcons\*.ico" Link="FileTypes\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+  <!-- Regenerates the file-type icons from the source art when the generator or art changed. The generated .ico files are
+       committed, so a machine without Python/Pillow still builds with the checked-in copies. -->
+  <Target Name="GenerateFileTypeIcons" BeforeTargets="BeforeBuild"
+          Inputs="$(MSBuildProjectDirectory)\..\..\tools\generate-icons.py;$(MSBuildProjectDirectory)\Assets\GlideIcon.png"
+          Outputs="$(MSBuildProjectDirectory)\FileTypeIcons\stamp.txt">
+    <Exec Command="python &quot;$(MSBuildProjectDirectory)\..\..\tools\generate-icons.py&quot; --file-types" IgnoreExitCode="true" IgnoreStandardErrorWarningFormat="true" StandardOutputImportance="low" StandardErrorImportance="low" />
+  </Target>
   <Target Name="ValidateGlideApplicationIcon" BeforeTargets="CoreCompile">
     <Error Condition="!Exists('$(MSBuildProjectDirectory)\Assets\Glide.ico')" Text="Glide application icon is missing: Assets\Glide.ico" />
   </Target>

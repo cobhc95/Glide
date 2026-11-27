@@ -151,7 +151,8 @@ internal static partial class Program
                     tryForward: timeout => ExternalLaunchBroker.TryForwardToExisting(forwardBatch, timeout),
                     claimPresence: ExternalLaunchBroker.ClaimProcessPresence,
                     budget: LaunchElection.DefaultBudget,
-                    trace: line => StartupTrace.Write(line));
+                    trace: line => StartupTrace.Write(line),
+                    ownerIncompatible: () => ExternalLaunchBroker.LastOwnerIncompatible);
                 switch (outcome)
                 {
                     case LaunchElectionOutcome.Forwarded:

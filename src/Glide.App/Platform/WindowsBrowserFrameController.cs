@@ -170,12 +170,15 @@ internal sealed class WindowsBrowserFrameController : IDisposable
         if (_disposed || _hwnd == IntPtr.Zero) return;
         try
         {
-            var exe = Environment.ProcessPath;
-            if (string.IsNullOrEmpty(exe)) return;
-            if (_bigIcon == IntPtr.Zero)
-                _bigIcon = ExtractIcon(exe, GetSystemMetrics(SmCxIcon), GetSystemMetrics(SmCyIcon));
-            if (_smallIcon == IntPtr.Zero)
-                _smallIcon = ExtractIcon(exe, GetSystemMetrics(SmCxSmIcon), GetSystemMetrics(SmCySmIcon));
+            if (_bigIcon == IntPtr.Zero || _smallIcon == IntPtr.Zero)
+            {
+                // One extraction per process (per icon size), shared by every window: this used to read and decode the icon
+                // resources of the exe twice for EACH new window (every detached tab, every Ctrl+N), on the UI thread, and leaked
+                // two more icon handles each time.
+                var (big, small) = SharedTaskbarIcons();
+                if (_bigIcon == IntPtr.Zero) _bigIcon = big;
+                if (_smallIcon == IntPtr.Zero) _smallIcon = small;
+            }
             if (_bigIcon != IntPtr.Zero)
             {
                 SendMessageW(_hwnd, WmSetIcon, new IntPtr(IconBig), _bigIcon);
@@ -189,6 +192,30 @@ internal sealed class WindowsBrowserFrameController : IDisposable
             }
         }
         catch { /* icon attachment is cosmetic */ }
+    }
+
+    private static readonly object SharedIconGate = new();
+    private static (int Big, int Small, IntPtr BigIcon, IntPtr SmallIcon) _sharedIcons;
+
+    /// <summary>
+    /// The process icon at the system's big and small sizes, extracted once and reused. Re-extracted only when the system icon
+    /// metrics changed (a DPI / display change), and only an icon that was actually found is cached, so a failed extraction retries.
+    /// </summary>
+    internal static (IntPtr Big, IntPtr Small) SharedTaskbarIcons()
+    {
+        lock (SharedIconGate)
+        {
+            var exe = Environment.ProcessPath;
+            if (string.IsNullOrEmpty(exe)) return (IntPtr.Zero, IntPtr.Zero);
+            var big = GetSystemMetrics(SmCxIcon);
+            var small = GetSystemMetrics(SmCxSmIcon);
+            if (_sharedIcons.Big != big || _sharedIcons.Small != small) _sharedIcons = (big, small, IntPtr.Zero, IntPtr.Zero);
+            if (_sharedIcons.BigIcon == IntPtr.Zero)
+                _sharedIcons.BigIcon = ExtractIcon(exe, big, GetSystemMetrics(SmCyIcon));
+            if (_sharedIcons.SmallIcon == IntPtr.Zero)
+                _sharedIcons.SmallIcon = ExtractIcon(exe, small, GetSystemMetrics(SmCySmIcon));
+            return (_sharedIcons.BigIcon, _sharedIcons.SmallIcon);
+        }
     }
 
     private static IntPtr ExtractIcon(string path, int cx, int cy)

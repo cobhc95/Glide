@@ -113,6 +113,28 @@ public sealed class NavigationHistory
         _entries[Index] = KeepLinks(Current, entry);
     }
 
+    /// <summary>
+    /// Files were renamed from inside Glide (batch rename, a tag ticked, F2): every Image entry that points at one of them follows
+    /// the new name, so Back / Forward still reach the picture. Silent: no step is added and the current entry does not change.
+    /// </summary>
+    /// <returns>True when an entry changed.</returns>
+    public bool RetargetImages(IReadOnlyDictionary<string, string> renamed)
+    {
+        var changed = false;
+        for (var i = 0; i < _entries.Count; i++)
+        {
+            if (_entries[i] is not { Kind: NavigationEntryKind.Image, Path: { } path } entry) continue;
+            foreach (var (from, to) in renamed)
+            {
+                if (!NavigationEntry.PathsEqual(path, from)) continue;
+                _entries[i] = entry with { Path = to };
+                changed = true;
+                break;
+            }
+        }
+        return changed;
+    }
+
     /// <summary>Changes the current entry in place (for example to remember the Explorer selection).</summary>
     public void UpdateCurrent(Func<NavigationEntry, NavigationEntry> update)
     {

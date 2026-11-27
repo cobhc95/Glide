@@ -100,6 +100,12 @@ public partial class MainWindow
         // 5.0.8: Default on a side-button row is pass-through ("not used by Glide"): the press is NOT marked handled, so
         // Windows / the mouse software keep it. Only an explicit choice ("Do nothing" blocks; any action runs) claims it.
         var decision = GestureResolver.ForSideButton(slot.Id, ResolveGestureSlot(slot.Id, e.KeyModifiers));
+        // Round 4 (A2): on a picture whose rows are still on Default, the back button returns to the Explorer folder the
+        // picture was opened from (this tab's history). Everything else stays pass-through; explicit bindings win.
+        if (decision.Outcome == GestureOutcome.PassThrough && kind == PointerUpdateKind.XButton1Pressed &&
+            slot.Area is GestureAreas.Windowed or GestureAreas.Fullscreen && _workspace.Active is ImageTabState &&
+            ActiveHistory is { CanGoBack: true } history && history.Entries[history.Index - 1].Kind == Glide.Core.Navigation.NavigationEntryKind.Explorer)
+            decision = new GestureDecision(GestureOutcome.Run, GestureCatalog.NavigateBack);
         if (!decision.Runs) return false;
         var action = decision.Action;
         e.Handled = true;
@@ -175,7 +181,11 @@ public partial class MainWindow
         if (!_settings.EnableTabFocusNavigation && e.Key is Key.Enter or Key.Space &&
             e.Source is Button && e.Source is not TextBox && !IsInsideOpenMenu(e.Source))
         {
-            await RouteHotkeyAsync(e);
+            // Round 4 H1: the key is claimed even when it is bound to nothing here, so the focused button is never
+            // keyboard-clicked (Space after clicking the Settings button reopened Settings).
+            var route = RouteHotkeyAsync(e);
+            e.Handled = true;
+            await route;
             return;
         }
 
@@ -196,6 +206,21 @@ public partial class MainWindow
     }
 
     private bool _slideshowSpaceDown;
+
+    /// <summary>
+    /// Round 4 H1: the matching key-up of a Space / Enter that <see cref="GlobalKeyDown"/> routed through the hotkey map
+    /// is swallowed too. Avalonia's Button clicks on Space key-up, so after the Settings button had been clicked (and kept
+    /// focus), Space ran its own hotkey (play/pause GIF) on key-down and then reopened Settings on key-up.
+    /// </summary>
+    private void GlobalKeyUp(object? sender, KeyEventArgs e)
+    {
+        if (!_settings.EnableTabFocusNavigation && e.Key is Key.Enter or Key.Space &&
+            e.Source is Button && e.Source is not TextBox && !IsInsideOpenMenu(e.Source))
+        {
+            OnKeyUp(sender, e);   // the window's own key-up bookkeeping still runs (it is skipped once handled)
+            e.Handled = true;
+        }
+    }
 
     private static bool IsInsideOpenMenu(object? source)
     {
@@ -220,6 +245,9 @@ public partial class MainWindow
             if (e.Source is TextBox && (e.KeyModifiers & (KeyModifiers.Control | KeyModifiers.Alt | KeyModifiers.Meta)) == 0 &&
                 !(e.Key >= Key.F1 && e.Key <= Key.F24) && e.Key is not (Key.Escape or Key.Tab))
                 return;
+
+            // Explorer list: letters and digits are Windows type-to-select, not hotkeys (see IsExplorerTypeAheadKey).
+            if (IsExplorerTypeAheadKey(e)) return;
 
             if (e.Key == Key.Home)
             {
@@ -561,8 +589,24 @@ public partial class MainWindow
     /// <summary>Resolves a gesture slot for an input made while <paramref name="modifiers"/> were held
     /// (custom gestures first, then the slot binding).</summary>
     private string ResolveGestureSlot(string slotId, KeyModifiers modifiers) =>
-        GestureCatalog.ResolveAction(slotId, _settings.Gestures, _settings.CustomGestures,
-            GestureModifiers.From(modifiers.HasFlag(KeyModifiers.Control), modifiers.HasFlag(KeyModifiers.Shift), modifiers.HasFlag(KeyModifiers.Alt)));
+        GestureCatalog.ResolveAction(slotId, _settings.Gestures, _settings.CustomGestures, GestureModifierOf(modifiers));
+
+    private static string GestureModifierOf(KeyModifiers modifiers) =>
+        GestureModifiers.From(modifiers.HasFlag(KeyModifiers.Control), modifiers.HasFlag(KeyModifiers.Shift), modifiers.HasFlag(KeyModifiers.Alt));
+
+    /// <summary>Round 4 C3: an Explorer item double-click with the held keys: its slot (plain, Alt, Ctrl or Shift row) and what
+    /// it runs (a slot left at Default that has a built-in action, such as Alt = properties, runs that action).</summary>
+    private (string Slot, string Action) ResolveExplorerDoubleClick(KeyModifiers modifiers)
+    {
+        var slot = GestureCatalog.ExplorerDoubleClickSlot(GestureModifierOf(modifiers));
+        var action = ResolveGestureSlot(slot, modifiers);
+        if (action == GestureCatalog.Default && GestureCatalog.DefaultRunAction(slot) is { } builtIn) action = builtIn;
+        // A Ctrl / Shift row left at Default keeps the pre-round-4 behaviour: the plain double-click row, when the user has set
+        // it (for example "Open in new tab"), still applies with the key held (Shift / Ctrl then flip new-tab placement).
+        else if (action == GestureCatalog.Default && !string.Equals(slot, "explorer.doubleClick", StringComparison.OrdinalIgnoreCase))
+            action = ResolveGestureSlot("explorer.doubleClick", modifiers);
+        return (slot, action);
+    }
 
     private async Task ExecuteGestureActionAsync(string actionId, int wheelStep = 0, string? slotId = null)
     {
@@ -817,7 +861,7 @@ public partial class MainWindow
             [GlideCommand.DetachTab] = async () => { if (_workspace.Active is { } a) await DetachTabAsync(a.Id, this.PointToScreen(new Point(Bounds.Width / 2, 48)), fromMenu: true); }, [GlideCommand.CloseWindow] = () => { Close(); return Task.CompletedTask; }, [GlideCommand.ExitApplication] = ExitGlideAsync, [GlideCommand.ToggleFullscreen] = () => { ToggleFullscreen(); return Task.CompletedTask; }, [GlideCommand.StartPauseSlideshow] = ToggleSlideshowAsync, [GlideCommand.StopSlideshow] = () => { StopSlideshow(true); return Task.CompletedTask; },
             [GlideCommand.ToggleImageInfo] = () => Run(ToggleImageInfoPanel), [GlideCommand.ClearSelection] = HandleEscapeAsync, [GlideCommand.Settings] = () => Fire(OpenSettingsAsync), [GlideCommand.AddOverlay] = () => Fire(AddOverlayFromPickerAsync), [GlideCommand.SaveOverlayLayout] = () => Fire(SaveOverlayLayoutAsync), [GlideCommand.LoadOverlayLayout] = () => Fire(LoadOverlayLayoutAsync), [GlideCommand.ResetSelectedOverlayZoom] = () => { EnsureOverlays().ResetSelectedZoom(); return Task.CompletedTask; }, [GlideCommand.BringSelectedOverlayFront] = () => { EnsureOverlays().BringSelectedToFront(); return Task.CompletedTask; },
             [GlideCommand.ToggleAlwaysOnTop] = () => Run(ToggleAlwaysOnTopSetting), [GlideCommand.ToggleTransparency] = () => Run(ToggleTransparencyPanel), [GlideCommand.ShowContextMenu] = () => { ShowViewerContextMenu(); return Task.CompletedTask; }, [GlideCommand.BrowserBack] = () => Fire(BrowserBackAsync), [GlideCommand.BrowserForward] = () => Fire(BrowserForwardAsync), [GlideCommand.BrowserUp] = () => Run(NavigateBrowserUp),
-            [GlideCommand.CopyImage] = () => { CopyImagePixels(); return Task.CompletedTask; }, [GlideCommand.ExportSelection] = ExportSelectionAsync, [GlideCommand.CopyFile] = () => { CopyImageFile(); return Task.CompletedTask; }, [GlideCommand.CopyFileName] = () => CopyTextAsync(_currentPath is null ? null : Path.GetFileName(_currentPath)), [GlideCommand.CopyFolderPath] = () => CopyTextAsync(_currentPath is null ? null : Path.GetDirectoryName(_currentPath)), [GlideCommand.CopyFullPath] = () => CopyTextAsync(_currentPath), [GlideCommand.RenameFile] = RenameCurrentFileAsync, [GlideCommand.DeleteFile] = DeleteCurrentFileAsync, [GlideCommand.OpenContainingFolder] = OpenContainingFolderOrAlternativeAsync, [GlideCommand.Print] = PrintCurrentImageAsync, [GlideCommand.SaveImage] = SaveCurrentImageAsync, [GlideCommand.SaveImageAs] = SaveCurrentImageAsAsync, [GlideCommand.ExternalProgram1] = () => { LaunchExternal(1); return Task.CompletedTask; }, [GlideCommand.ExternalProgram2] = () => { LaunchExternal(2); return Task.CompletedTask; }, [GlideCommand.ExternalProgram3] = () => { LaunchExternal(3); return Task.CompletedTask; }
+            [GlideCommand.CopyImage] = () => { CopyImagePixels(); return Task.CompletedTask; }, [GlideCommand.ExportSelection] = ExportSelectionAsync, [GlideCommand.CopyFile] = () => { CopyImageFile(); return Task.CompletedTask; }, [GlideCommand.CopyFileName] = () => CopyTextAsync(_currentPath is null ? null : Path.GetFileName(_currentPath)), [GlideCommand.CopyFolderPath] = () => CopyTextAsync(_currentPath is null ? null : Path.GetDirectoryName(_currentPath)), [GlideCommand.CopyFullPath] = () => CopyTextAsync(_currentPath), [GlideCommand.RenameFile] = RenameCurrentFileAsync, [GlideCommand.DeleteFile] = DeleteCurrentFileAsync, [GlideCommand.DeleteFilePermanently] = DeleteCurrentFilePermanentlyAsync, [GlideCommand.OpenContainingFolder] = OpenContainingFolderOrAlternativeAsync, [GlideCommand.Print] = PrintCurrentImageAsync, [GlideCommand.SaveImage] = SaveCurrentImageAsync, [GlideCommand.SaveImageAs] = SaveCurrentImageAsAsync, [GlideCommand.ExternalProgram1] = () => { LaunchExternal(1); return Task.CompletedTask; }, [GlideCommand.ExternalProgram2] = () => { LaunchExternal(2); return Task.CompletedTask; }, [GlideCommand.ExternalProgram3] = () => { LaunchExternal(3); return Task.CompletedTask; }
         };
         actions[GlideCommand.JumpForward10] = () => NavigateMouseAsync(10);
         actions[GlideCommand.JumpBack10] = () => NavigateMouseAsync(-10);
@@ -835,6 +879,7 @@ public partial class MainWindow
         actions[GlideCommand.NewExplorerTab] = () => OpenExplorerTabAsync(_currentPath is { } current && File.Exists(current) ? Path.GetDirectoryName(current) : null);
         actions[GlideCommand.NewHomeTab] = async () => { AddNewHomeTab(); RebuildTabStrip(); await ActivateWorkspaceAsync(); };
         actions[GlideCommand.OpenFirstImageInFolder] = () => _workspace.Active is BrowserTabState browserTab ? OpenFirstImageInFolderAsync(browserTab.Folder) : Task.CompletedTask;
+        actions[GlideCommand.ToggleOverlayPreserveAspect] = () => { if (_wholeAppOverlayMode) ToggleWholeAppOverlayPreserveAspect(); return Task.CompletedTask; };
         actions[GlideCommand.ToggleOverlayMode] = () => { if (_wholeAppOverlayMode) ExitWholeAppOverlayMode(); else EnterWholeAppOverlayMode(); return Task.CompletedTask; };
         actions[GlideCommand.CustomizeTitleBar] = ShowTitleBarCustomizerAsync;
         actions[GlideCommand.CustomizeStatusBar] = ShowStatusBarCustomizerAsync;
@@ -857,6 +902,9 @@ public partial class MainWindow
         actions[GlideCommand.ImportGlideBackup] = () => OpenBackupFromCommandAsync(import: true);
         // 5.1.3: right-click on the text overlay, or this action: Settings at its placement card (MainWindow.TextOverlayDrag.cs).
         actions[GlideCommand.OpenTextOverlaySettings] = () => { OpenTextOverlaySettings(); return Task.CompletedTask; };
+        actions[GlideCommand.ExplorerItemProperties] = () => { ShowExplorerProperties(); return Task.CompletedTask; };
+        // 5.1.7 (issue #4): the tag sidebar (MainWindow.Tags.cs).
+        actions[GlideCommand.ToggleTagSidebar] = ToggleTagSidebarAsync;
         MainWindowCommandDispatcher.AssertComplete(actions.Keys);
         return new MainWindowCommandDispatcher(actions);
     }
@@ -953,7 +1001,7 @@ public partial class MainWindow
             ToolTip.SetTip(_browserSurface.WindowsExplorerButton, ExplorerRevealButtonTip());
             // Ctrl+F is a fixed registry shortcut: read it from there instead of typing it a second time.
             _browserSurface.FilterBox.Watermark = BindingHints.FixedShortcut("fixed.explorer.filter") is { } filterKeys
-                ? $"Filter this folder ({filterKeys})" : "Filter this folder";
+                ? $"Filter this folder ({filterKeys.Split(" / ")[0]})" : "Filter this folder";
         }
         UpdateHistoryNavigationState(); // Back / Forward tips may name a cross-tab target ("Back to x.jpg")
     }

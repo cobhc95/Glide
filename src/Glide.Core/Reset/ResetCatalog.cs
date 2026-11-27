@@ -53,6 +53,8 @@ public static class ResetCatalog
     public const string PrintSettingsFileName = "print.settings.json";
     public const string ThumbnailSettingsFileName = "thumbnail.settings.json";
     public const string StartupDiagnosticsFolderName = "Startup Diagnostics";
+    /// <summary>Folder of the Explorer thumbnail disk cache (must equal Glide.Imaging.ThumbnailDiskCache.FolderName; a test checks).</summary>
+    public const string ThumbnailCacheFolderName = "thumbnails";
 
     // ---- glide.settings.json property groups: defined in Glide.Core.Data.GlideSettingsPropertyGroups (Stage B: one-way
     //      Reset -> Data dependency, no type-initialiser cycle). Kept here as forwarding members for existing callers. ----

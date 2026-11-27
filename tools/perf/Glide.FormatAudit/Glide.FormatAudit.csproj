@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Format speed audit helpers (5.2.0): the viewer-small decode, the Windows / Glide shell thumbnail providers and the
+       thumbnail route probe. NOT part of Glide.sln. Shares Common.cs (Stats, Args, Timing, BenchPolicies) with Glide.PerfBench. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
+    <TieredPGO>true</TieredPGO>
+    <IsPackable>false</IsPackable>
+    <EnforceCodeStyleInBuild>false</EnforceCodeStyleInBuild>
+    <AnalysisMode>None</AnalysisMode>
+    <NoWarn>$(NoWarn);CA1416;CA2007;CS1591;SYSLIB1054</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\Glide.PerfBench\Common.cs" Link="Common.cs" />
+    <PackageReference Include="Avalonia.Headless" Version="11.3.20" />
+    <PackageReference Include="Avalonia.Skia" Version="11.3.20" />
+    <ProjectReference Include="..\..\..\src\Glide.Core\Glide.Core.csproj" />
+    <ProjectReference Include="..\..\..\src\Glide.Imaging\Glide.Imaging.csproj" />
+    <ProjectReference Include="..\..\..\src\Glide.App\Glide.App.csproj" />
+  </ItemGroup>
+</Project>

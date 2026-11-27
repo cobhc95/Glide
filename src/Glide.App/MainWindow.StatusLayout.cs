@@ -97,26 +97,24 @@ public partial class MainWindow
         foreach (var hiddenSlot in StatusSlots.Where(x => !shownIds.Contains(x.Id))) hiddenSlot.Border.IsVisible = false;
         var slots = shownIds.Select(id => StatusSlots.FirstOrDefault(x => x.Id == id) ?? ExtraStatusSlot(id)).OfType<StatusSlot>().ToList();
 
-        // Put every group back on row 1 so each can be measured at its natural size.
-        StatusRow1.Children.Clear();
-        StatusRow2.Children.Clear();
+        // Every group must be attached to the (visible) tree to be styled and measured at its natural size. Groups already
+        // sitting in a row stay where they are: detaching and re-attaching all of them on every call re-ran the styles and a
+        // full measure of the whole bar for each WM_SIZE of a window drag. Only a group that is in no row (moved into the
+        // "..." menu earlier) is put on row 1 for the measurement; the final layout below is reconciled without churn.
+        var iconChanged = _statusIconSizeApplied != iconSize;
+        bool InRow(Control c) => c.Parent is Panel p && (ReferenceEquals(p, StatusRow1) || ReferenceEquals(p, StatusRow2));
         foreach (var slot in slots)
         {
             slot.Border.IsVisible = slot.Inner.IsVisible;
-            foreach (var button in Avalonia.LogicalTree.LogicalExtensions.GetLogicalDescendants(slot.Border).OfType<Button>().Where(b => b.Classes.Contains("legacyStatusIcon")))
-            {
-                button.Width = iconSize;
-                button.Height = iconSize;
-            }
-            StatusRow1.Children.Add(slot.Border);
+            var attached = InRow(slot.Border);
+            if (iconChanged || !attached) ApplyStatusIconSize(slot.Border, iconSize, legacyOnly: true);
+            if (!attached) StatusRow1.Children.Add(slot.Border);
         }
-        foreach (var button in Avalonia.LogicalTree.LogicalExtensions.GetLogicalDescendants(MoreGroupBorder).OfType<Button>())
-        {
-            button.Width = iconSize;
-            button.Height = iconSize;
-        }
+        var moreAttached = InRow(MoreGroupBorder);
+        if (iconChanged || !moreAttached) ApplyStatusIconSize(MoreGroupBorder, iconSize, legacyOnly: false);
+        _statusIconSizeApplied = iconSize;
         MoreGroupBorder.IsVisible = true;
-        StatusRow1.Children.Add(MoreGroupBorder);
+        if (!moreAttached) StatusRow1.Children.Add(MoreGroupBorder);
 
         static double Natural(Border border, double icon)
         {
@@ -230,17 +228,54 @@ public partial class MainWindow
             }
         }
 
-        StatusRow1.Children.Clear();
-        StatusRow2.Children.Clear();
-        foreach (var i in row1) StatusRow1.Children.Add(enabled[i].Border);
-        foreach (var i in row2) StatusRow2.Children.Add(enabled[i].Border);
         foreach (var hidden in _statusHiddenSlots) hidden.Border.IsVisible = false;
-        if (overflow)
-        {
-            MoreGroupBorder.IsVisible = true;
-            StatusRow1.Children.Add(MoreGroupBorder);
-        }
+        MoreGroupBorder.IsVisible = overflow;
+        var desiredRow1 = new List<Control>(row1.Count + 1);
+        foreach (var i in row1) desiredRow1.Add(enabled[i].Border);
+        // The "..." group stays in row 1 (invisible unless something overflowed, so it takes no space): taking it out and putting it
+        // back for its measurement on every call re-attached it, and a changed child list made the panel rebuild every time.
+        desiredRow1.Add(MoreGroupBorder);
+        var desiredRow2 = new List<Control>(row2.Count);
+        foreach (var i in row2) desiredRow2.Add(enabled[i].Border);
+        SyncStatusRows(StatusRow1, desiredRow1, StatusRow2, desiredRow2);
         StatusRow2.IsVisible = row2.Count > 0;
+    }
+
+    private double _statusIconSizeApplied = double.NaN;
+
+    private static void ApplyStatusIconSize(Control root, double iconSize, bool legacyOnly)
+    {
+        foreach (var button in Avalonia.LogicalTree.LogicalExtensions.GetLogicalDescendants(root).OfType<Button>())
+        {
+            if (legacyOnly && !button.Classes.Contains("legacyStatusIcon")) continue;
+            button.Width = iconSize;
+            button.Height = iconSize;
+        }
+    }
+
+    private static bool RowHolds(Panel row, IReadOnlyList<Control> desired)
+    {
+        var children = row.Children;
+        if (children.Count != desired.Count) return false;
+        for (var i = 0; i < desired.Count; i++)
+            if (!ReferenceEquals(children[i], desired[i])) return false;
+        return true;
+    }
+
+    /// <summary>Makes <paramref name="row"/> hold exactly <paramref name="desired"/>, in order, touching the panel only when it differs.</summary>
+    internal static void SyncStatusRow(Panel row, IReadOnlyList<Control> desired) => SyncStatusRows(row, desired, null, Array.Empty<Control>());
+
+    /// <summary>
+    /// Both rows hold their groups already: nothing happens. Otherwise both are emptied first and then refilled, because a group
+    /// that moves from one row to the other still has its old parent until that row lets go of it.
+    /// </summary>
+    internal static void SyncStatusRows(Panel row1, IReadOnlyList<Control> desired1, Panel? row2, IReadOnlyList<Control> desired2)
+    {
+        if (RowHolds(row1, desired1) && (row2 is null || RowHolds(row2, desired2))) return;
+        row1.Children.Clear();
+        row2?.Children.Clear();
+        foreach (var control in desired1) row1.Children.Add(control);
+        if (row2 is not null) foreach (var control in desired2) row2.Children.Add(control);
     }
 
     private void StatusMoreClicked(object? sender, RoutedEventArgs e)

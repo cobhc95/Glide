@@ -1,0 +1,820 @@
+{
+  "mode": "thumb",
+  "machine": {
+    "logicalProcessors": 16,
+    "os": "Microsoft Windows NT 10.0.26100.0",
+    "runtime": ".NET 10.0.14",
+    "hardwareTier": "HighEnd",
+    "utc": "2026-11-27T09:53:47.2102156Z"
+  },
+  "items": [
+    {
+      "file": "avif-4k.avif",
+      "width": 152,
+      "warmMs": null,
+      "minMs": null,
+      "maxMs": null,
+      "noisy": false,
+      "size": "error: NullReferenceException Object reference not set to an instance of an object.",
+      "missMs": null,
+      "hitMs": null,
+      "samples": []
+    },
+    {
+      "file": "avif-4k.avif",
+      "width": 236,
+      "warmMs": null,
+      "minMs": null,
+      "maxMs": null,
+      "noisy": false,
+      "size": "error: NullReferenceException Object reference not set to an instance of an object.",
+      "missMs": null,
+      "hitMs": null,
+      "samples": []
+    },
+    {
+      "file": "bmp-24mp.bmp",
+      "width": 152,
+      "warmMs": 6.765,
+      "minMs": 6.5937,
+      "maxMs": 7.3406,
+      "noisy": false,
+      "size": "152x102",
+      "missMs": 13.4373,
+      "hitMs": 0.2416,
+      "samples": [
+        7.3406,
+        6.7752,
+        6.7865,
+        6.5937,
+        6.765,
+        6.7212,
+        6.631
+      ]
+    },
+    {
+      "file": "bmp-24mp.bmp",
+      "width": 236,
+      "warmMs": 6.874,
+      "minMs": 6.8048,
+      "maxMs": 7.2038,
+      "noisy": false,
+      "size": "236x157",
+      "missMs": 7.2294,
+      "hitMs": 0.1788,
+      "samples": [
+        6.9749,
+        7.2038,
+        6.874,
+        6.9062,
+        6.8179,
+        6.8048,
+        6.8408
+      ]
+    },
+    {
+      "file": "bmp-4k.bmp",
+      "width": 152,
+      "warmMs": 3.9294,
+      "minMs": 3.5039,
+      "maxMs": 5.9464,
+      "noisy": true,
+      "size": "152x86",
+      "missMs": 4.0787,
+      "hitMs": 0.1129,
+      "samples": [
+        3.9294,
+        3.661,
+        4.0819,
+        3.7443,
+        3.5039,
+        5.9464,
+        4.3632
+      ]
+    },
+    {
+      "file": "bmp-4k.bmp",
+      "width": 236,
+      "warmMs": 3.9619,
+      "minMs": 3.7715,
+      "maxMs": 4.1092,
+      "noisy": false,
+      "size": "236x133",
+      "missMs": 4.1963,
+      "hitMs": 0.1995,
+      "samples": [
+        4.0615,
+        3.7715,
+        3.9146,
+        3.8719,
+        4.1092,
+        4.0043,
+        3.9619
+      ]
+    },
+    {
+      "file": "gif-4k.gif",
+      "width": 152,
+      "warmMs": 16.605,
+      "minMs": 15.7208,
+      "maxMs": 17.0252,
+      "noisy": false,
+      "size": "152x85",
+      "missMs": 17.2218,
+      "hitMs": 0.2373,
+      "samples": [
+        16.7792,
+        15.7208,
+        16.7334,
+        16.3098,
+        16.605,
+        17.0252,
+        16.1523
+      ]
+    },
+    {
+      "file": "gif-4k.gif",
+      "width": 236,
+      "warmMs": 17.4451,
+      "minMs": 16.2705,
+      "maxMs": 20.2806,
+      "noisy": false,
+      "size": "236x132",
+      "missMs": 16.9575,
+      "hitMs": 0.182,
+      "samples": [
+        20.2806,
+        17.5149,
+        17.4451,
+        16.2705,
+        17.273,
+        17.2202,
+        17.8838
+      ]
+    },
+    {
+      "file": "heic-4k.heic",
+      "width": 152,
+      "warmMs": null,
+      "minMs": null,
+      "maxMs": null,
+      "noisy": false,
+      "size": "error: NullReferenceException Object reference not set to an instance of an object.",
+      "missMs": null,
+      "hitMs": null,
+      "samples": []
+    },
+    {
+      "file": "heic-4k.heic",
+      "width": 236,
+      "warmMs": null,
+      "minMs": null,
+      "maxMs": null,
+      "noisy": false,
+      "size": "error: NullReferenceException Object reference not set to an instance of an object.",
+      "missMs": null,
+      "hitMs": null,
+      "samples": []
+    },
+    {
+      "file": "ico-256.ico",
+      "width": 152,
+      "warmMs": 0.8384,
+      "minMs": 0.8087,
+      "maxMs": 0.8705,
+      "noisy": false,
+      "size": "152x152",
+      "missMs": 0.9889,
+      "hitMs": 0.1459,
+      "samples": [
+        0.8446,
+        0.8384,
+        0.8385,
+        0.8259,
+        0.8094,
+        0.8087,
+        0.8705
+      ]
+    },
+    {
+      "file": "ico-256.ico",
+      "width": 236,
+      "warmMs": 0.9794,
+      "minMs": 0.9538,
+      "maxMs": 1.0593,
+      "noisy": false,
+      "size": "236x236",
+      "missMs": 1.0962,
+      "hitMs": 0.1873,
+      "samples": [
+        1.0045,
+        0.9708,
+        0.9976,
+        0.9794,
+        0.9538,
+        0.9606,
+        1.0593
+      ]
+    },
+    {
+      "file": "jpeg-base-12mp.jpg",
+      "width": 152,
+      "warmMs": 12.5575,
+      "minMs": 12.4285,
+      "maxMs": 12.6946,
+      "noisy": false,
+      "size": "152x114",
+      "missMs": 12.7228,
+      "hitMs": 0.1339,
+      "samples": [
+        12.5575,
+        12.4921,
+        12.5253,
+        12.6946,
+        12.5675,
+        12.6729,
+        12.4285
+      ]
+    },
+    {
+      "file": "jpeg-base-12mp.jpg",
+      "width": 236,
+      "warmMs": 12.7771,
+      "minMs": 12.6881,
+      "maxMs": 13.6539,
+      "noisy": false,
+      "size": "236x177",
+      "missMs": 12.8549,
+      "hitMs": 0.19,
+      "samples": [
+        13.6539,
+        12.6881,
+        12.6893,
+        13.0078,
+        12.7771,
+        12.7624,
+        12.786
+      ]
+    },
+    {
+      "file": "jpeg-base-24mp.jpg",
+      "width": 152,
+      "warmMs": 24.8541,
+      "minMs": 24.5295,
+      "maxMs": 25.7016,
+      "noisy": false,
+      "size": "152x101",
+      "missMs": 25.8927,
+      "hitMs": 0.1215,
+      "samples": [
+        24.8541,
+        24.8432,
+        24.849,
+        25.0584,
+        25.7016,
+        25.5971,
+        24.5295
+      ]
+    },
+    {
+      "file": "jpeg-base-24mp.jpg",
+      "width": 236,
+      "warmMs": 26.2066,
+      "minMs": 25.4668,
+      "maxMs": 27.3649,
+      "noisy": false,
+      "size": "236x157",
+      "missMs": 27.1569,
+      "hitMs": 0.299,
+      "samples": [
+        25.5549,
+        25.4668,
+        25.6862,
+        27.3649,
+        27.0386,
+        26.6846,
+        26.2066
+      ]
+    },
+    {
+      "file": "jpeg-camera-mpf-24mp.jpg",
+      "width": 152,
+      "warmMs": 1.882,
+      "minMs": 1.6829,
+      "maxMs": 2.3236,
+      "noisy": false,
+      "size": "152x228",
+      "missMs": 2.0092,
+      "hitMs": 0.3198,
+      "samples": [
+        1.936,
+        1.9661,
+        1.7603,
+        1.8274,
+        1.882,
+        1.6829,
+        2.3236
+      ]
+    },
+    {
+      "file": "jpeg-camera-mpf-24mp.jpg",
+      "width": 236,
+      "warmMs": 2.0776,
+      "minMs": 1.9567,
+      "maxMs": 2.4307,
+      "noisy": false,
+      "size": "236x354",
+      "missMs": 2.3346,
+      "hitMs": 0.2163,
+      "samples": [
+        2.125,
+        2.0776,
+        1.9598,
+        2.0214,
+        2.1061,
+        2.4307,
+        1.9567
+      ]
+    },
+    {
+      "file": "jpeg-prog-12mp.jpg",
+      "width": 152,
+      "warmMs": 8.756,
+      "minMs": 8.3504,
+      "maxMs": 9.0985,
+      "noisy": false,
+      "size": "152x114",
+      "missMs": 9.1964,
+      "hitMs": 0.1975,
+      "samples": [
+        8.9542,
+        8.3979,
+        8.756,
+        8.9101,
+        8.6616,
+        9.0985,
+        8.3504
+      ]
+    },
+    {
+      "file": "jpeg-prog-12mp.jpg",
+      "width": 236,
+      "warmMs": 8.4728,
+      "minMs": 8.2742,
+      "maxMs": 8.5516,
+      "noisy": false,
+      "size": "236x177",
+      "missMs": 8.5395,
+      "hitMs": 0.221,
+      "samples": [
+        8.4851,
+        8.2742,
+        8.5516,
+        8.3093,
+        8.4728,
+        8.3234,
+        8.5098
+      ]
+    },
+    {
+      "file": "jpeg-prog-24mp.jpg",
+      "width": 152,
+      "warmMs": 16.5708,
+      "minMs": 15.8986,
+      "maxMs": 19.0277,
+      "noisy": false,
+      "size": "152x101",
+      "missMs": 19.2531,
+      "hitMs": 0.1443,
+      "samples": [
+        17.9152,
+        19.0277,
+        16.2317,
+        15.8986,
+        16.4121,
+        16.8837,
+        16.5708
+      ]
+    },
+    {
+      "file": "jpeg-prog-24mp.jpg",
+      "width": 236,
+      "warmMs": 16.415,
+      "minMs": 16.1491,
+      "maxMs": 18.749,
+      "noisy": false,
+      "size": "236x157",
+      "missMs": 17.1413,
+      "hitMs": 0.1479,
+      "samples": [
+        16.7788,
+        16.2006,
+        16.415,
+        16.1491,
+        17.8104,
+        18.749,
+        16.335
+      ]
+    },
+    {
+      "file": "png-24mp.png",
+      "width": 152,
+      "warmMs": 133.004,
+      "minMs": 130.9872,
+      "maxMs": 134.2033,
+      "noisy": false,
+      "size": "152x101",
+      "missMs": 135.6317,
+      "hitMs": 0.1006,
+      "samples": [
+        134.2033,
+        132.0277,
+        132.5834,
+        133.3851,
+        130.9872,
+        133.004,
+        133.4487
+      ]
+    },
+    {
+      "file": "png-24mp.png",
+      "width": 236,
+      "warmMs": 132.4591,
+      "minMs": 131.1866,
+      "maxMs": 140.6792,
+      "noisy": false,
+      "size": "236x157",
+      "missMs": 135.5502,
+      "hitMs": 0.1463,
+      "samples": [
+        136.0353,
+        140.6792,
+        131.1866,
+        133.5934,
+        131.508,
+        132.4591,
+        131.881
+      ]
+    },
+    {
+      "file": "png-4k.png",
+      "width": 152,
+      "warmMs": 51.061,
+      "minMs": 50.2078,
+      "maxMs": 52.9514,
+      "noisy": false,
+      "size": "152x85",
+      "missMs": 51.3303,
+      "hitMs": 0.0984,
+      "samples": [
+        50.2078,
+        51.1461,
+        50.3715,
+        51.4068,
+        50.8535,
+        51.061,
+        52.9514
+      ]
+    },
+    {
+      "file": "png-4k.png",
+      "width": 236,
+      "warmMs": 50.1126,
+      "minMs": 49.8119,
+      "maxMs": 51.5709,
+      "noisy": false,
+      "size": "236x132",
+      "missMs": 50.9093,
+      "hitMs": 0.1287,
+      "samples": [
+        50.1126,
+        49.8119,
+        50.1306,
+        50.3473,
+        50.0463,
+        50.0325,
+        51.5709
+      ]
+    },
+    {
+      "file": "png-alpha-4k.png",
+      "width": 152,
+      "warmMs": 77.1799,
+      "minMs": 76.6042,
+      "maxMs": 79.3481,
+      "noisy": false,
+      "size": "152x85",
+      "missMs": 76.536,
+      "hitMs": 0.0914,
+      "samples": [
+        77.5695,
+        77.6316,
+        76.6042,
+        79.3481,
+        77.1799,
+        76.7819,
+        76.6303
+      ]
+    },
+    {
+      "file": "png-alpha-4k.png",
+      "width": 236,
+      "warmMs": 77.7501,
+      "minMs": 77.0286,
+      "maxMs": 80.6861,
+      "noisy": false,
+      "size": "236x132",
+      "missMs": 76.9223,
+      "hitMs": 0.1088,
+      "samples": [
+        78.2125,
+        80.1361,
+        77.0286,
+        77.1374,
+        80.6861,
+        77.1721,
+        77.7501
+      ]
+    },
+    {
+      "file": "tiff-lzw-24mp.tif",
+      "width": 152,
+      "warmMs": 33.1934,
+      "minMs": 28.2157,
+      "maxMs": 35.5744,
+      "noisy": false,
+      "size": "152x102",
+      "missMs": 36.8994,
+      "hitMs": 0.1205,
+      "samples": [
+        35.5744,
+        33.9509,
+        31.0626,
+        34.2737,
+        33.1934,
+        28.2157,
+        30.8581
+      ]
+    },
+    {
+      "file": "tiff-lzw-24mp.tif",
+      "width": 236,
+      "warmMs": 29.0885,
+      "minMs": 28.4987,
+      "maxMs": 32.1383,
+      "noisy": false,
+      "size": "236x157",
+      "missMs": 28.2181,
+      "hitMs": 0.1684,
+      "samples": [
+        32.1383,
+        28.4987,
+        29.0885,
+        29.589,
+        29.2626,
+        28.5755,
+        28.9784
+      ]
+    },
+    {
+      "file": "tiff-lzw-4k.tif",
+      "width": 152,
+      "warmMs": 11.465,
+      "minMs": 10.6076,
+      "maxMs": 12.4923,
+      "noisy": false,
+      "size": "152x86",
+      "missMs": 10.5345,
+      "hitMs": 0.1086,
+      "samples": [
+        10.6076,
+        10.9519,
+        10.6416,
+        12.4923,
+        12.2809,
+        11.465,
+        11.6934
+      ]
+    },
+    {
+      "file": "tiff-lzw-4k.tif",
+      "width": 236,
+      "warmMs": 11.1383,
+      "minMs": 10.6649,
+      "maxMs": 13.0301,
+      "noisy": false,
+      "size": "236x133",
+      "missMs": 11.1846,
+      "hitMs": 0.1582,
+      "samples": [
+        11.4533,
+        13.0301,
+        12.4509,
+        10.6649,
+        10.9812,
+        11.1383,
+        11.1226
+      ]
+    },
+    {
+      "file": "tiff-raw-24mp.tif",
+      "width": 152,
+      "warmMs": 8.5508,
+      "minMs": 8.2016,
+      "maxMs": 9.3225,
+      "noisy": false,
+      "size": "152x102",
+      "missMs": 9.364,
+      "hitMs": 0.2333,
+      "samples": [
+        9.3225,
+        8.5691,
+        8.5345,
+        8.4381,
+        8.6567,
+        8.2016,
+        8.5508
+      ]
+    },
+    {
+      "file": "tiff-raw-24mp.tif",
+      "width": 236,
+      "warmMs": 8.8618,
+      "minMs": 8.3455,
+      "maxMs": 9.0059,
+      "noisy": false,
+      "size": "236x157",
+      "missMs": 9.2879,
+      "hitMs": 0.2001,
+      "samples": [
+        8.9046,
+        8.6902,
+        8.8618,
+        8.4844,
+        8.3455,
+        8.9989,
+        9.0059
+      ]
+    },
+    {
+      "file": "tiff-raw-4k.tif",
+      "width": 152,
+      "warmMs": 4.4707,
+      "minMs": 4.2956,
+      "maxMs": 4.9364,
+      "noisy": false,
+      "size": "152x86",
+      "missMs": 4.603,
+      "hitMs": 0.1056,
+      "samples": [
+        4.9364,
+        4.9337,
+        4.4272,
+        4.4707,
+        4.3939,
+        4.2956,
+        4.4904
+      ]
+    },
+    {
+      "file": "tiff-raw-4k.tif",
+      "width": 236,
+      "warmMs": 4.9645,
+      "minMs": 4.5627,
+      "maxMs": 5.1262,
+      "noisy": false,
+      "size": "236x133",
+      "missMs": 5.6734,
+      "hitMs": 0.1289,
+      "samples": [
+        5.0507,
+        4.9648,
+        4.5658,
+        4.5627,
+        5.1262,
+        4.9645,
+        4.9109
+      ]
+    },
+    {
+      "file": "webp-24mp.webp",
+      "width": 152,
+      "warmMs": 53.4089,
+      "minMs": 53.159,
+      "maxMs": 53.9377,
+      "noisy": false,
+      "size": "152x101",
+      "missMs": 54.929,
+      "hitMs": 0.1143,
+      "samples": [
+        53.9377,
+        53.4089,
+        53.3995,
+        53.159,
+        53.2458,
+        53.8778,
+        53.5337
+      ]
+    },
+    {
+      "file": "webp-24mp.webp",
+      "width": 236,
+      "warmMs": 54.8455,
+      "minMs": 54.0013,
+      "maxMs": 57.0297,
+      "noisy": false,
+      "size": "236x157",
+      "missMs": 56.111,
+      "hitMs": 0.1526,
+      "samples": [
+        55.3606,
+        54.8352,
+        55.303,
+        57.0297,
+        54.8455,
+        54.4774,
+        54.0013
+      ]
+    },
+    {
+      "file": "webp-4k.webp",
+      "width": 152,
+      "warmMs": 19.7265,
+      "minMs": 19.508,
+      "maxMs": 20.3219,
+      "noisy": false,
+      "size": "152x86",
+      "missMs": 20.3547,
+      "hitMs": 0.1046,
+      "samples": [
+        19.6998,
+        19.6886,
+        20.1549,
+        20.3219,
+        19.508,
+        19.8939,
+        19.7265
+      ]
+    },
+    {
+      "file": "webp-4k.webp",
+      "width": 236,
+      "warmMs": 19.8359,
+      "minMs": 19.8058,
+      "maxMs": 20.4118,
+      "noisy": false,
+      "size": "236x133",
+      "missMs": 20.1057,
+      "hitMs": 0.1202,
+      "samples": [
+        20.0241,
+        19.8194,
+        19.818,
+        20.4118,
+        19.8359,
+        20.2927,
+        19.8058
+      ]
+    },
+    {
+      "file": "webp-alpha-4k.webp",
+      "width": 152,
+      "warmMs": 41.6552,
+      "minMs": 40.8137,
+      "maxMs": 43.6311,
+      "noisy": false,
+      "size": "152x86",
+      "missMs": 41.3541,
+      "hitMs": 0.0859,
+      "samples": [
+        41.399,
+        41.8156,
+        43.6311,
+        42.7682,
+        40.8845,
+        41.6552,
+        40.8137
+      ]
+    },
+    {
+      "file": "webp-alpha-4k.webp",
+      "width": 236,
+      "warmMs": 41.7129,
+      "minMs": 40.5281,
+      "maxMs": 43.5744,
+      "noisy": false,
+      "size": "236x133",
+      "missMs": 43.2095,
+      "hitMs": 0.0989,
+      "samples": [
+        43.3583,
+        40.5281,
+        41.7129,
+        41.0123,
+        43.5744,
+        41.0865,
+        43.1718
+      ]
+    }
+  ]
+}

@@ -41,7 +41,7 @@ $clsidKey = "HKCU:\Software\Classes\CLSID\{$clsid}"
 New-Item -Path "$clsidKey\InprocServer32" -Force | Out-Null
 Set-ItemProperty -Path $clsidKey -Name "(default)" -Value "Glide Explorer Thumbnail Provider"
 Set-ItemProperty -Path "$clsidKey\InprocServer32" -Name "(default)" -Value $dll
-Set-ItemProperty -Path "$clsidKey\InprocServer32" -Name "ThreadingModel" -Value "Apartment"
+Set-ItemProperty -Path "$clsidKey\InprocServer32" -Name "ThreadingModel" -Value "Both"
 
 try {
     Add-Type -TypeDefinition @"

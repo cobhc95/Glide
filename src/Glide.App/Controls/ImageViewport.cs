@@ -498,6 +498,26 @@ public sealed class ImageViewport : Control
     private double ViewWidth => Bounds.Width;
     private double ViewHeight => Bounds.Height - _fitBottomInset >= 48 ? Bounds.Height - _fitBottomInset : Bounds.Height;
 
+    private bool _stretchToFill;
+
+    /// <summary>
+    /// Overlay mode with "Preserve aspect ratio" off: in a fit mode the picture is stretched (non-uniformly) to fill the whole
+    /// viewport, so a window resize squeezes or stretches it instead of refitting uniformly. A manual zoom is uniform again.
+    /// </summary>
+    public bool StretchToFill
+    {
+        get => _stretchToFill;
+        set
+        {
+            if (_stretchToFill == value) return;
+            _stretchToFill = value;
+            InvalidateVisual();
+            RaiseViewChanged();
+        }
+    }
+
+    private bool StretchActive => _stretchToFill && _fitMode != FitMode.Manual;
+
     public double CurrentScale => GetScale();
     public int ZoomPercent => (int)Math.Round(CurrentScale * 100);
 
@@ -655,6 +675,7 @@ public sealed class ImageViewport : Control
         var coordinateSize = CoordinateImageSize;
         var display = GetDisplayImageSize(coordinateSize);
         if (display.Width <= 0 || display.Height <= 0) return null;
+        if (StretchActive) return new Rect(0, 0, viewportSize.Width, viewportSize.Height);
         var w = Math.Max(1, display.Width);
         var h = Math.Max(1, display.Height);
         var scale = _fitMode switch
@@ -678,6 +699,51 @@ public sealed class ImageViewport : Control
         return new Vector(
             Math.Clamp(candidate.X, -halfOverflowX, halfOverflowX),
             Math.Clamp(candidate.Y, -halfOverflowY, halfOverflowY));
+    }
+
+    private (Vector Pan, Size View, Size Image)? _edgeCrop;
+
+    /// <summary>
+    /// Starts an edge-handle crop (Overlay mode's width / height handles, like picture-in-picture): freezes the current rendered
+    /// scale as a manual zoom so resizing the window only moves the visible edge and never refits the picture.
+    /// Returns the viewport size and the presented picture size at that scale.
+    /// </summary>
+    public bool BeginEdgeCrop(out Size view, out Size image)
+    {
+        view = default; image = default;
+        if (Bitmap is null || Bounds.Width <= 0 || Bounds.Height <= 0) { _edgeCrop = null; return false; }
+        var scale = GetScale();
+        _fitMode = FitMode.Manual;
+        _zoom = scale;
+        var display = GetDisplayImageSize(CoordinateImageSize);
+        view = new Size(ViewWidth, ViewHeight);
+        image = new Size(display.Width * scale, display.Height * scale);
+        _pan = ClampPanForViewport(_pan, view, image.Width, image.Height);
+        _edgeCrop = (_pan, view, image);
+        return true;
+    }
+
+    /// <summary>
+    /// Pans so the picture's left edge (<paramref name="horizontal"/>) or bottom edge stays where it was when the crop began,
+    /// for the viewport size the window is about to have. Applied before the window resizes so no frame shows the old pan.
+    /// </summary>
+    public void UpdateEdgeCrop(Size newView, bool horizontal)
+    {
+        if (_edgeCrop is not { } crop) return;
+        var pan = crop.Pan;
+        if (horizontal)
+            pan = new Vector(((crop.View.Width - crop.Image.Width) / 2 + crop.Pan.X) - (newView.Width - crop.Image.Width) / 2, pan.Y);
+        else
+            pan = new Vector(pan.X, ((crop.Image.Height - crop.View.Height) / 2 + crop.Pan.Y) + (newView.Height - crop.Image.Height) / 2);
+        _pan = ClampPanForViewport(pan, newView, crop.Image.Width, crop.Image.Height);
+        InvalidateVisual();
+    }
+
+    public void EndEdgeCrop()
+    {
+        if (_edgeCrop is null) return;
+        _edgeCrop = null;
+        RaiseViewChanged();
     }
 
     public ViewerViewSnapshot CaptureViewState() => new(_fitMode.ToString(), _zoom, _pan);
@@ -844,11 +910,11 @@ public sealed class ImageViewport : Control
             var coordinateSize = frame.SourceSize;
             var scale = GetScale();
             var displaySize = GetDisplayImageSize(coordinateSize);
-            var width = displaySize.Width * scale;
-            var height = displaySize.Height * scale;
+            var width = StretchActive ? ViewWidth : displaySize.Width * scale;
+            var height = StretchActive ? ViewHeight : displaySize.Height * scale;
             _pan = ClampPan(_pan);
-            var left = (ViewWidth - width) / 2 + _pan.X;
-            var top = (ViewHeight - height) / 2 + _pan.Y;
+            var left = StretchActive ? 0 : (ViewWidth - width) / 2 + _pan.X;
+            var top = StretchActive ? 0 : (ViewHeight - height) / 2 + _pan.Y;
             _lastImageDest = new Rect(left, top, width, height);
 
             using (context.PushTransform(BuildImageToViewMatrix(bitmapPixelSize, _lastImageDest)))

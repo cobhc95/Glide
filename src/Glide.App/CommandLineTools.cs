@@ -46,7 +46,7 @@ internal static class CommandLineTools
         // Machine-wide Explorer thumbnail provider registration, invoked by the installer.
         if (args.Length >= 1 && args[0].Equals("--register-thumbnails", StringComparison.OrdinalIgnoreCase))
         {
-            var extensions = Platform.WindowsThumbnailRegistration.ExtensionsFor(Platform.ThumbnailProviderMode.Recommended);
+            var extensions = Platform.WindowsThumbnailRegistration.ExtensionsFor(Platform.ThumbnailSettings.Default.Mode);
             var ok = Platform.WindowsThumbnailRegistration.Register(perUser: false, extensions, out var message);
             Console.WriteLine(message);
             exitCode = ok ? 0 : 1;

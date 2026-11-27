@@ -17,7 +17,9 @@ public readonly record struct ViewerStatusModel(
     int PixelHeight,
     long FileSize,
     int ZoomPercent,
-    (int Width, int Height)? Selection = null)
+    (int Width, int Height)? Selection = null,
+    DateTime? Modified = null,
+    DateTime? Taken = null)
 {
     public bool HasImage => !string.IsNullOrWhiteSpace(Path) && Count > 0;
 }
@@ -54,49 +56,14 @@ public static class ViewerStatusFormatter
             : string.Join("  •  ", parts.Select(p => p.Replace(' ', '\u00A0')));
     }
 
-    /// <summary>The text overlay template with its <c>{token}</c>s replaced (line breaks are applied by the caller).</summary>
-    public static string CounterText(in ViewerStatusModel model, string? template)
-    {
-        var culture = CultureInfo.CurrentCulture;
-        var path = model.Path ?? string.Empty;
-        var empty = string.IsNullOrWhiteSpace(path);
-        var file = empty ? string.Empty : System.IO.Path.GetFileName(path);
-        var stem = empty ? string.Empty : System.IO.Path.GetFileNameWithoutExtension(path);
-        var extension = empty ? string.Empty : System.IO.Path.GetExtension(path).TrimStart('.');
-        var folderPath = FolderPathOf(path);
-        var folder = string.IsNullOrWhiteSpace(folderPath)
-            ? string.Empty
-            : System.IO.Path.GetFileName(folderPath.TrimEnd(System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar));
-        if (string.IsNullOrWhiteSpace(folder) && !string.IsNullOrWhiteSpace(folderPath)) folder = folderPath;
-        var width = Math.Max(0, model.PixelWidth);
-        var height = Math.Max(0, model.PixelHeight);
-        var megapixels = width > 0 && height > 0 ? (width * (double)height / 1_000_000d).ToString("0.##", culture) : "0";
-        var format = empty ? string.Empty : CodecCapabilityRegistry.GetLongestExtension(path).TrimStart('.').ToUpperInvariant();
-        var replacements = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["{index}"] = model.Count > 0 ? (model.Index + 1).ToString(culture) : "0",
-            ["{total}"] = model.Count.ToString(culture),
-            // {file} and {filename} are deliberately identical (name with extension); both are documented tokens. {path} is the full path.
-            ["{file}"] = file,
-            ["{filename}"] = file,
-            ["{stem}"] = stem,
-            ["{extension}"] = extension,
-            ["{format}"] = format,
-            ["{folder}"] = folder,
-            ["{folderpath}"] = folderPath,
-            ["{path}"] = path,
-            ["{width}"] = width.ToString(culture),
-            ["{height}"] = height.ToString(culture),
-            ["{dimensions}"] = width > 0 && height > 0 ? $"{width}×{height}" : string.Empty,
-            ["{megapixels}"] = megapixels,
-            ["{filesize}"] = model.FileSize > 0 ? FormatFileSize(model.FileSize) : "0 B",
-            ["{filesizebytes}"] = Math.Max(0, model.FileSize).ToString(culture),
-            ["{zoom}"] = $"{model.ZoomPercent}%"
-        };
-        var text = string.IsNullOrWhiteSpace(template) ? DefaultCounterTemplate : template;
-        foreach (var (token, value) in replacements) text = text.Replace(token, value, StringComparison.OrdinalIgnoreCase);
-        return text;
-    }
+    /// <summary>The text overlay template with its <c>{token}</c>s replaced (line breaks are applied by the caller).
+    /// Round 4: the shared engine (<see cref="TextTemplate"/>), so short tokens, date formats and {sep} work here too.</summary>
+    public static string CounterText(in ViewerStatusModel model, string? template, string? separator = TextTemplate.DefaultSeparator) =>
+        TextTemplate.Render(string.IsNullOrWhiteSpace(template) ? DefaultCounterTemplate : template, Values(model), separator);
+
+    /// <summary>The template values of the current image.</summary>
+    public static TemplateValues Values(in ViewerStatusModel model) =>
+        new(model.Path, model.Index, model.Count, model.PixelWidth, model.PixelHeight, model.FileSize, model.ZoomPercent, model.Modified, model.Taken);
 
     public static string FolderPathOf(string? path) =>
         string.IsNullOrWhiteSpace(path) ? string.Empty : System.IO.Path.GetDirectoryName(path) ?? string.Empty;

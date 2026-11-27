@@ -50,7 +50,7 @@ Name: "integrate"; Description: "Integrate with Windows for all supported image 
 Name: "thumbnails"; Description: "Use Glide's thumbnails in File Explorer (recommended)"; GroupDescription: "Windows integration:"
 
 [Files]
-Source: "..\dist\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\.artifacts\stage\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "installed.flag"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]

@@ -2,7 +2,7 @@
   "id": "glide.codecs",
   "version": "1.0.0",
   "license": "BSD-2-Clause AND BSD-3-Clause AND LGPL-3.0-or-later",
-  "sha256": "7f2a3ba8112fe40973308b2a9af29a6a05c283bb592470a04bc962bfe6146346",
+  "sha256": "2e1b5be2e51cf7717c8c2217369309cd25c436a9ec13a6a38305cdc3706beaaa",
   "abiVersion": 2,
   "structSize": 48,
   "extensions": [".avif", ".avifs", ".jxl", ".jp2", ".j2k", ".j2c", ".jpc", ".jpx", ".jpf", ".jpm", ".mj2", ".heic", ".heif", ".heics", ".heifs", ".hif"],

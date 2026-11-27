@@ -32,6 +32,7 @@ public static class WindowPlacementCatalog
         new("slideshow-start", "Start slideshow", WindowPlacementMode.PositionOnly, "MainWindow.Slideshow.cs"),
         new("folder-boundary-confirm", "Continue to nearby folder?", WindowPlacementMode.PositionOnly, "MainWindow.Navigation.cs"),
         new("multi-tab-close-confirm", "Close Glide tabs?", WindowPlacementMode.PositionOnly, "MainWindow.Sessions.cs"),
+        new("batch-rename", "Rename several items (BatchRenameDialog)", WindowPlacementMode.SizeAndPosition, "Controls/BatchRenameDialog.cs"),
         new("rename-image", "Rename image", WindowPlacementMode.PositionOnly, "MainWindow.Sessions.cs"),
         new("overlay-video-unavailable", "Can't play this video", WindowPlacementMode.PositionOnly, "MainWindow.Tabs.cs"),
         new("escape-close-confirm", "Close Glide? (Escape)", WindowPlacementMode.PositionOnly, "MainWindow.Tabs.cs"),

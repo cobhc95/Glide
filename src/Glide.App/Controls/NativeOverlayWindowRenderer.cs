@@ -144,7 +144,7 @@ internal sealed class NativeOverlayWindowRenderer : IDisposable
             scale = Math.Max(.1, scale);
             var p = (double dip) => Math.Max(1, (int)Math.Round(dip * scale));
             var w = _width / scale; var h = _height / scale;
-            var a = C(accent.R, accent.G, accent.B, accent.A); var white = C(255, 255, 255, 255); var glass = C(36, 41, 48, 220);
+            var a = C(accent.R, accent.G, accent.B, accent.A); var white = C(255, 255, 255, 255); var g = OverlayFrameChromePainter.Palette.Glass; var glass = C(g.R, g.G, g.B, g.A);
             if (showGlow) Border(0, 0, _width - 1, _height - 1, a, p(1));
             Ellipse(p(w - 21), p(20), p(13), glass); Line(p(w - 25), p(16), p(w - 17), p(24), white, p(2)); Line(p(w - 17), p(16), p(w - 25), p(24), white, p(2));
             RectFill(p(w - 28), p(h - 28), p(24), p(24), glass); Border(p(w - 28), p(h - 28), p(w - 5), p(h - 5), a, p(1));

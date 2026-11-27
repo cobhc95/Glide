@@ -106,6 +106,9 @@ internal sealed class ExplorerHarness : IDisposable
         {
             // Continuations after awaits must come back to the UI thread, as they do in the real app.
             AvaloniaSynchronizationContext.InstallIfNeeded();
+            // The tooltip guard's wheel quiet period (600 ms, static) is longer than the pause above (560 ms): a previous test's
+            // last wheel tick used to cancel the first tooltip of this one (HoverToolTipTests, intermittently in a full run).
+            Glide.App.Services.ToolTipGuard.ResetWheelQuietPeriodForTests();
             var harness = new ExplorerHarness(populate, theme);
             try
             {

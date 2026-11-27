@@ -85,8 +85,10 @@ public sealed class OverlayVideoTests
     [Fact]
     public void All_three_overlay_renderers_and_hit_testing_share_the_video_layout()
     {
-        foreach (var file in new[] { "WindowInWindowOverlayManager.cs", "CompositorOverlayRenderer.cs", "NativeOverlayWindowRenderer.cs", "OverlayVideoChromePainter.cs" })
+        // The compositor renderer reads the layout through the shared OverlayFrameGeometry (round 4: also Overlay mode's).
+        foreach (var file in new[] { "WindowInWindowOverlayManager.cs", "OverlayFrameGeometry.cs", "NativeOverlayWindowRenderer.cs", "OverlayVideoChromePainter.cs" })
             Assert.Contains("OverlayVideoChromeLayout.", ReadSource("src", "Glide.App", "Controls", file), StringComparison.Ordinal);
+        Assert.Contains("OverlayFrameGeometry.BuildSpec", ReadSource("src", "Glide.App", "Controls", "CompositorOverlayRenderer.cs"), StringComparison.Ordinal);
     }
 
     [Fact]

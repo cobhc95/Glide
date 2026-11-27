@@ -160,7 +160,7 @@ public sealed class ExplorerTabViewTests
             IEnumerable<ExplorerEntry> OnlyFiles() => h.Entries.Where(e => !e.IsDirectory);
 
             var entries = await OpenSortMenu();
-            Assert.Equal(new[] { "Name ▲  ✓", "Name ▼", "Date modified ▲", "Date modified ▼", "Type ▲", "Type ▼", "File size ▲", "File size ▼", "Dimensions", "-", "Group folders first  ✓", "Keep selection in view" }, Headers(entries).ToArray());
+            Assert.Equal(new[] { "Name ▲  ✓", "Name ▼", "Date modified ▲", "Date modified ▼", "Date taken ▲", "Date taken ▼", "Type ▲", "Type ▼", "File size ▲", "File size ▼", "Dimensions", "-", "Group folders first  ✓", "Keep selection in view" }, Headers(entries).ToArray());
             Choose(entries, "File size ▲");
             await h.SettleAsync();
             Assert.Equal(OnlyFiles().OrderBy(f => f.Size).ThenBy(f => f.Name, StringComparer.OrdinalIgnoreCase).Select(f => f.Name), OnlyFiles().Select(f => f.Name));

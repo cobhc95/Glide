@@ -8,6 +8,7 @@ using Avalonia.Platform.Storage;
 using Avalonia.VisualTree;
 using Glide.App.Controls;
 using Glide.App.Explorer;
+using Glide.App.Services;
 using Glide.Core.Commands;
 using Glide.Core.Workspace;
 
@@ -142,12 +143,37 @@ public partial class MainWindow
         return false;
     }
 
+    /// <summary>
+    /// The click (or quick second click) that confirmed a modal dialog can reach the list the dialog was covering as the dialog
+    /// closes: Avalonia counts clicks by window-relative position and time across windows, so a press on the list a moment after
+    /// the dialog closed at the same spot can arrive as a double-click and open the item under it (5.1.7 UI test bug 7: clicking
+    /// Rename in the batch rename dialog also opened a picture). Presses in this short window after such a dialog are ignored.
+    /// </summary>
+    internal const long ExplorerInputGraceAfterDialogMs = 400;
+    private long _explorerIgnorePressesUntilTick;
+
+    private bool ExplorerPressIgnoredAfterDialog() => Environment.TickCount64 < _explorerIgnorePressesUntilTick;
+
     /// <summary>Central press handler for the file list (tiles, rows, empty space).</summary>
     private async void BrowserItemPointerPressed(object? sender, PointerPressedEventArgs e)
     {
-        if (_browserSurface is not { } surface || ExplorerSourceIsScrollBar(e.Source)) return;
+        if (_browserSurface is not { } surface || ExplorerSourceIsScrollBar(e.Source))
+        {
+            if (UiTrace.Input) UiTrace.WriteInput("press_skipped", $"surface={_browserSurface is not null} scrollBar={ExplorerSourceIsScrollBar(e.Source)} source={DescribeVisual(e.Source as Visual)}");
+            return;
+        }
+        if (ExplorerPressIgnoredAfterDialog())
+        {
+            if (UiTrace.Input) UiTrace.WriteInput("press_ignored_after_dialog", $"remainingMs={_explorerIgnorePressesUntilTick - Environment.TickCount64}");
+            e.Handled = true;
+            return;
+        }
         var properties = e.GetCurrentPoint(surface.ScrollViewer).Properties;
         var entry = ExplorerEntryAt(e.Source);
+        if (UiTrace.Input)
+            UiTrace.WriteInput("press", $"kind={properties.PointerUpdateKind} left={properties.IsLeftButtonPressed} middle={properties.IsMiddleButtonPressed} right={properties.IsRightButtonPressed} " +
+                $"clicks={e.ClickCount} keys={e.KeyModifiers} entry={entry?.Path ?? "none"} source={DescribeVisual(e.Source as Visual)} captured={DescribeVisual(e.Pointer.Captured as Visual)} " +
+                $"activeTab={_workspace.Active?.GetType().Name} displayed={_explorerDisplayedTabId} browserVisible={BrowserView.IsVisible} imageVisible={ImageView.IsVisible}");
         _explorerSelectOnRelease = null;
         // Any press cancels a pending click-to-rename; a plain left press on the name may arm a new one (below).
         CancelExplorerClickRename();
@@ -156,9 +182,9 @@ public partial class MainWindow
         {
             // Middle-click = the other open action (new tab vs. this tab; folders open in a new
             // Explorer tab), mirroring a web browser.
-            if (entry is null) return;
+            if (entry is null) { UiTrace.WriteInput("middle_no_entry"); return; }
             e.Handled = true;
-            await OpenBrowserEntryAsync(entry.Path, alternate: true, e.KeyModifiers);
+            await OpenExplorerEntryFromPointerAsync(entry.Path, alternate: true, e.KeyModifiers);
             return;
         }
         surface.ScrollViewer.Focus();
@@ -198,11 +224,11 @@ public partial class MainWindow
         // is configured for that modifier, so rapid Ctrl+clicks keep toggling the selection.
         // (Odd counts - a rapid third click - only select, so click-click-click-click is two opens, not a chain.)
         if (e.ClickCount >= 2 && e.ClickCount % 2 == 0 && (e.KeyModifiers == KeyModifiers.None ||
-            ResolveGestureSlot("explorer.doubleClick", e.KeyModifiers) != GestureCatalog.Default))
+            ResolveExplorerDoubleClick(e.KeyModifiers).Action != GestureCatalog.Default))
         {
             _explorerDragCandidate = null;
             e.Handled = true;
-            await OpenBrowserEntryAsync(entry.Path, alternate: false, e.KeyModifiers);
+            await OpenExplorerEntryFromPointerAsync(entry.Path, alternate: false, e.KeyModifiers);
             return;
         }
         // Pressing an already selected item (without modifiers) keeps the multi-selection so it can be dragged; a release
@@ -217,6 +243,26 @@ public partial class MainWindow
         _explorerDragCandidate = entry;
         _explorerDragOrigin = e.GetPosition(surface);
         _explorerDragging = false;
+    }
+
+    /// <summary>
+    /// Opens the entry a pointer press landed on (double-click, or middle-click for the alternate action). This runs from an async
+    /// void handler, and the app's dispatcher handler swallows whatever escapes such a handler (App.axaml.cs: it only logs to the
+    /// live diagnostic trace, which is normally off), so a failure here used to look exactly like "the click did nothing". It is
+    /// now written to startup-trace.log always, and every step is traced under GLIDE_TRACE_INPUT=1.
+    /// </summary>
+    private async Task OpenExplorerEntryFromPointerAsync(string path, bool alternate, KeyModifiers modifiers)
+    {
+        try
+        {
+            await OpenBrowserEntryAsync(path, alternate, modifiers);
+            if (UiTrace.Input) UiTrace.WriteInput("open_returned", $"path={path} alternate={alternate} tabs={_workspace.Tabs.Count} active={_workspace.Active?.GetType().Name}");
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            StartupTrace.Write("explorer_open_failed", $"path={path} alternate={alternate} error={ex.GetType().Name}: {ex.Message}");
+            _diagnostics.Write("browser", "open_failed", new { path, alternate, error = ex.GetType().Name, ex.Message });
+        }
     }
 
     private void ExplorerPointerMoved(object? sender, PointerEventArgs e)
@@ -323,8 +369,8 @@ public partial class MainWindow
         }
         // Keys typed while a toolbar button / combo box / navigation item has focus belong to that control,
         // except the navigation shortcuts that make sense anywhere in the Explorer.
-        var inList = e.Source is not Visual source || ReferenceEquals(source, surface) || source.GetSelfAndVisualAncestors().Any(v => ReferenceEquals(v, surface.ScrollViewer));
-        if (!inList && !(alt && !ctrl && !shift) && e.Key != Key.F5 && e.Key != Key.F4) return;
+        var inList = ExplorerSourceInList(e.Source);
+        if (!inList && !(alt && !ctrl && !shift) && e.Key != Key.F5 && e.Key != Key.F4 && e.Key != Key.F3) return;
 
         if (alt && !ctrl && !shift)
         {
@@ -348,6 +394,12 @@ public partial class MainWindow
             {
                 case Key.A when !shift: SelectAllBrowserEntries(); e.Handled = true; return;
                 case Key.C when !shift: ExplorerCopyOrCut(cut: false); e.Handled = true; return;
+                // Windows 11: Ctrl+Shift+C copies the selection's full path(s) as text.
+                case Key.C: await ExplorerCopyPathsAsync(SelectedExplorerEntries().Select(x => x.Path).ToList()); e.Handled = true; return;
+                // The classic clipboard pair Ctrl+Insert (copy) and Shift+Insert (paste, below).
+                case Key.Insert when !shift: ExplorerCopyOrCut(cut: false); e.Handled = true; return;
+                // Ctrl+Shift+1..6 pick the view like Windows' Extra large / Large / Medium / Small / List / Details.
+                case >= Key.D1 and <= Key.D6 when shift: SetExplorerViewMode(e.Key - Key.D1); e.Handled = true; return;
                 case Key.X when !shift: ExplorerCopyOrCut(cut: true); e.Handled = true; return;
                 case Key.V when !shift: await ExplorerPasteAsync(browser.Folder); e.Handled = true; return;
                 case Key.N when shift: await ExplorerNewFolderAsync(); e.Handled = true; return;
@@ -363,6 +415,8 @@ public partial class MainWindow
         {
             case Key.F5: BrowserRefreshClicked(surface, new RoutedEventArgs()); e.Handled = true; return;
             case Key.F4: surface.AddressBar.BeginEdit(); e.Handled = true; return;
+            case Key.F3 when !ctrl && !shift: FocusExplorerFilter(); e.Handled = true; return;
+            case Key.Insert when shift && !ctrl: await ExplorerPasteAsync(browser.Folder); e.Handled = true; return;
             case Key.F2 when !ctrl && !shift: ExplorerBeginRenameSelection(); e.Handled = true; return;
             case Key.Delete when !ctrl: await ExplorerDeleteSelectionAsync(permanent: shift); e.Handled = true; return;
             // Escape clears the selection (round 3 #9). With nothing selected it is left to the hotkey map.
@@ -397,8 +451,9 @@ public partial class MainWindow
         {
             case Key.Left when !details: next = current < 0 ? 0 : Math.Max(0, current - 1); break;
             case Key.Right when !details: next = current < 0 ? 0 : Math.Min(last, current + 1); break;
-            case Key.Up: next = current < 0 ? 0 : Math.Max(0, current - columns); break;
-            case Key.Down: next = current < 0 ? 0 : Math.Min(last, current + columns); break;
+            // Up on the first row / Down on the last row stay where they are (Windows); Down from a full row onto a shorter last row lands on its last item.
+            case Key.Up: next = current < 0 ? 0 : current < columns ? current : current - columns; break;
+            case Key.Down: next = current < 0 ? 0 : current / columns == last / columns ? current : Math.Min(last, current + columns); break;
             // Shift+Home / Shift+End extend the selection to the start / end of the current row (round 3 #10);
             // Ctrl+Shift+Home / End, plain Home / End and the one-column Details view go to the folder's first / last item.
             case Key.Home when shift && !ctrl && !details && current >= 0: next = current - current % columns; break;
@@ -428,18 +483,53 @@ public partial class MainWindow
         surface.FilterBox.SelectAll();
     }
 
+    /// <summary>Window of time (ms) in which further typed characters extend the type-to-select prefix, as in Windows Explorer.</summary>
+    private const long ExplorerTypeAheadWindowMs = 1000;
+
+    private bool ExplorerTypeAheadActive => _explorerTypeAhead.Length > 0 && Environment.TickCount64 - _explorerTypeAheadTick <= ExplorerTypeAheadWindowMs;
+
+    private bool ExplorerSourceInList(object? source) =>
+        _browserSurface is { } surface &&
+        (source is not Visual visual || ReferenceEquals(visual, surface) || visual.GetSelfAndVisualAncestors().Any(v => ReferenceEquals(v, surface.ScrollViewer)));
+
+    /// <summary>
+    /// Windows File Explorer type-to-select wins over single-letter hotkeys while the Explorer list has the keyboard: an
+    /// unmodified (or Shift-only) letter, unshifted digit, number-pad digit or - . , is a character of the name being typed, so it is not routed
+    /// to the hotkey map (F, O, U, ... by default). Space joins the prefix while one is being typed. Ctrl / Alt / Win chords,
+    /// function keys, Enter, Backspace, the arrows and every key outside the list or inside a text box keep their hotkeys.
+    /// The key is left unhandled so the platform's text input still reaches <see cref="ExplorerSurfaceTextInput"/>.
+    /// </summary>
+    private bool IsExplorerTypeAheadKey(KeyEventArgs e)
+    {
+        if (_workspace.Active is not BrowserTabState || _browserSurface is null || e.Source is TextBox) return false;
+        if ((e.KeyModifiers & (KeyModifiers.Control | KeyModifiers.Alt | KeyModifiers.Meta)) != 0 || !ExplorerSourceInList(e.Source)) return false;
+        var shift = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
+        if (e.Key is >= Key.A and <= Key.Z) return true;
+        // Shift + digit types a symbol (! @ #), not a digit: those chords stay hotkeys (Shift+1..3 = external programs, which also work from an Explorer tab).
+        if (e.Key is >= Key.D0 and <= Key.D9 && !shift) return true;
+        if (e.Key is >= Key.NumPad0 and <= Key.NumPad9) return true;
+        // Names that start with - _ . or , (the "+" / "=" keys have no such names to find and stay hotkeys).
+        if (e.Key is Key.OemMinus or Key.OemPeriod or Key.OemComma) return true;
+        return e.Key == Key.Space && ExplorerTypeAheadActive;
+    }
+
     private void ExplorerSurfaceTextInput(object? sender, TextInputEventArgs e)
     {
-        if (e.Source is TextBox || string.IsNullOrEmpty(e.Text) || char.IsControl(e.Text[0]) || _browserEntries.Count == 0) return;
+        if (e.Source is TextBox || string.IsNullOrEmpty(e.Text) || char.IsControl(e.Text[0]) || _browserEntries.Count == 0 || !ExplorerSourceInList(e.Source)) return;
         var now = Environment.TickCount64;
-        if (now - _explorerTypeAheadTick > 1000) _explorerTypeAhead = "";
+        if (now - _explorerTypeAheadTick > ExplorerTypeAheadWindowMs) _explorerTypeAhead = "";
+        // A space that does not continue a prefix is not a name character (nothing starts with one): leave it alone.
+        if (_explorerTypeAhead.Length == 0 && string.IsNullOrWhiteSpace(e.Text)) return;
         _explorerTypeAheadTick = now;
         _explorerTypeAhead += e.Text;
-        var start = _browserCurrentIndex < 0 ? 0 : _browserCurrentIndex;
+        // A single character searches after the focused item (the selected one), so pressing it again moves on; with nothing
+        // selected the search starts at the first item. A longer prefix refines the match, starting at the current item.
+        var currentSelected = _browserCurrentIndex >= 0 && _browserCurrentIndex < _browserEntries.Count && _browserSelection.Contains(_browserEntries[_browserCurrentIndex].Path);
+        var start = Math.Max(0, _browserCurrentIndex);
         // The same letter typed repeatedly cycles through the items that start with it.
         var repeated = _explorerTypeAhead.Length > 1 && _explorerTypeAhead.All(c => char.ToLowerInvariant(c) == char.ToLowerInvariant(_explorerTypeAhead[0]));
         var prefix = repeated ? _explorerTypeAhead[..1] : _explorerTypeAhead;
-        var offset = repeated || _explorerTypeAhead.Length == 1 ? 1 : 0;
+        var offset = currentSelected && (repeated || _explorerTypeAhead.Length == 1) ? 1 : 0;
         for (var step = 0; step < _browserEntries.Count; step++)
         {
             var index = (start + offset + step) % _browserEntries.Count;
@@ -507,13 +597,13 @@ public partial class MainWindow
         {
             var paths = ExplorerDragPaths(e);
             var destination = folder();
-            if (paths is null || destination is null || !CanDropExplorerPaths(paths, destination, e.KeyModifiers.HasFlag(KeyModifiers.Control)))
+            if (paths is null || destination is null || !CanDropExplorerPaths(paths, destination, ExplorerDropIsCopy(paths, destination, e.KeyModifiers)))
             {
                 if (paths is not null) { e.DragEffects = DragDropEffects.None; e.Handled = true; }
                 Highlight(false);
                 return;
             }
-            e.DragEffects = e.KeyModifiers.HasFlag(KeyModifiers.Control) ? DragDropEffects.Copy : DragDropEffects.Move;
+            e.DragEffects = ExplorerDropIsCopy(paths, destination, e.KeyModifiers) ? DragDropEffects.Copy : DragDropEffects.Move;
             Highlight(true);
             e.Handled = true;
         });
@@ -525,10 +615,22 @@ public partial class MainWindow
             var destination = folder();
             if (paths is null || destination is null) return;
             e.Handled = true;
-            var copy = e.KeyModifiers.HasFlag(KeyModifiers.Control);
+            var copy = ExplorerDropIsCopy(paths, destination, e.KeyModifiers);
             if (!CanDropExplorerPaths(paths, destination, copy)) return;
             await ExplorerTransferAsync(paths, destination, move: !copy);
         });
+    }
+
+    /// <summary>
+    /// Windows' drop rule: Ctrl copies, Shift moves, and with neither the items move within one drive and are copied to another
+    /// (Alt / Ctrl+Shift "create shortcut" is not supported). Ctrl wins over Shift.
+    /// </summary>
+    internal static bool ExplorerDropIsCopy(IReadOnlyList<string> paths, string destination, KeyModifiers modifiers)
+    {
+        if (modifiers.HasFlag(KeyModifiers.Control)) return true;
+        if (modifiers.HasFlag(KeyModifiers.Shift)) return false;
+        var destinationRoot = Path.GetPathRoot(destination);
+        return paths.Any(p => !string.Equals(Path.GetPathRoot(p), destinationRoot, StringComparison.OrdinalIgnoreCase));
     }
 
     private static bool CanDropExplorerPaths(IReadOnlyList<string> paths, string destination, bool copy)

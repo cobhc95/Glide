@@ -307,7 +307,16 @@ public static class DiagnosticRunner
                 !defaults["nav.backOrPrevious"].SequenceEqual(new[] { "Backspace" }) || defaults["nav.previousBack"].Count != 0 ||
                 defaults.Count(p => p.Value.Contains("Backspace")) != 1) return false;
             foreach (var slot in GestureCatalog.Slots.Where(s => s.Input is GestureInputs.BackButton or GestureInputs.ForwardButton))
-                if (GestureCatalog.DefaultActionFor(slot.Id) is not null) return false;
+            {
+                // Round 4 A: only the Explorer side buttons default to Back / Forward; elsewhere they are left to Windows.
+                var expected = slot.Id switch
+                {
+                    "explorer.backButton" => GestureCatalog.NavigateBack,
+                    "explorer.forwardButton" => GestureCatalog.NavigateForward,
+                    _ => null
+                };
+                if (GestureCatalog.DefaultActionFor(slot.Id) != expected) return false;
+            }
             var history = new Glide.Core.Navigation.NavigationHistory();
             history.Record(Glide.Core.Navigation.NavigationEntry.Explorer(@"C:\Pictures"));
             history.Record(Glide.Core.Navigation.NavigationEntry.Image(@"C:\Pictures\a.png"));
@@ -666,7 +675,7 @@ public static class DiagnosticRunner
         var candidates = new[]
         {
             Path.Combine(AppContext.BaseDirectory, "Glide.exe"),
-            Path.Combine(Directory.GetCurrentDirectory(), "dist", "Glide.exe"),
+            Path.Combine(Directory.GetCurrentDirectory(), ".artifacts", "stage", "Glide.exe"),
             Path.Combine(Directory.GetCurrentDirectory(), ".artifacts", "bin", "Glide.App", "debug", "Glide.exe"),
             Path.Combine(Directory.GetCurrentDirectory(), ".artifacts", "bin", "Glide.App", "release", "Glide.exe"),
             Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".artifacts", "bin", "Glide.App", "debug", "Glide.exe")

@@ -25,6 +25,8 @@ internal static class DialogPlacement
         {
             dialog.Opened -= opened;
             Recenter(dialog);
+            // The real frame size can settle a layout pass later (DPI change, resize above): fit once more.
+            Avalonia.Threading.Dispatcher.UIThread.Post(() => Recenter(dialog), Avalonia.Threading.DispatcherPriority.Loaded);
         };
         dialog.Opened += opened;
     }
@@ -44,7 +46,18 @@ internal static class DialogPlacement
             // The dialog lands on the owner's monitor, so it is measured at that monitor's DPI.
             var scale = screen is { } s && s.Scale > 0 ? s.Scale : ownerScale;
             var dialogPx = new PixelSize((int)Math.Round(dialogSize.Width * scale), (int)Math.Round(dialogSize.Height * scale));
-            var (x, y) = WindowPlacementResolver.CenterOnOwner(owner.Position.X, owner.Position.Y, ownerPx.Width, ownerPx.Height, dialogPx.Width, dialogPx.Height, screen);
+            // Title-bar allowance: Position may be the client origin, so keep the frame's top edge on screen too.
+            var chromeH = Math.Max(0, dialogSize.Height - dialog.ClientSize.Height);
+            var chromeW = Math.Max(0, dialogSize.Width - dialog.ClientSize.Width);
+            var topInset = (int)Math.Ceiling(chromeH * scale);
+            var minW = (int)Math.Ceiling((Math.Max(0, dialog.MinWidth) + chromeW) * scale);
+            var minH = (int)Math.Ceiling((Math.Max(0, dialog.MinHeight) + chromeH) * scale);
+            var (x, y, w, h) = WindowPlacementResolver.FitDialog(owner.Position.X, owner.Position.Y, ownerPx.Width, ownerPx.Height, dialogPx.Width, dialogPx.Height, minW, minH, topInset, screen);
+            if (dialog.CanResize && (w < dialogPx.Width || h < dialogPx.Height))
+            {
+                if (w < dialogPx.Width) dialog.Width = Math.Max(1, w / scale - chromeW);
+                if (h < dialogPx.Height) dialog.Height = Math.Max(1, h / scale - chromeH);
+            }
             var target = new PixelPoint(x, y);
             if (dialog.Position != target) dialog.Position = target;
         }

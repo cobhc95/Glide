@@ -52,6 +52,12 @@ public static class SettingActionCatalog
         ["overlay.picturePositionTopTabs"] = ["Top left", "Top center", "Top right", "Bottom left", "Bottom center", "Bottom right", "Title bar – left", "Title bar – center", "Title bar – right", "Custom"],   // = TextOverlayPlacements.TopTabsPositions (test-checked)
         ["overlay.picturePositionSideTabs"] = ["Top left", "Top center", "Top right", "Bottom left", "Bottom center", "Bottom right", "Title bar – left", "Title bar – center", "Title bar – right", "Vertical tabs – top", "Vertical tabs – bottom", "Custom"],   // = TextOverlayPlacements.All (test-checked)
         ["overlay.pictureColor"] = ["White", "Soft gray", "Accent", "Amber"],
+        ["overlay.titleBarColor"] = ["Same as over the picture", "White", "Soft gray", "Accent", "Amber"],   // = TextOverlayStyle.ColorChoices
+        ["overlay.titleBarBorder"] = ["Same as over the picture", "On", "Off"],   // = TextOverlayStyle.BorderChoices
+        ["overlay.tabBarColor"] = ["Same as over the picture", "White", "Soft gray", "Accent", "Amber"],
+        ["overlay.tabBarBorder"] = ["Same as over the picture", "On", "Off"],
+        ["overlay.pictureSeparator"] = ["•", "▪", "|", "–", "/", "None"],   // = TextTemplate.Separators
+        ["overlay.separatorColor"] = ["Same as text", "White", "Soft gray", "Accent", "Amber"],   // = TextOverlayStyle.SeparatorColorChoices
         ["overlay.pictureAlignmentTopTabs"] = ["Automatic", "Left", "Center", "Right"],
         ["overlay.pictureAlignmentSideTabs"] = ["Automatic", "Left", "Center", "Right"],
         ["overlay.animationRegion"] = ["Anywhere", "Top half", "Bottom half", "Top left quarter", "Top right quarter", "Bottom left quarter", "Bottom right quarter"],
@@ -59,8 +65,8 @@ public static class SettingActionCatalog
         ["tabs.switchToNewTabs"] = ["foreground", "background"],
         ["tabs.newTabPositionKey"] = ["None", "Shift", "Ctrl", "Alt"],
         ["tabs.newTabForegroundKey"] = ["None", "Shift", "Ctrl", "Alt"],
-        ["tabs.middleClickSide"] = ["background", "foreground"],
-        ["tabs.middleClickPosition"] = ["at the end", "next to the current tab", "same as new tabs"],
+        ["tabs.duplicatePosition"] = ["next to the current tab", "at the end"],
+        ["tabs.duplicateSide"] = ["foreground", "background"],
         ["tabs.previewResizeModifier"] = ["Ctrl", "Shift", "Alt", "None"],
         ["tabs.afterCloseActivate"] = ["Match Ctrl+Tab order", "Previously used tab", "Tab to the right", "Tab to the left", "First tab", "Last tab", "Custom…"],
         ["tabs.afterCloseCustomTarget"] = ["Home", "New empty Explorer tab", "Explorer tab with the closed picture's folder"],
@@ -89,6 +95,9 @@ public static class SettingActionCatalog
         ["caption.fullscreenMinimize"] = "Per-button caption configuration; see caption.windowedMinimize.",
         ["caption.fullscreenMaximize"] = "Per-button caption configuration; see caption.windowedMaximize.",
         ["caption.fullscreenClose"] = "Per-button caption configuration; see caption.windowedClose.",
+        ["performance.thumbnailLanes"] = "A capacity choice for the thumbnail decoder (clamped by memory), not something to cycle from a hotkey.",
+        ["performance.thumbnailPrepareFolder"] = "A background-work policy of the Explorer tab next to the lanes choice; not a view toggle.",
+        ["explorer.thumbnailCache"] = "A disk-cache policy next to a size limit and a Clear button; turning it off from a hotkey would not delete anything and is not a view toggle.",
         ["windows.explorerThumbnails"] = "Shell thumbnail provider: applied by the thumbnail card's own Apply button, which re-registers the shell extension.",
         ["windows.thumbnailMode"] = "Shell thumbnail provider setting; applied by the thumbnail card's own Apply button (shell registration).",
         ["windows.thumbnailQuality"] = "Shell thumbnail provider setting; applied by the thumbnail card's own Apply button.",

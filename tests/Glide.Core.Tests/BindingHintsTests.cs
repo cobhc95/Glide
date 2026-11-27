@@ -83,7 +83,7 @@ public sealed class BindingHintsTests
     [Fact]
     public void Fixed_shortcuts_come_from_the_registry()
     {
-        Assert.Equal("Ctrl+F", BindingHints.FixedShortcut("fixed.explorer.filter"));
+        Assert.Equal("Ctrl+F / F3", BindingHints.FixedShortcut("fixed.explorer.filter"));
         Assert.Equal("Esc", BindingHints.FixedShortcut("fixed.overlay.areaCancel"));
         Assert.Null(BindingHints.FixedShortcut("file.open"));
         Assert.Null(BindingHints.FixedShortcut("nope"));

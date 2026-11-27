@@ -1,5 +1,7 @@
 // 5.0.7 libjpeg-turbo JPEG path. See GlideJpeg.h and docs/perf/benchmark-report-5.0.7.md section 6.
 #include "GlideJpeg.h"
+#include "GlideJpegLib.h"
+#include "GlideCmyk.h"
 #include <objbase.h>
 #include <turbojpeg.h>
 #include <algorithm>
@@ -7,6 +9,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <cmath>
+#include <csetjmp>
 #include <cwchar>
 #include <limits>
 #include <thread>
@@ -35,6 +38,7 @@ struct JpegConfig
     bool memoryMapped = true;        // input via a read-only file mapping (measured 2-3 % faster than one ReadFile)
     bool direct = true;              // decode straight to 32bpp BGRA (false: 24bpp + expansion)
     bool embeddedPreview = true;     // first view = camera's MPF large preview when it is big enough
+    bool progressiveDc = true;       // Explorer thumbnails of a progressive file: DC-only buffered-image decode (5.1.7)
 };
 
 #ifdef GLIDE_JPEG_BENCH_KNOBS
@@ -126,6 +130,7 @@ struct Header
 {
     int width = 0, height = 0, subsamp = TJSAMP_UNKNOWN;
     bool progressive = false;
+    bool cmyk = false; // CMYK / YCCK (5.2.0): decoded as 4 samples per pixel, converted by GlideCmyk (the colours WIC shows)
 };
 
 // Reads the header and decides whether this path may decode the file. Anything unusual stays with WIC.
@@ -138,7 +143,8 @@ bool ReadHeader(tjhandle h, const Input& in, Header& out)
     out.progressive = tj3Get(h, TJPARAM_PROGRESSIVE) == 1;
     const int colorspace = tj3Get(h, TJPARAM_COLORSPACE);
     if (tj3Get(h, TJPARAM_PRECISION) != 8 || tj3Get(h, TJPARAM_LOSSLESS) == 1 || tj3Get(h, TJPARAM_ARITHMETIC) == 1) return false;
-    if (colorspace != TJCS_YCbCr && colorspace != TJCS_GRAY && colorspace != TJCS_RGB) return false; // CMYK/YCCK: WIC
+    out.cmyk = colorspace == TJCS_CMYK || colorspace == TJCS_YCCK;
+    if (colorspace != TJCS_YCbCr && colorspace != TJCS_GRAY && colorspace != TJCS_RGB && !out.cmyk) return false;
     if (out.subsamp == TJSAMP_UNKNOWN) return false;
     if (!GlideWithinDecodeCap(static_cast<std::uint64_t>(out.width), static_cast<std::uint64_t>(out.height))) return false;
     // Fail (and fall back to WIC) on any warning: corrupt or truncated data keeps WIC's existing behaviour.
@@ -212,8 +218,37 @@ tjscalingfactor ChooseScale(int width, int height, std::uint32_t needW, std::uin
     return best;
 }
 
-bool Decode(tjhandle h, const Input& in, std::uint8_t* dst, int pitch, int outW, int outH, bool direct)
+// 5.2.0 CMYK / YCCK: TurboJPEG decodes to packed CMYK (the stored, Adobe style samples); GlideCmyk turns them into the BGRA
+// Windows shows for the same file. One band at a time, so a banded full decode converts on its own thread.
+thread_local bool g_inBand = false; // set while a band of the banded decode runs: its CMYK conversion stays on that thread
+
+bool DecodeCmyk(tjhandle h, const Input& in, std::uint8_t* dst, int pitch, int outW, int outH)
 {
+    std::vector<std::uint8_t> cmyk;
+    try { cmyk.resize(static_cast<std::size_t>(outW) * outH * 4); } catch (...) { return false; }
+    if (tj3Decompress8(h, in.data, in.size, cmyk.data(), outW * 4, TJPF_CMYK) != 0) return false;
+    auto convert = [&](int yBegin, int yEnd)
+    {
+        for (int y = yBegin; y < yEnd; ++y)
+            GlideCmykToBgra(cmyk.data() + static_cast<std::size_t>(y) * outW * 4, static_cast<std::size_t>(outW),
+                            dst + static_cast<std::size_t>(y) * pitch, true);
+    };
+    // The lattice conversion costs about as much as the decode; a large single-thread frame (scaled first view, thumbnail, one band of
+    // the banded decode never reaches this size) spreads it over the cores.
+    const unsigned parts = !g_inBand && static_cast<std::uint64_t>(outW) * outH >= 1'000'000ull ? std::min<unsigned>(8u, std::max<unsigned>(1u, std::thread::hardware_concurrency())) : 1u;
+    if (parts < 2) { convert(0, outH); return true; }
+    std::vector<std::thread> workers;
+    const int chunk = (outH + static_cast<int>(parts) - 1) / static_cast<int>(parts);
+    try { for (unsigned p = 1; p < parts && static_cast<int>(p) * chunk < outH; ++p) workers.emplace_back(convert, static_cast<int>(p) * chunk, std::min(outH, static_cast<int>(p + 1) * chunk)); }
+    catch (...) { for (unsigned p = static_cast<unsigned>(workers.size()) + 1; p < parts && static_cast<int>(p) * chunk < outH; ++p) convert(static_cast<int>(p) * chunk, std::min(outH, static_cast<int>(p + 1) * chunk)); }
+    convert(0, std::min(outH, chunk));
+    for (auto& w : workers) w.join();
+    return true;
+}
+
+bool Decode(tjhandle h, const Input& in, std::uint8_t* dst, int pitch, int outW, int outH, bool direct, bool cmyk = false)
+{
+    if (cmyk) return DecodeCmyk(h, in, dst, pitch, outW, outH);
     if (direct) return tj3Decompress8(h, in.data, in.size, dst, pitch, TJPF_BGRA) == 0;
     // Ablation path: 24bpp output, then expansion to 32bpp (the WIC preview's former shape).
     const std::size_t rowBytes = static_cast<std::size_t>(outW) * 3;
@@ -291,6 +326,171 @@ bool FindEmbeddedPreview(const std::uint8_t* d, std::size_t n, std::size_t& offs
     }
     return length > 0;
 }
+
+// ---- 5.1.7 second pass: DC-only decode of a progressive JPEG (libjpeg buffered-image mode) -----------------------------------
+// A progressive JPEG stores its first scan(s) as the DC coefficients of every block: exactly a 1/8 size picture. libjpeg's
+// buffered-image mode can output after any scan, so a thumbnail needs only that first scan (about 5 % of the file) instead of
+// entropy-decoding every scan the way the TurboJPEG one-shot call must (measured 97 ms for 24 MP, now a few ms).
+
+struct DcContext
+{
+    std::jmp_buf jump;
+    int warnings = 0;
+};
+
+void DcErrorExit(void* cinfo)
+{
+    auto* c = static_cast<gjpeg::Decompress*>(cinfo);
+    std::longjmp(static_cast<DcContext*>(c->client_data)->jump, 1);
+}
+
+void DcEmitMessage(void* cinfo, int level)
+{
+    if (level < 0) ++static_cast<DcContext*>(static_cast<gjpeg::Decompress*>(cinfo)->client_data)->warnings; // a corrupt or truncated file
+}
+
+void DcNoop(void*) {}
+int DcFill(void* cinfo)
+{
+    // Out of data before the DC scan was complete: a truncated file. Feed an EOI so the library stops, and count a warning.
+    static const std::uint8_t eoi[2] = { 0xFF, 0xD9 };
+    auto* c = static_cast<gjpeg::Decompress*>(cinfo);
+    ++static_cast<DcContext*>(c->client_data)->warnings;
+    c->src->next_input_byte = eoi;
+    c->src->bytes_in_buffer = 2;
+    return 1;
+}
+void DcSkip(void* cinfo, long bytes)
+{
+    auto* src = static_cast<gjpeg::Decompress*>(cinfo)->src;
+    if (bytes <= 0) return;
+    const std::size_t n = std::min<std::size_t>(static_cast<std::size_t>(bytes), src->bytes_in_buffer);
+    src->next_input_byte += n;
+    src->bytes_in_buffer -= n;
+}
+
+// True when every component's DC coefficient has arrived (coef_bits[component][0] is -1 until then).
+bool DcComplete(const gjpeg::Decompress* c)
+{
+    if (!c->coef_bits) return false;
+    for (int i = 0; i < c->num_components; ++i)
+        if (c->coef_bits[i][0] < 0) return false;
+    return true;
+}
+
+// Decodes the DC scans of a progressive JPEG to a 1/8 size 32bpp BGRA picture (CoTaskMem). False on anything unusual
+// (not YCbCr / grayscale, a warning or error, DC not complete within the first scans): the caller uses the one-shot path.
+bool DecodeProgressiveDc(const Input& in, std::uint8_t** pixelsOut, int* widthOut, int* heightOut)
+{
+    alignas(16) unsigned char storage[gjpeg::kDecompressSize + 64] = {};
+    auto* c = reinterpret_cast<gjpeg::Decompress*>(storage);
+    gjpeg::ErrorMgr errors{};
+    gjpeg::Source source{};
+    DcContext context;
+    std::uint8_t* volatile pixels = nullptr; // volatile: read after a longjmp
+    volatile bool created = false;
+    if (setjmp(context.jump))
+    {
+        if (created) jpeg_destroy_decompress(c);
+        if (pixels) CoTaskMemFree(pixels);
+        return false;
+    }
+    c->err = jpeg_std_error(&errors);
+    errors.error_exit = DcErrorExit;
+    errors.emit_message = DcEmitMessage;
+    c->client_data = &context;
+    jpeg_CreateDecompress(c, gjpeg::kLibVersion, gjpeg::kDecompressSize);
+    created = true;
+    source.next_input_byte = in.data;
+    source.bytes_in_buffer = in.size;
+    source.init_source = DcNoop;
+    source.fill_input_buffer = DcFill;
+    source.skip_input_data = DcSkip;
+    source.resync_to_restart = [](void* cinfo, int desired) { return jpeg_resync_to_restart(cinfo, desired); };
+    source.term_source = DcNoop;
+    c->src = &source;
+    jpeg_read_header(c, 1);
+    const bool colourOk = (c->num_components == 3 && c->jpeg_color_space == gjpeg::YCbCr) || (c->num_components == 1 && c->jpeg_color_space == gjpeg::Grayscale);
+    if (!colourOk) { jpeg_destroy_decompress(c); return false; }
+    c->buffered_image = 1;
+    c->scale_num = 1;
+    c->scale_denom = 8;
+    c->dct_method = gjpeg::Ifast;
+    c->do_fancy_upsampling = 0;
+    c->do_block_smoothing = 0;
+    c->out_color_space = gjpeg::ExtBgra;
+    jpeg_start_decompress(c);
+    int completedScans = 0;
+    for (;;)
+    {
+        const int result = jpeg_consume_input(c);
+        if (result == gjpeg::Suspended) break;
+        if (result == gjpeg::ScanCompleted)
+        {
+            ++completedScans;
+            if (DcComplete(c)) goto ready;
+        }
+        if (result == gjpeg::ReachedEoi || completedScans > 3) break;
+    }
+    jpeg_destroy_decompress(c);
+    return false; // DC never completed within the first scans
+ready:
+    if (context.warnings != 0) { jpeg_destroy_decompress(c); return false; }
+    jpeg_start_output(c, c->input_scan_number);
+    const int w = static_cast<int>(c->output_width), h = static_cast<int>(c->output_height);
+    if (w <= 0 || h <= 0 || c->output_components != 4 || !GlideWithinDecodeCap(w, h)) { jpeg_destroy_decompress(c); return false; }
+    pixels = static_cast<std::uint8_t*>(CoTaskMemAlloc(static_cast<std::size_t>(w) * h * 4));
+    if (!pixels) { jpeg_destroy_decompress(c); return false; }
+    while (c->output_scanline < static_cast<unsigned>(h))
+    {
+        std::uint8_t* row = pixels + static_cast<std::size_t>(c->output_scanline) * w * 4;
+        jpeg_read_scanlines(c, &row, 1);
+    }
+    jpeg_finish_output(c);
+    jpeg_destroy_decompress(c);
+    if (context.warnings != 0) { CoTaskMemFree(pixels); return false; }
+    *pixelsOut = pixels;
+    *widthOut = w;
+    *heightOut = h;
+    return true;
+}
+
+// Whole frame at full scale into target: baseline files of 4 MP and more in horizontal bands of whole iMCU rows, one TurboJPEG instance
+// per thread (each band entropy-decodes, but does not IDCT / colour-convert, the rows above it, so the gain flattens beyond 8 - 16 bands);
+// progressive files and small frames on one thread.
+bool DecodeFrame(tjhandle handle, const Input& in, const Header& hdr, std::uint8_t* target, int pitch, const JpegConfig& cfg)
+{
+    SYSTEM_INFO si{};
+    GetSystemInfo(&si);
+    const unsigned cap = cfg.maxThreads ? cfg.maxThreads : std::min<unsigned>(si.dwNumberOfProcessors, 16u);
+    const int mcuH = tjMCUHeight[hdr.subsamp];
+    unsigned bands = 1;
+    if (!hdr.progressive && static_cast<std::uint64_t>(hdr.width) * hdr.height >= 4'000'000ull)
+        bands = std::max(1u, std::min<unsigned>(cap, hdr.height / 256u));
+    if (bands < 2) return Decode(handle, in, target, pitch, hdr.width, hdr.height, cfg.direct, hdr.cmyk);
+    int bandRows = (hdr.height + static_cast<int>(bands) - 1) / static_cast<int>(bands);
+    bandRows = (bandRows + mcuH - 1) / mcuH * mcuH;
+    std::atomic<bool> good{ true };
+    auto run = [&](unsigned b)
+    {
+        const int y0 = static_cast<int>(b) * bandRows;
+        if (y0 >= hdr.height) return;
+        const int rows = std::min(bandRows, hdr.height - y0);
+        struct InBand { bool previous; InBand() : previous(g_inBand) { g_inBand = true; } ~InBand() { g_inBand = previous; } } inBand;
+        Turbo t;
+        Header bh;
+        if (!ReadHeader(t.h, in, bh) || bh.width != hdr.width || bh.height != hdr.height ||
+            tj3SetCroppingRegion(t.h, tjregion{ 0, y0, hdr.width, rows }) != 0 ||
+            !Decode(t.h, in, target + static_cast<std::size_t>(y0) * pitch, pitch, hdr.width, rows, cfg.direct, hdr.cmyk))
+            good = false;
+    };
+    std::vector<std::thread> workers;
+    try { for (unsigned b = 1; b < bands; ++b) workers.emplace_back(run, b); }
+    catch (...) { good = false; }
+    run(0);
+    for (auto& w : workers) w.join();
+    return good;
+}
 }
 
 bool GlideIsJpegPath(const wchar_t* path)
@@ -301,16 +501,47 @@ bool GlideIsJpegPath(const wchar_t* path)
     return !_wcsicmp(dot, L".jpg") || !_wcsicmp(dot, L".jpeg") || !_wcsicmp(dot, L".jpe") || !_wcsicmp(dot, L".jfif") || !_wcsicmp(dot, L".jif");
 }
 
-bool GlideTurboDecodeBounded(const wchar_t* path, std::uint32_t maxWidth, std::uint32_t maxHeight, bool progressiveScaled, GlideDecodedImage* image)
+namespace
+{
+// The bounded decode once the compressed file is in `in` (read from disk, mapped, or handed over in memory).
+bool TurboDecodeBoundedFromInput(const Input& in, std::uint32_t maxWidth, std::uint32_t maxHeight, bool progressiveScaled, GlideDecodedImage* image,
+                                 bool thumbnail);
+}
+
+bool GlideTurboDecodeBounded(const wchar_t* path, std::uint32_t maxWidth, std::uint32_t maxHeight, bool progressiveScaled, GlideDecodedImage* image,
+                             bool thumbnail)
 {
     const JpegConfig& cfg = Config();
-    if (!image || !(cfg.previewTurbo || cfg.previewTurboProgressive || cfg.embeddedPreview) || !GlideIsJpegPath(path) || maxWidth == 0 || maxHeight == 0) return false;
+    if (thumbnail) g_lastJpegThumbnailRoute = 0;
+    if (!image || !(thumbnail || cfg.previewTurbo || cfg.previewTurboProgressive || cfg.embeddedPreview) || !GlideIsJpegPath(path) || maxWidth == 0 || maxHeight == 0) return false;
     Input in;
     if (!in.Open(path, cfg.memoryMapped)) return false;
+    return TurboDecodeBoundedFromInput(in, maxWidth, maxHeight, progressiveScaled, image, thumbnail);
+}
+
+// 5.2.0 (Explorer thumbnails): the same bounded decode of a JPEG the caller already read (the I/O stage of the thumbnail
+// pipeline), so a slow first open of the file is paid once, off the decode lanes. The bytes are only read, never kept.
+bool GlideTurboDecodeBoundedMemory(const std::uint8_t* data, std::size_t size, std::uint32_t maxWidth, std::uint32_t maxHeight, GlideDecodedImage* image)
+{
+    g_lastJpegThumbnailRoute = 0;
+    if (!image || !data || size < 4 || size > 0x7FFFFFFF || maxWidth == 0 || maxHeight == 0 || data[0] != 0xFF || data[1] != 0xD8) return false;
+    Input in; // borrowed memory: no handle, mapping or owned buffer, so the destructor releases nothing
+    in.data = data;
+    in.size = size;
+    return TurboDecodeBoundedFromInput(in, maxWidth, maxHeight, true, image, true);
+}
+
+namespace
+{
+bool TurboDecodeBoundedFromInput(const Input& in, std::uint32_t maxWidth, std::uint32_t maxHeight, bool progressiveScaled, GlideDecodedImage* image,
+                                 bool thumbnail)
+{
+    const JpegConfig& cfg = Config();
     Turbo turbo;
     Header hdr;
     if (!ReadHeader(turbo.h, in, hdr)) return false;
-    if (!cfg.embeddedPreview && (hdr.progressive ? !(cfg.previewTurboProgressive && progressiveScaled) : !cfg.previewTurbo)) return false;
+    if (hdr.cmyk && !GlideCmykReady()) return false; // WIC converts it as before
+    if (!thumbnail && !cfg.embeddedPreview && (hdr.progressive ? !(cfg.previewTurboProgressive && progressiveScaled) : !cfg.previewTurbo)) return false;
     const std::uint16_t orientation = ExifOrientation(in.data, in.size);
     const bool rotated = orientation >= 5 && orientation <= 8;
     const std::uint32_t physW = rotated ? maxHeight : maxWidth, physH = rotated ? maxWidth : maxHeight;
@@ -324,7 +555,7 @@ bool GlideTurboDecodeBounded(const wchar_t* path, std::uint32_t maxWidth, std::u
     // refinement then replaces either as with any reduced view.
     Input embedded;
     std::uint32_t previewLong = 0;
-    if (cfg.embeddedPreview)
+    if (cfg.embeddedPreview || thumbnail)
     {
         std::size_t off = 0, len = 0;
         if (FindEmbeddedPreview(in.data, in.size, off, len))
@@ -338,7 +569,9 @@ bool GlideTurboDecodeBounded(const wchar_t* path, std::uint32_t maxWidth, std::u
                 previewLong = static_cast<std::uint32_t>(std::max(eh.width, eh.height));
         }
     }
-    const bool scaledAllowed = hdr.progressive ? (cfg.previewTurboProgressive && progressiveScaled) : cfg.previewTurbo;
+    // Thumbnails (Explorer tab grid) always take the DCT-scaled decode: WIC's reduced decode is about 2x slower.
+    // CMYK (5.2.0) always: WIC's CMYK frame goes through its single-threaded colour converter (about 0.34 s for 8 MP) whatever the size.
+    const bool scaledAllowed = (thumbnail || hdr.cmyk) ? true : hdr.progressive ? (cfg.previewTurboProgressive && progressiveScaled) : cfg.previewTurbo;
     GlideJpegFirstView choice = GlideJpegChooseFirstView(hdr.width, hdr.height, needW, needH, previewLong, scaledAllowed);
     // Scaling disabled (bench H0/H3): the 5.0.7 rule, a preview of at least half the requested size.
     if (choice == GlideJpegFirstViewWic && previewLong * 2 >= std::max(needW, needH)) choice = GlideJpegFirstViewEmbedded;
@@ -346,14 +579,55 @@ bool GlideTurboDecodeBounded(const wchar_t* path, std::uint32_t maxWidth, std::u
     const bool useEmbedded = choice == GlideJpegFirstViewEmbedded;
     if (useEmbedded && !ReadHeader(turbo.h, embedded, hdr)) return false;
     const Input& source = useEmbedded ? embedded : in;
+    // Explorer thumbnails of a progressive file: the DC scan alone is a 1/8 picture (see DecodeProgressiveDc). Used when 1/8 still
+    // covers the tile; otherwise (a small source) the one-shot scaled decode below.
+    if (thumbnail && !useEmbedded && hdr.progressive && cfg.progressiveDc &&
+        static_cast<std::uint32_t>((hdr.width + 7) / 8) >= needW && static_cast<std::uint32_t>((hdr.height + 7) / 8) >= needH)
+    {
+        std::uint8_t* dcPixels = nullptr;
+        int dcW = 0, dcH = 0;
+        // 5.2.0: Glide's own DC reader first (no coefficient buffer); libjpeg's buffered-image mode for anything it declines.
+        bool dcOk = GlideJpegDcOnly(in.data, in.size, &dcPixels, &dcW, &dcH);
+        g_lastJpegThumbnailRoute = dcOk ? 1 : 0;
+        if (!dcOk && DecodeProgressiveDc(in, &dcPixels, &dcW, &dcH)) { dcOk = true; g_lastJpegThumbnailRoute = 2; }
+        if (dcOk)
+        {
+            std::uint32_t outW = static_cast<std::uint32_t>(dcW), outH = static_cast<std::uint32_t>(dcH);
+            if (orientation != 1)
+            {
+                outW = rotated ? dcH : dcW;
+                outH = rotated ? dcW : dcH;
+                auto* oriented = static_cast<std::uint8_t*>(CoTaskMemAlloc(static_cast<std::size_t>(dcW) * dcH * 4));
+                if (!oriented) { CoTaskMemFree(dcPixels); return false; }
+                GlideOrientBgra(dcPixels, dcW, dcH, orientation, oriented, outW);
+                CoTaskMemFree(dcPixels);
+                dcPixels = oriented;
+            }
+            image->width = outW;
+            image->height = outH;
+            image->stride = outW * 4;
+            image->bufferBytes = static_cast<std::uint64_t>(dcW) * dcH * 4ull;
+            image->data = dcPixels;
+            return true;
+        }
+    }
     const tjscalingfactor sf = ChooseScale(hdr.width, hdr.height, std::min<std::uint32_t>(needW, hdr.width), std::min<std::uint32_t>(needH, hdr.height), cfg.minScale);
     if (tj3SetScalingFactor(turbo.h, sf) != 0) return false;
+    if (thumbnail) g_lastJpegThumbnailRoute = useEmbedded ? 4 : 3;
+    if (thumbnail)
+    {
+        // The result is shrunk again to a tile: the fast integer IDCT and plain chroma upsampling are invisible there.
+        tj3Set(turbo.h, TJPARAM_FASTDCT, 1);
+        tj3Set(turbo.h, TJPARAM_FASTUPSAMPLE, 1);
+    }
     const int w = Scaled(hdr.width, sf), h = Scaled(hdr.height, sf);
     const std::uint64_t bytes = static_cast<std::uint64_t>(w) * h * 4ull;
     if (!GlideWithinDecodeCap(w, h) || bytes > std::numeric_limits<UINT>::max()) return false;
     auto* pixels = static_cast<std::uint8_t*>(CoTaskMemAlloc(static_cast<std::size_t>(bytes)));
     if (!pixels) return false;
-    if (!Decode(turbo.h, source, pixels, w * 4, w, h, cfg.direct))
+    // CMYK at full scale (a viewport that DCT scaling cannot reduce) is a whole-frame decode like the full-size one: banded and multi-threaded.
+    const bool whole = hdr.cmyk && sf.denom == 1 && !useEmbedded && !thumbnail;
+    if (!(whole ? DecodeFrame(turbo.h, source, hdr, pixels, w * 4, cfg) : Decode(turbo.h, source, pixels, w * 4, w, h, cfg.direct, hdr.cmyk)))
     {
         CoTaskMemFree(pixels);
         return false;
@@ -376,6 +650,7 @@ bool GlideTurboDecodeBounded(const wchar_t* path, std::uint32_t maxWidth, std::u
     image->data = pixels;
     return true;
 }
+} // namespace
 
 bool GlideTurboDecodeInto(const wchar_t* path, GlideSurfaceAllocator allocate, void* context,
                           std::uint8_t** surface, std::uint32_t* stride, std::uint32_t* surfaceWidth, std::uint32_t* surfaceHeight)
@@ -387,6 +662,7 @@ bool GlideTurboDecodeInto(const wchar_t* path, GlideSurfaceAllocator allocate, v
     Turbo turbo;
     Header hdr;
     if (!ReadHeader(turbo.h, in, hdr)) return false;
+    if (hdr.cmyk && !GlideCmykReady()) return false;
     const std::uint16_t orientation = ExifOrientation(in.data, in.size);
     const bool rotated = orientation >= 5 && orientation <= 8;
     const std::uint32_t width = static_cast<std::uint32_t>(hdr.width), height = static_cast<std::uint32_t>(hdr.height);
@@ -414,43 +690,7 @@ bool GlideTurboDecodeInto(const wchar_t* path, GlideSurfaceAllocator allocate, v
     std::uint8_t* target = upright ? upright : destination;
     const int pitch = upright ? static_cast<int>(width * 4) : static_cast<int>(dstStride);
 
-    SYSTEM_INFO si{};
-    GetSystemInfo(&si);
-    const unsigned cap = cfg.maxThreads ? cfg.maxThreads : std::min<unsigned>(si.dwNumberOfProcessors, 16u);
-    const int mcuH = tjMCUHeight[hdr.subsamp], mcuW = tjMCUWidth[hdr.subsamp];
-    (void)mcuW;
-    unsigned bands = 1;
-    if (!hdr.progressive && static_cast<std::uint64_t>(width) * height >= 4'000'000ull)
-        bands = std::max(1u, std::min<unsigned>(cap, height / 256u));
-    bool ok;
-    if (bands < 2)
-        ok = Decode(turbo.h, in, target, pitch, hdr.width, hdr.height, cfg.direct);
-    else
-    {
-        // Horizontal bands of whole iMCU rows, one TurboJPEG instance each. Each band entropy-decodes (but
-        // does not IDCT/colour-convert) the rows above it, so the gain flattens beyond ~8-16 bands.
-        int bandRows = (hdr.height + static_cast<int>(bands) - 1) / static_cast<int>(bands);
-        bandRows = (bandRows + mcuH - 1) / mcuH * mcuH;
-        std::atomic<bool> good{ true };
-        auto run = [&](unsigned b)
-        {
-            const int y0 = static_cast<int>(b) * bandRows;
-            if (y0 >= hdr.height) return;
-            const int rows = std::min(bandRows, hdr.height - y0);
-            Turbo t;
-            Header bh;
-            if (!ReadHeader(t.h, in, bh) || bh.width != hdr.width || bh.height != hdr.height ||
-                tj3SetCroppingRegion(t.h, tjregion{ 0, y0, hdr.width, rows }) != 0 ||
-                !Decode(t.h, in, target + static_cast<std::size_t>(y0) * pitch, pitch, hdr.width, rows, cfg.direct))
-                good = false;
-        };
-        std::vector<std::thread> workers;
-        try { for (unsigned b = 1; b < bands; ++b) workers.emplace_back(run, b); }
-        catch (...) { good = false; }
-        run(0);
-        for (auto& w : workers) w.join();
-        ok = good;
-    }
+    const bool ok = DecodeFrame(turbo.h, in, hdr, target, pitch, cfg);
     if (ok && upright) GlideOrientIntoSurface(upright, width, height, orientation, destination, dstStride);
     if (upright) CoTaskMemFree(upright);
     return ok;
@@ -463,7 +703,7 @@ bool GlideTurboAccepts(const wchar_t* path)
     if (!in.Open(path, true)) return false;
     Turbo turbo;
     Header hdr;
-    return ReadHeader(turbo.h, in, hdr);
+    return ReadHeader(turbo.h, in, hdr) && (!hdr.cmyk || GlideCmykReady());
 }
 
 int GlideJpegChooseScaleDenom(int width, int height, std::uint32_t needW, std::uint32_t needH)
@@ -486,4 +726,23 @@ GlideJpegFirstView GlideJpegChooseFirstView(int width, int height, std::uint32_t
     if (static_cast<std::uint32_t>(width) <= needW && static_cast<std::uint32_t>(height) <= needH) return GlideJpegFirstViewWic;
     if (previewLongSide > 0 && previewLongSide >= std::max(needW, needH)) return GlideJpegFirstViewEmbedded;
     return scaledAllowed ? GlideJpegFirstViewScaled : GlideJpegFirstViewWic;
+}
+
+bool GlideTurboProgressiveDc(const wchar_t* path, GlideDecodedImage* image)
+{
+    if (!image || !GlideIsJpegPath(path)) return false;
+    Input in;
+    if (!in.Open(path, true)) return false;
+    Turbo turbo;
+    Header hdr;
+    if (!ReadHeader(turbo.h, in, hdr) || !hdr.progressive) return false;
+    std::uint8_t* pixels = nullptr;
+    int w = 0, h = 0;
+    if (!DecodeProgressiveDc(in, &pixels, &w, &h)) return false;
+    image->width = static_cast<std::uint32_t>(w);
+    image->height = static_cast<std::uint32_t>(h);
+    image->stride = static_cast<std::uint32_t>(w) * 4;
+    image->bufferBytes = static_cast<std::uint64_t>(w) * h * 4ull;
+    image->data = pixels;
+    return true;
 }

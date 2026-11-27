@@ -131,5 +131,13 @@ public enum GlideCommand
     /// <summary>Turns "Loop this folder" on / off for the active tab (overrides "When the last image is reached"). Appended (5.0.7).</summary>
     ToggleLoopFolder,
     /// <summary>Opens Settings at the text overlay placement card for the current tab layout (also right-click on the overlay). Appended (5.1.3).</summary>
-    OpenTextOverlaySettings
+    OpenTextOverlaySettings,
+    /// <summary>Permanently deletes the current image (no Recycle Bin) after a confirmation. Appended (round 4 G1, 5.1.7).</summary>
+    DeleteFilePermanently,
+    /// <summary>Explorer tab: Windows properties of the selected item (default of Alt+double-click). Appended (5.1.7, round 4 C3).</summary>
+    ExplorerItemProperties,
+    /// <summary>Shows or hides the tag sidebar (Explorer tab and picture view); needs Settings > Tags > Enable tags. Appended (5.1.7, issue #4).</summary>
+    ToggleTagSidebar,
+    /// <summary>Overlay mode: turns "Preserve aspect ratio" on / off (off: the resize handles stretch the picture). Appended (5.1.7).</summary>
+    ToggleOverlayPreserveAspect
 }

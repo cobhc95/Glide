@@ -209,6 +209,7 @@ public partial class SettingsWindow : Window
         BuildResetSelector();
         BuildBackupSelector();
         BuildSettingControlMap();
+        WireTagControls();
         // 5.1.0: this window's tooltips wait the Settings-window delay (live while the box changes).
         Glide.App.Controls.TooltipDelayStyle.Apply(this, Glide.Core.Settings.TooltipAreas.DelayMs(current, Glide.Core.Settings.TooltipAreas.Settings));
         TooltipDelaySettingsBox.ValueChanged += (_, e) =>
@@ -234,6 +235,13 @@ public partial class SettingsWindow : Window
         TabsCheck.IsCheckedChanged += (_, _) => UpdateTextOverlayPlacementCards();
         AfterTabCloseActivateCombo.SelectionChanged += (_, _) => UpdateAfterTabCloseCustomRow();
         SwitchToNewTabsCombo.SelectionChanged += (_, _) => UpdateNewTabKeyLabels();
+        NewTabPositionKeyCombo.SelectionChanged += (_, _) => UpdateNewTabKeyLabels();
+        NewTabForegroundKeyCombo.SelectionChanged += (_, _) => UpdateNewTabKeyLabels();
+        // Hiding the whole result list (Escape, a category click) must not leave a result's tooltip open either.
+        SearchPanel.PropertyChanged += (_, e) =>
+        {
+            if (e.Property == Visual.IsVisibleProperty && !SearchPanel.IsVisible) CloseTooltips(SearchPanel);
+        };
         _searchDebounceTimer.Tick += (_, _) =>
         {
             _searchDebounceTimer.Stop();
@@ -294,6 +302,8 @@ public partial class SettingsWindow : Window
         PageTitle.Text = startPage.Title;
         PageSubtitle.Text = startPage.Subtitle;
         UpdateExpandCollapseButtons();
+        // Come back the way Settings was left (page, open sections, scroll); nothing remembered keeps the default page.
+        RestoreViewMemory(current);
         UpdateDirtyState();
 
         Opened += SettingsOpened;
@@ -329,10 +339,7 @@ public partial class SettingsWindow : Window
     /// rather than a XAML attribute (5.0.6): the attribute held a raw line break where the two characters backslash-n belonged,
     /// and XML attribute normalisation turned it into a space, so the help read "Line break: &lt;br&gt; or ." .</summary>
     internal const string TextOverlayTemplateHelp =
-        @"Tokens: {index} position in the folder (1-based); {total} number of images; {file} and {filename} file name with extension (photo.jpg; the two are identical, both kept for compatibility); " +
-        @"{stem} file name without extension (photo); {extension} extension (jpg); {format} file type (JPG); {folder} folder name; {folderpath} full folder path; {path} full file path; " +
-        @"{width}, {height}, {dimensions} pixel size (4000×3000); {megapixels}; {filesize} (2.4 MB); {filesizebytes} size in bytes; {zoom} zoom (100%). " +
-        @"Line break: <br> or \n. Example: {stem}  •  {dimensions}  •  {filesize}  •  {index}/{total}. To frame all the lines in one box, turn on Text overlay border below.";
+        @"Tokens: see the columns below. Line break: <br> or \n. Dates take a format: {modified:yyyy/MM/dd HH:mm}, {taken:ddd}. Example: {stem}{sep}{res}{sep}{filesize}{sep}{index}/{total}.";
 
     internal const string TextOverlayTemplateTip =
         @"Combine tokens freely. See the token list directly below. Type <br> or \n to start a new line. Turn on Text overlay border to put every line in one box.";
@@ -341,6 +348,34 @@ public partial class SettingsWindow : Window
     {
         PictureTemplateHelpText.Text = TextOverlayTemplateHelp;
         ToolTip.SetTip(PictureTemplateBox, TextOverlayTemplateTip);
+        // Round 4 B7: the short tokens in three columns of token + meaning.
+        var grid = PictureTemplateTokenGrid;
+        grid.Children.Clear();
+        grid.RowDefinitions.Clear();
+        var tokens = Glide.Core.Status.TextTemplate.Tokens;
+        const int columns = 3;
+        var rows = (tokens.Length + columns - 1) / columns;
+        for (var r = 0; r < rows; r++) grid.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
+        for (var i = 0; i < tokens.Length; i++)
+        {
+            var row = i % rows; var col = i / rows;
+            var token = new TextBlock { Text = tokens[i].Token, FontFamily = new Avalonia.Media.FontFamily("Consolas, Cascadia Mono, monospace"), Margin = new Thickness(0, 0, 8, 1) };
+            token.Classes.Add("phaseNote");
+            var meaning = new TextBlock { Text = tokens[i].Meaning, Margin = new Thickness(0, 0, 18, 1), TextWrapping = Avalonia.Media.TextWrapping.Wrap };
+            meaning.Classes.Add("phaseNote");
+            Grid.SetRow(token, row); Grid.SetColumn(token, col * 2);
+            Grid.SetRow(meaning, row); Grid.SetColumn(meaning, col * 2 + 1);
+            grid.Children.Add(token); grid.Children.Add(meaning);
+        }
+    }
+
+    /// <summary>Round 4 B4: the offset boxes edit the card in use, so they sit in that card, under its Position and Alignment.</summary>
+    private void PlaceTextOverlayOffsetPanel(bool sideTabs)
+    {
+        var target = (StackPanel)(sideTabs ? SideTabsPlacementCard : TopTabsPlacementCard).Child!;
+        if (ReferenceEquals(TextOverlayOffsetPanel.Parent, target)) return;
+        (TextOverlayOffsetPanel.Parent as Panel)?.Children.Remove(TextOverlayOffsetPanel);
+        target.Children.Insert(Math.Min(3, target.Children.Count), TextOverlayOffsetPanel);
     }
 
     /// <summary>Explorer default view shows the Explorer tab's own view labels ("Thumbnails (L)"...); each item keeps the
@@ -417,6 +452,7 @@ public partial class SettingsWindow : Window
     private void SettingsOpened(object? sender, EventArgs e)
     {
         FitToScreenOnOpen();
+        ReapplyRestoredScrollWhenOpened();
         // Never schedule diagnostic rendering on the first-interaction path. The old implementation
         // captured multiple RenderTargetBitmaps at +40 ms/+260 ms, making an already-visible Settings
         // window temporarily unresponsive. Diagnostics can explicitly request screenshots instead.
@@ -490,6 +526,7 @@ public partial class SettingsWindow : Window
 
             SelectByText(InitialQualityCombo, s.InitialImageQuality);
             SelectByText(InteractivePanQualityCombo, string.IsNullOrWhiteSpace(s.InteractivePanQuality) ? "Full quality" : s.InteractivePanQuality);
+            SelectByText(ThumbnailLanesCombo, Glide.Core.Settings.ThumbnailLanesSetting.Normalize(s.ThumbnailLanes));
             SelectByText(SpeedBoostTrayIconCombo, App.EffectiveTrayIconMode(s));
             AdaptivePreviewDelayBox.Value = s.AdaptivePreviewDelayMs;
             PrefetchDepthBox.Value = Math.Clamp(s.PrefetchDepth, 1, 30);
@@ -522,8 +559,8 @@ public partial class SettingsWindow : Window
             SelectByText(NewTabPositionKeyCombo, Glide.Core.Workspace.NewTabKeys.Normalize(s.NewTabPositionKey));
             SelectByText(SwitchToNewTabsCombo, Glide.Core.Workspace.NewTabSides.FromSwitch(s.SwitchToNewTabs));
             SelectByText(NewTabForegroundKeyCombo, Glide.Core.Workspace.NewTabKeys.Normalize(s.NewTabForegroundKey));
-            SelectByText(MiddleClickSideCombo, Glide.Core.Workspace.MiddleClickSides.Normalize(s.MiddleClickNewTabSide));
-            SelectByText(MiddleClickPositionCombo, Glide.Core.Workspace.MiddleClickPositions.Normalize(s.MiddleClickNewTabPosition));
+            SelectByText(DuplicateTabPositionCombo, Glide.Core.Workspace.DuplicateTabPositions.Normalize(s.DuplicateTabPosition));
+            SelectByText(DuplicateTabSideCombo, Glide.Core.Workspace.DuplicateTabSides.Normalize(s.DuplicateTabSide));
             UpdateNewTabKeyLabels();
             TabPreviewSizeBox.Value = Glide.Core.Workspace.TabPreviewSize.Clamp(s.TabPreviewSizePercent);
             SelectByText(TabPreviewResizeModifierCombo, Glide.Core.Workspace.TabPreviewSize.NormalizeModifier(s.TabPreviewResizeModifier));
@@ -539,6 +576,8 @@ public partial class SettingsWindow : Window
             ExplorerScrollRowsBox.Value = Glide.App.Explorer.ExplorerWheelScroll.ClampRows(s.ExplorerScrollRows);
             ExplorerScrollPixelsBox.Value = Glide.App.Explorer.ExplorerWheelScroll.ClampPixels(s.ExplorerScrollPixels);
             ExplorerNavPaneWidthBox.Value = Glide.App.Explorer.ExplorerLayout.ClampNavPaneWidth(s.ExplorerNavPaneWidth);
+            ExplorerThumbnailCacheMaxBox.Value = Glide.App.Services.ThumbnailCacheSettings.ClampMegabytes(s.ExplorerThumbnailCacheMaxMb);
+            RefreshThumbnailCacheUsage();
             UpdateExplorerScrollModeRows();
             AlternativeFileManagerPathBox.Text = s.AlternativeFileManagerPath;
             AlternativeFileManagerArgumentsBox.Text = s.AlternativeFileManagerArguments;
@@ -561,7 +600,21 @@ public partial class SettingsWindow : Window
             var textOffset = TextOverlayPlacements.Offset(s, _textOverlayOffsetSideTabs);
             PictureOffsetXBox.Value = textOffset.X;
             PictureOffsetYBox.Value = textOffset.Y;
+            PlaceTextOverlayOffsetPanel(_textOverlayOffsetSideTabs);
             SelectByText(PictureColorCombo, s.PictureCounterColor);
+            // Round 4 B5/B6/C1.
+            TitleBarTemplateBox.Text = s.TextOverlayTitleBarTemplate;
+            TabBarTemplateBox.Text = s.TextOverlayTabBarTemplate;
+            TitleBarFontSizeBox.Value = s.TextOverlayTitleBarFontSize;
+            TabBarFontSizeBox.Value = s.TextOverlayTabBarFontSize;
+            SelectByText(TitleBarColorCombo, s.TextOverlayTitleBarColor);
+            SelectByText(TabBarColorCombo, s.TextOverlayTabBarColor);
+            SelectByText(TitleBarBorderCombo, s.TextOverlayTitleBarBorder);
+            SelectByText(TabBarBorderCombo, s.TextOverlayTabBarBorder);
+            SelectByText(PictureSeparatorCombo, s.TextOverlaySeparator);
+            SelectByText(SeparatorColorCombo, s.TextOverlaySeparatorColor);
+            ExplorerInfoTemplateBox.Text = s.ExplorerInfoTemplate;
+            LoadTagControls(s);
             OverlayOpacityBox.Value = s.OverlayDefaultOpacity;
             OverlayZoomStepBox.Value = s.OverlayZoomStepPercent;
             SelectByText(OverlayAnimationRegionCombo, s.OverlayAnimationRegion ?? "Anywhere");
@@ -722,6 +775,7 @@ public partial class SettingsWindow : Window
         state.InitialImageQuality = SelectedText(InitialQualityCombo, "Maximum quality");
         state.PerformanceUserCustom = string.Equals(state.InitialImageQuality, "User custom", StringComparison.OrdinalIgnoreCase);
         state.InteractivePanQuality = SelectedText(InteractivePanQualityCombo, "Full quality");
+        state.ThumbnailLanes = SelectedText(ThumbnailLanesCombo, Glide.Core.Settings.ThumbnailLanesSetting.Automatic);
         state.SpeedBoostTrayIcon = SelectedText(SpeedBoostTrayIconCombo, "Always");
         state.ShowTrayIcon = !string.Equals(state.SpeedBoostTrayIcon, "Never", StringComparison.OrdinalIgnoreCase);
         state.AdaptivePreviewDelayMs = (int)(AdaptivePreviewDelayBox.Value ?? 20);
@@ -756,8 +810,8 @@ public partial class SettingsWindow : Window
         state.NewTabPositionKey = Glide.Core.Workspace.NewTabKeys.Normalize(SelectedText(NewTabPositionKeyCombo, Glide.Core.Workspace.NewTabKeys.Default));
         state.SwitchToNewTabs = Glide.Core.Workspace.NewTabSides.ToSwitch(SelectedText(SwitchToNewTabsCombo, Glide.Core.Workspace.NewTabSides.Foreground));
         state.NewTabForegroundKey = Glide.Core.Workspace.NewTabKeys.Normalize(SelectedText(NewTabForegroundKeyCombo, Glide.Core.Workspace.NewTabKeys.Default));
-        state.MiddleClickNewTabSide = Glide.Core.Workspace.MiddleClickSides.Normalize(SelectedText(MiddleClickSideCombo, Glide.Core.Workspace.MiddleClickSides.Default));
-        state.MiddleClickNewTabPosition = Glide.Core.Workspace.MiddleClickPositions.Normalize(SelectedText(MiddleClickPositionCombo, Glide.Core.Workspace.MiddleClickPositions.Default));
+        state.DuplicateTabPosition = Glide.Core.Workspace.DuplicateTabPositions.Normalize(SelectedText(DuplicateTabPositionCombo, Glide.Core.Workspace.DuplicateTabPositions.Default));
+        state.DuplicateTabSide = Glide.Core.Workspace.DuplicateTabSides.Normalize(SelectedText(DuplicateTabSideCombo, Glide.Core.Workspace.DuplicateTabSides.Default));
         state.TabToolTipTextSize = SelectedText(TabToolTipTextSizeCombo, "Medium");
         state.TabStripPosition = SelectedText(TabPositionCombo, "Top");
         state.ExplorerDefaultView = ExplorerDefaultViews.Normalize((ExplorerDefaultViewCombo.SelectedItem as ComboBoxItem)?.Tag as string);
@@ -768,6 +822,7 @@ public partial class SettingsWindow : Window
         state.ExplorerScrollRows = Glide.App.Explorer.ExplorerWheelScroll.ClampRows((int)(ExplorerScrollRowsBox.Value ?? 3m));
         state.ExplorerScrollPixels = Glide.App.Explorer.ExplorerWheelScroll.ClampPixels((int)(ExplorerScrollPixelsBox.Value ?? 100m));
         state.ExplorerNavPaneWidth = Glide.App.Explorer.ExplorerLayout.ClampNavPaneWidth((double)(ExplorerNavPaneWidthBox.Value ?? 208m));
+        state.ExplorerThumbnailCacheMaxMb = Glide.App.Services.ThumbnailCacheSettings.ClampMegabytes((int)(ExplorerThumbnailCacheMaxBox.Value ?? 512m));
         state.AlternativeFileManagerPath = (AlternativeFileManagerPathBox.Text ?? string.Empty).Trim();
         state.AlternativeFileManagerArguments = AlternativeFileManagerArgumentsBox.Text ?? string.Empty;
         state.LastTabCloseBehavior = SelectedText(LastTabBehaviorCombo, "Open home page");
@@ -789,6 +844,18 @@ public partial class SettingsWindow : Window
         else
             TextOverlayPlacements.SetOffset(state, _textOverlayOffsetSideTabs, offsetX, offsetY);
         state.PictureCounterColor = SelectedText(PictureColorCombo, "White");
+        state.TextOverlayTitleBarTemplate = TitleBarTemplateBox.Text ?? string.Empty;
+        state.TextOverlayTabBarTemplate = TabBarTemplateBox.Text ?? string.Empty;
+        state.TextOverlayTitleBarFontSize = (int)(TitleBarFontSizeBox.Value ?? 0);
+        state.TextOverlayTabBarFontSize = (int)(TabBarFontSizeBox.Value ?? 0);
+        state.TextOverlayTitleBarColor = SelectedText(TitleBarColorCombo, TextOverlayStyle.Same);
+        state.TextOverlayTabBarColor = SelectedText(TabBarColorCombo, TextOverlayStyle.Same);
+        state.TextOverlayTitleBarBorder = SelectedText(TitleBarBorderCombo, TextOverlayStyle.Same);
+        state.TextOverlayTabBarBorder = SelectedText(TabBarBorderCombo, TextOverlayStyle.Same);
+        state.TextOverlaySeparator = SelectedText(PictureSeparatorCombo, Glide.Core.Status.TextTemplate.DefaultSeparator);
+        state.TextOverlaySeparatorColor = SelectedText(SeparatorColorCombo, TextOverlayStyle.SameAsText);
+        state.ExplorerInfoTemplate = string.IsNullOrWhiteSpace(ExplorerInfoTemplateBox.Text) ? new GlideSettingsState().ExplorerInfoTemplate : ExplorerInfoTemplateBox.Text!;
+        ReadTagControls(state);
         state.OverlayDefaultOpacity = (int)(OverlayOpacityBox.Value ?? 100);
         state.OverlayZoomStepPercent = (int)(OverlayZoomStepBox.Value ?? 10);
         state.OverlayAnimationRegion = SelectedText(OverlayAnimationRegionCombo, "Anywhere");
@@ -843,6 +910,9 @@ public partial class SettingsWindow : Window
     {
         NewTabPositionKeyLabel.Text = Glide.Core.Workspace.NewTabPolicy.PositionKeyLabel(SelectedText(NewTabPositionCombo, Glide.Core.Workspace.NewTabPositions.Default));
         NewTabForegroundKeyLabel.Text = Glide.Core.Workspace.NewTabPolicy.ForegroundKeyLabel(Glide.Core.Workspace.NewTabSides.ToSwitch(SelectedText(SwitchToNewTabsCombo, Glide.Core.Workspace.NewTabSides.Foreground)));
+        // Round 4 D2: the same key for both is allowed; say that holding it inverts both.
+        NewTabSharedKeyWarning.IsVisible = Glide.Core.Workspace.NewTabPolicy.KeysShared(
+            SelectedText(NewTabPositionKeyCombo, Glide.Core.Workspace.NewTabKeys.None), SelectedText(NewTabForegroundKeyCombo, Glide.Core.Workspace.NewTabKeys.None));
     }
 
     private void UpdateEndOfFolderDependentControls() =>
@@ -1158,6 +1228,7 @@ public partial class SettingsWindow : Window
             {
                 if (!string.IsNullOrWhiteSpace(card.CardId)) _cardById[card.CardId!] = card;
                 _pageOfCard[card] = pair.Key;
+                _initialCardExpanded[card] = card.IsExpanded;
                 card.ExpandedChanged += (_, _) => { AnchorCollapsedCardHeader(card); UpdateExpandCollapseButtons(); };
                 foreach (var anchor in card.Body.GetLogicalDescendants().OfType<Control>().Prepend(card.Body))
                     foreach (var id in SettingsCard.GetSettingIdList(anchor))
@@ -1368,6 +1439,32 @@ public partial class SettingsWindow : Window
         CollapseAllCardsButton.IsEnabled = cards.Any(c => c.IsExpanded);
     }
 
+    /// <summary>Shows how much disk the thumbnail cache uses (folder scan on the thread pool, never on the UI thread).</summary>
+    private void RefreshThumbnailCacheUsage()
+    {
+        _ = Task.Run(Glide.App.Services.ThumbnailCacheSettings.Usage).ContinueWith(task =>
+        {
+            if (!task.IsCompletedSuccessfully) return;
+            var (files, bytes) = task.Result;
+            Avalonia.Threading.Dispatcher.UIThread.Post(() => ThumbnailCacheUsageText.Text = files == 0
+                ? "The cache is empty."
+                : $"Using {Glide.App.Services.ThumbnailCacheSettings.FormatBytes(bytes)} in {files:N0} thumbnails.");
+        }, TaskScheduler.Default);
+    }
+
+    private void ClearThumbnailCacheClicked(object? sender, RoutedEventArgs e)
+    {
+        // Runs off the UI thread: a large cache is thousands of small files.
+        ClearThumbnailCacheButton.IsEnabled = false;
+        ThumbnailCacheUsageText.Text = "Clearing...";
+        _ = Task.Run(Glide.App.Services.ThumbnailCacheSettings.Clear).ContinueWith(task =>
+            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+            {
+                ClearThumbnailCacheButton.IsEnabled = true;
+                ThumbnailCacheUsageText.Text = task.IsCompletedSuccessfully ? $"Cleared ({task.Result:N0} files removed)." : "Could not clear every file.";
+            }), TaskScheduler.Default);
+    }
+
     private void ResetEscChoiceClicked(object? sender, RoutedEventArgs e)
     {
         _escRememberedChoice = "Ask";
@@ -1403,6 +1500,8 @@ public partial class SettingsWindow : Window
     private void ShowCategory(string key, bool clearSearch, bool restoreScroll = false, Control? revealTarget = null)
     {
         if (FindGroup(key) is not { } group) return;
+        // Any navigation other than the one that restores the remembered view (a link, search "Open", a page click) wins over it.
+        if (!_restoringInitialView) _restoredScroll = null;
         SettingsCard? aliasCard = null;
         if (LegacyPageAliases.TryGetValue(key, out var alias)) _cardById.TryGetValue(alias.CardId, out aliasCard);
         RememberCategoryScroll();
@@ -1940,7 +2039,12 @@ public partial class SettingsWindow : Window
         {
             if (version != _searchRenderVersion) return;
             var to = progressive ? Math.Min(builders.Count, from + 4) : builders.Count;
-            for (var i = from; i < to; i++) SearchPanel.Children.Add(builders[i]());
+            for (var i = from; i < to; i++)
+            {
+                var card = builders[i]();
+                CloseTooltipsWhenGone(card);
+                SearchPanel.Children.Add(card);
+            }
             if (to < builders.Count)
                 Dispatcher.UIThread.Post(() => AddBatch(to), DispatcherPriority.Background);
         }
@@ -1956,6 +2060,22 @@ public partial class SettingsWindow : Window
         ContentScroll.Offset = new Vector(ContentScroll.Offset.X, 0);
     }
 
+    /// <summary>
+    /// A tooltip belongs to the control it opened on. When a search result is removed (a new query rebuilds the list, the box is
+    /// cleared) or hidden while the pointer rests on it, Avalonia never sees the pointer leave, and the tooltip stayed on screen
+    /// (5.1.7 UI test bug 6). Close every tooltip a result owns as the result leaves the tree or stops being visible.
+    /// </summary>
+    private static void CloseTooltipsWhenGone(Control card)
+    {
+        card.DetachedFromVisualTree += (_, _) => CloseTooltips(card);
+    }
+
+    internal static void CloseTooltips(Control card)
+    {
+        foreach (var control in card.GetSelfAndVisualDescendants().OfType<Control>())
+            if (ToolTip.GetIsOpen(control)) ToolTip.SetIsOpen(control, false);
+    }
+
     /// <summary>A read-only search card for a fixed shortcut (no Change / Add / Clear buttons).</summary>
     private Control BuildFixedShortcutSearchResult(FixedShortcutDefinition fixedShortcut)
     {
@@ -1963,7 +2083,7 @@ public partial class SettingsWindow : Window
         border.Classes.Add("searchResult");
         var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,210"), ColumnSpacing = 7 };
         var label = new StackPanel { Spacing = 1, VerticalAlignment = VerticalAlignment.Center };
-        label.Children.Add(new TextBlock { Text = fixedShortcut.Label, FontWeight = FontWeight.SemiBold, FontSize = 14.5 });
+        label.Children.Add(new TextBlock { Text = fixedShortcut.Label, FontWeight = FontWeight.SemiBold, FontSize = 14.5, TextWrapping = TextWrapping.Wrap });
         label.Children.Add(new TextBlock { Text = fixedShortcut.Category + " — fixed shortcut, not editable", Foreground = SearchMutedBrush(), FontSize = 12 });
         grid.Children.Add(label);
         var keys = new TextBlock { Text = fixedShortcut.Shortcut, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
@@ -1980,7 +2100,7 @@ public partial class SettingsWindow : Window
         border.Classes.Add("searchResult");
         var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,210,Auto,Auto,Auto,Auto"), ColumnSpacing = 7 };
         var label = new StackPanel { Spacing = 1, VerticalAlignment = VerticalAlignment.Center };
-        label.Children.Add(new TextBlock { Text = action.Label, FontWeight = FontWeight.SemiBold, FontSize = 14.5 });
+        label.Children.Add(new TextBlock { Text = action.Label, FontWeight = FontWeight.SemiBold, FontSize = 14.5, TextWrapping = TextWrapping.Wrap });
         label.Children.Add(new TextBlock { Text = action.Category, Foreground = SearchMutedBrush(), FontSize = 12 });
         grid.Children.Add(label);
 
@@ -2059,7 +2179,7 @@ public partial class SettingsWindow : Window
         border.Classes.Add("searchResult");
         var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), ColumnSpacing = 12 };
         var text = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
-        text.Children.Add(new TextBlock { Text = setting.Label, FontWeight = FontWeight.SemiBold, FontSize = 15 });
+        text.Children.Add(new TextBlock { Text = setting.Label, FontWeight = FontWeight.SemiBold, FontSize = 15, TextWrapping = TextWrapping.Wrap });
         var location = SettingLocation(setting);
         text.Children.Add(new TextBlock { Text = $"{location}  •  {setting.Description}", TextWrapping = TextWrapping.Wrap, Foreground = SearchMutedBrush(), FontSize = 12.5 });
         grid.Children.Add(text);
@@ -2183,6 +2303,7 @@ public partial class SettingsWindow : Window
             case "titlebar.customize": yield return B("Configure...", b => CustomizeTitleBarClicked(b, new RoutedEventArgs())); break;
             case "status.customizeButtons": yield return B("Configure...", b => CustomizeStatusBarClicked(b, new RoutedEventArgs())); break;
             case "escape.resetRememberedClose": yield return B("Reset", b => ResetEscChoiceClicked(b, new RoutedEventArgs())); break;
+            case "explorer.clearThumbnailCache": yield return B("Clear", b => ClearThumbnailCacheClicked(b, new RoutedEventArgs())); break;
             case "profiles.import": yield return B("Import...", b => ImportSettingsClicked(b, new RoutedEventArgs())); break;
             case "profiles.export": yield return B("Export...", b => ExportSettingsClicked(b, new RoutedEventArgs())); break;
             case "profiles.presets": yield return B("Apply", b => ApplyPresetClicked(b, new RoutedEventArgs())); break;
@@ -2246,9 +2367,9 @@ public partial class SettingsWindow : Window
             }
             default:
             {
-                var open = new Button { Content = "Open", Tag = "General" };
-                open.Classes.Add("searchOpen");
-                return open;
+                // A container (Tag groups, the gesture matrix...) has no inline editor. BuildSearchResult already gives every
+                // result its one working Open button; a second, inert one here showed up as a duplicate (5.1.7 UI test bug 5).
+                return new Panel { Width = 0, Height = 1 };
             }
         }
     }
@@ -2264,7 +2385,7 @@ public partial class SettingsWindow : Window
         M("general.startupAction", StartupActionCombo); M("general.startupCustomPath", StartupCustomPathBox); M("general.newTabAction", NewTabActionCombo); M("general.newTabCustomPath", NewTabCustomPathBox); M("titlebar.customize", CustomizeTitleBarButton); M("settings.alwaysExpand", SettingsAlwaysExpandSwitch); M("escape.resetRememberedClose", ResetEscChoiceButton);
         M("status.visible", StatusCheck); M("status.hoverWhenClosed", StatusHoverWhenClosedCheck); M("view.scrollbars", ShowScrollbarsCheck); M("window.fullPathTitle", FullPathTitleCheck); M("fullscreen.hideCursor", HideCursorFullscreenCheck); M("fullscreen.hideCursorWindowed", HideCursorNormalWindowCheck); M("fullscreen.hideCursorDelay", FullscreenHideCursorDelayBox); M("fullscreen.hideCursorMode", HideCursorModeCombo);
         M("explorer.itemInfoTooltip", ExplorerItemInfoTooltipCheck); M("explorer.addressBarOverPictures", AddressBarOverPicturesCheck); M("appearance.tooltipDelaySettings", TooltipDelaySettingsBox); M("appearance.tooltipDelayMain", TooltipDelayMainBox); M("appearance.tooltipDelayOverlay", TooltipDelayOverlayBox); M("appearance.tooltipDelayExplorer", TooltipDelayExplorerBox);
-        M("fullscreen.autoHideChrome", AutoHideFullscreenChromeCheck); M("fullscreen.keepTabBarOpen", FullscreenKeepTabBarOpenCheck); M("fullscreen.keepTitleBarForExplorer", FullscreenKeepTitleBarForExplorerCheck); M("tabs.enabled", TabsCheck); M("window.showInExplorerTarget", ShowInExplorerTargetCombo); M("explorer.defaultView", ExplorerDefaultViewCombo); M("explorer.locateOpensIn", ExplorerLocateOpensInCombo); M("explorer.backReturnsToImage", ExplorerBackReturnsToImageCombo); M("explorer.showHidden", ExplorerShowHiddenFilesCheck); M("explorer.keepSelectionInView", ExplorerKeepSelectionInViewCheck); M("explorer.clickToRename", ExplorerClickToRenameCheck); M("explorer.onlyImages", ExplorerShowOnlyImagesCheck); M("explorer.infoDate", ExplorerInfoDateCheck); M("explorer.infoResolution", ExplorerInfoResolutionCheck); M("explorer.infoFileSize", ExplorerInfoFileSizeCheck); M("explorer.scrollSpeed", ExplorerScrollSpeedBox); M("explorer.scrollMode", ExplorerScrollModeCombo); M("explorer.scrollRows", ExplorerScrollRowsBox); M("explorer.scrollPixels", ExplorerScrollPixelsBox); M("explorer.navPaneWidth", ExplorerNavPaneWidthBox); M("explorer.altFileManagerPath", AlternativeFileManagerPathBox); M("explorer.altFileManagerArguments", AlternativeFileManagerArgumentsBox); M("tabs.showBackButton", TabBarBackButtonCheck); M("tabs.showForwardButton", TabBarForwardButtonCheck); M("fullscreen.statusAlways", FullscreenStatusAlwaysCheck);
+        M("fullscreen.autoHideChrome", AutoHideFullscreenChromeCheck); M("fullscreen.keepTabBarOpen", FullscreenKeepTabBarOpenCheck); M("fullscreen.keepTitleBarForExplorer", FullscreenKeepTitleBarForExplorerCheck); M("tabs.enabled", TabsCheck); M("window.showInExplorerTarget", ShowInExplorerTargetCombo); M("explorer.defaultView", ExplorerDefaultViewCombo); M("explorer.locateOpensIn", ExplorerLocateOpensInCombo); M("explorer.backReturnsToImage", ExplorerBackReturnsToImageCombo); M("explorer.showHidden", ExplorerShowHiddenFilesCheck); M("explorer.keepSelectionInView", ExplorerKeepSelectionInViewCheck); M("explorer.clickToRename", ExplorerClickToRenameCheck); M("explorer.onlyImages", ExplorerShowOnlyImagesCheck); M("explorer.infoDate", ExplorerInfoDateCheck); M("explorer.infoResolution", ExplorerInfoResolutionCheck); M("explorer.infoFileSize", ExplorerInfoFileSizeCheck); M("explorer.scrollSpeed", ExplorerScrollSpeedBox); M("explorer.scrollMode", ExplorerScrollModeCombo); M("explorer.scrollRows", ExplorerScrollRowsBox); M("explorer.scrollPixels", ExplorerScrollPixelsBox); M("explorer.navPaneWidth", ExplorerNavPaneWidthBox); M("explorer.thumbnailCache", ExplorerThumbnailCacheCheck); M("explorer.thumbnailCacheMaxMb", ExplorerThumbnailCacheMaxBox); M("explorer.clearThumbnailCache", ClearThumbnailCacheButton); M("explorer.altFileManagerPath", AlternativeFileManagerPathBox); M("explorer.altFileManagerArguments", AlternativeFileManagerArgumentsBox); M("tabs.showBackButton", TabBarBackButtonCheck); M("tabs.showForwardButton", TabBarForwardButtonCheck); M("fullscreen.statusAlways", FullscreenStatusAlwaysCheck);
         M("caption.windowedMinimize", CaptionWindowedMinimizeCombo); M("caption.windowedMaximize", CaptionWindowedMaximizeCombo); M("caption.windowedClose", CaptionWindowedCloseCombo);
         M("caption.fullscreenMinimize", CaptionFullscreenMinimizeCombo); M("caption.fullscreenMaximize", CaptionFullscreenMaximizeCombo); M("caption.fullscreenClose", CaptionFullscreenCloseCombo);
         M("windows.alwaysOnTop", AlwaysOnTopCheck); M("windows.alwaysOnTopMode", AlwaysOnTopModeCombo); M("fullscreen.exitBehavior", FullscreenExitBehaviorCombo); M("windows.sameImageBehavior", SameImageBehaviorCombo); M("window.centerOnDisplay", AutoCenterWindowOnRestoreCheck); M("view.defaultMode", DefaultViewCombo); M("view.animateGifs", AnimateGifsCheck); M("view.pointerZoom", PointerZoomCheck); M("view.keepZoom", PreserveZoomCheck);
@@ -2279,7 +2400,7 @@ public partial class SettingsWindow : Window
         M("performance.interactivePanQuality", InteractivePanQualityCombo);
         M("performance.sequentialReads", SequentialReadCheck); M("performance.prefetch", PrefetchCheck); M("performance.backgroundRefinement", BackgroundRefinementCheck);
         M("performance.speedBoost", SpeedBoostCheck); M("performance.speedBoostTrayIcon", SpeedBoostTrayIconCombo); M("performance.startWithWindowsInBackground", StartWithWindowsInBackgroundCheck);
-        M("performance.purgeOnMinimize", PurgeCacheCheck); M("developer.startupDiagnostics", StartupDiagnosticsCheck); M("performance.prefetchDepth", PrefetchDepthBox);
+        M("performance.purgeOnMinimize", PurgeCacheCheck); M("performance.thumbnailLanes", ThumbnailLanesCombo); M("performance.thumbnailPrepareFolder", ThumbnailPrepareFolderCheck); M("developer.startupDiagnostics", StartupDiagnosticsCheck); M("performance.prefetchDepth", PrefetchDepthBox);
         M("performance.prefetchSiblingFolders", PrefetchSiblingFoldersCheck); M("performance.prefetchSiblingFolderCount", PrefetchSiblingFolderCountBox);
         M("performance.cacheItems", CacheItemsBox); M("performance.compressedCacheMb", CompressedCacheMbBox); M("performance.decodedCacheMb", DecodedCacheMbBox); M("performance.rapidPreviewSize", RapidPreviewBox); M("performance.rapidBrowsePreviewSize", RapidBrowsePreviewBox); M("performance.progressiveColor", ProgressiveColorCheck);
         M("overlay.wholeAppAlwaysStart", WholeAppOverlayAlwaysStartCheck); M("overlay.wholeAppWindowedInteractions", WholeAppOverlayWindowedInteractionsCheck); M("overlay.wholeAppShowDragStrip", WholeAppOverlayShowDragStripCheck); M("overlay.wholeAppTopCentreGrip", WholeAppOverlayTopCentreGripCheck); M("overlay.wholeAppLockPosition", WholeAppOverlayLockPositionCheck);
@@ -2292,13 +2413,18 @@ public partial class SettingsWindow : Window
         M("slideshow.direction", SlideshowDirectionCombo); M("slideshow.startFullscreen", SlideshowStartFullscreenCheck); M("slideshow.pauseInactive", SlideshowPauseInactiveCheck);
         M("tabs.minWidth", TabMinWidthBox); M("tabs.maxWidth", TabMaxWidthBox); M("tabs.overflowArrows", TabOverflowArrowsCheck); M("tabs.detach", TabDetachCheck); M("tabs.attach", TabAttachCheck); M("tabs.closedHistory", ClosedHistoryBox);
         M("tabs.closeEmptyAfterDetach", CloseEmptyAfterDetachCheck); M("tabs.detachedHome", DetachedHomeTabCheck); M("tabs.cycleOrder", TabCycleOrderCombo); M("tabs.tooltipTextSize", TabToolTipTextSizeCombo); M("tabs.position", TabPositionCombo); M("tabs.sideAutoHide", TabSideAutoHideCheck); M("tabs.topAutoHide", TabTopAutoHideCheck);
-        M("tabs.newTabPosition", NewTabPositionCombo); M("tabs.newTabPositionKey", NewTabPositionKeyCombo); M("tabs.switchToNewTabs", SwitchToNewTabsCombo); M("tabs.newTabForegroundKey", NewTabForegroundKeyCombo); M("tabs.middleClickSide", MiddleClickSideCombo); M("tabs.middleClickPosition", MiddleClickPositionCombo); M("tabs.afterCloseActivate", AfterTabCloseActivateCombo); M("tabs.afterCloseCustomTarget", AfterTabCloseCustomTargetCombo); M("tabs.hoverPreview", TabHoverPreviewsCheck); M("tabs.animateGifPreviews", AnimateGifPreviewsCheck); M("tabs.previewSize", TabPreviewSizeBox); M("tabs.previewResizeModifier", TabPreviewResizeModifierCombo);
+        M("tabs.newTabPosition", NewTabPositionCombo); M("tabs.newTabPositionKey", NewTabPositionKeyCombo); M("tabs.switchToNewTabs", SwitchToNewTabsCombo); M("tabs.newTabForegroundKey", NewTabForegroundKeyCombo); M("tabs.duplicatePosition", DuplicateTabPositionCombo); M("tabs.duplicateSide", DuplicateTabSideCombo); M("tabs.afterCloseActivate", AfterTabCloseActivateCombo); M("tabs.afterCloseCustomTarget", AfterTabCloseCustomTargetCombo); M("tabs.hoverPreview", TabHoverPreviewsCheck); M("tabs.animateGifPreviews", AnimateGifPreviewsCheck); M("tabs.previewSize", TabPreviewSizeBox); M("tabs.previewResizeModifier", TabPreviewResizeModifierCombo);
         M("tabs.lastTabBehavior", LastTabBehaviorCombo); M("tabs.confirmCloseMultiple", ConfirmCloseMultipleTabsCheck); M("tabs.homePage", HomePageCombo); M("folderNav.group", FolderNavGroupCheck); M("folderNav.previous", FolderNavPreviousCheck);
         M("folderNav.showCounter", ShowFolderCounterCheck); M("folderNav.counterGrandparent", FolderCounterGrandparentCheck);
         M("folderNav.next", FolderNavNextCheck); M("folderNav.explore", FolderNavExploreCheck); M("folderNav.skipEmpty", FolderNavSkipEmptyCheck); M("folderNav.includeHidden", FolderNavIncludeHiddenCheck); M("folderNav.wrap", FolderNavWrapCheck); M("folderNav.openFirst", FolderNavFirstImageCheck); M("folderNav.order", FolderNavOrderCombo);
         M("overlay.pictureCounter", PictureCounterCheck); M("overlay.pictureTemplate", PictureTemplateBox); M("overlay.pictureFontSize", PictureFontSizeBox); M("overlay.pictureOffsetX", PictureOffsetXBox); M("overlay.pictureOffsetY", PictureOffsetYBox);
         M("overlay.pictureBold", PictureBoldCheck); M("overlay.pictureOpacity", PictureOpacityBox); M("overlay.picturePositionTopTabs", TopTabsPositionCombo); M("overlay.pictureAlignmentTopTabs", TopTabsAlignmentCombo); M("overlay.picturePositionSideTabs", SideTabsPositionCombo); M("overlay.pictureAlignmentSideTabs", SideTabsAlignmentCombo);
-        M("overlay.pictureColor", PictureColorCombo); M("overlay.pictureShadow", PictureShadowCheck); M("overlay.pictureBorder", PictureBorderCheck); M("overlay.defaultOpacity", OverlayOpacityBox); M("overlay.zoomStep", OverlayZoomStepBox);
+        M("overlay.pictureColor", PictureColorCombo); M("overlay.pictureShadow", PictureShadowCheck); M("overlay.pictureBorder", PictureBorderCheck);
+        M("overlay.titleBarTemplate", TitleBarTemplateBox); M("overlay.titleBarFontSize", TitleBarFontSizeBox); M("overlay.titleBarColor", TitleBarColorCombo); M("overlay.titleBarBorder", TitleBarBorderCombo);
+        M("overlay.tabBarTemplate", TabBarTemplateBox); M("overlay.tabBarFontSize", TabBarFontSizeBox); M("overlay.tabBarColor", TabBarColorCombo); M("overlay.tabBarBorder", TabBarBorderCombo);
+        M("overlay.pictureSeparator", PictureSeparatorCombo); M("overlay.separatorColor", SeparatorColorCombo);
+        M("tags.enabled", TagsEnabledCheck); M("tags.applyImmediately", TagsApplyImmediatelyCheck); M("tags.groups", TagGroupsHost); M("tags.prefix", TagPrefixBox); M("tags.open", TagOpenBox); M("tags.close", TagCloseBox); M("tags.separator", TagSeparatorBox); M("tags.format", TagFormatBox);
+        M("explorer.infoUseTemplate", ExplorerInfoUseTemplateCheck); M("explorer.infoTemplate", ExplorerInfoTemplateBox); M("overlay.defaultOpacity", OverlayOpacityBox); M("overlay.zoomStep", OverlayZoomStepBox);
         M("overlay.rememberFolder", OverlayRememberFolderCheck); M("overlay.scaleWithWindow", OverlayScaleWithWindowCheck); M("overlay.animationRegion", OverlayAnimationRegionCombo); M("overlay.animationSpeedDipsPerSecond", OverlayAnimationSpeedBox); M("overlay.animationTurnIntervalMs", OverlayAnimationTurnIntervalBox); M("overlay.animationTurnAngleDegrees", OverlayAnimationTurnAngleBox); M("overlay.animationPauseWhileInteracting", OverlayAnimationPauseCheck); M("overlay.animationAvoidOverlap", OverlayAnimationAvoidOverlapCheck); M("overlay.animationRefreshRateHz", OverlayAnimationRefreshRateCombo); M("overlay.defaultDirectory", OverlayDefaultDirectoryBox); M("profiles.defaultDirectory", ProfileDefaultDirectoryBox); M("overlay.persistSession", OverlayPersistSessionCheck); M("overlay.keyboardZoom", OverlayKeyboardZoomCheck); M("overlay.highlightSelected", OverlayHighlightCheck); M("overlay.rememberZoom", OverlayRememberZoomCheck);
         M("windows.externalOpenBehavior", ExternalOpenBehaviorCombo); M("windows.external1", External1Box); M("windows.external2", External2Box); M("windows.external3", External3Box);
         M("windows.defaultViewer", MakeDefaultViewerButton);

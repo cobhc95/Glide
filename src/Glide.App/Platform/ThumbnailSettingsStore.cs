@@ -16,14 +16,23 @@ internal sealed record ThumbnailSettings(
     string Quality,
     bool PreferEmbedded,
     int MaxSourceSize,
-    IReadOnlyList<string>? CustomExtensions = null)
+    IReadOnlyList<string>? CustomExtensions = null,
+    int DefaultsRevision = 0)
 {
+    /// <summary>
+    /// Revision of the defaults a settings file was written under. 1 (5.2.0): Glide takes over all supported formats
+    /// and Fast is the default quality; a file below it that still holds the old defaults (Recommended + Balanced)
+    /// is moved to the new ones once (<see cref="ThumbnailSettingsStore.MigrateDefaults"/>).
+    /// </summary>
+    public const int CurrentDefaultsRevision = 1;
+
     public static ThumbnailSettings Default { get; } = new(
         Enabled: true,
-        Mode: ThumbnailProviderMode.Recommended,
-        Quality: "Balanced",
+        Mode: ThumbnailProviderMode.All,
+        Quality: "Fast",
         PreferEmbedded: true,
-        MaxSourceSize: 0);
+        MaxSourceSize: 0,
+        DefaultsRevision: CurrentDefaultsRevision);
 }
 
 /// <summary>
@@ -85,7 +94,7 @@ internal static class ThumbnailSettingsStore
         {
             if (!File.Exists(SettingsPath)) return ThumbnailSettings.Default;
             var settings = JsonSerializer.Deserialize(File.ReadAllText(SettingsPath), AppJsonContext.Default.ThumbnailSettings);
-            return Normalize(settings);
+            return MigrateDefaults(Normalize(settings));
         }
         catch { return ThumbnailSettings.Default; }
     }
@@ -99,6 +108,45 @@ internal static class ThumbnailSettingsStore
             File.WriteAllText(SettingsPath, JsonSerializer.Serialize(Normalize(settings), AppJsonContext.Default.ThumbnailSettings));
         }
         catch { /* Persistence is best-effort; the registry is the source of truth at runtime. */ }
+    }
+
+    /// <summary>
+    /// One-time move to the 5.2.0 defaults: a file written before <see cref="ThumbnailSettings.CurrentDefaultsRevision"/> that
+    /// still holds the old defaults (Recommended + Balanced) becomes "Glide for all supported formats" + Fast. Any other
+    /// choice (Custom, High, a deliberate Recommended + Fast...) is kept. Pure; <see cref="EnsureMigrationApplied"/> persists it.
+    /// </summary>
+    internal static ThumbnailSettings MigrateDefaults(ThumbnailSettings settings)
+    {
+        if (settings.DefaultsRevision >= ThumbnailSettings.CurrentDefaultsRevision) return settings;
+        var moved = settings.Mode == ThumbnailProviderMode.Recommended && settings.Quality == "Balanced"
+            ? settings with { Mode = ThumbnailProviderMode.All, Quality = "Fast" }
+            : settings;
+        return moved with { DefaultsRevision = ThumbnailSettings.CurrentDefaultsRevision };
+    }
+
+    /// <summary>
+    /// Startup: when the stored file is from before the 5.2.0 defaults, saves the migrated settings and applies them (provider
+    /// presets and the per-user handler set), so an existing user really gets the new defaults in Explorer. A user who turned
+    /// Explorer thumbnails off stays off. No-op once the revision is current.
+    /// </summary>
+    public static void EnsureMigrationApplied()
+    {
+        try
+        {
+            if (!File.Exists(SettingsPath)) return;
+            var stored = JsonSerializer.Deserialize(File.ReadAllText(SettingsPath), AppJsonContext.Default.ThumbnailSettings);
+            if (stored is null || stored.DefaultsRevision >= ThumbnailSettings.CurrentDefaultsRevision) return;
+            var before = Normalize(stored);
+            var migrated = MigrateDefaults(before);
+            var changed = migrated.Mode != before.Mode || migrated.Quality != before.Quality;
+            if (migrated.Enabled && changed && WindowsThumbnailRegistration.ProviderDllPresent)
+            {
+                Apply(migrated, out _, out var applied);
+                migrated = applied;
+            }
+            Save(migrated);
+        }
+        catch { /* best-effort; the next start tries again */ }
     }
 
     /// <summary>Applies the settings to the per-user registry and reports a human-readable status.</summary>
@@ -180,8 +228,8 @@ internal static class ThumbnailSettingsStore
     internal static ThumbnailSettings Normalize(ThumbnailSettings? settings)
     {
         settings ??= ThumbnailSettings.Default;
-        var quality = settings.Quality is "Fast" or "Balanced" or "High" ? settings.Quality : "Balanced";
-        var mode = Enum.IsDefined(settings.Mode) ? settings.Mode : ThumbnailProviderMode.Recommended;
+        var quality = settings.Quality is "Fast" or "Balanced" or "High" ? settings.Quality : ThumbnailSettings.Default.Quality;
+        var mode = Enum.IsDefined(settings.Mode) ? settings.Mode : ThumbnailSettings.Default.Mode;
         var maxSource = settings.MaxSourceSize is 0 or 512 or 1024 or 2048 ? settings.MaxSourceSize : 0;
         var custom = settings.CustomExtensions is { Count: > 0 }
             ? WindowsThumbnailRegistration.ExtensionsFor(ThumbnailProviderMode.Custom, settings.CustomExtensions)

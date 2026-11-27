@@ -714,8 +714,8 @@ public sealed class HotkeyEndToEndTests
                 Assert.True(browserView.IsVisible);
                 Assert.Equal("explorer.backButton", window.SideButtonSlotAt(browserView, true, out tab)!.Id);
                 Assert.Equal("explorer.forwardButton", window.SideButtonSlotAt(browserView, false, out tab)!.Id);
-                // Default (5.0.8): pass-through, not handled by Glide.
-                Assert.False(RaiseSideButton(window, browserView, true).Handled);
+                // Default (round 4 A1): Back in the Explorer, claimed. A new Explorer tab has nothing to go back to.
+                Assert.True(RaiseSideButton(window, browserView, true).Handled);
                 await Settle();
                 Assert.False(Collapsed(window));
                 // Explicitly bound to Back: claimed. A new Explorer tab has nothing to go back to, so the folder stays.
@@ -929,6 +929,8 @@ public sealed class HotkeyEndToEndTests
             ["Services/KeyboardShortcutText.cs"] = "the canonical key-to-text adapter",
             ["Services/DialogEscape.cs"] = "Esc cancels every dialog / secondary window (one class handler; never the main viewer window)",
             ["Controls/ExplorerAddressBar.cs"] = "address bar text editing",
+            ["Controls/BatchRenameDialog.cs"] = "batch rename dialog: Enter in the preset name box saves it (Enter renames and Esc cancels through the default / cancel buttons)",
+            ["Renaming/RenameTemplateEditor.cs"] = "batch rename \"New name\" box text editing: Backspace / Delete remove a chip, Left / Right move over it",
             ["Controls/BrowserSurface.axaml.cs"] = "forwards the filter box keys",
             ["Controls/WindowInWindowOverlayManager.cs"] = "Esc cancels drawing an overlay area (fixed.overlay.areaCancel)",
             ["Settings/SettingsWindow.axaml.cs"] = "Settings window keys",

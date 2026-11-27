@@ -9,7 +9,9 @@ public sealed class OverlayAndTitleNavigationRegressionTests
     {
         var source = ReadSource("src", "Glide.App", "Controls", "WindowInWindowOverlayManager.cs");
         Assert.Contains("current.PreserveAspectRatio", source, StringComparison.Ordinal);
-        Assert.Contains("Math.Clamp(double.IsFinite(scale) ? scale : 1.0, 0.05, 20.0)", source, StringComparison.Ordinal);
+        // The corner's size rules live in the shared OverlayResizeMath (also used by Overlay mode's window resize).
+        Assert.Contains("Math.Clamp(double.IsFinite(scale) ? scale : 1.0, 0.05, 20.0)", ReadSource("src", "Glide.App", "Controls", "OverlayFrameGeometry.cs"), StringComparison.Ordinal);
+        Assert.Contains("OverlayResizeMath.Compute", source, StringComparison.Ordinal);
         Assert.Contains("ContentScale = contentScale", source, StringComparison.Ordinal);
         Assert.Contains("resize.Mode is ResizeMode.WidthOnly or ResizeMode.HeightOnly", source, StringComparison.Ordinal);
         Assert.Contains("Expansion is capped at the full source-image extent", source, StringComparison.Ordinal);

@@ -41,10 +41,17 @@ public static class ImagePerformanceGovernor
     public static int SpeculativeDecodeLanes => Current.SpeculativeDecodeLanes;
 
     /// <summary>
-    /// Concurrent Explorer thumbnail decodes: a quarter of the logical processors, 2..6 (4 on a 16-thread
-    /// desktop, 2 on a 4-thread laptop). Measured: 8 lanes were no faster than 4 and slowed tab switches.
+    /// Concurrent Explorer thumbnail decodes. Half the logical processors, 2..8, on every PC but a high-end one (8 on a 16-thread
+    /// desktop, 2 on a 4-thread laptop); a high-end PC (12+ threads, 20+ GB) uses three quarters, up to 12. 5.1.7 measurements
+    /// (200 mixed pictures, 16 threads): 4 lanes 1310 ms, 8 lanes 869 ms, 12 lanes 749 ms, 16 lanes 714 ms, 24 lanes 708 ms
+    /// for the whole folder. Twelve keeps four threads for the UI and the other tabs; each lane may hold one decoded frame
+    /// (a 24 MP PNG is 96 MB), which is why the cap is only raised where memory is plentiful.
     /// </summary>
-    public static int ThumbnailDecodeLanes => Math.Clamp(Current.LogicalProcessors / 4, 2, 6);
+    public static int ThumbnailDecodeLanes => ThumbnailLanesFor(Current.Tier, Current.LogicalProcessors);
+
+    internal static int ThumbnailLanesFor(GlideHardwareTier tier, int logicalProcessors) => tier == GlideHardwareTier.HighEnd
+        ? Math.Clamp(logicalProcessors * 3 / 4, 2, 12)
+        : Math.Clamp(logicalProcessors / 2, 2, 8);
 
     /// <summary>
     /// Returns the largest file eligible for speculative managed-byte caching. The limit is tied

@@ -16,7 +16,7 @@ public sealed class OverlayControlVisibilityContractTests
         Assert.Contains("ShowTransientChrome(hover, hold: true)", manager, StringComparison.Ordinal);
         Assert.Contains("Controls = 1", compositor, StringComparison.Ordinal);
         Assert.Contains("Active = 2", compositor, StringComparison.Ordinal);
-        Assert.Contains("if (showGlow)", compositor, StringComparison.Ordinal);
+        Assert.Contains("showFrame: showGlow", compositor, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -24,8 +24,11 @@ public sealed class OverlayControlVisibilityContractTests
     {
         var manager = ReadSource("src", "Glide.App", "Controls", "WindowInWindowOverlayManager.cs");
 
-        Assert.Contains("ResizeRect(OverlayState s) => new(s.X + s.Width - 36", manager, StringComparison.Ordinal);
-        Assert.Contains("ResizeRectVisual(OverlayState s)", manager, StringComparison.Ordinal);
+        // The 40 x 40 hit box and the drawn 24 x 24 grip are defined once for picture-in-picture and Overlay mode.
+        var geometry = ReadSource("src", "Glide.App", "Controls", "OverlayFrameGeometry.cs");
+        Assert.Contains("ResizeRect(OverlayState s) => OverlayFrameGeometry.GripHit(Frame(s))", manager, StringComparison.Ordinal);
+        Assert.Contains("GripHit(Rect frame) => new(frame.X + frame.Width - 36", geometry, StringComparison.Ordinal);
+        Assert.Contains("GripVisual(Rect frame)", geometry, StringComparison.Ordinal);
         Assert.Contains("private int HitTestChrome(Point p)", manager, StringComparison.Ordinal);
         Assert.Contains("var chrome = HitTestChrome(p);", manager, StringComparison.Ordinal);
     }
@@ -38,7 +41,7 @@ public sealed class OverlayControlVisibilityContractTests
         Assert.Contains("var hit = HitTest(p);", manager, StringComparison.Ordinal);
         Assert.DoesNotContain("if (hit < 0 && _selected is Guid selected)", manager, StringComparison.Ordinal);
         Assert.Contains("current.PreserveAspectRatio", manager, StringComparison.Ordinal);
-        Assert.Contains("Math.Clamp(double.IsFinite(scale) ? scale : 1.0, 0.05, 20.0)", manager, StringComparison.Ordinal);
+        Assert.Contains("Math.Clamp(double.IsFinite(scale) ? scale : 1.0, 0.05, 20.0)", ReadSource("src", "Glide.App", "Controls", "OverlayFrameGeometry.cs"), StringComparison.Ordinal);
         Assert.Contains("resize.Mode is ResizeMode.WidthOnly or ResizeMode.HeightOnly", manager, StringComparison.Ordinal);
         Assert.Contains("ContentScale = resize.ContentScale", manager, StringComparison.Ordinal);
         Assert.Contains("pixelSize.Width) * renderedScale", manager, StringComparison.Ordinal);

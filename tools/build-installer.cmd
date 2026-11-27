@@ -45,8 +45,8 @@ echo.
 rem Direct invocation is supported. If there is no published app yet, build a
 rem current fast candidate first while explicitly suppressing build.cmd's own
 rem installer step to avoid recursion.
-if not exist "dist\Glide.exe" (
-  echo dist\Glide.exe not found. Building the application first...
+if not exist ".artifacts\stage\Glide.exe" (
+  echo .artifacts\stage\Glide.exe not found. Building the application first...
   set "GLIDE_SKIP_INSTALLER=1"
   set "GLIDE_FORCE_FAST=1"
   call build.cmd --glide-captured fast --no-pause
@@ -59,26 +59,26 @@ if not exist "dist\Glide.exe" (
   )
 )
 
-if not exist "dist\Glide.exe" (
-  echo ERROR: dist\Glide.exe still does not exist after the application build.
+if not exist ".artifacts\stage\Glide.exe" (
+  echo ERROR: .artifacts\stage\Glide.exe still does not exist after the application build.
   exit /b 1
 )
 
-rem Keep the licence files in dist\ (normally staged by build.cmd) when invoked against an older dist\.
-copy /y "LICENSE" "dist\LICENSE" >nul 2>nul
-copy /y "THIRD-PARTY-NOTICES.md" "dist\THIRD-PARTY-NOTICES.md" >nul 2>nul
-if exist "licenses" xcopy /e /i /y /q "licenses" "dist\licenses" >nul 2>nul
+rem Keep the licence files in .artifacts\stage\ (normally staged by build.cmd) when invoked against an older .artifacts\stage\.
+copy /y "LICENSE" ".artifacts\stage\LICENSE" >nul 2>nul
+copy /y "THIRD-PARTY-NOTICES.md" ".artifacts\stage\THIRD-PARTY-NOTICES.md" >nul 2>nul
+if exist "licenses" xcopy /e /i /y /q "licenses" ".artifacts\stage\licenses" >nul 2>nul
 
-rem The installer packages dist\ recursively. When it is invoked directly against an older dist\,
+rem The installer packages .artifacts\stage\ recursively. When it is invoked directly against an older .artifacts\stage\,
 rem refresh the bundled codec provider payload so Setup and the portable ZIP stay identical.
 if exist "codecs\glidecodecs.dll" if exist "codecs\codecs.index.json" (
-  if not exist "dist\codecs" mkdir "dist\codecs"
-  copy /y "codecs\glidecodecs.dll" "dist\codecs\" >nul
-  copy /y "codecs\glidecodecs.glidecodec.json" "dist\codecs\" >nul
-  copy /y "codecs\codecs.index.json" "dist\codecs\" >nul
-  if exist "codecs\glidecodecs.NOTICE.txt" copy /y "codecs\glidecodecs.NOTICE.txt" "dist\codecs\" >nul
+  if not exist ".artifacts\stage\codecs" mkdir ".artifacts\stage\codecs"
+  copy /y "codecs\glidecodecs.dll" ".artifacts\stage\codecs\" >nul
+  copy /y "codecs\glidecodecs.glidecodec.json" ".artifacts\stage\codecs\" >nul
+  copy /y "codecs\codecs.index.json" ".artifacts\stage\codecs\" >nul
+  if exist "codecs\glidecodecs.NOTICE.txt" copy /y "codecs\glidecodecs.NOTICE.txt" ".artifacts\stage\codecs\" >nul
 )
-if not exist "dist\codecs\glidecodecs.dll" echo WARNING: dist\codecs\glidecodecs.dll is missing; AVIF/HEIC/JXL/JPEG 2000 will not open in this installer build.
+if not exist ".artifacts\stage\codecs\glidecodecs.dll" echo WARNING: .artifacts\stage\codecs\glidecodecs.dll is missing; AVIF/HEIC/JXL/JPEG 2000 will not open in this installer build.
 
 set "ISCC="
 for /f "delims=" %%I in ('where ISCC.exe 2^>nul') do if not defined ISCC set "ISCC=%%I"

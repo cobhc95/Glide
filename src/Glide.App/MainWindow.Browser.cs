@@ -17,6 +17,7 @@ using Glide.App.Services;
 using Glide.Core;
 using Glide.Core.Commands;
 using Glide.Core.Workspace;
+using Glide.Imaging;
 
 namespace Glide.App;
 
@@ -178,6 +179,7 @@ public partial class MainWindow
         _browserThumbnailCts = CancellationTokenSource.CreateLinkedTokenSource(_windowLifetimeCts.Token);
         var token = _browserThumbnailCts.Token;
         var generation = Interlocked.Increment(ref _browserGeneration);
+        Volatile.Write(ref _browserPrefetchedUpTo, -1);
         var activeTabId = (_workspace.Active as BrowserTabState)?.Id ?? Guid.Empty;
         CancelAllBrowserRealizations();
         var sameFolder = string.Equals(_explorerLoadedFolder, folder, StringComparison.OrdinalIgnoreCase);
@@ -221,14 +223,15 @@ public partial class MainWindow
             var onlyImages = ExplorerOptionsView.ShowOnlyImages;
             // Enumeration/sorting is the only O(N) folder operation. UI controls, context menus,
             // tooltips and thumbnail decoders are created strictly by ItemsRepeater realization.
-            var probeDimensions = ExplorerSortFields.IsDimension(_explorerSortKey);
+            var probeDimensions = ExplorerSortFields.NeedsProbe(_explorerSortKey);
+            var probeKey = _explorerSortKey;
             // 5.1.0 instant tab switching: a recently shown Explorer tab is rebuilt from its kept listing at once and
             // reconciled in place afterwards, instead of waiting for the folder to be read again.
             var warmListing = TakeWarmExplorerListing(activeTabId, folder);
             var entries = warmListing is not null && !probeDimensions ? warmListing.ToList() : await Task.Run(() =>
             {
                 var listed = ExplorerModel.Enumerate(folder, showHidden, onlyImages, token);
-                if (probeDimensions) ExplorerModel.ProbeDimensions(listed, token); // a dimension sort reads headers here, not on the UI thread
+                if (probeDimensions) ExplorerModel.ProbeForSort(listed, probeKey, token); // a dimension / date taken sort reads headers here, not on the UI thread
                 return listed;
             }, token);
             var reconcileWarm = warmListing is not null && !probeDimensions;
@@ -237,6 +240,7 @@ public partial class MainWindow
                 _workspace.Active is not BrowserTabState active || active.Id != activeTabId ||
                 !string.Equals(active.Folder, folder, StringComparison.OrdinalIgnoreCase)) return;
             _explorerAllEntries = entries;
+            WarmCodecsForListing(entries);
             _explorerLoadedFolder = folder;
             _explorerListing = false;
             _browserSelection.Clear();
@@ -255,6 +259,7 @@ public partial class MainWindow
             ConfigureBrowserRepeaterLayout();
             UpdateExplorerStatus();
             SelectBrowserHighlight(active.Id);
+            RefreshTagSidebarAfterListing();
             if (_explorerPendingRename is { } renamePath)
             {
                 _explorerPendingRename = null;
@@ -319,11 +324,12 @@ public partial class MainWindow
         BrowserRepeater.ItemsSource = null;
         await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Render);
         if (version != Volatile.Read(ref _explorerViewVersion) || generation != Volatile.Read(ref _browserGeneration)) return;
-        if (ExplorerSortFields.IsDimension(_explorerSortKey))
+        if (ExplorerSortFields.NeedsProbe(_explorerSortKey))
         {
-            // Read the pictures' pixel sizes in the background (once per entry), then sort.
+            // Read the pictures' pixel sizes / dates taken in the background (once per entry), then sort.
             var all = _explorerAllEntries.ToList();
-            try { await Task.Run(() => ExplorerModel.ProbeDimensions(all, CancellationToken.None)); }
+            var key = _explorerSortKey;
+            try { await Task.Run(() => ExplorerModel.ProbeForSort(all, key, CancellationToken.None)); }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* unknown sizes sort first */ }
             if (version != Volatile.Read(ref _explorerViewVersion) || generation != Volatile.Read(ref _browserGeneration)) return;
         }
@@ -338,6 +344,7 @@ public partial class MainWindow
         UpdateExplorerSortButton();
         BrowserRepeater.ItemsSource = _browserEntries;
         UpdateExplorerStatus();
+        RefreshTagSidebarAfterListing();
         if (revealCurrent)
         {
             if (_browserCurrentIndex >= 0) EnsureExplorerIndexVisible(_browserCurrentIndex);
@@ -605,7 +612,28 @@ public partial class MainWindow
             if (thumbnailFallback is not null) thumbnailFallback.IsVisible = false;
         }
         else if (thumbnailTarget is not null)
-            _ = LoadBrowserThumbnailAsync(path, thumbnailTarget, thumbnailFallback, thumbnailWidth, token, generation);
+        {
+            var (priority, order) = ExplorerThumbnailRank(entry);
+            _ = LoadBrowserThumbnailAsync(entry, thumbnailTarget, thumbnailFallback, thumbnailWidth, token, generation, priority, order);
+        }
+    }
+
+    /// <summary>
+    /// 5.2.0: where a realised tile stands for the thumbnail scheduler. The repeater also realises a buffer of tiles above and
+    /// below the viewport; only tiles that intersect the viewport are <see cref="ThumbnailPriority.Visible"/> (ordered by reading
+    /// position, top-left to bottom-right), the buffer follows nearest-first. Before the first layout every tile counts as visible.
+    /// </summary>
+    private (ThumbnailPriority Priority, long Order) ExplorerThumbnailRank(ExplorerEntry entry)
+    {
+        var index = _browserEntries.IndexOf(entry);
+        if (index < 0) return (ThumbnailPriority.Visible, int.MaxValue);
+        if (_browserSurface is not { } surface || surface.ScrollViewer.Viewport.Height <= 0) return (ThumbnailPriority.Visible, index);
+        var rect = ExplorerTileRect(index);
+        var top = surface.ScrollViewer.Offset.Y;
+        var bottom = top + surface.ScrollViewer.Viewport.Height;
+        if (rect.Bottom > top && rect.Top < bottom) return (ThumbnailPriority.Visible, index);
+        var distance = rect.Bottom <= top ? top - rect.Bottom : rect.Top - bottom;
+        return (ThumbnailPriority.Near, (long)Math.Min(distance, 10_000_000d) * 1_000_000L + Math.Min(index, 999_999));
     }
 
     private IBrush BrowserFolderBrush() => new SolidColorBrush(Color.Parse(
@@ -643,7 +671,8 @@ public partial class MainWindow
     private ExplorerTileInfo _explorerAppliedTileInfo;
 
     /// <summary>Round 3 #6: the extra info lines under thumbnails chosen in Settings (date / resolution / file size).</summary>
-    private ExplorerTileInfo ExplorerTileInfoView => new(ExplorerOptionsView.InfoDate, ExplorerOptionsView.InfoResolution, ExplorerOptionsView.InfoFileSize);
+    private ExplorerTileInfo ExplorerTileInfoView => new(ExplorerOptionsView.InfoDate, ExplorerOptionsView.InfoResolution, ExplorerOptionsView.InfoFileSize,
+        ExplorerOptionsView.InfoUseTemplate ? ExplorerOptionsView.InfoTemplate : null, ExplorerOptionsView.Separator);
 
     /// <summary>Extra info lines every icon tile reserves (0 in Small, List and Details, which never show them).</summary>
     private int ExplorerInfoLines => ExplorerViewModes.IsIconMode(_browserViewMode) ? ExplorerTileInfoView.Lines : 0;
@@ -664,7 +693,7 @@ public partial class MainWindow
     {
         var host = new StackPanel { Width = width, Tag = "tileinfo", IsHitTestVisible = false };
         var lines = info.Text(entry, pixels: null);
-        TextBlock? resolutionLine = null;
+        var built = new List<TextBlock>(lines.Count);
         for (var i = 0; i < lines.Count; i++)
         {
             var line = new TextBlock
@@ -675,19 +704,25 @@ public partial class MainWindow
             line.Classes.Add("exMuted");
             line.Classes.Add("exInfo");
             host.Children.Add(line);
-            if (info.Resolution && i == (info.Date ? 1 : 0)) resolutionLine = line;
+            built.Add(line);
         }
-        if (resolutionLine is not null && entry.IsImage) _ = FillExplorerTileResolutionAsync(entry, resolutionLine, generation);
+        if ((info.NeedsPixels || info.NeedsTaken) && entry.IsImage) _ = FillExplorerTileInfoAsync(entry, info, built, generation);
         return host;
     }
 
-    private async Task FillExplorerTileResolutionAsync(ExplorerEntry entry, TextBlock line, long generation)
+    /// <summary>Reads the picture's pixel size / date taken off the UI thread, then fills in the info lines.</summary>
+    private async Task FillExplorerTileInfoAsync(ExplorerEntry entry, ExplorerTileInfo info, IReadOnlyList<TextBlock> lines, long generation)
     {
         Glide.Imaging.ImageDimensions pixels;
-        try { pixels = await Task.Run(() => entry.PixelDimensions); }
-        catch { return; /* unreadable: the line stays empty */ }
-        if (generation != Volatile.Read(ref _browserGeneration) || !pixels.IsValid) return;
-        line.Text = new ExplorerTileInfo(false, true, false).Text(entry, pixels)[0];
+        DateTime? taken;
+        try
+        {
+            (pixels, taken) = await Task.Run(() => (info.NeedsPixels ? entry.PixelDimensions : default, info.NeedsTaken ? entry.DateTaken : null));
+        }
+        catch { return; /* unreadable: the lines keep what they have */ }
+        if (generation != Volatile.Read(ref _browserGeneration)) return;
+        var texts = info.Text(entry, pixels.IsValid ? pixels : null, taken);
+        for (var i = 0; i < lines.Count && i < texts.Count; i++) lines[i].Text = texts[i];
     }
 
     private void ConfigureBrowserRepeaterLayout()
@@ -744,6 +779,7 @@ public partial class MainWindow
              ((ExplorerTile)tile).BuiltInfo != (ExplorerViewModes.IsIconMode(_browserViewMode) ? ExplorerTileInfoView : default) ||
              !_browserRealizationCts.ContainsKey(tile)))
             PopulateExplorerTile(tile, entry);
+        PrefetchExplorerThumbnails(e.Index);
         UpdateExplorerTileVisual(tile);
         if (_explorerRenamePath is not null && tile.Tag is ExplorerEntry shown &&
             string.Equals(shown.Path, _explorerRenamePath, StringComparison.OrdinalIgnoreCase))
@@ -762,41 +798,113 @@ public partial class MainWindow
         ReleaseExplorerTileImages(e.Element);
     }
 
-    private static bool CanUseBrowserThumbnailDecoder(string path) =>
-        Path.GetExtension(path).ToLowerInvariant() is ".jpg" or ".jpeg" or ".png" or ".bmp" or ".gif" or ".tif" or ".tiff";
+    /// <summary>5.2.0: every format the viewer opens has a thumbnail route (was 11 suffixes); see <see cref="ThumbnailRoutes"/>.</summary>
+    private static bool CanUseBrowserThumbnailDecoder(string path) => ThumbnailRoutes.CanThumbnail(path);
+
+    /// <summary>Rows of tiles below the last prepared one that are decoded ahead of the scroll (their thumbnails land in the disk cache).</summary>
+    private const int ExplorerPrefetchRows = 2;
+
+    /// <summary>
+    /// 5.2.0: a listing that holds HEIC / AVIF / JPEG XL / JPEG 2000 files warms the codec plug-in on a background thread
+    /// (hash check, load, start-up), so the first tile or the first open of one does not pay it. A snapshot of the paths is
+    /// taken here (the list belongs to the UI thread); the scan itself runs off it.
+    /// </summary>
+    private static void WarmCodecsForListing(IReadOnlyCollection<ExplorerEntry> entries)
+    {
+        if (entries.Count == 0) return;
+        var paths = new string[entries.Count];
+        var i = 0;
+        foreach (var entry in entries) paths[i++] = entry.IsDirectory ? "" : entry.Path;
+        _ = Task.Run(() => CodecPreloader.NotifyListing(paths));
+    }
+
+    /// <summary>Most files the whole-folder preparation queues when only the memory cache keeps the results (disk cache off).</summary>
+    internal const int ExplorerPrepareFolderMaxWithoutDiskCache = 1500;
+    /// <summary>Most files the whole-folder preparation queues with the disk cache on.</summary>
+    internal const int ExplorerPrepareFolderMax = 5000;
+
+    /// <summary>
+    /// 5.2.0 ("Thumbnails loaded at once", "Prepare thumbnails for the whole folder in the background"): decode lanes from the setting
+    /// (clamped by free memory) and the in-memory thumbnail cache size. Applied live; running decodes finish on the old lane count.
+    /// </summary>
+    internal void ApplyThumbnailLoadSettings()
+    {
+        var profile = ImagePerformanceGovernor.Current;
+        long available = 0;
+        try { var info = GC.GetGCMemoryInfo(); available = Math.Max(0, info.TotalAvailableMemoryBytes - info.MemoryLoadBytes); }
+        catch { /* unknown: no memory clamp */ }
+        var lanes = Glide.Core.Settings.ThumbnailLanesSetting.Resolve(_settings.ThumbnailLanes, profile.Tier == GlideHardwareTier.HighEnd, profile.LogicalProcessors, available);
+        _browserThumbnails.SetLanes(lanes, Glide.Core.Settings.ThumbnailLanesSetting.IoLanesFor(lanes));
+        var memoryBytes = (_settings.ThumbnailPrepareFolder ? 256L : 64L) * 1024 * 1024;
+        if (_browserThumbnails.MemoryCache is { } cache) cache.SetMaxBytes(memoryBytes);
+        else _browserThumbnails.MemoryCache = new ThumbnailMemoryCache(memoryBytes);
+    }
+
+    /// <summary>
+    /// Look-ahead (audit #9): when a tile is prepared, the tiles up to <see cref="ExplorerPrefetchRows"/> rows after it are queued
+    /// at low priority behind every visible tile. 5.2.0: with "Prepare thumbnails for the whole folder in the background" (default)
+    /// the first prepared tile queues every picture of the folder instead (bounded by <see cref="ExplorerPrepareFolderMax"/>); the
+    /// pictures go to the in-memory cache and the disk cache, so scrolling onto them shows them at once, and a tile realised while its
+    /// file is still queued joins that job (raised to its rank) instead of decoding it twice. Opening another folder cancels it.
+    /// Without either cache the result would be thrown away, so nothing is queued.
+    /// </summary>
+    private void PrefetchExplorerThumbnails(int preparedIndex)
+    {
+        var wholeFolder = _settings.ThumbnailPrepareFolder && _browserThumbnails.MemoryCache is not null;
+        if (ThumbnailDiskCache.Current is null && !wholeFolder) return;
+        var mode = _browserViewMode;
+        if (!ExplorerViewModes.IsIconMode(mode) && mode != ExplorerViewModes.Small) return;
+        var entries = _browserEntries;
+        var last = wholeFolder
+            ? Math.Min(entries.Count - 1, (ThumbnailDiskCache.Current is null ? ExplorerPrepareFolderMaxWithoutDiskCache : ExplorerPrepareFolderMax) - 1)
+            : Math.Min(entries.Count - 1, preparedIndex + Math.Max(1, ExplorerColumnCount()) * ExplorerPrefetchRows);
+        if (wholeFolder) preparedIndex = Volatile.Read(ref _browserPrefetchedUpTo) >= 0 ? preparedIndex : -1;
+        var first = Math.Max(preparedIndex + 1, Volatile.Read(ref _browserPrefetchedUpTo) + 1);
+        if (last < first) return;
+        Volatile.Write(ref _browserPrefetchedUpTo, last);
+        var width = Math.Max(16, ExplorerViewModes.PreviewSize(mode).Width);
+        var token = _browserThumbnailCts?.Token ?? CancellationToken.None;
+        for (var i = first; i <= last; i++)
+        {
+            var entry = entries[i];
+            if (entry.IsDirectory || !entry.IsImage || !CanUseBrowserThumbnailDecoder(entry.Path)) continue;
+            _ = PrefetchExplorerThumbnailAsync(entry, width, i, token);
+        }
+    }
+
+    private async Task PrefetchExplorerThumbnailAsync(ExplorerEntry entry, int width, long order, CancellationToken token)
+    {
+        try
+        {
+            var bitmap = await _browserThumbnails.RunAsync(
+                new ThumbnailRequest(entry.Path, entry.Size, entry.Modified.Ticks, width, order), ThumbnailPriority.Prefetch, token).ConfigureAwait(false);
+            bitmap?.Dispose(); // the decode already stored it in the disk cache
+        }
+        catch { /* look-ahead is best effort */ }
+    }
 
     /// <summary>Tile tooltip: the path, plus size and modified time for files (same text as before, from the listing).</summary>
     private static string BrowserTooltipText(ExplorerEntry entry) => entry.IsDirectory
         ? entry.Path
         : $"{entry.Path}\n{entry.Size / 1024d / 1024d:F2} MB\nModified {entry.Modified:g}";
 
-    private async Task LoadBrowserThumbnailAsync(string path, Image target, Control? fallback, int width, CancellationToken token, long generation)
+    private async Task LoadBrowserThumbnailAsync(ExplorerEntry entry, Image target, Control? fallback, int width, CancellationToken token, long generation,
+        ThumbnailPriority priority = ThumbnailPriority.Visible, long order = 0)
     {
-        var entered = false;
+        var path = entry.Path;
         try
         {
-            await _browserThumbnailGate.WaitAsync(token).ConfigureAwait(false);
-            entered = true;
             // Thumbnail work is deliberately independent from the foreground image pipeline: opening
             // a browser tab must never steal the decode generation or cancel an image-view request.
-            Bitmap? bitmap;
-            try
-            {
-                bitmap = await Task.Run(() =>
-                {
-                    token.ThrowIfCancellationRequested();
-                    return ThumbnailDecode.DecodeToWidth(path, Math.Max(16, width));
-                }, token).ConfigureAwait(false);
-            }
-            finally
-            {
-                // Free the decode lane as soon as the pixels exist. The lane used to stay held while the
-                // result waited in the UI-thread queue, so a busy UI throttled thumbnail throughput.
-                _browserThumbnailGate.Release();
-                entered = false;
-            }
-            if (bitmap is null) return; // too large to decode safely: the tile keeps its file-type icon
+            // The scheduler starts visible tiles first, cheapest format / size first, gives up on a file that takes too long
+            // (the tile keeps its file-type glyph) and frees its lane the moment the pixels exist, so a busy UI thread
+            // cannot throttle the decoding.
+            var bitmap = await _browserThumbnails.RunAsync(
+                new ThumbnailRequest(path, entry.Size, entry.Modified.Ticks, Math.Max(16, width), order),
+                priority, token, out var timing).ConfigureAwait(false);
+            if (bitmap is null) return; // too large, not decodable or timed out: the tile keeps its file-type icon
             if (token.IsCancellationRequested || generation != Volatile.Read(ref _browserGeneration)) { bitmap.Dispose(); return; }
+            var readyAt = System.Diagnostics.Stopwatch.GetTimestamp();
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
                 if (token.IsCancellationRequested || generation != Volatile.Read(ref _browserGeneration) ||
@@ -804,11 +912,11 @@ public partial class MainWindow
                 if (target.Source is IDisposable previous) previous.Dispose();
                 target.Source = bitmap;
                 if (fallback is not null) fallback.IsVisible = false;
+                if (ThumbnailTrace.Enabled) ThumbnailTrace.Applied(timing, ThumbnailTiming.Ms(readyAt, System.Diagnostics.Stopwatch.GetTimestamp()));
             }, DispatcherPriority.Background);
         }
         catch (OperationCanceledException) { /* cancellation is the expected way to stop this work */ }
         catch { /* cancellation is the expected way to stop this work */ }
-        finally { if (entered) _browserThumbnailGate.Release(); }
     }
 
     // ------------------------------------------------------------------------------------------
@@ -878,6 +986,7 @@ public partial class MainWindow
         foreach (var tile in RealizedExplorerTiles()) UpdateExplorerTileVisual(tile);
         UpdateExplorerStatus();
         NoteExplorerSessionChanged();
+        RefreshTagSidebarTargets();
     }
 
     private List<ExplorerEntry> SelectedExplorerEntries() =>
@@ -1042,6 +1151,7 @@ public partial class MainWindow
         }
         if (mode == _browserViewMode) return;
         _browserViewMode = mode;
+        Volatile.Write(ref _browserPrefetchedUpTo, -1); // look-ahead tiles are a different width in the new view
         // Retire the complete old visual generation before changing geometry. Reusing a measured
         // ItemsRepeater tree across view modes was the source of overlapping/"melted" icons.
         _explorerRefreshTask = ApplyExplorerViewAsync();
@@ -1221,23 +1331,25 @@ public partial class MainWindow
         // Explorer gesture rows (4.8.0): the double-click row (also Enter / "Open") and the
         // middle-click row. Default = current tab for double-click, new tab for middle-click.
         // The context menu's explicit Open items always open (GestureResolver.ForExplorerOpen).
+        // Round 4 C3: Alt / Ctrl / Shift + double-click have their own rows (Alt = properties by default).
         var action = GestureResolver.ForExplorerOpen(
-            ResolveGestureSlot(alternate ? "explorer.middleClick" : "explorer.doubleClick", modifiers), alternate, fromMenu);
+            alternate ? ResolveGestureSlot("explorer.middleClick", modifiers) : ResolveExplorerDoubleClick(modifiers).Action, alternate, fromMenu);
+        if (UiTrace.Input) UiTrace.WriteInput("open_entry", $"path={path} alternate={alternate} fromMenu={fromMenu} keys={modifiers} action={action} exists={File.Exists(path)} dir={Directory.Exists(path)}");
         if (action is not (GestureCatalog.OpenInCurrentTab or GestureCatalog.OpenInNewTab))
         {
             await ExecuteGestureActionAsync(action);
             return;
         }
-        // 5.1.0: a real middle-click uses its own side / position settings; menu items and double-click the general ones.
-        var opening = alternate && !fromMenu ? ResolveMiddleClickOpening(modifiers) : ResolveNewTabOpening(modifiers);
+        // Round 4 D1: middle-click, menu items and double-click all follow the general new-tab settings and keys.
+        var opening = ResolveNewTabOpening(modifiers);
         if (Directory.Exists(path))
         {
             if (!alternate) { NavigateBrowserTo(path, addHistory: true); return; }
             await OpenFolderInNewTabAsync(path, opening, fromMenu ? "explorer_menu" : "explorer_middle_click");
             return;
         }
-        if (!File.Exists(path)) return;
-        if (!ImageNavigator.IsSupported(path)) { ExplorerShell.Open(path); return; }
+        if (!File.Exists(path)) { UiTrace.WriteInput("open_stopped", "reason=file_missing"); return; }
+        if (!ImageNavigator.IsSupported(path)) { UiTrace.WriteInput("open_stopped", "reason=not_an_image_shell_open"); ExplorerShell.Open(path); return; }
         var newTab = action == GestureCatalog.OpenInNewTab;
         _diagnostics.Write("browser", "open_image", new { path, newTab, alternate });
         if (newTab)

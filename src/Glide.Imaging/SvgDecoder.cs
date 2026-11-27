@@ -46,7 +46,7 @@ public static class SvgDecoder
             var targetW = Math.Max(1, (int)Math.Round(intrinsicW * scale));
             var targetH = Math.Max(1, (int)Math.Round(intrinsicH * scale));
             if (targetW > 32768 || targetH > 32768) return false;
-            bitmap = Render(picture, targetW, targetH);
+            bitmap = Render(picture, targetW, targetH, intrinsicW, intrinsicH);
             return bitmap is not null;
         }
         catch
@@ -55,6 +55,18 @@ public static class SvgDecoder
             bitmap = null;
             return false;
         }
+    }
+
+    /// <summary>Runs the parse -> picture -> raster pipeline once on a tiny in-memory document (idle warm-up, <see cref="SvgTileRenderer.WarmUp"/>).</summary>
+    internal static void WarmUpParser(byte[] document)
+    {
+        using var svg = new SKSvg();
+        using var stream = new MemoryStream(document, writable: false);
+        var picture = LoadWithoutExternalImages(svg, stream);
+        if (picture is null) return;
+        using var surface = SKSurface.Create(new SKImageInfo(16, 16, SKColorType.Bgra8888, SKAlphaType.Premul));
+        surface?.Canvas.DrawPicture(picture);
+        surface?.Canvas.Flush();
     }
 
     public static bool TryProbeDimensions(string path, out ImageDimensions dimensions)
@@ -207,13 +219,17 @@ public static class SvgDecoder
         value.Length >= 3 && char.IsAsciiLetter(value[0]) && value[1] == ':' && (value[2] == '\\' || value[2] == '/') &&
         value.IndexOf("\\\\", 2, StringComparison.Ordinal) < 0 && value.IndexOf("//", 2, StringComparison.Ordinal) < 0;
 
-    private static unsafe Bitmap? Render(SKPicture picture, int width, int height)
+    private static unsafe Bitmap? Render(SKPicture picture, int width, int height, float intrinsicWidth, float intrinsicHeight)
     {
         var info = new SKImageInfo(width, height, SKColorType.Bgra8888, SKAlphaType.Premul);
         using var surface = SKSurface.Create(info);
         if (surface is null) return null;
         var canvas = surface.Canvas;
         canvas.Clear(SKColors.Transparent);
+        // The picture is recorded at the document's own size: scale it to the requested size (5.2.0: it was drawn 1:1 into the
+        // requested frame, so a preview of a different size than the document showed a cropped or tiny picture).
+        if (width != (int)Math.Round(intrinsicWidth) || height != (int)Math.Round(intrinsicHeight))
+            canvas.Scale(width / Math.Max(1f, intrinsicWidth), height / Math.Max(1f, intrinsicHeight));
         canvas.DrawPicture(picture);
         canvas.Flush();
         using var image = surface.Snapshot();

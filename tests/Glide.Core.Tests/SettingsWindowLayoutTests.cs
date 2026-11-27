@@ -323,6 +323,59 @@ public sealed class SettingsWindowLayoutTests : IDisposable
         return problems;
     }
 
+    /// <summary>Round 4 E1: "Hide cursor in normal window" lives on Mouse &amp; keyboard (catalogue and control) with a link to the fullscreen option.</summary>
+    [Fact]
+    public async Task Hide_cursor_in_normal_window_is_on_the_mouse_page()
+    {
+        Assert.Equal("Mouse & keyboard", Glide.Core.Settings.SettingsCatalog.All.Single(e => e.Id == "fullscreen.hideCursorWindowed").Category);
+        await AvaloniaHeadlessFixture.RunOnUIThreadAsync(() =>
+        {
+            var window = Open(900, 700, "Mouse", expandAll: true);
+            try
+            {
+                var mouse = window.FindControl<StackPanel>("MousePanel")!;
+                Assert.Contains(window.FindControl<CheckBox>("HideCursorNormalWindowCheck")!.GetLogicalAncestors(), a => ReferenceEquals(a, mouse));
+                Assert.Contains(window.FindControl<Button>("HideCursorFullscreenLinkButton")!.GetLogicalAncestors(), a => ReferenceEquals(a, mouse));
+                Assert.DoesNotContain(window.FindControl<CheckBox>("HideCursorFullscreenCheck")!.GetLogicalAncestors(), a => ReferenceEquals(a, mouse));
+            }
+            finally { window.Close(); }
+            return Task.CompletedTask;
+        });
+    }
+
+    /// <summary>Round 4 D3: the flipping "Key to open ... instead" labels never run into their combo box, whichever wording shows.</summary>
+    [Theory]
+    [InlineData(0, 0, 720)]
+    [InlineData(1, 1, 720)]
+    [InlineData(0, 0, 1000)]
+    [InlineData(1, 1, 1000)]
+    public async Task New_tab_key_labels_keep_clear_of_their_combo_boxes(int position, int side, double width)
+    {
+        await AvaloniaHeadlessFixture.RunOnUIThreadAsync(() =>
+        {
+            var window = Open(width, 600, "Tabs", expandAll: true);
+            try
+            {
+                Named<ComboBox>(window, "NewTabPositionCombo").SelectedIndex = position;
+                Named<ComboBox>(window, "SwitchToNewTabsCombo").SelectedIndex = side;
+                Call(window, "UpdateNewTabKeyLabels");
+                Resize(window, width, 600);
+                foreach (var (label, combo) in new[] { ("NewTabPositionKeyLabel", "NewTabPositionKeyCombo"), ("NewTabForegroundKeyLabel", "NewTabForegroundKeyCombo") })
+                {
+                    var text = Named<TextBlock>(window, label);
+                    var textRect = BoundsIn(text, window);
+                    var comboRect = BoundsIn(Named<ComboBox>(window, combo), window);
+                    var ink = new Rect(textRect.X, textRect.Y, text.TextLayout.WidthIncludingTrailingWhitespace, text.TextLayout.Height);
+                    var sideBySide = ink.Bottom > comboRect.Top && ink.Top < comboRect.Bottom;
+                    Assert.True(sideBySide ? ink.Right <= comboRect.X - 8 : !ink.Intersects(comboRect),
+                        $"{label} \"{text.Text}\" text {ink} runs into its combo {comboRect} at {width} wide");
+                }
+            }
+            finally { window.Close(); }
+            return Task.CompletedTask;
+        });
+    }
+
     [Theory]
     [InlineData("General")]
     [InlineData("Appearance")]
@@ -498,6 +551,134 @@ public sealed class SettingsWindowLayoutTests : IDisposable
                 var first = Named<CheckBox>(window, "ResetAllSettingsCheck");
                 Assert.True(first.IsFocused, "the first Reset Glide tick box has keyboard focus");
                 Assert.False(first.IsChecked == true, "opening the card never ticks anything");
+            }
+            finally { window.Close(); }
+            return Task.CompletedTask;
+        });
+    }
+
+    /// <summary>5.1.7 UI test bug 1: both offset boxes of the Text overlay placement cards stay inside the card, on either card.</summary>
+    [Theory]
+    [InlineData(false, 720)]
+    [InlineData(true, 720)]
+    [InlineData(false, 930)]
+    [InlineData(true, 930)]
+    public async Task Text_overlay_offset_boxes_stay_inside_their_placement_card(bool sideTabs, double width)
+    {
+        await AvaloniaHeadlessFixture.RunOnUIThreadAsync(() =>
+        {
+            var window = Open(width, 700, "Appearance", expandAll: true);
+            try
+            {
+                Call(window, "PlaceTextOverlayOffsetPanel", sideTabs);
+                Resize(window, width, 700);
+                var card = Named<Border>(window, sideTabs ? "SideTabsPlacementCard" : "TopTabsPlacementCard");
+                var cardRect = BoundsIn(card, window);
+                foreach (var name in new[] { "PictureOffsetXBox", "PictureOffsetYBox" })
+                {
+                    var box = Named<NumericUpDown>(window, name);
+                    var rect = BoundsIn(box, window);
+                    Assert.True(rect.Width >= 100, $"{name} is only {rect.Width:0} wide");
+                    // Real layout: the text area inside the box shows at least 6 characters ("-12345") of the control's own font.
+                    var text = box.GetVisualDescendants().OfType<TextBox>().First();
+                    var inner = BoundsIn(text, window);
+                    var sample = new Avalonia.Media.FormattedText("-12345", System.Globalization.CultureInfo.CurrentCulture, Avalonia.Media.FlowDirection.LeftToRight,
+                        new Avalonia.Media.Typeface(text.FontFamily), text.FontSize, null);
+                    Assert.True(inner.Width - text.Padding.Left - text.Padding.Right >= sample.Width, $"{name}: the text area is {inner.Width:0} wide, -12345 needs {sample.Width:0}");
+                    Assert.True(rect.Right <= cardRect.Right - card.Padding.Right + 0.5, $"{name} right edge {rect.Right:0.#} sticks out past the card's content edge {cardRect.Right - card.Padding.Right:0.#}");
+                    Assert.True(rect.Left >= cardRect.Left + card.Padding.Left - 0.5, $"{name} left edge is outside the card");
+                }
+                Save(window, $"offset-card-{(sideTabs ? "side" : "top")}-{width:0}.png");
+            }
+            finally { window.Close(); }
+            return Task.CompletedTask;
+        });
+    }
+
+    /// <summary>
+    /// 5.1.7 desktop retest E: typing 5000 into an offset box (real key input, then leaving the box) is stored as 5000, not 500 or 4000;
+    /// the limit is applied when the overlay is drawn, never to what was typed.
+    /// </summary>
+    [Theory]
+    [InlineData(false, "PictureOffsetXBox", "5000", 5000, 0)]
+    [InlineData(true, "PictureOffsetYBox", "-12345", 0, -12345)]
+    [InlineData(false, "PictureOffsetXBox", "100000", 100000, 0)]
+    public async Task Typing_into_an_offset_box_is_stored_exactly(bool sideTabs, string name, string typed, int expectedX, int expectedY)
+    {
+        await AvaloniaHeadlessFixture.RunOnUIThreadAsync(() =>
+        {
+            var state = new GlideSettingsState { TabsEnabled = true, TabStripPosition = sideTabs ? "Side" : "Top" };
+            var window = Open(930, 700, "Appearance", expandAll: true, state: state);
+            try
+            {
+                Call(window, "PlaceTextOverlayOffsetPanel", sideTabs);
+                Resize(window, 930, 700);
+                var box = Named<NumericUpDown>(window, name);
+                var text = box.GetVisualDescendants().OfType<TextBox>().First();
+                text.Focus();
+                Dispatcher.UIThread.RunJobs();
+                text.SelectAll();
+                window.KeyTextInput(typed);
+                Dispatcher.UIThread.RunJobs();
+                Assert.Equal(typed, text.Text);   // every character was accepted by the box
+                Named<TextBox>(window, "SearchBox").Focus();   // leaving the box commits it
+                Dispatcher.UIThread.RunJobs();
+                window.UpdateLayout();
+                Assert.Equal((decimal)(name == "PictureOffsetXBox" ? expectedX : expectedY), box.Value);
+                var read = (GlideSettingsState)Call(window, "ReadControls")!;
+                Assert.Equal((expectedX, expectedY), Glide.Core.Settings.TextOverlayPlacements.Offset(read, sideTabs));
+            }
+            finally { window.Close(); }
+            return Task.CompletedTask;
+        });
+    }
+
+    /// <summary>5.1.7 UI test bug 2: a search result's title is never cut off ("New-tab custom pat"); it wraps instead.</summary>
+    [Theory]
+    [InlineData("New-tab custom path", 720)]
+    [InlineData("New-tab custom path", 930)]
+    [InlineData("Startup custom path", 720)]
+    public async Task Search_result_titles_are_not_cut_off(string query, double width)
+    {
+        await AvaloniaHeadlessFixture.RunOnUIThreadAsync(() =>
+        {
+            var window = Open(width, 600, "General");
+            try
+            {
+                Named<TextBox>(window, "SearchBox").Text = query;
+                Call(window, "RunSearchRebuildCore", query, false);
+                Resize(window, width, 600);
+                var panel = Named<StackPanel>(window, "SearchPanel");
+                var title = panel.GetVisualDescendants().OfType<TextBlock>()
+                    .First(t => string.Equals(t.Text, query, StringComparison.OrdinalIgnoreCase) && t.FontWeight == Avalonia.Media.FontWeight.SemiBold);
+                Assert.True(title.TextLayout.WidthIncludingTrailingWhitespace <= title.Bounds.Width + 0.5,
+                    $"the title \"{title.Text}\" needs {title.TextLayout.WidthIncludingTrailingWhitespace:0} but is given {title.Bounds.Width:0}");
+                Save(window, $"search-title-{width:0}.png");
+            }
+            finally { window.Close(); }
+            return Task.CompletedTask;
+        });
+    }
+    /// <summary>5.1.7 UI test bug 5: a search result has exactly one Open button (Tag groups showed a second, inert one).</summary>
+    [Fact]
+    public async Task Every_search_result_has_at_most_one_Open_button_and_Tag_groups_one_that_works()
+    {
+        await AvaloniaHeadlessFixture.RunOnUIThreadAsync(() =>
+        {
+            var window = Open(900, 700, "General");
+            try
+            {
+                var offenders = new List<string>();
+                foreach (var setting in Glide.Core.Settings.SettingsCatalog.All)
+                {
+                    var card = (Control)Call(window, "BuildSearchResult", setting)!;
+                    var opens = card.GetLogicalDescendants().OfType<Button>().Count(b => b.Content as string == "Open");
+                    if (opens > 1) offenders.Add($"{setting.Id}: {opens}");
+                }
+                Assert.True(offenders.Count == 0, "more than one Open button on: " + string.Join(", ", offenders));
+
+                var tags = (Control)Call(window, "BuildSearchResult", Glide.Core.Settings.SettingsCatalog.All.Single(s => s.Id == "tags.groups"))!;
+                Assert.Single(tags.GetLogicalDescendants().OfType<Button>(), b => b.Content as string == "Open");
             }
             finally { window.Close(); }
             return Task.CompletedTask;

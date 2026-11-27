@@ -97,6 +97,7 @@ rem Remove every prior portable deliverable (any version) so stale, mislabeled a
 rem never accumulate next to the current release.
 del /q "Glide-*.exe" >nul 2>nul
 del /q "Glide-*-Portable.zip" >nul 2>nul
+del /q "Glide-Zero-Context-Handover.zip" >nul 2>nul
 call :progress 2 "Preflight"
 
 where dotnet >nul 2>nul
@@ -302,11 +303,11 @@ if "%GLIDE_FAST%"=="1" (
   call :progress 48 "Core + Input + Explorer tests (parallel)"
   echo [4-5/8] Running Core, Input and Explorer test projects in parallel...
   rem Capture the exit code on the very next line: any command in between (even echo/call) can reset
-  rem it, and a non-zero code from the parallel run must stop the build before dist\ is deleted.
+  rem it, and a non-zero code from the parallel run must stop the build before .artifacts\stage\ is deleted.
   dotnet test Glide.sln -c Release --no-build -m -p:BuildInParallel=true
   set "GLIDE_TEST_RC=!errorlevel!"
   if not "!GLIDE_TEST_RC!"=="0" (
-    echo ERROR: Core/Input/Explorer tests failed ^(exit code !GLIDE_TEST_RC!^). Publish skipped; dist\ left untouched.
+    echo ERROR: Core/Input/Explorer tests failed ^(exit code !GLIDE_TEST_RC!^). Publish skipped; .artifacts\stage\ left untouched.
     set "GLIDE_BUILD_RC=!GLIDE_TEST_RC!"
     goto :fail
   )
@@ -322,42 +323,42 @@ if "%GLIDE_FAST%"=="1" (
 
 call :progress 78 "Publishing"
 echo [7/8] Publishing...
-if not "%GLIDE_FAST%"=="1" if exist dist rmdir /s /q dist
-if "%GLIDE_FAST%"=="1" if not exist dist mkdir dist
+if not "%GLIDE_FAST%"=="1" if exist ".artifacts\stage" rmdir /s /q ".artifacts\stage"
+if "%GLIDE_FAST%"=="1" if not exist ".artifacts\stage" mkdir ".artifacts\stage"
 rem NativeAOT: Glide.exe needs no installed .NET. The linker step locates MSVC through vswhere.
 set "PATH=%PATH%;%ProgramFiles(x86)%\Microsoft Visual Studio\Installer"
-dotnet publish src\Glide.App\Glide.App.csproj -c Release -r win-x64 --self-contained true -p:PublishAot=true -o dist
+dotnet publish src\Glide.App\Glide.App.csproj -c Release -r win-x64 --self-contained true -p:PublishAot=true -o ".artifacts\stage"
 set "GLIDE_PUBLISH_RC=!errorlevel!"
 if not "!GLIDE_PUBLISH_RC!"=="0" (
   echo ERROR: dotnet publish failed ^(exit code !GLIDE_PUBLISH_RC!^).
   set "GLIDE_BUILD_RC=!GLIDE_PUBLISH_RC!"
   goto :fail
 )
-if not exist "dist\Glide.exe" (
-  echo ERROR: dotnet publish reported success but dist\Glide.exe is missing.
+if not exist ".artifacts\stage\Glide.exe" (
+  echo ERROR: dotnet publish reported success but .artifacts\stage\Glide.exe is missing.
   set "GLIDE_BUILD_RC=1"
   goto :fail
 )
-rem Post-build cleanup: fast mode keeps dist\, so drop any symbol files left by earlier builds.
-del /q "dist\*.pdb" >nul 2>nul
+rem Post-build cleanup: drop any symbol files from the publish output.
+del /q ".artifacts\stage\*.pdb" >nul 2>nul
 
-rem Licence files ship in dist\ so the portable ZIP and the installer (both built from dist\) carry them.
-copy /y "LICENSE" "dist\LICENSE" >nul
+rem Licence files ship in .artifacts\stage\ so the installer (built from .artifacts\stage\) carries them.
+copy /y "LICENSE" ".artifacts\stage\LICENSE" >nul
 if errorlevel 1 (
-  echo ERROR: Could not stage LICENSE into dist.
+  echo ERROR: Could not stage LICENSE into the staging folder.
   set "GLIDE_BUILD_RC=1"
   goto :fail
 )
-copy /y "THIRD-PARTY-NOTICES.md" "dist\THIRD-PARTY-NOTICES.md" >nul
+copy /y "THIRD-PARTY-NOTICES.md" ".artifacts\stage\THIRD-PARTY-NOTICES.md" >nul
 if errorlevel 1 (
-  echo ERROR: Could not stage THIRD-PARTY-NOTICES.md into dist.
+  echo ERROR: Could not stage THIRD-PARTY-NOTICES.md into the staging folder.
   set "GLIDE_BUILD_RC=1"
   goto :fail
 )
 if exist "licenses" (
-  xcopy /e /i /y /q "licenses" "dist\licenses" >nul
+  xcopy /e /i /y /q "licenses" ".artifacts\stage\licenses" >nul
   if errorlevel 1 (
-    echo ERROR: Could not stage licenses into dist.
+    echo ERROR: Could not stage licenses into the staging folder.
     set "GLIDE_BUILD_RC=1"
     goto :fail
   )
@@ -373,40 +374,40 @@ if not defined GLIDE_NATIVE_DLL (
   set "GLIDE_BUILD_RC=1"
   goto :fail
 )
-copy /y "!GLIDE_NATIVE_DLL!" "dist\Glide.Native.dll" >nul
-if not exist "dist\Glide.Native.dll" (
-  echo ERROR: Native bridge copy to dist failed.
+copy /y "!GLIDE_NATIVE_DLL!" ".artifacts\stage\Glide.Native.dll" >nul
+if not exist ".artifacts\stage\Glide.Native.dll" (
+  echo ERROR: Native bridge copy to the staging folder failed.
   set "GLIDE_BUILD_RC=1"
   goto :fail
 )
 
-rem Optional decoder providers (DLL + manifest + license NOTICE + generated index) ship in dist\codecs,
-rem before the portable ZIP is made so the ZIP and the installer carry the same payload. No runtime download.
-if exist "dist\codecs" rmdir /s /q "dist\codecs"
+rem Optional decoder providers (DLL + manifest + license NOTICE + generated index) ship in .artifacts\stage\codecs,
+rem before the installer is made. No runtime download.
+if exist ".artifacts\stage\codecs" rmdir /s /q ".artifacts\stage\codecs"
 if exist "codecs\codecs.index.json" (
-  mkdir "dist\codecs"
-  copy /y "codecs\codecs.index.json" "dist\codecs\" >nul
+  mkdir ".artifacts\stage\codecs"
+  copy /y "codecs\codecs.index.json" ".artifacts\stage\codecs\" >nul
   for %%F in ("codecs\*.glidecodec.json") do (
-    copy /y "%%~fF" "dist\codecs\" >nul
+    copy /y "%%~fF" ".artifacts\stage\codecs\" >nul
     rem name.glidecodec.json pairs with name.dll and name.NOTICE.txt
     for %%G in ("%%~nF") do (
-      if exist "codecs\%%~nG.dll" copy /y "codecs\%%~nG.dll" "dist\codecs\" >nul
-      if exist "codecs\%%~nG.NOTICE.txt" copy /y "codecs\%%~nG.NOTICE.txt" "dist\codecs\" >nul
+      if exist "codecs\%%~nG.dll" copy /y "codecs\%%~nG.dll" ".artifacts\stage\codecs\" >nul
+      if exist "codecs\%%~nG.NOTICE.txt" copy /y "codecs\%%~nG.NOTICE.txt" ".artifacts\stage\codecs\" >nul
     )
   )
 )
 rem The thumbnail codec library has no manifest (the viewer does not route through it); the provider
 rem loads it from <app>\codecs by its pinned hash, so it must ship next to the provider's other codecs.
 if exist "codecs\glidemanaged.dll" (
-  if not exist "dist\codecs" mkdir "dist\codecs"
-  copy /y "codecs\glidemanaged.dll" "dist\codecs\" >nul
+  if not exist ".artifacts\stage\codecs" mkdir ".artifacts\stage\codecs"
+  copy /y "codecs\glidemanaged.dll" ".artifacts\stage\codecs\" >nul
 )
 
 rem Explorer thumbnail provider ships alongside the native bridge. It is optional at runtime: the app
 rem simply reports the provider as unavailable when the DLL is absent.
 if exist "native\Glide.ShellThumbnail\build\Release\Glide.ShellThumbnail.dll" (
-  copy /y "native\Glide.ShellThumbnail\build\Release\Glide.ShellThumbnail.dll" "dist\Glide.ShellThumbnail.dll" >nul
-  echo       Thumbnail provider staged in dist.
+  copy /y "native\Glide.ShellThumbnail\build\Release\Glide.ShellThumbnail.dll" ".artifacts\stage\Glide.ShellThumbnail.dll" >nul
+  echo       Thumbnail provider staged.
 ) else (
   echo WARNING: Glide.ShellThumbnail.dll was not built; Explorer thumbnails will be unavailable.
 )
@@ -417,39 +418,21 @@ set "GLIDE_SIGNING=0"
 if defined GLIDE_SIGN_CERT_THUMBPRINT set "GLIDE_SIGNING=1"
 if defined GLIDE_SIGN_PFX set "GLIDE_SIGNING=1"
 if "!GLIDE_SIGNING!"=="1" (
-  echo       Signing dist binaries...
-  powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File "tools\sign-local.ps1" -Path dist
+  echo       Signing staged binaries...
+  powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File "tools\sign-local.ps1" -Path ".artifacts\stage"
   if errorlevel 1 (
     set "GLIDE_BUILD_RC=!errorlevel!"
     goto :fail
   )
 )
 
-rem Release deliverable: a clean portable archive. (The former root Glide-<ver>.exe copy is gone: it was a
-rem 37 MB duplicate of dist\Glide.exe that could not run without the DLLs next to it.)
-rem 7-Zip's deflate (-mx9 -mpass=15) gives a standard ZIP ~0.7 MB smaller than Compress-Archive; fall back
-rem to Compress-Archive when 7-Zip is not installed.
-if exist "Glide-%GLIDE_VERSION%-Portable.zip" del /q "Glide-%GLIDE_VERSION%-Portable.zip"
+rem The only build deliverable is dist-installer\Glide Setup.exe. No portable ZIP and no runnable Glide.exe
+rem are left behind: the publish output lives in .artifacts\stage (the installer's source) and is removed
+rem at the end of a successful build.
 if exist "Glide-%GLIDE_VERSION%.exe" del /q "Glide-%GLIDE_VERSION%.exe"
-set "GLIDE_7Z="
-if exist "%ProgramFiles%\7-Zip\7z.exe" set "GLIDE_7Z=%ProgramFiles%\7-Zip\7z.exe"
-if defined GLIDE_7Z (
-  pushd dist
-  "!GLIDE_7Z!" a -tzip -mx9 -mfb=258 -mpass=15 -bd -bso0 -bsp0 "..\Glide-%GLIDE_VERSION%-Portable.zip" *
-  set "GLIDE_ZIP_RC=!errorlevel!"
-  popd
-  if not "!GLIDE_ZIP_RC!"=="0" cmd /c exit /b !GLIDE_ZIP_RC!
-) else (
-  powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "Compress-Archive -Path 'dist\*' -DestinationPath 'Glide-%GLIDE_VERSION%-Portable.zip' -CompressionLevel Optimal"
-)
-if errorlevel 1 (
-  echo ERROR: Portable ZIP creation failed.
-  set "GLIDE_BUILD_RC=!errorlevel!"
-  goto :fail
-)
 call :progress 90 "Diagnostic fixtures"
 if "%GLIDE_FAST%"=="1" (
-  powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File "tools\fixture-manifest.ps1" -Mode Validate -Directory "artifacts\diagnostic-fixtures" -Generator "dist\Glide.exe" -SourceIdentity "Glide-%GLIDE_VERSION%" >nul 2>&1
+  powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File "tools\fixture-manifest.ps1" -Mode Validate -Directory "artifacts\diagnostic-fixtures" -Generator ".artifacts\stage\Glide.exe" -SourceIdentity "Glide-%GLIDE_VERSION%" >nul 2>&1
   if errorlevel 1 (
     echo [8/8] Fast fixture cache is absent/stale/partial; regenerating...
     call :generate_diagnostic_fixtures
@@ -480,30 +463,35 @@ if /I "%GLIDE_SKIP_INSTALLER%"=="1" (
 )
 
 echo Packaging clean zero-context handover zip...
-powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File "tools\package-source.ps1"
+powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File "tools\package-source.ps1" -Output ".artifacts\Glide-Zero-Context-Handover.zip"
 if errorlevel 1 (
   echo WARNING: tools\package-source.ps1 failed, continuing build completion.
+)
+
+rem Leave no runnable Glide.exe in the project: drop the staging publish and every Glide.exe the compile/test steps copied under .artifacts.
+rem (.artifacts is wiped at the start of every build anyway, so nothing incremental is lost.)
+if /I not "%GLIDE_SKIP_INSTALLER%"=="1" (
+  if exist ".artifacts\stage" rmdir /s /q ".artifacts\stage"
+  if exist ".artifacts\bin\Glide.App\release" rmdir /s /q ".artifacts\bin\Glide.App\release"
+  for /r ".artifacts" %%F in (Glide.exe) do if exist "%%F" del /q "%%F" >nul 2>nul
 )
 
 call :progress 100 "Complete"
 echo.
 echo ============================================================
-echo   BUILD COMPLETE - portable: dist\
-echo   PORTABLE ZIP: Glide-%GLIDE_VERSION%-Portable.zip
 if /I "%GLIDE_SKIP_INSTALLER%"=="1" (
-  echo   INSTALLER: skipped by caller
+  echo   BUILD COMPLETE - staged publish: .artifacts\stage\ ^(installer skipped by caller^)
 ) else (
+  echo   BUILD COMPLETE
   echo   INSTALLER: dist-installer\Glide Setup.exe
 )
-echo   HANDOVER:  Glide-Zero-Context-Handover.zip
 echo ============================================================
-echo Run: dist\Glide.exe
 exit /b 0
 
 :generate_diagnostic_fixtures
 if not exist artifacts mkdir artifacts
 if exist "artifacts\diagnostic-fixtures" rmdir /s /q "artifacts\diagnostic-fixtures"
-dist\Glide.exe --write-diagnostic-fixtures "artifacts\diagnostic-fixtures"
+.artifacts\stage\Glide.exe --write-diagnostic-fixtures "artifacts\diagnostic-fixtures"
 if errorlevel 1 (
   set "GLIDE_BUILD_RC=!errorlevel!"
   exit /b !GLIDE_BUILD_RC!
@@ -513,13 +501,13 @@ if not exist "artifacts\diagnostic-fixtures" (
   set "GLIDE_BUILD_RC=1"
   exit /b 1
 )
-powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File "tools\fixture-manifest.ps1" -Mode Write -Directory "artifacts\diagnostic-fixtures" -Generator "dist\Glide.exe" -SourceIdentity "Glide-%GLIDE_VERSION%"
+powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File "tools\fixture-manifest.ps1" -Mode Write -Directory "artifacts\diagnostic-fixtures" -Generator ".artifacts\stage\Glide.exe" -SourceIdentity "Glide-%GLIDE_VERSION%"
 if errorlevel 1 (
   echo ERROR: Diagnostic fixture identity manifest creation/validation failed.
   set "GLIDE_BUILD_RC=!errorlevel!"
   exit /b !GLIDE_BUILD_RC!
 )
-powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File "tools\fixture-manifest.ps1" -Mode Validate -Directory "artifacts\diagnostic-fixtures" -Generator "dist\Glide.exe" -SourceIdentity "Glide-%GLIDE_VERSION%"
+powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File "tools\fixture-manifest.ps1" -Mode Validate -Directory "artifacts\diagnostic-fixtures" -Generator ".artifacts\stage\Glide.exe" -SourceIdentity "Glide-%GLIDE_VERSION%"
 if errorlevel 1 (
   echo ERROR: Generated diagnostic fixtures did not pass identity validation.
   set "GLIDE_BUILD_RC=!errorlevel!"
@@ -548,6 +536,7 @@ rem Remove every prior portable deliverable (any version) so stale, mislabeled a
 rem never accumulate next to the current release.
 del /q "Glide-*.exe" >nul 2>nul
 del /q "Glide-*-Portable.zip" >nul 2>nul
+del /q "Glide-Zero-Context-Handover.zip" >nul 2>nul
 exit /b 0
 
 :fail

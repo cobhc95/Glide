@@ -1019,6 +1019,9 @@ public sealed class ImageLoadCoordinator : IDisposable
         // 86 vs 90 ms, 50 MP: 156 vs 183 ms; on PCs without the WIC WebP extension both go through Skia),
         // so its first paint stays on the scaled frame and the refinement then decodes full once.
         if (NativeImageDecoder.IsWebpPath(path)) return false;
+        // A pyramid TIFF (SubIFD / reduced pages) is the other exception (5.2.0): its level that covers the box decodes in a few
+        // milliseconds, the full frame follows through the refinement.
+        if (NativeImageDecoder.IsTiffPath(path) && NativeImageDecoder.TiffReducedLevelCovers(path, policy.PreviewMaxWidth, policy.PreviewMaxHeight)) return false;
         var bytes = EstimatedDecodedBytes(source.Width, source.Height);
         var limit = Math.Min(policy.DecodedCacheMegabytes * 1024L * 1024L / 2, MaxDirectFullRefinementBytes);
         return bytes > 0 && bytes <= limit;

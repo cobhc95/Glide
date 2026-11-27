@@ -132,9 +132,11 @@ public partial class SettingsWindow
         };
         PositionChanged += (_, _) => { if (WindowState == WindowState.Normal) RememberNormalBounds(); };
         Resized += (_, _) => { if (WindowState == WindowState.Normal) RememberNormalBounds(); };
-        Closing += (_, _) => CapturePlacement();
+        Closing += (_, _) => { CapturePlacement(); CaptureViewMemory(); };
         Closed += (_, _) =>
         {
+            // The view first: the owner's placement callback is the one that saves the settings.
+            if (_viewMemoryCaptured) ViewMemoryChanged?.Invoke(_lastViewMemory);
             if (_placementCaptured) PlacementChanged?.Invoke(_lastPlacement);
         };
     }

@@ -907,6 +907,7 @@ public partial class MainWindow
             return;
         }
 
+        if (StatusAutoHideFrozen && !hideImmediately) { StopStatusHideTimer(); return; }   // round 4 B2: Alt over / dragging the text overlay
         var barBox = CurrentStatusBarBox();
         var zone = StatusBarAutoHide.RevealZone(barBox, Bounds.Width, Bounds.Height, StatusBarOptionsView.RevealZoneExpand);
         var inZone = zone.Contains(pointer.X, pointer.Y);

@@ -8,8 +8,8 @@ namespace Glide.Core.Tests;
 /// 5.0.7 JPEG path (native/Glide.Native/GlideJpeg.cpp).
 /// Full resolution: libjpeg-turbo must match the Windows (WIC) decode it replaces within 1 LSB per channel for
 /// every JPEG kind it accepts (baseline 4:2:0 / 4:2:2 / 4:4:4, grayscale, progressive, restart markers, odd
-/// sizes, banded multi-threaded decode, EXIF orientations 2-8); CMYK and damaged files are declined and keep
-/// the WIC result. Reference = GlideDecodeImageW(path, 0) (WIC only); tested = GlideDecodeImageIntoW (turbo first).
+/// sizes, banded multi-threaded decode, EXIF orientations 2-8); damaged files are declined and keep the WIC result.
+/// CMYK / YCCK (libjpeg-turbo + the colour lattice, 5.2.0) is covered by JpegCmykTests. Reference = GlideDecodeImageW(path, 0) (WIC only); tested = GlideDecodeImageIntoW (turbo first).
 /// First view: the camera's MPF large preview is used only when present, a large-thumbnail entry, the same
 /// aspect ratio and large enough to cover the request alone; otherwise a libjpeg-turbo DCT-scaled decode (1/2, 1/4,
 /// 1/8) of the main image (progressive: only for the unstaged prefetch decode; the staged first view stays on WIC).
@@ -60,7 +60,6 @@ public sealed class JpegTurboParityTests
     [InlineData("exif7-1001x667.jpg", true)]
     [InlineData("exif8-1001x667.jpg", true)]
     [InlineData("exif6-2048x2000.jpg", true)]        // banded + rotated into the surface
-    [InlineData("cmyk-adobe-320x240.jpg", false)]    // declined: CMYK stays on WIC
     public void FullDecode_MatchesTheWindowsDecoderWithinOneLsb(string name, bool turboAccepts)
     {
         var path = Fixture(name);

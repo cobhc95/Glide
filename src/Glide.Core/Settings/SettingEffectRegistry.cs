@@ -51,7 +51,7 @@ public static class SettingEffectRegistry
         ["view"] = SettingEffectOwner.Viewing, ["keyboard"] = SettingEffectOwner.Viewing,
         ["window"] = SettingEffectOwner.WindowChrome, ["titlebar"] = SettingEffectOwner.WindowChrome, ["caption"] = SettingEffectOwner.WindowChrome,
         ["fullscreen"] = SettingEffectOwner.Fullscreen,
-        ["tabs"] = SettingEffectOwner.TabsWorkspace, ["explorer"] = SettingEffectOwner.TabsWorkspace,
+        ["tabs"] = SettingEffectOwner.TabsWorkspace, ["explorer"] = SettingEffectOwner.TabsWorkspace, ["tags"] = SettingEffectOwner.TabsWorkspace,
         ["escape"] = SettingEffectOwner.Input, ["mouse"] = SettingEffectOwner.Input, ["selection"] = SettingEffectOwner.Input,
         ["hotkeys"] = SettingEffectOwner.Input, ["gesture"] = SettingEffectOwner.Input,
         ["developer"] = SettingEffectOwner.Developer, ["backup"] = SettingEffectOwner.Developer, ["reset"] = SettingEffectOwner.Developer,

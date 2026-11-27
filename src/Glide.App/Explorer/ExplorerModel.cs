@@ -3,7 +3,7 @@ using Glide.Core;
 
 namespace Glide.App.Explorer;
 
-internal enum ExplorerSortKey { Name, Modified, Type, Size, Width, Height, Pixels }
+internal enum ExplorerSortKey { Name, Modified, Type, Size, Width, Height, Pixels, Taken }
 
 /// <summary>The sort fields in menu order with their labels: the Sort by menu, the toolbar Sort button and the Details headers.</summary>
 internal static class ExplorerSortFields
@@ -25,9 +25,16 @@ internal static class ExplorerSortFields
     /// <summary>The direction triangle: ▲ ascending, ▼ descending.</summary>
     public static string Triangle(bool ascending) => ascending ? Ascending : Descending;
 
+    /// <summary>Round 4 C2: "Date taken" (EXIF; pictures without it use their date modified). In the Sort by list after
+    /// Date modified; no Details column.</summary>
+    public static readonly (ExplorerSortKey Key, string Label) Taken = (ExplorerSortKey.Taken, "Date taken");
+
     public static bool IsDimension(ExplorerSortKey key) => key is ExplorerSortKey.Width or ExplorerSortKey.Height or ExplorerSortKey.Pixels;
 
-    public static string Label(ExplorerSortKey key) => All.Concat(Dimensions).First(f => f.Key == key).Label;
+    /// <summary>Sorts that read each picture's header (dimensions, date taken) in the background before sorting.</summary>
+    public static bool NeedsProbe(ExplorerSortKey key) => IsDimension(key) || key == ExplorerSortKey.Taken;
+
+    public static string Label(ExplorerSortKey key) => All.Concat(Dimensions).Append(Taken).First(f => f.Key == key).Label;
 
     /// <summary>Details column header text (the File size column keeps its short "Size" header).</summary>
     public static string ColumnLabel(ExplorerSortKey key) => key == ExplorerSortKey.Size ? "Size" : Label(key);
@@ -124,26 +131,55 @@ internal static class ExplorerViewModes
 
 /// <summary>
 /// Round 3 #6: the optional extra info lines under Explorer thumbnails (off by default; each one chosen in Settings).
-/// One line per chosen item, in this order: date modified, resolution (pixel size), file size. Every icon tile of the
-/// view reserves the same lines (a folder's resolution and size lines stay empty) so the grid stays uniform and the
-/// text always sits inside the selection fill.
+/// Date modified on one line; resolution and file size share the next (round 4 C1). Or, with "Use a template" on
+/// (round 4 C1), the lines of a <see cref="Glide.Core.Status.TextTemplate"/> (the text overlay's tokens plus
+/// {modified:format} / {taken:format}). Every icon tile of the view reserves the same lines (a folder's picture values
+/// stay empty) so the grid stays uniform and the text always sits inside the selection fill.
 /// </summary>
-internal readonly record struct ExplorerTileInfo(bool Date, bool Resolution, bool FileSize)
+internal readonly record struct ExplorerTileInfo(bool Date, bool Resolution, bool FileSize, string? Template = null, string? Separator = null)
 {
     public const int MaxLines = 3;
 
-    public int Lines => (Date ? 1 : 0) + (Resolution ? 1 : 0) + (FileSize ? 1 : 0);
+    private static readonly System.Text.RegularExpressions.Regex LineBreak =
+        new(@"<br\s*/?>|\\n|\r?\n", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    /// <summary>The template's lines (at most <see cref="MaxLines"/>); null without a template.</summary>
+    private string[]? TemplateLines => Template is null ? null : LineBreak.Split(Template).Take(MaxLines).ToArray();
+
+    public int Lines => TemplateLines is { } t ? t.Length : (Date ? 1 : 0) + (Resolution || FileSize ? 1 : 0);
+
+    /// <summary>The picture's pixel size is shown (read from its header after the tile is built).</summary>
+    public bool NeedsPixels => Template is null ? Resolution
+        : Glide.Core.Status.TextTemplate.Uses(Template, "w") || Glide.Core.Status.TextTemplate.Uses(Template, "h") ||
+          Glide.Core.Status.TextTemplate.Uses(Template, "res") || Glide.Core.Status.TextTemplate.Uses(Template, "mp");
+
+    /// <summary>The EXIF date taken is shown (read after the tile is built).</summary>
+    public bool NeedsTaken => Template is not null && Glide.Core.Status.TextTemplate.Uses(Template, "taken");
 
     public static ExplorerTileInfo From(Glide.Core.Settings.GlideSettingsState settings) =>
-        new(settings.ExplorerInfoDate, settings.ExplorerInfoResolution, settings.ExplorerInfoFileSize);
+        new(settings.ExplorerInfoDate, settings.ExplorerInfoResolution, settings.ExplorerInfoFileSize,
+            settings.ExplorerInfoUseTemplate ? settings.ExplorerInfoTemplate : null, settings.TextOverlaySeparator);
 
-    /// <summary>The lines for <paramref name="entry"/>; <paramref name="pixels"/> is its pixel size when known.</summary>
-    public IReadOnlyList<string> Text(ExplorerEntry entry, ImageDimensions? pixels)
+    /// <summary>The lines for <paramref name="entry"/>; <paramref name="pixels"/> is its pixel size and <paramref name="taken"/>
+    /// its date taken when known.</summary>
+    public IReadOnlyList<string> Text(ExplorerEntry entry, ImageDimensions? pixels, DateTime? taken = null)
     {
         var lines = new List<string>(Lines);
+        if (TemplateLines is { } templateLines)
+        {
+            var values = new Glide.Core.Status.TemplateValues(entry.Path, PixelWidth: pixels?.Width ?? 0, PixelHeight: pixels?.Height ?? 0,
+                FileSize: entry.Size, Modified: entry.Modified, Taken: taken, IsFolder: entry.IsDirectory);
+            foreach (var line in templateLines) lines.Add(Glide.Core.Status.TextTemplate.Render(line, values, Separator ?? Glide.Core.Status.TextTemplate.DefaultSeparator).Trim());
+            return lines;
+        }
         if (Date) lines.Add(ExplorerModel.FormatDate(entry.Modified));
-        if (Resolution) lines.Add(pixels is { IsValid: true } p ? $"{p.Width} \u00d7 {p.Height}" : "");
-        if (FileSize) lines.Add(entry.IsDirectory ? "" : ExplorerModel.FormatSize(entry.Size));
+        if (Resolution || FileSize)
+        {
+            var parts = new List<string>(2);
+            if (Resolution && pixels is { IsValid: true } p) parts.Add($"{p.Width} \u00d7 {p.Height}");
+            if (FileSize && !entry.IsDirectory) parts.Add(ExplorerModel.FormatSize(entry.Size));
+            lines.Add(string.Join(Glide.Core.Status.TextTemplate.SeparatorText(Separator ?? Glide.Core.Status.TextTemplate.DefaultSeparator), parts));
+        }
         return lines;
     }
 }
@@ -177,6 +213,25 @@ internal sealed class ExplorerEntry
 
     private ImageDimensions? _dimensions;
     private bool _dimensionsProbed;
+    private DateTime? _taken;
+    private bool _takenProbed;
+
+    /// <summary>Round 4 C1/C2: the EXIF date taken (local time), read once on first use; null for folders and pictures without one.</summary>
+    public DateTime? DateTaken
+    {
+        get
+        {
+            if (!_takenProbed)
+            {
+                _taken = IsImage ? ExplorerModel.ProbeDateTaken(Path) : null;
+                _takenProbed = true;
+            }
+            return _taken;
+        }
+    }
+
+    /// <summary>Date taken, or the date modified when the picture has none (the "Date taken" sort key).</summary>
+    public DateTime TakenOrModified => DateTaken ?? Modified;
 
     /// <summary>The picture's pixel size from its header, read once on first use ((0,0) for folders and unreadable files).</summary>
     public ImageDimensions PixelDimensions
@@ -236,6 +291,7 @@ internal static class ExplorerModel
         Comparison<ExplorerEntry> core = key switch
         {
             ExplorerSortKey.Modified => (a, b) => { var c = a.Modified.CompareTo(b.Modified); return c != 0 ? c : ByName(a, b); },
+            ExplorerSortKey.Taken => (a, b) => { var c = a.TakenOrModified.CompareTo(b.TakenOrModified); return c != 0 ? c : ByName(a, b); },
             ExplorerSortKey.Size => (a, b) => { var c = a.Size.CompareTo(b.Size); return c != 0 ? c : ByName(a, b); },
             ExplorerSortKey.Width => (a, b) => { var c = a.PixelDimensions.Width.CompareTo(b.PixelDimensions.Width); return c != 0 ? c : ByName(a, b); },
             ExplorerSortKey.Height => (a, b) => { var c = a.PixelDimensions.Height.CompareTo(b.PixelDimensions.Height); return c != 0 ? c : ByName(a, b); },
@@ -264,6 +320,24 @@ internal static class ExplorerModel
             token.ThrowIfCancellationRequested();
             _ = entry.PixelDimensions;
         }
+    }
+
+    /// <summary>Background thread: reads what <paramref name="key"/> sorts by (pixel size or date taken) for every picture.</summary>
+    public static void ProbeForSort(IEnumerable<ExplorerEntry> entries, ExplorerSortKey key, CancellationToken token)
+    {
+        if (key == ExplorerSortKey.Taken)
+        {
+            foreach (var entry in entries) { token.ThrowIfCancellationRequested(); _ = entry.DateTaken; }
+            return;
+        }
+        if (ExplorerSortFields.IsDimension(key)) ProbeDimensions(entries, token);
+    }
+
+    /// <summary>The EXIF date taken (original, digitized, then the image date), or null.</summary>
+    public static DateTime? ProbeDateTaken(string path)
+    {
+        try { return Glide.Imaging.ImageMetadataReader.Read(path).Captured?.DateTime; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return null; }
     }
 
     /// <summary>A picture's pixel size from its header (built-in probe, header probe, then the Windows codecs); null when unknown.</summary>

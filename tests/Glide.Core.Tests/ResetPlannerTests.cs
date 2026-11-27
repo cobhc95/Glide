@@ -107,6 +107,8 @@ public sealed class ResetPlannerTests
         Assert.Contains(new DirectoriesMatchingTarget(s.Local, "ffmpeg-*"), caches);
         Assert.Contains(new DirectoryTarget(Path.Combine(s.Local, "Startup Diagnostics")), caches);
         Assert.Contains(new FileTarget(Path.Combine(s.Settings, "thumbnail.settings.json")), caches);
+        // 5.1.7: the Explorer tab's thumbnail disk cache (its folder is not Windows' thumbcache_*.db database).
+        Assert.Contains(new DirectoryTarget(Path.Combine(s.Local, "thumbnails")), caches);
         Assert.Contains(new FileTarget(Path.Combine(s.Temp, "glide-diagnostic-transfer.jpg")), caches);
         // crash logs are evidence, and Windows' own thumbnail database is shared by every app.
         Assert.DoesNotContain(caches, t => t.Describe().Contains("crash.log") || t.Describe().Contains("thumbcache"));

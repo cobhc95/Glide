@@ -143,10 +143,10 @@ public partial class MainWindow
             if (directory || one.IsImage)
             {
                 // The other action (middle-click) is offered explicitly too.
-                var alternate = directory ? "Open in new Explorer tab"
-                    : ExplorerMiddleClickOpensInCurrentTab ? "Open in this tab" : "Open in new tab";
+                var inThisTab = !directory && ExplorerMiddleClickOpensInCurrentTab;
+                var alternate = inThisTab ? "Open in this tab" : OpenInNewTabMenuLabel(directory ? "Open in new Explorer tab" : "Open in new tab");
                 items.Add(ExplorerMenuItem(alternate, () => _ = OpenBrowserEntryAsync(path, alternate: true, fromMenu: true),
-                    alternate == "Open in this tab" ? "gesture.openInCurrentTab" : "gesture.openInNewTab", directory ? "Browser" : "Image"));
+                    inThisTab ? "gesture.openInCurrentTab" : "gesture.openInNewTab", directory ? "Browser" : "Image"));
             }
             if (!directory) items.Add(ExplorerMenuItem("Open with…", () => ExplorerOpenWith(path), Ctx + "explorer.openThisItemWith", "OpenWith"));
             if (OperatingSystem.IsWindows())
@@ -177,10 +177,19 @@ public partial class MainWindow
             items.Add(ExplorerMenuItem("Copy", () => ExplorerCopyOrCut(cut: false), "fixed.explorer.copy", "Copy"));
             items.Add(ExplorerMenuItem($"Copy {paths.Count} paths", () => _ = ExplorerCopyPathsAsync(paths), Ctx + "explorer.copyPathsOfSelection", "Copy"));
             items.Add(ExplorerSeparator());
+            var batch = selected.ToList();
+            items.Add(ExplorerMenuItem($"Rename {selected.Count} items…", () => _ = ExplorerBatchRenameAsync(batch), "fixed.explorer.rename", "Rename"));
             items.Add(ExplorerMenuItem($"Delete {selected.Count} items", () => _ = ExplorerDeleteSelectionAsync(permanent: false), "fixed.explorer.delete", "Delete"));
             items.Add(ExplorerSeparator());
             var target = entry!;
             items.Add(ExplorerMenuItem($"Properties of {ExplorerMenuName(target.Name)}", () => ShowExplorerProperties(target), "fixed.explorer.properties", "Info"));
+        }
+
+        // With tags on, the tag sidebar is reachable from here too (above Properties).
+        if (BuildTagSidebarMenuItem() is { } tagItem)
+        {
+            var at = items.FindLastIndex(i => i.Header is "-");
+            items.Insert(at < 0 ? items.Count : at, tagItem);
         }
 
         return NewExplorerMenu(items);
@@ -198,6 +207,9 @@ public partial class MainWindow
             ExplorerMenuItem($"{field.Label} {ExplorerSortFields.Triangle(ascending)}", () => SetExplorerSort(field.Key, ascending), Tag,
                 check: _explorerSortKey == field.Key && _explorerSortAscending == ascending));
         var items = ExplorerSortFields.All.SelectMany(Both).ToList();
+        // Round 4 C2: "Date taken" right after "Date modified".
+        var afterModified = items.FindIndex(i => (i.Header as string)?.StartsWith(ExplorerSortFields.Label(ExplorerSortKey.Modified), StringComparison.Ordinal) == true) + 2;
+        items.InsertRange(Math.Clamp(afterModified, 0, items.Count), Both(ExplorerSortFields.Taken));
         var dimensions = MenuActions.Context(new MenuItem
         {
             Header = ExplorerSortFields.IsDimension(_explorerSortKey) ? "Dimensions  ✓" : "Dimensions",

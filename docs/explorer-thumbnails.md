@@ -115,7 +115,7 @@ it, so the three performance controls had no effect. The values are read per req
 applies to the next thumbnail Explorer asks for; thumbnails Windows already cached stay until
 *Refresh thumbnails* (or Windows) rebuilds them.
 
-| | Fast | Balanced (default) | High |
+| | Fast (default since 5.2.0) | Balanced | High |
 |---|---|---|---|
 | Intermediate decode | requested size | requested size | 2× requested (≤ 2048) |
 | Resampling (WIC) | bilinear | Fant (area averaging) | high-quality cubic |
@@ -155,6 +155,12 @@ Design rules, all enforced in `ThumbnailCore.cpp`:
 4. **Decoder-side downscaling.** `IWICBitmapSourceTransform` lets JPEG reduce during the DCT
    (1/2, 1/4, 1/8) to the smallest size at or above the target. For high-entropy JPEGs the Huffman
    decode, not the IDCT, dominates, so the gain is modest.
+   **5.1.7: JPEG goes through libjpeg-turbo** (`DecodeJpegTurbo`, the same vendored static library as
+   Glide.Native): smallest covering DCT scale, fast integer IDCT and plain chroma upsampling (accurate ones for
+   High), then the preset's WIC scaler. Before that, when *Prefer embedded previews* is on, the camera's **MPF
+   preview** (CIPA DC-007 large thumbnail, ~1620 × 1080, same aspect ratio within 1 %; gain/depth maps never used)
+   is decoded instead when it covers the target (`decoder = "mpf"`). CMYK, 12-bit, lossless or any decoder
+   warning fall back to WIC unchanged.
 5. **Premultiplied resampling.** Every resample runs on premultiplied BGRA, so transparent pixels
    never bleed dark fringes; the result keeps its transparency (premultiplied, WTSAT_ARGB) so Explorer blends it like its own PNG thumbnails.
 6. **Vectors render at the target size** — SVG is rasterised directly at the requested edge.
@@ -191,11 +197,48 @@ deliberately tinted, so a high *err* there just means the preview was used.
 | GIF whose frame 0 is offset | err 121 (frame stretched) | err 0.2 | err 0.2 | err 0.03 |
 | 4000×3000 WebP | 116 ms | 114 ms | 115 ms | 117 ms |
 
+### Measured (5.1.7, camera JPEGs vs Windows' own provider)
+
+`python -I tools/thumbnail-speed-benchmark.py --dll <provider> --preset 1,0,1 [--mpf]` generates 200 camera-style
+6000×4000 JPEGs (sensor-noise texture, 7 MB, 160×120 EXIF thumbnail; `--mpf` adds a 1620×1080 MPF preview) and
+thumbnails each one in-process through Glide's provider and through Windows' Photo Thumbnail Provider
+`{C7657C4A-…}` (CoCreateInstance + IInitializeWithStream; nothing registered or cached). Median per file:
+
+| request | Windows | Glide before | Glide 5.1.7 |
+|---|---|---|---|
+| 96 px (EXIF thumbnail) | 52–62 ms | 3.6 ms | 0.3 ms |
+| 256 px, MPF preview present | 61 ms | 57 ms (WIC reduced) | **4.8 ms** (MPF) |
+| 256 px, no MPF preview | 53 ms | 58 ms (WIC reduced) | 47 ms (turbo) |
+
+Without a big enough embedded preview the cost is the main image's Huffman decode (~40 ms for 7 MB, single
+thread), which no DCT scale avoids; Explorer runs several thumbnail requests in parallel.
+
+The Explorer *tab* grid (`ThumbnailDecode`) uses Glide.Native's `GlideDecodeJpegThumbnailW` (MPF preview or
+DCT-scaled libjpeg-turbo, area-averaged to the tile) and `ImagePerformanceGovernor.ThumbnailDecodeLanes` (half the
+logical processors, 2..8). `GLIDE_THUMB_BENCH_DIR=<corpus>` enables `ExplorerThumbnailSpeedBenchmark`
+(Glide.Explorer.Tests, headless MainWindow): 21 Large tiles all shown in ~410 ms (was 640–890), ~320 ms with MPF
+previews (was 670); reopening the folder ~220 ms (was 450–550), ~90 ms with MPF.
+
 `tests/Glide.Core.Tests/ShellThumbnailProviderTests.cs` loads the freshly built DLL the same way and
 asserts the presets resolve to different profiles and pixels, that Fast is not slower than High on a
 large image, the decode cap, embedded-preview selection and orientation, GIF placement and partial
 reads, and the status-line wording for installed, portable and stale registrations.
 `tools/thumbnail-benchmark.ps1` (older, registers the provider per-user) is kept for reference.
+
+## Glide's own Explorer tab thumbnails (in-app, not the shell provider)
+
+Everything above is the Windows Shell provider. The Explorer tab inside Glide decodes its own tiles (`Glide.App/Services/ThumbnailDecode.cs`):
+
+1. **Disk cache** (`Glide.Imaging/ThumbnailDiskCache.cs`, Settings > Window & navigation > "Remember Explorer thumbnails on disk"): one small file per picture path and tile width under `%LOCALAPPDATA%\Glide\thumbnails`, keyed by the picture's size and last-write time, trimmed oldest first to the size limit (default 512 MB). A hit is a single file read (0.1 - 0.3 ms).
+2. **JPEG**: libjpeg-turbo DCT-scaled decode, or the camera's MPF preview (`GlideDecodeJpegThumbnailW`).
+3. **WebP, TIFF, BMP, JPEG XR**: `GlideDecodeThumbnailW` in `Glide.Native` (libwebp scaled decode; parallel row bands with a box reduction for TIFF / BMP of 2 MP and more; WIC decoder-native size or Fant scaler otherwise).
+4. **PNG, GIF, ICO and anything the bridge declines**: Skia's scaled decode behind `SkiaDecodeGuard`.
+5. **Every other format the viewer opens (5.2.0)**, routed by suffix in `Services/ThumbnailRoutes.cs`: the JPEG family (`.jfif`, `.jif`, `.mpo`, ... through the same libjpeg-turbo path); camera RAW (the smallest embedded preview that covers the tile), PSD, EXR, HDR, PFM, TGA, PPM, QOI, PCX, SGI, DDS, KTX, FITS, ORA, ... through the bounded managed decoders (`ThumbnailExtendedDecode.DecodeBuiltIn`); HEIC, AVIF, JPEG XL and JPEG 2000 through the codec plug-in's reduced decode; SVG at the tile size (`Glide.Imaging/SvgTileRenderer.cs`: Direct2D through `GlideRenderSvgBuffer` in `Glide.Native` for plain path-heavy documents, Svg.Skia for text, CSS, filters, masks, patterns and images); WIC for what is left. A file that cannot be decoded keeps the file-type glyph. Every result is stored in the disk cache.
+6. **Scheduling** (`Services/ThumbnailScheduler.cs`): the decode lanes run a priority queue instead of a first-come gate: visible tiles first, cheapest format and size first (`ThumbnailCostModel`, from the 5.2.0 audit), arrival order inside a cost class, and look-ahead (the two rows after the last prepared tile, only while the disk cache is on) last. A decode that takes longer than 8 s gives its lane up and the tile keeps its glyph; that file is not retried until its size or last-write time changes. The folder listing also warms the codec plug-in (`Glide.Imaging/CodecPreloader.cs`) when it holds HEIC, AVIF, JPEG XL or JPEG 2000.
+7. **I/O stage (5.2.0, `Services/ThumbnailPipeline.cs`)**: in front of the decode lanes, 4 to 16 I/O lanes (twice the decode lanes) ask the disk cache, then Windows' own thumbnail cache (`IShellItemImageFactory`, `SIIGBF_INCACHEONLY`; `GLIDE_THUMB_WINCACHE=0` skips it), then read the file whole (JPEG, PNG, GIF, ICO), so a slow first open (on-access scanner, virtual disk) overlaps the decoding of other tiles and a file is opened once. Reads start in on-screen reading order.
+8. **Per-tile trace**: start Glide with `--diagnostic-trace` (or `GLIDE_DIAGNOSTIC_TRACE=1`) and every tile logs its stage timings to `Glide-Diagnostic-Latest.txt` in Downloads (`thumbnail.tile`, `thumbnail.applied`, `thumbnail.burst`; file names as a hash). Fields and how to read them: `docs/audits/explorer-thumbnail-io-5.2.0.md`.
+
+Measured before / after: `docs/audits/thumbnail-perf-5.1.7.md` (`tools/perf/run-thumb-bench.ps1`) and `docs/audits/format-thumbnails-5.2.0.md` (`tools/perf/run-format-audit.ps1`, `compare-format-thumbs.py`).
 
 ## Failure behaviour
 
@@ -219,9 +262,9 @@ new Glide format is thumbnail-capable with no provider change. Modes:
 
 | mode | behaviour |
 |---|---|
-| Recommended (default) | Glide owns the formats it decodes natively, fills gaps where no handler exists, and takes codec-library formats (HEIC/AVIF/JXL/JPEG 2000/RAW/EXR/...) over from Windows' codec-dependent Photo Thumbnail Provider `{C7657C4A-…}` — never from a third-party handler, and only when the library is installed |
+| Recommended | Glide owns the formats it decodes natively, fills gaps where no handler exists, and takes codec-library formats (HEIC/AVIF/JXL/JPEG 2000/RAW/EXR/...) over from Windows' codec-dependent Photo Thumbnail Provider `{C7657C4A-…}` — never from a third-party handler, and only when the library is installed |
 | Glide for unsupported formats only | only extensions with no other registered thumbnail handler |
-| Glide for all supported formats | every supported extension, overriding existing handlers |
+| Glide for all supported formats (default since 5.2.0) | every supported extension, overriding existing handlers. Existing users still on the old defaults (Recommended + Balanced) are moved to Glide for all supported formats + Fast once at startup (`ThumbnailSettingsStore.EnsureMigrationApplied`, keyed on `DefaultsRevision` in thumbnail.settings.json) |
 | Custom | keeps the saved selection, else the formats currently routed to Glide, else Recommended |
 
 Extension→handler detection reads `Software\Classes\<ext>\ShellEx\{E357FCCD-…}`.

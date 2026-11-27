@@ -88,6 +88,20 @@ public sealed class GlideIconView : Control
                 Box(4, 5, 16, 14); Circle(9, 10, 1.3); L(5.5, 17, 10.5, 12.5); L(10.5, 12.5, 13.5, 15); L(13.5, 15, 17, 11.5); L(17, 11.5, 19, 14); break;
             case "Browser":
                 Box(3.5, 5.5, 17, 13); L(3.5, 9, 20.5, 9); L(8, 5.5, 8, 9); break;
+            // Tab-bar kinds (round 4 I3): bigger, filled silhouettes so Explorer and image tabs differ at a glance.
+            // Explorer = solid folder with a tab; image = picture frame with filled mountains and sun.
+            case "TabExplorer":
+            {
+                var tint = new SolidColorBrush(((brush as ISolidColorBrush)?.Color ?? Colors.White), 0.35);
+                context.DrawGeometry(tint, pen, Poly(P, (2.5, 5), (9.5, 5), (11.5, 7.5), (21.5, 7.5), (21.5, 19.5), (2.5, 19.5)));
+                context.DrawGeometry(brush, null, Poly(P, (2.5, 10), (21.5, 10), (21.5, 19.5), (2.5, 19.5)));
+                break;
+            }
+            case "TabImage":
+                context.DrawRectangle(null, pen, R(2.5, 4, 19, 16), 2 * Bounds.Width / 24.0, 2 * Bounds.Height / 24.0);
+                context.DrawGeometry(brush, null, Poly(P, (4, 18.5), (10, 11), (13.5, 15), (16, 12.5), (20, 18.5)));
+                Circle(16.5, 8.5, 1.8, true);
+                break;
             case "Previous":
                 L(15.5, 5, 8.5, 12); L(8.5, 12, 15.5, 19); break;
             case "Next":
@@ -299,5 +313,15 @@ public sealed class GlideIconView : Control
             default:
                 Box(5, 5, 14, 14); break;
         }
+    }
+
+    private static StreamGeometry Poly(Func<double, double, Point> map, params (double X, double Y)[] points)
+    {
+        var geometry = new StreamGeometry();
+        using var ctx = geometry.Open();
+        ctx.BeginFigure(map(points[0].X, points[0].Y), isFilled: true);
+        for (var i = 1; i < points.Length; i++) ctx.LineTo(map(points[i].X, points[i].Y));
+        ctx.EndFigure(isClosed: true);
+        return geometry;
     }
 }
